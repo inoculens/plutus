@@ -3702,7 +3702,7 @@
       });
     })();
 
-    // === Transfer fee fiat tests (frozen tx-date Fee Fiat Rate, no fiat Fee) ===
+    // === Transfer fee fiat tests (frozen tx-date Fee in fiat rate, no fiat Fee) ===
     (function transferFeeFiatTests() {
       var L = window.Inoculens || {};
       function seedTransferBase() {
@@ -3754,14 +3754,14 @@
           assert(block !== null, 'transfer block must render');
           assert(block.querySelector('[data-label="Fee"]') === null, 'fiat Fee row must be gone for transfers');
           assert(block.querySelector('[data-label="Rate"]') === null, 'meaningless 1:1 Rate must be gone for transfers');
-          var fr = block.querySelector('[data-label="Fee Fiat Rate"]');
-          assert(fr !== null, 'Fee Fiat Rate row must render');
+          var fr = block.querySelector('[data-label="Fee in fiat rate"]');
+          assert(fr !== null, 'Fee in fiat rate row must render');
           assert(fr.textContent.indexOf('BTC') !== -1 && fr.textContent.indexOf('50') !== -1, 'fee rate wrong: ' + fr.textContent);
           var nf = block.querySelector('[data-label="Transfer fees"]');
           assert(nf !== null && nf.textContent.indexOf('≈') !== -1, 'transfer fees must carry their fiat value: ' + (nf && nf.textContent));
           assert(nf.textContent.indexOf('500') !== -1, 'fee fiat 0.01 x 50000 = 500, got: ' + nf.textContent);
           var order = Array.prototype.map.call(block.querySelectorAll('.trade-facts > .stat-row'), function (r) { return r.getAttribute('data-label'); });
-          assert(order.indexOf('Fee Fiat Rate') === order.indexOf('Transfer fees') + 1, 'Fee Fiat Rate must sit right after Transfer fees, got: ' + order.join(' | '));
+          assert(order.indexOf('Fee in fiat rate') === order.indexOf('Transfer fees') + 1, 'Fee in fiat rate must sit right after Transfer fees, got: ' + order.join(' | '));
           try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
           navHome();
         } finally {
@@ -3796,7 +3796,7 @@
           var det = document.getElementById('account-detail');
           var block = det.querySelector('[data-trade="' + last.id + '"]');
           assert(block !== null, 'transfer block must render');
-          var fr = block.querySelector('[data-label="Fee Fiat Rate"]');
+          var fr = block.querySelector('[data-label="Fee in fiat rate"]');
           assert(fr !== null && fr.textContent.indexOf('—') !== -1, 'unknown rate must be —, never a guess, got ' + (fr && fr.textContent));
           var nf = block.querySelector('[data-label="Transfer fees"]');
           assert(nf !== null && nf.textContent.indexOf('≈') === -1, 'crypto-only fee must not invent fiat: ' + (nf && nf.textContent));
@@ -3860,7 +3860,7 @@
         route();
         render();
         return flush().then(flush).then(flush).then(function () {
-          var row = document.querySelector('[data-trade="t2"] [data-label="Fee Fiat Rate"]');
+          var row = document.querySelector('[data-trade="t2"] [data-label="Fee in fiat rate"]');
           assert(row !== null, 'fee rate row must render');
           assert(row.textContent.indexOf('—') !== -1, 'rate must start unknown, got ' + row.textContent);
           krakenOk = true;
@@ -3897,12 +3897,12 @@
         render();
         function flush() { return new Promise(function (res) { setTimeout(res, 0); }); }
         return flush().then(flush).then(flush).then(function () {
-          var row = document.querySelector('[data-trade="t2"] [data-label="Fee Fiat Rate"]');
+          var row = document.querySelector('[data-trade="t2"] [data-label="Fee in fiat rate"]');
           assert(row !== null, 'fee rate row must render');
           row.click();
           return flush().then(flush).then(flush);
         }).then(function () {
-          var row = document.querySelector('[data-trade="t2"] [data-label="Fee Fiat Rate"]');
+          var row = document.querySelector('[data-trade="t2"] [data-label="Fee in fiat rate"]');
           assert(row && String(row.title).indexOf('CoinGecko HTTP 429') !== -1, 'tooltip must name the coingecko failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Kraken HTTP 429') !== -1, 'tooltip must name the kraken failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Stooq HTTP 429') !== -1, 'tooltip must name the stooq failure, got ' + JSON.stringify(row && row.title));

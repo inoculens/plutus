@@ -2482,7 +2482,7 @@ function feeRateWhy(t, kind) {
 // would yank the scroll to the top via route()).
 function feeRateTitle(id, text) {
   try {
-    var el = document.querySelector('[data-trade="' + id + '"] [data-label="Fee Fiat Rate"]');
+    var el = document.querySelector('[data-trade="' + id + '"] [data-label="Fee in fiat rate"]');
     if (el) el.title = String(text);
   } catch (e) { /* ignore */ }
 }
@@ -2498,7 +2498,7 @@ function feeFailMsg(id, key) {
 function feeFailTap(id, key) {
   histNoteFail(key);
   feeFailMsg(id, key);
-  try { openNoteDialog(feeRateErr[id], 'Fee Fiat Rate'); } catch (e) { /* ignore */ }
+  try { openNoteDialog(feeRateErr[id], 'Fee in fiat rate'); } catch (e) { /* ignore */ }
 }
 function retryFeeRate(tradeId) {
   var st = null;
@@ -4455,13 +4455,13 @@ function tradeBlock(t, main, accountNameById, kind) {
       var feeTxtT = fmtQty(t.networkFee) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
       box.appendChild(statRow('Transfer fees', feeTxtT, t.networkFee, false));
-      // Fee Fiat Rate sits right after Transfer fees — it is the rate behind
+      // Fee in fiat rate sits right after Transfer fees — it is the rate behind
       // the (≈) above, frozen at the tx date. Unknown: tap retries the
       // lookup on demand instead of waiting for the backoff.
       var feeRateTxt = (xferRate !== null)
         ? fmtMoney(xferRate.price, xferRate.ccy) + ' / ' + tSym
         : '—';
-      var feeRateEl = rateRow('Fee Fiat Rate', feeRateTxt);
+      var feeRateEl = rateRow('Fee in fiat rate', feeRateTxt);
       if (xferRate === null) {
         feeRateEl.title = feeRateWhy(t, kind);
         (function (el, id) {
@@ -4516,7 +4516,7 @@ function tradeBlock(t, main, accountNameById, kind) {
     }
   }
   // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate is gone for
-  // transfers (Fee Fiat Rate lives next to Transfer fees instead), and the
+  // transfers (Fee in fiat rate lives next to Transfer fees instead), and the
   // fiat Fee row is gone too — the network fee IS the fee.
   if (!isXfer) {
     box.appendChild(rateRow('Rate', fxBadgeText(t)));
@@ -6244,7 +6244,7 @@ function onTradeSubmit(ev) {
       // Reference exec quote: manual wins; else keep the frozen quote when the
       // identifying fields are untouched; otherwise refreeze after save.
       // Transfers freeze it too: it values the network fee in fiat at the
-      // tx-date rate (Fee Fiat Rate). Other rows carry no execLock.
+      // tx-date rate (Fee in fiat rate). Other rows carry no execLock.
       var needRefreeze = false;
       if (side === 'buy' || side === 'sell' || side === 'transfer') {
         if (manualPrice !== null) {

@@ -2327,6 +2327,8 @@ function clearHistCache() {
   histPriceCache = {};
   histFailKeys = {};
   histInflight = {};
+  try { feeRateErr = {}; } catch (e) { /* ignore */ }
+  try { histDiag = {}; } catch (e) { /* ignore */ }
   try {
     if (typeof localStorage !== 'undefined') localStorage.removeItem(HISTCACHE_KEY);
   } catch (e) { /* ignore */ }
@@ -2443,6 +2445,19 @@ function freezeExecLock(tradeId, symbol, date, mainU, kind) {
   }, function () { delete histInflight[ckey]; /* legacy async display path covers the row */ });
 }
 
+// Last per-quote history failure, in plain words (session-only): attached
+// to the fee-rate tooltip so a failed lookup names its cause.
+var histDiag = {}; // key(sym|day|vs|crypto) -> text
+function histDiagNote(sym, day, vs, text) {
+  try {
+    var k = String(sym || '').toUpperCase() + '|' + String(day || '').slice(0, 10) + '|' + String(vs || '').toUpperCase() + '|crypto';
+    var prev = histDiag[k];
+    histDiag[k] = prev ? (prev + '; ' + text) : String(text);
+  } catch (e) { /* ignore */ }
+}
+function histDiagClear(sym, day, vs) {
+  try { delete histDiag[String(sym || '').toUpperCase() + '|' + String(day || '').slice(0, 10) + '|' + String(vs || '').toUpperCase() + '|crypto']; } catch (e) { /* ignore */ }
+}
 function getHistCached(symbol, date, vs, kind) {
   var c = loadHistCache()[histCacheKey(symbol, date, vs, kind)];
   if (c && isFinite(Number(c.price)) && Number(c.price) > 0) {
@@ -2470,6 +2485,13 @@ function feeRateTitle(id, text) {
     var el = document.querySelector('[data-trade="' + id + '"] [data-label="Fee Fiat Rate"]');
     if (el) el.title = String(text);
   } catch (e) { /* ignore */ }
+}
+// Compose the fee-rate failure tooltip from the recorded per-host causes.
+function feeFailMsg(id, key) {
+  var detail = '';
+  try { detail = histDiag[key] || ''; } catch (e) { detail = ''; }
+  feeRateErr[id] = 'History lookup failed' + (detail ? ' (' + detail + ')' : '') + ' — tap to retry';
+  feeRateTitle(id, feeRateErr[id]);
 }
 function retryFeeRate(tradeId) {
   var st = null;
@@ -2508,8 +2530,8 @@ function retryFeeRate(tradeId) {
       } catch (e) { /* ignore */ }
       try { delete feeRateErr[tradeId]; } catch (e) { /* ignore */ }
       try { render(); } catch (e) { /* ignore */ }
-    } else { histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; feeRateTitle(tradeId, feeRateErr[tradeId]); }
-  }, function () { delete histInflight[key]; histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; feeRateTitle(tradeId, feeRateErr[tradeId]); });
+    } else { histNoteFail(key); feeFailMsg(tradeId, key); }
+  }, function () { delete histInflight[key]; histNoteFail(key); feeFailMsg(tradeId, key); });
 }
 
 function setHistCached(symbol, date, vs, kind, price, source, interpolated) {
@@ -2561,20 +2583,22 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) return Promise.resolve(null);
   function krakenFallback() { return fetchKrakenHistory(sym, dateStr, cur); }
+  var day10 = dateStr.slice(0, 10);
   return capturedFetch(url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
-  }).then(function (data) {
+  }, function () { throw new Error('price-unreachable'); }).then(function (data) {
     var cp = data && data.market_data && data.market_data.current_price;
     var p = cp ? Number(cp[curLow]) : NaN;
-    if (isFinite(p) && p > 0) return p;
+    if (isFinite(p) && p > 0) { histDiagClear(sym, day10, cur); return p; }
     // Bridge unsupported vs via the USD pivot + HISTORICAL ECB USD->main.
     if (curLow !== 'usd') {
       var pu = cp ? Number(cp.usd) : NaN;
       if (isFinite(pu) && pu > 0) {
         return fetchEcbRate(dateStr.slice(0, 10), 'USD', cur).then(function (r) {
           var v = pu * Number(r.rate);
-          return (isFinite(v) && v > 0) ? v : null;
+          if (isFinite(v) && v > 0) { histDiagClear(sym, day10, cur); return v; }
+          return null;
         }, function () { return null; });
       }
     }
@@ -2582,7 +2606,12 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   }).then(function (p) {
     if (isFinite(p) && p > 0) return p;
     return krakenFallback();
-  }, function () { return krakenFallback(); });
+  }, function (e) {
+    var msg = String((e && e.message) || e);
+    if (msg.indexOf('price-http-') === 0) histDiagNote(sym, day10, cur, 'CoinGecko HTTP ' + msg.slice(11));
+    else histDiagNote(sym, day10, cur, 'CoinGecko unreachable');
+    return krakenFallback();
+  });
 }
 
 // Second source for crypto history when CoinGecko fails or omits the fiat:
@@ -2593,7 +2622,10 @@ function fetchKrakenHistory(sym, dateStr, vs) {
   var s = String(sym || '').trim().toUpperCase();
   var c = String(vs || '').trim().toUpperCase();
   var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
-  if (KRAKEN_SYMBOLS.indexOf(s) === -1 || !isValidDateStr(day) || isFutureDateStr(day)) return Promise.resolve(null);
+  if (KRAKEN_SYMBOLS.indexOf(s) === -1 || !isValidDateStr(day) || isFutureDateStr(day)) {
+    if (KRAKEN_SYMBOLS.indexOf(s) === -1) histDiagNote(s, day, c, 'Kraken: asset not covered');
+    return Promise.resolve(null);
+  }
   var fiat = (c === 'EUR') ? 'EUR' : 'USD';
   var start = Math.floor(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) / 1000);
   if (!isFinite(start) || start <= 0) return Promise.resolve(null);
@@ -2623,15 +2655,22 @@ function fetchKrakenHistory(sym, dateStr, vs) {
       var tt = Number(cd[0]);
       if (tt >= start && tt < start + 86400 && Number(cd[4]) > 0) {
         var close = Number(cd[4]);
-        if (fiat === c) return close;
+        if (fiat === c) { histDiagClear(s, day, c); return close; }
         return fetchEcbRate(day, 'USD', c).then(function (r) {
           var v = close * Number(r.rate);
-          return (isFinite(v) && v > 0) ? v : null;
+          if (isFinite(v) && v > 0) { histDiagClear(s, day, c); return v; }
+          return null;
         }, function () { return null; });
       }
     }
+    histDiagNote(s, day, c, 'Kraken: no candle for date');
     return null;
-  }).then(null, function () { return null; });
+  }).then(null, function (e) {
+    var msg = String((e && e.message) || e);
+    if (msg.indexOf('kraken-http-') === 0) histDiagNote(s, day, c, 'Kraken HTTP ' + msg.slice(12));
+    else histDiagNote(s, day, c, 'Kraken unreachable');
+    return null;
+  });
 }
 
 function fetchHistoricalStockPrice(symbol, dateStr, vs) {
@@ -2725,6 +2764,7 @@ function ensureHistoricalExec(trades, main, kinds) {
   }
   var seen = {};
   var jobs = [];
+  var idsByKey = {}; // quote key -> trade ids waiting on it (for failure tooltips)
   (trades || []).forEach(function (t) {
     if (!t || (t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer')) return;
     var sym = String((t && t.symbol) || '').toUpperCase();
@@ -2735,6 +2775,7 @@ function ensureHistoricalExec(trades, main, kinds) {
     if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
     var kk = (kd === 'stock' ? 'stock' : 'crypto');
     var key = sym + '|' + day + '|' + m + '|' + kk;
+    if (t.id) { (idsByKey[key] = idsByKey[key] || []).push(t.id); }
     if (seen[key]) return;
     seen[key] = true;
     try { if (priceOverrideFor(sym) !== null) return; } catch (e) { /* fall through */ }
@@ -2753,8 +2794,9 @@ function ensureHistoricalExec(trades, main, kinds) {
         return true;
       }
       histNoteFail(key);
+      (idsByKey[key] || []).forEach(function (id) { try { feeFailMsg(id, key); } catch (e) { /* ignore */ } });
       return false;
-    }, function () { delete histInflight[key]; histNoteFail(key); return false; }));
+    }, function () { delete histInflight[key]; histNoteFail(key); (idsByKey[key] || []).forEach(function (id) { try { feeFailMsg(id, key); } catch (e) { /* ignore */ } }); return false; }));
   });
   if (!jobs.length) return Promise.resolve(false);
   return Promise.all(jobs).then(function (flags) {

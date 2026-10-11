@@ -3856,7 +3856,8 @@
         }).then(function () {
           var row = document.querySelector('[data-trade="t2"] [data-label="Fee Fiat Rate"]');
           restore();
-          assert(row && String(row.title).indexOf('unreachable') !== -1, 'failed tap must say why, got title ' + JSON.stringify(row && row.title));
+          assert(row && String(row.title).indexOf('CoinGecko HTTP 429') !== -1, 'tooltip must name the coingecko failure, got ' + JSON.stringify(row && row.title));
+          assert(row && String(row.title).indexOf('Kraken HTTP 429') !== -1, 'tooltip must name the kraken failure, got ' + JSON.stringify(row && row.title));
           navHome();
         }, function (e) { restore(); throw e; });
       });

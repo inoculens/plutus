@@ -498,10 +498,10 @@ section h2, aside h2 {
 }
 
 .card {
-  padding: 1.15rem 1.35rem 1.05rem;
+  padding: 0.8rem 1.1rem 0.7rem;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.2rem;
   min-width: 0;
   border-left: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
@@ -535,7 +535,7 @@ section h2, aside h2 {
 }
 
 /* ————— Accounts ————— */
-#accounts { display: grid; gap: 0.85rem; padding: 0; }
+#accounts { display: grid; gap: 0.6rem; padding: 0; }
 
 #accounts > h2, .section-title {
   margin: 1.4rem 0 0.3rem;
@@ -552,7 +552,7 @@ section h2, aside h2 {
   justify-content: space-between;
   gap: 0.75rem 1rem;
   flex-wrap: wrap;
-  margin: 1.4rem 0 0.9rem;
+  margin: 1rem 0 0.6rem;
 }
 
 .section-head .section-title { margin: 0; }
@@ -749,8 +749,8 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .account-card {
   display: flex;
   align-items: center;
-  gap: 1.15rem;
-  padding: 1.05rem 1.2rem;
+  gap: 0.85rem;
+  padding: 0.75rem 1rem;
   background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent), var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -999,12 +999,12 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .trade-block {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 0.7rem 1.15rem 0.5rem;
-  margin: 0.55rem 0;
+  padding: 0.55rem 1.1rem 0.4rem;
+  margin: 0.45rem 0;
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
 }
 .trade-block:last-child { margin-bottom: 0; }
-.trade-head { display: flex; align-items: center; gap: 0.8rem; padding-bottom: 0.35rem; }
+.trade-head { display: flex; align-items: center; gap: 0.8rem; padding-bottom: 0.25rem; }
 
 .side {
   font-size: 0.7rem;
@@ -1037,9 +1037,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 0.12rem;
+  gap: 0.1rem;
   border-bottom: none;
-  padding: 0.3rem 0 0.2rem;
+  padding: 0.2rem 0 0.12rem;
 }
 .trade-block .stat-label { flex: none; }
 .trade-block .stat-val { flex: none; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1113,8 +1113,8 @@ dialog::backdrop { background: rgba(3, 4, 6, 0.72); backdrop-filter: blur(8px); 
 label { display: block; margin: 1rem 0 0.35rem; color: var(--muted); font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 input, select, textarea {
   width: 100%;
-  padding: 0.7rem 0.85rem;
-  min-height: 2.9rem;
+  padding: 0.5rem 0.7rem;
+  min-height: 2.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: #0a0e14;
@@ -1479,7 +1479,7 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
 
 /* Tables (legacy safety) */
 table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
-th, td { text-align: left; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--border); }
+th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.07em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-display); }
 
@@ -1502,7 +1502,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .trade-block { display: flex; flex-wrap: wrap; column-gap: 1.25rem; }
   .trade-facts { flex-wrap: wrap; overflow: visible; }
   .trade-head { flex: 1 1 100%; }
-  .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.1rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.3rem 0; }
+  .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.1rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.2rem 0; }
   main { padding-bottom: 7rem; }
   table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   table, table tbody, table tr, table td { display: block; width: 100%; }
@@ -1573,7 +1573,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 .detail-meta-block {
   flex: 1 1 100%;
   display: grid;
-  gap: 0.35rem;
+  gap: 0.2rem;
   margin-top: 0.25rem;
   min-width: 0;
 }

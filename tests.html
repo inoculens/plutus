@@ -4091,6 +4091,9 @@
         assert(acc && acc.address === 'line one\nline two', 'multiline label must persist, got ' + JSON.stringify(acc && acc.address));
         var lab = document.querySelector('#account-detail [data-label="Label"]');
         assert(lab !== null, 'saved label must render on the detail page');
+        var labVal = lab.querySelector ? lab.querySelector('.detail-meta-val') : null;
+        assert(labVal !== null && labVal.classList.contains('detail-meta-multiline'), 'label must render wrapped multiline');
+        assert(labVal.textContent.indexOf('line one') !== -1 && labVal.textContent.indexOf('line two') !== -1, 'wrapped label must show every line');
         navHome();
       });
     })();

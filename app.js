@@ -4684,11 +4684,15 @@ function tradeBlock(t, main, accountNameById, kind) {
 function detailMetaRow(label, text, title) {
   var d = document.createElement('div');
   d.className = 'detail-meta';
+  d.setAttribute('data-label', label);
   var l = document.createElement('span');
   l.className = 'detail-meta-label';
   l.textContent = label;
   var v = document.createElement('span');
   v.className = 'detail-meta-val';
+  // Account labels are multi-line by design: wrap them fully instead of
+  // trimming to one line. Notes keep the trim + popup treatment.
+  if (String(label) === 'Label') v.classList.add('detail-meta-multiline');
   v.textContent = String(text);
   v.title = String(text);
   v.setAttribute('role', 'button');

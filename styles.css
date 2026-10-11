@@ -1601,6 +1601,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   text-overflow: ellipsis;
   cursor: pointer;
 }
+/* Multi-line account labels: wrap fully, break long tokens. */
+.detail-meta-val.detail-meta-multiline {
+  white-space: pre-wrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
 .label-edit-row {
   display: flex;
   gap: 0.6rem;

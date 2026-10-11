@@ -3430,6 +3430,75 @@
       });
     })();
 
+    // === Transfer send/receive tests (sent − received = fee) ===
+    (function transferSendReceiveTests() {
+      var L = window.Inoculens || {};
+      test('transferFeeFrom derives fee as sent minus received', function () {
+        var f = L.transferFeeFrom;
+        assert(typeof f === 'function', 'transferFeeFrom missing');
+        var r = f('1', '0.99');
+        assert(r && Math.abs(r.fee - 0.01) < 1e-9, 'fee should be 0.01, got ' + JSON.stringify(r));
+        var zero = f('1', '1');
+        assert(zero && zero.fee === 0, 'equal amounts mean zero fee, got ' + JSON.stringify(zero));
+        assert(f('1', '2') === null, 'received over sent must be null');
+        assert(f('1', '') === null, 'blank received is the manual-fee fallback, got non-null');
+        assert(f('0', '0') === null, 'non-positive amounts must be null');
+        assert(f('1', '0') === null, 'zero received must be null');
+      });
+
+      test('transfer submit stores sent minus received as the fee', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openPrefillTrade('a1');
+        document.getElementById('t-side').value = 'transfer';
+        document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('t-qty').value = '1';
+        document.getElementById('t-qty').dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('t-toqty').value = '0.99';
+        document.getElementById('t-toqty').dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('t-toaccount').value = 'a2';
+        document.getElementById('t-total').value = '';
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        onTradeSubmit({ preventDefault: function () {} });
+        var st = L.loadState();
+        assert(st.trades.length === 2, 'transfer should save, got ' + st.trades.length);
+        var last = st.trades[st.trades.length - 1];
+        assert(last.type === 'transfer' && last.qty === 1, 'sent qty must be stored, got ' + JSON.stringify(last));
+        assert(Math.abs(Number(last.networkFee) - 0.01) < 1e-9, 'fee must be sent minus received, got ' + JSON.stringify(last.networkFee));
+        assert(last.toAccountId === 'a2', 'destination must be stored, got ' + JSON.stringify(last.toAccountId));
+        // Edit round-trips received back into the form.
+        openEditTrade(last.id);
+        assert(document.getElementById('t-toqty').value === '0.99', 'edit should prefill received, got ' + document.getElementById('t-toqty').value);
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        // Received over sent never saves.
+        openPrefillTrade('a1');
+        document.getElementById('t-side').value = 'transfer';
+        document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('t-qty').value = '0.5';
+        document.getElementById('t-toqty').value = '0.6';
+        document.getElementById('t-toaccount').value = 'a2';
+        document.getElementById('t-total').value = '';
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        onTradeSubmit({ preventDefault: function () {} });
+        assert(L.loadState().trades.length === 2, 'received over sent must not save');
+        var err = document.getElementById('t-error');
+        assert(err && err.hidden === false, 'over-received must surface a form error');
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+      });
+    })();
+
     renderResults();
   </script>
 </body>

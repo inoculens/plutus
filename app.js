@@ -5144,8 +5144,9 @@ function buildTradeForm() {
     '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
     '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
     '<p class="fld-hint" id="t-qty-hint">Amount you received (net of any fee taken in asset).</p></div>' +
-    '<div id="t-toqty-row" hidden><label for="t-toqty">Received quantity</label>' +
-    '<input id="t-toqty" inputmode="decimal" placeholder="e.g. 15.2"></div>' +
+    '<div id="t-toqty-row" hidden><label for="t-toqty" id="t-toqty-label">Received quantity</label>' +
+    '<input id="t-toqty" inputmode="decimal" placeholder="e.g. 15.2">' +
+    '<p class="fld-hint" id="t-toqty-hint"></p></div>' +
     '<div id="t-total-row"><label for="t-total" id="t-total-label">Total (native currency)</label>' +
     '<input id="t-total" inputmode="decimal" placeholder="e.g. 50000">' +
     '<p class="fld-hint" id="t-total-hint">Full amount paid, including the fee below.</p></div>' +
@@ -5158,7 +5159,7 @@ function buildTradeForm() {
     '<details class="adv"><summary>Details</summary>' +
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Network fee (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005">' +
-    '<p class="fld-hint">On-chain gas / miner fee taken from the moved amount. Tracked as a real loss.</p></div>' +
+    '<p class="fld-hint" id="t-networkfee-hint">On-chain gas / miner fee taken from the moved amount. Tracked as a real loss. Auto-filled from sent − received when both are entered.</p></div>' +
     '<label for="t-fee">Fee (fiat)</label>' +
     '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
     '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p>' +
@@ -5182,6 +5183,10 @@ function buildTradeForm() {
   }
   var sideSel = document.getElementById('t-side');
   if (sideSel) sideSel.addEventListener('change', syncTradeTypeUI);
+  var qtyEl = document.getElementById('t-qty');
+  if (qtyEl) qtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
+  var toQtyEl = document.getElementById('t-toqty');
+  if (toQtyEl) toQtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var toSel = document.getElementById('t-toaccount');
   if (toSel) toSel.addEventListener('change', function () { /* hint only */ });
   var ccy = document.getElementById('t-currency');
@@ -5206,26 +5211,42 @@ function syncTradeTypeUI() {
   var isExpense = type === 'expense';
   var isBuySell = type === 'buy' || type === 'sell';
   setHidden('t-toaccount-row', !(isTransfer || isSwap));
-  setHidden('t-toqty-row', !isSwap);
+  setHidden('t-toqty-row', !(isSwap || isTransfer));
   setHidden('t-networkfee-row', !(isTransfer));
   // Total row: optional for income/transfer/expense, required for buy/sell/swap fiat value
   setHidden('t-total-row', false);
   setHidden('t-currency-row', false);
   if (isTransfer) {
-    setLabel('t-qty-label', 'Quantity to move');
+    setLabel('t-qty-label', 'You send');
+    setLabel('t-toqty-label', 'You receive');
     setLabel('t-total-label', 'Fiat fee value (optional, leave 0)');
+    setLabel('t-qty-hint', 'Amount leaving the source (before any fee).');
+    setLabel('t-total-hint', 'Optional cash fee on top — leave empty when the fee is crypto-only.');
   } else if (isSwap) {
     setLabel('t-qty-label', 'From quantity (you send)');
+    setLabel('t-toqty-label', 'Received quantity');
     setLabel('t-total-label', 'Fiat value of swap (for tax, e.g. 50000)');
+    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
+    setLabel('t-total-hint', 'Full amount paid, including the fee below.');
+    setLabel('t-toqty-hint', '');
   } else if (isIncome) {
     setLabel('t-qty-label', 'Quantity received');
     setLabel('t-total-label', 'Market value at receipt (optional, 0 = free)');
+    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
+    setLabel('t-total-hint', 'Full amount paid, including the fee below.');
+    setLabel('t-toqty-hint', '');
   } else if (isExpense) {
     setLabel('t-qty-label', 'Quantity lost (optional if cash-only)');
     setLabel('t-total-label', 'Fiat lost (optional if crypto-only)');
+    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
+    setLabel('t-total-hint', 'Full amount paid, including the fee below.');
+    setLabel('t-toqty-hint', '');
   } else {
     setLabel('t-qty-label', 'Quantity');
     setLabel('t-total-label', 'Total (native currency)');
+    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
+    setLabel('t-total-hint', 'Full amount paid, including the fee below.');
+    setLabel('t-toqty-hint', '');
   }
   // Rebuild to-account options: transfer = same ticker only, swap = any other account.
   try {
@@ -5272,6 +5293,50 @@ function syncTradeTypeUI() {
     }
   } catch (e) { /* ignore */ }
   void isBuySell; void isIncome; void isExpense;
+  try { syncTransferFeePreview(); } catch (e) { /* ignore */ }
+}
+
+// Transfer send/receive helper: fee = sent − received. When both are valid
+// the Details network-fee field is auto-filled and the hint shows what will
+// be recorded as the loss (exchange + network fee). When received is blank
+// the manual network-fee field stays as the fallback (legacy path).
+function transferFeeFrom(sentRaw, recvRaw) {
+  var sent = Number(sentRaw);
+  var recv = Number(recvRaw);
+  if (String(recvRaw).trim() === '') return null;
+  if (!isFinite(sent) || sent <= 0) return null;
+  if (!isFinite(recv) || recv <= 0 || recv > sent) return null;
+  var fee = sent - recv;
+  if (Math.abs(fee) < 1e-12) fee = 0;
+  if (!(fee >= 0 && fee < sent)) return null;
+  return { sent: sent, recv: recv, fee: fee };
+}
+
+function syncTransferFeePreview() {
+  var sideEl = document.getElementById('t-side');
+  if (!sideEl || sideEl.value !== 'transfer') return;
+  var hint = document.getElementById('t-toqty-hint');
+  var feeInput = document.getElementById('t-networkfee');
+  var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-toqty', ''));
+  var sym = '';
+  try {
+    var acc = accountById(loadState(), uiVal('t-account', ''));
+    if (acc) sym = ' ' + String(acc.ticker).toUpperCase();
+  } catch (e) { sym = ''; }
+  if (!r) {
+    var recvTxt = String(uiVal('t-toqty', '')).trim();
+    if (hint) {
+      if (recvTxt === '') hint.textContent = 'Enter what arrived — the fee is filled in for you. Leave blank to type the fee manually under Details.';
+      else hint.textContent = 'Received must be > 0 and at most what you sent.';
+    }
+    return;
+  }
+  if (feeInput) feeInput.value = String(r.fee);
+  if (hint) {
+    hint.textContent = r.fee === 0
+      ? 'No fee — received equals sent.'
+      : 'Fee ' + String(r.fee) + sym + ' will be recorded as the loss.';
+  }
 }
 
 // --- Account-bound trade dialog (Task 3) ---
@@ -5393,6 +5458,7 @@ function openEditTrade(tradeId) {
   syncLockedSymbol();
   syncTradeTypeUI();
   uiSetVal('t-qty', tr.qty !== undefined && tr.qty !== null ? String(tr.qty) : '');
+  uiSetVal('t-toqty', '');
   uiSetVal('t-total', tr.total !== undefined && tr.total !== null ? String(tr.total) : '');
   try {
     var cSel = document.getElementById('t-currency');
@@ -5407,6 +5473,15 @@ function openEditTrade(tradeId) {
   uiSetVal('t-fee', tr.fee !== undefined && tr.fee !== null ? String(tr.fee) : '');
   uiSetVal('t-note', tr.note || '');
   uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
+  if (tr.type === 'transfer') {
+    var trQty = Number(tr.qty);
+    var trNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
+    if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
+      var recv = trQty - trNf;
+      if (Math.abs(recv) < 1e-12) recv = 0;
+      uiSetVal('t-toqty', String(recv));
+    }
+  }
   // Manual fields reflect their persistent state, like every other input:
   // the FX rate lives on in the trade's manual fxLock, the price in the
   // trade's manual execLock (else the global override for the symbol).
@@ -5437,6 +5512,7 @@ function openEditTrade(tradeId) {
       toSel.value = tr.toAccountId;
     }
   } catch (e) { /* ignore */ }
+  try { syncTransferFeePreview(); } catch (e) { /* ignore */ }
   var submitBtn2 = document.getElementById('t-submit');
   if (submitBtn2) { submitBtn2.textContent = 'Save changes'; submitBtn2.disabled = false; }
   var titleEl2 = document.getElementById('trade-dialog-title');
@@ -5595,6 +5671,21 @@ function onTradeSubmit(ev) {
   var feeCurrency = currency; // one fiat per trade: fee follows Currency
   var netRaw = uiVal('t-networkfee', '');
   var networkFee = (netRaw === undefined || netRaw === null || String(netRaw).trim() === '') ? 0 : Number(netRaw);
+  var toQtyRaw = uiVal('t-toqty', '');
+  // Send + receive mode: the fee is the difference (exchange + network fee),
+  // recorded as the loss — e.g. exchange → self-custody or wallet → wallet.
+  // When received is entered it wins over the manual Details fee; when it is
+  // blank the manual fee stays as the fallback (legacy path).
+  if (side === 'transfer' && String(toQtyRaw).trim() !== '') {
+    var sentChk = Number(qtyRaw);
+    var recvChk = Number(toQtyRaw);
+    if (!isFinite(sentChk) || sentChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
+    if (!isFinite(recvChk) || recvChk <= 0) { tradeFormError('Received must be > 0.'); return; }
+    if (recvChk > sentChk) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
+    networkFee = sentChk - recvChk;
+    if (Math.abs(networkFee) < 1e-12) networkFee = 0;
+    uiSetVal('t-networkfee', String(networkFee));
+  }
   var toAccId = uiVal('t-toaccount', '');
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
   if (!isFinite(fee) || fee < 0) { tradeFormError('Fee must be >= 0.'); return; }
@@ -5607,7 +5698,12 @@ function onTradeSubmit(ev) {
     if (!isFinite(total) || total < 0) { tradeFormError('Total must be >= 0.'); return; }
     if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid — pick one or enter a 2–10 letter code.'); return; }
   } else if (side === 'transfer') {
-    if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
+    if (!isFinite(qty) || qty <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
+    if (String(toQtyRaw).trim() !== '') {
+      var recvV = Number(toQtyRaw);
+      if (!isFinite(recvV) || recvV <= 0) { tradeFormError('Received must be > 0.'); return; }
+      if (recvV > qty) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
+    }
     if (!isFinite(networkFee) || networkFee < 0 || networkFee >= qty) { tradeFormError('Network fee must be >= 0 and < qty.'); return; }
     // No destination: on-chain move inside this account (fresh address, same
     // owner). With one: it must be a different account with the same asset.
@@ -6958,6 +7054,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.syncTradeButtons = syncTradeButtons;
   window.Inoculens.syncLockedSymbol = syncLockedSymbol;
   window.Inoculens.syncTradeTypeUI = syncTradeTypeUI;
+  window.Inoculens.transferFeeFrom = transferFeeFrom;
+  window.Inoculens.syncTransferFeePreview = syncTransferFeePreview;
   window.Inoculens.route = route;
   window.Inoculens.renderAccountDetail = renderAccountDetail;
   window.Inoculens.accountDetailId = accountDetailId;

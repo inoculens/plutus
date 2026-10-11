@@ -1059,6 +1059,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   overflow: hidden;
 }
 .trade-block .rate-line .stat-val { max-width: 100%; cursor: pointer; }
+/* Rate rows read like every other value (same typeface/weight/size); the
+   muted gray stays as the "automatic" cue. */
+.trade-block .rate-line .stat-val { font-family: var(--font-display); font-size: inherit; font-weight: 550; }
 .trade-block .stat-row[data-label="Note"] .stat-val {
   display: block;
   white-space: nowrap;

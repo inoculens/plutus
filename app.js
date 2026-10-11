@@ -2451,10 +2451,18 @@ function getHistCached(symbol, date, vs, kind) {
   return null;
 }
 
-// Manual retry for one trade's historical quote (e.g. tapping an unknown
-// Fee Fiat Rate): clears any cooldown for that quote and fetches now,
-// bypassing the backoff that spaces out automatic attempts. Repaints on
-// success; a failed tap simply leaves the '—' in place.
+// Last tap-to-retry failure per trade (session-only): surfaced as the Fee
+// Fiat Rate row's tooltip so an unknown rate says WHY instead of just '—'.
+// Cleared whenever a lookup for that trade succeeds.
+var feeRateErr = {};
+function feeRateWhy(t, kind) {
+  if (t && feeRateErr[t.id]) return feeRateErr[t.id];
+  var kd = String(kind || '').trim().toLowerCase();
+  if (kd === 'custom' || kd === 'cash') return 'No market history for this account kind — tap to retry anyway';
+  var sym = t ? String(t.symbol || '').toUpperCase() : '';
+  if (kd !== 'stock' && !SYMBOL_MAP[sym]) return 'No market history for this asset — tap to retry anyway';
+  return 'Tap to retry the rate lookup';
+}
 function retryFeeRate(tradeId) {
   var st = null;
   try { st = loadState(); } catch (e) { return; }
@@ -2490,9 +2498,10 @@ function retryFeeRate(tradeId) {
           (r && typeof r === 'object') ? !!r.interpolated : false);
         saveHistCache();
       } catch (e) { /* ignore */ }
+      try { delete feeRateErr[tradeId]; } catch (e) { /* ignore */ }
       try { render(); } catch (e) { /* ignore */ }
-    } else { histNoteFail(key); }
-  }, function () { delete histInflight[key]; histNoteFail(key); });
+    } else { histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; try { render(); } catch (e) { /* ignore */ } }
+  }, function () { delete histInflight[key]; histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; try { render(); } catch (e) { /* ignore */ } });
 }
 
 function setHistCached(symbol, date, vs, kind, price, source, interpolated) {
@@ -4289,7 +4298,7 @@ function tradeBlock(t, main, accountNameById, kind) {
         : '—';
       var feeRateEl = rateRow('Fee Fiat Rate', feeRateTxt);
       if (xferRate === null) {
-        feeRateEl.title = 'Tap to retry the rate lookup';
+        feeRateEl.title = feeRateWhy(t, kind);
         (function (el, id) {
           el.addEventListener('click', function () {
             try { retryFeeRate(id); } catch (e) { /* ignore */ }

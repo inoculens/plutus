@@ -4051,6 +4051,10 @@
         assert(noteLab !== null && noteLab.querySelector('.info-dot') !== null, 'Note label must carry ⓘ');
         var shortDot = document.querySelector('[data-trade="a-buy"] [data-label="Note"] .stat-label .info-dot');
         assert(shortDot !== null && shortDot.style.display === 'none', 'fitting values must hide their ⓘ');
+        var shortVal = document.querySelector('[data-trade="a-buy"] [data-label="Note"] .stat-val');
+        assert(shortVal !== null && shortVal.style.cursor === '', 'fitting text keeps the text cursor');
+        var shortLab = document.querySelector('[data-trade="a-buy"] [data-label="Note"] .stat-label');
+        assert(shortLab !== null && shortLab.style.cursor === '', 'inert labels keep the default cursor');
         var rateLab = document.querySelector('[data-trade="a-xfer"] [data-label="Fee in fiat rate"] .stat-label');
         assert(rateLab !== null && rateLab.querySelector('.info-dot') !== null, 'rate label must carry ⓘ');
         var metaLab = document.querySelector('#account-detail .detail-meta-label .info-dot, #account-detail .detail-meta-block .info-dot');

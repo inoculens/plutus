@@ -1070,7 +1070,7 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   min-width: 0;
   overflow: hidden;
 }
-.trade-block .rate-line .stat-val { max-width: 100%; cursor: pointer; }
+.trade-block .rate-line .stat-val { max-width: 100%; }
 /* Rate rows read like every other value (same typeface/weight/size); the
    muted gray stays as the "automatic" cue. */
 .trade-block .rate-line .stat-val { font-family: var(--font-display); font-size: inherit; font-weight: 550; }
@@ -1079,7 +1079,6 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
 }
 /* Tx hash link keeps the transfer-pill blue in every state — visited links
    must never fall back to the browser default purple. */
@@ -1611,7 +1610,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
 }
 /* Multi-line account labels: wrap fully, break long tokens. */
 .detail-meta-val.detail-meta-multiline {

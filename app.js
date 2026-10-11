@@ -4408,8 +4408,10 @@ function infoDot(labelEl, openFn, valueEl) {
 }
 
 // Overflow-gated dots mean something only when the value is actually
-// truncated: hide the decorative ones after layout settles. Runs on every
-// paint and on resize (truncation follows width).
+// truncated: hide the decorative ones after layout settles. The pointer
+// follows the same truth — text cursor for fitting text, hand only where
+// a tap does something. Runs on every paint and on resize (truncation
+// follows width).
 function syncInfoDots() {
   try {
     var vals = document.querySelectorAll('.stat-val[data-info-cond], .detail-meta-val[data-info-cond]');
@@ -4419,10 +4421,15 @@ function syncInfoDots() {
       try { box = v.closest ? v.closest('.stat-row, .detail-meta') : null; } catch (e) { box = null; }
       if (!box) continue;
       var dot = box.querySelector('.info-dot');
-      if (!dot) continue;
+      var lab = null;
+      try { lab = box.querySelector('.stat-label, .detail-meta-label'); } catch (e) { lab = null; }
       var overflowing = false;
       try { overflowing = v.scrollWidth > v.clientWidth + 1; } catch (e) { overflowing = false; }
-      dot.style.display = overflowing ? '' : 'none';
+      if (dot) dot.style.display = overflowing ? '' : 'none';
+      try { v.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
+      if (lab) {
+        try { lab.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
+      }
     }
   } catch (e) { /* ignore */ }
 }

@@ -4927,6 +4927,39 @@ function renderAccountDetail(st, id) {
   rows.forEach(function (r) { feesSum += Number(r.fees) || 0; incomeSum += Number(r.income) || 0; });
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
   host.appendChild(stats);
+  // Per-account spent (this account only): lifetime sell proceeds, cash legs
+  // and crypto fees at the frozen tx-date rate — same definition as the home
+  // SPENT AMOUNT, scoped to atrades. Orange pill above the red fees pill.
+  var spentSum = 0;
+  try {
+    atrades.forEach(function (t) {
+      if (!t) return;
+      var sn = normalizeTrade(t);
+      if (t.type === 'sell') {
+        if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
+      } else if (t.type === 'expense' || t.type === 'transfer') {
+        if (isFinite(sn.netMain) && sn.netMain > 0) spentSum += sn.netMain;
+        var cq = (t.type === 'transfer')
+          ? ((t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee))
+          : ((t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? 0 : Number(t.qty));
+        if (isFinite(cq) && cq > 0) {
+          var kr = null;
+          try { kr = resolveExecPrice(t, main, accKind); } catch (e) { kr = null; }
+          if (kr !== null && isFinite(Number(kr.price)) && Number(kr.price) > 0) {
+            spentSum += cq * Number(kr.price);
+          }
+        }
+      }
+    });
+  } catch (e) { spentSum = 0; }
+  if (spentSum > 1e-9) {
+    var spentLine = document.createElement('p');
+    spentLine.className = 'spent-line';
+    spentLine.setAttribute('data-label', 'Spent amount');
+    spentLine.setAttribute('data-value', String(spentSum));
+    spentLine.textContent = 'Spent amount: ' + fmtMoney(spentSum, main);
+    host.appendChild(spentLine);
+  }
   if (Math.abs(feesSum) > 1e-9) {
     var feesLine = document.createElement('p');
     feesLine.className = 'fees-line';

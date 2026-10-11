@@ -1916,8 +1916,9 @@
             assert(feesLine !== null, 'fees must render as a line below the 8-card grid');
             assert(feesLine.getAttribute('data-value') === '1', 'fees line value wrong: ' + feesLine.getAttribute('data-value'));
             var feesStyle = getComputedStyle(feesLine);
-            assert(feesStyle.borderColor.indexOf('251, 146, 60') !== -1, 'fees must wear the orange pill, got ' + feesStyle.borderColor);
+            assert(feesStyle.borderColor.indexOf('248, 113, 113') !== -1, 'fees must wear the red pill, got ' + feesStyle.borderColor);
             assert(feesStyle.borderRadius !== '0px', 'fees must be pill-shaped, got ' + feesStyle.borderRadius);
+            assert(det2.querySelector('[data-label="Spent amount"]') === null, 'buy-only account must show no spent pill');
             assert(det2.querySelector('.card[data-label="Fees paid"]') === null, 'fees must not be a 9th grid card');
             navHome();
           } finally {
@@ -4155,6 +4156,46 @@
         assert(f('a"b,c\nd') === '"a""b,c\nd"', 'quoting still applies');
         assert(f(12.5) === '12.5', 'numbers untouched');
         assert(f('') === '' && f(null) === '' && f(undefined) === '', 'empties stay empty');
+      });
+    })();
+
+    // === Per-account spent pill tests (orange, above red fees) ===
+    (function accountSpentTests() {
+      var L = window.Inoculens || {};
+      test('account detail shows its own spent above fees', function () {
+        var fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Savings', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 'p-a', type: 'buy', symbol: 'BTC', qty: 1, total: 100, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'p-b', type: 'sell', symbol: 'BTC', qty: 0.4, total: 50, currency: 'EUR', date: '2026-02-01', fee: 2, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: fx, createdAt: '2026-02-01T00:00:00.000Z' },
+            { id: 'p-c', type: 'transfer', symbol: 'BTC', qty: 0.5, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0.01, execLock: { price: 50000, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-03-01T00:00:00.000Z' },
+            { id: 'p-d', type: 'buy', symbol: 'BTC', qty: 2, total: 200, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a2', fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        var det = document.getElementById('account-detail');
+        var spent = det.querySelector('[data-label="Spent amount"]');
+        assert(spent !== null, 'a1 must show its spent pill');
+        assert(Math.abs(Number(spent.getAttribute('data-value')) - 550) < 1e-6, 'a1 spent = 50 proceeds + 0.01 x 50000 fee, got ' + spent.getAttribute('data-value'));
+        var spentStyle = getComputedStyle(spent);
+        assert(spentStyle.borderColor.indexOf('251, 146, 60') !== -1, 'spent must wear the orange pill, got ' + spentStyle.borderColor);
+        var order = Array.prototype.map.call(det.querySelectorAll('#account-detail > p[data-label]'), function (el) { return el.getAttribute('data-label'); });
+        assert(order.join(' | ') === 'Spent amount | Total fees paid', 'spent must sit above fees, got ' + order.join(' | '));
+        navTo('a2');
+        route();
+        render();
+        var det2 = document.getElementById('account-detail');
+        assert(det2.querySelector('[data-label="Spent amount"]') === null, 'buy-only a2 must show no spent pill');
+        navHome();
       });
     })();
 

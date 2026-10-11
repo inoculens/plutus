@@ -4437,7 +4437,7 @@ function tradeBlock(t, main, accountNameById, kind) {
   box.appendChild(head);
   var isXfer = t.type === 'transfer';
   // Transfer fee valuation: the network fee in fiat at the frozen tx-date
-  // rate. Resolved once here and reused by the Network fee (≈) and Fee Fiat
+  // rate. Resolved once here and reused by the Transfer fees (≈) and Fee Fiat
   // Rate rows; null (→ '—') when nothing is known, never a guess.
   var xferFee = 0;
   var xferRate = null;
@@ -4454,8 +4454,8 @@ function tradeBlock(t, main, accountNameById, kind) {
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
-      box.appendChild(statRow('Network fee', feeTxtT, t.networkFee, false));
-      // Fee Fiat Rate sits right after Network fee — it is the rate behind
+      box.appendChild(statRow('Transfer fees', feeTxtT, t.networkFee, false));
+      // Fee Fiat Rate sits right after Transfer fees — it is the rate behind
       // the (≈) above, frozen at the tx date. Unknown: tap retries the
       // lookup on demand instead of waiting for the backoff.
       var feeRateTxt = (xferRate !== null)
@@ -4516,7 +4516,7 @@ function tradeBlock(t, main, accountNameById, kind) {
     }
   }
   // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate is gone for
-  // transfers (Fee Fiat Rate lives next to Network fee instead), and the
+  // transfers (Fee Fiat Rate lives next to Transfer fees instead), and the
   // fiat Fee row is gone too — the network fee IS the fee.
   if (!isXfer) {
     box.appendChild(rateRow('Rate', fxBadgeText(t)));
@@ -5573,7 +5573,7 @@ function buildTradeForm() {
     '<label for="t-date">Date</label>' +
     '<input id="t-date" type="date">' +
     '<details class="adv"><summary>Details</summary>' +
-    '<div id="t-networkfee-row" hidden><label for="t-networkfee">Network fee (in same asset)</label>' +
+    '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005">' +
     '<p class="fld-hint" id="t-networkfee-hint">On-chain gas / miner fee taken from the moved amount. Tracked as a real loss. Auto-filled from sent − received when both are entered.</p></div>' +
     '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat)</label>' +
@@ -6136,7 +6136,7 @@ function onTradeSubmit(ev) {
   var toAccId = uiVal('t-toaccount', '');
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
   if (!isFinite(fee) || fee < 0) { tradeFormError('Fee must be >= 0.'); return; }
-  if (!isFinite(networkFee) || networkFee < 0) { tradeFormError('Network fee must be >= 0.'); return; }
+  if (!isFinite(networkFee) || networkFee < 0) { tradeFormError('Transfer fees must be >= 0.'); return; }
   var qty = (side === 'expense' && String(qtyRaw).trim() === '') ? null : Number(qtyRaw);
   var total = (String(totalRaw).trim() === '') ? (side === 'buy' || side === 'sell' ? NaN : 0) : Number(totalRaw);
   if (side === 'transfer') {
@@ -6157,7 +6157,7 @@ function onTradeSubmit(ev) {
       if (!isFinite(recvV) || recvV <= 0) { tradeFormError('Received must be > 0.'); return; }
       if (recvV > qty) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
     }
-    if (!isFinite(networkFee) || networkFee < 0 || networkFee >= qty) { tradeFormError('Network fee must be >= 0 and < qty.'); return; }
+    if (!isFinite(networkFee) || networkFee < 0 || networkFee >= qty) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     // No destination: on-chain move inside this account (fresh address, same
     // owner). With one: it must be a different account with the same asset.
     var toAccT = toAccId ? accountById(st0, toAccId) : null;

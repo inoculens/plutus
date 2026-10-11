@@ -3757,11 +3757,11 @@
           var fr = block.querySelector('[data-label="Fee Fiat Rate"]');
           assert(fr !== null, 'Fee Fiat Rate row must render');
           assert(fr.textContent.indexOf('BTC') !== -1 && fr.textContent.indexOf('50') !== -1, 'fee rate wrong: ' + fr.textContent);
-          var nf = block.querySelector('[data-label="Network fee"]');
-          assert(nf !== null && nf.textContent.indexOf('≈') !== -1, 'network fee must carry its fiat value: ' + (nf && nf.textContent));
+          var nf = block.querySelector('[data-label="Transfer fees"]');
+          assert(nf !== null && nf.textContent.indexOf('≈') !== -1, 'transfer fees must carry their fiat value: ' + (nf && nf.textContent));
           assert(nf.textContent.indexOf('500') !== -1, 'fee fiat 0.01 x 50000 = 500, got: ' + nf.textContent);
           var order = Array.prototype.map.call(block.querySelectorAll('.trade-facts > .stat-row'), function (r) { return r.getAttribute('data-label'); });
-          assert(order.indexOf('Fee Fiat Rate') === order.indexOf('Network fee') + 1, 'Fee Fiat Rate must sit right after Network fee, got: ' + order.join(' | '));
+          assert(order.indexOf('Fee Fiat Rate') === order.indexOf('Transfer fees') + 1, 'Fee Fiat Rate must sit right after Transfer fees, got: ' + order.join(' | '));
           try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
           navHome();
         } finally {
@@ -3798,7 +3798,7 @@
           assert(block !== null, 'transfer block must render');
           var fr = block.querySelector('[data-label="Fee Fiat Rate"]');
           assert(fr !== null && fr.textContent.indexOf('—') !== -1, 'unknown rate must be —, never a guess, got ' + (fr && fr.textContent));
-          var nf = block.querySelector('[data-label="Network fee"]');
+          var nf = block.querySelector('[data-label="Transfer fees"]');
           assert(nf !== null && nf.textContent.indexOf('≈') === -1, 'crypto-only fee must not invent fiat: ' + (nf && nf.textContent));
           try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
           navHome();

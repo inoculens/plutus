@@ -4388,9 +4388,10 @@ function openFeeExplainer(t, main, feeQty, rate) {
 }
 
 // Discoverability for tap-for-info rows: an ⓘ badge on the label that
-// opens the same popup as the value. Used everywhere a row hides fuller
-// info behind a tap (Transfer fees explainer, Rate/Note/detail overflows).
-function infoDot(labelEl, openFn) {
+// opens the same popup as the value. Pass the value element when the popup
+// only exists on overflow — syncInfoDots then hides decorative dots whose
+// value fits. Omit it when the tap always opens something (Transfer fees).
+function infoDot(labelEl, openFn, valueEl) {
   if (!labelEl || typeof openFn !== 'function') return;
   var dot = document.createElement('span');
   dot.className = 'info-dot';
@@ -4399,6 +4400,29 @@ function infoDot(labelEl, openFn) {
   labelEl.appendChild(dot);
   try { labelEl.style.cursor = 'pointer'; } catch (e) { /* ignore */ }
   labelEl.addEventListener('click', function () { try { openFn(); } catch (e) { /* ignore */ } });
+  if (valueEl) {
+    try { valueEl.setAttribute('data-info-cond', '1'); } catch (e) { /* ignore */ }
+  }
+}
+
+// Overflow-gated dots mean something only when the value is actually
+// truncated: hide the decorative ones after layout settles. Runs on every
+// paint and on resize (truncation follows width).
+function syncInfoDots() {
+  try {
+    var vals = document.querySelectorAll('.stat-val[data-info-cond], .detail-meta-val[data-info-cond]');
+    for (var i = 0; i < vals.length; i++) {
+      var v = vals[i];
+      var box = null;
+      try { box = v.closest ? v.closest('.stat-row, .detail-meta') : null; } catch (e) { box = null; }
+      if (!box) continue;
+      var dot = box.querySelector('.info-dot');
+      if (!dot) continue;
+      var overflowing = false;
+      try { overflowing = v.scrollWidth > v.clientWidth + 1; } catch (e) { overflowing = false; }
+      dot.style.display = overflowing ? '' : 'none';
+    }
+  } catch (e) { /* ignore */ }
 }
 
 function rateRow(label, text) {
@@ -4426,7 +4450,7 @@ function rateRow(label, text) {
       openRate();
     }
   });
-  infoDot(rl, openRate);
+  infoDot(rl, openRate, rv);
   rate.appendChild(rl);
   rate.appendChild(rv);
   return rate;
@@ -4615,7 +4639,7 @@ function tradeBlock(t, main, accountNameById, kind) {
             open();
           }
         });
-        infoDot(noteRow.querySelector('.stat-label'), open);
+        infoDot(noteRow.querySelector('.stat-label'), open, val);
       })(noteVal, t.note);
     }
     box.appendChild(noteRow);
@@ -4676,7 +4700,7 @@ function detailMetaRow(label, text, title) {
   v.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
   });
-  infoDot(l, open);
+  infoDot(l, open, v);
   d.appendChild(l);
   d.appendChild(v);
   return d;
@@ -7443,6 +7467,7 @@ function render() {
   if (ver) ver.textContent = APP_VERSION;
   route(); // show home or the routed account page
   refreshDisplayRates(st); // fill missing historical pairs, then repaint once
+  try { syncInfoDots(); } catch (e) { /* hide decorative ⓘ where nothing overflows */ }
 }
 
 // Fire-and-forget: fetch historical FX pairs AND historical execution prices
@@ -7480,6 +7505,7 @@ function refreshDisplayRates(st) {
       try { renderHeroAlloc(s2); } catch (e) { /* ignore */ }
       syncTopbar(s2);
       route();
+      try { syncInfoDots(); } catch (e) { /* ignore */ }
     }, function () { /* offline: keep current paint */ });
   } catch (e) { /* ignore */ }
 }
@@ -7510,7 +7536,7 @@ function init() {
     var heroRt = null;
     window.addEventListener('resize', function () {
       if (heroRt) { try { clearTimeout(heroRt); } catch (e) { /* ignore */ } }
-      heroRt = setTimeout(function () { fitHeroValue(); syncHeroAllocHeight(); }, 150);
+      heroRt = setTimeout(function () { fitHeroValue(); syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* ignore */ } }, 150);
     });
     try {
       if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
@@ -7580,6 +7606,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.syncTradeButtons = syncTradeButtons;
   window.Inoculens.syncLockedSymbol = syncLockedSymbol;
   window.Inoculens.syncTradeTypeUI = syncTradeTypeUI;
+  window.Inoculens.syncInfoDots = syncInfoDots;
   window.Inoculens.transferFeeFrom = transferFeeFrom;
   window.Inoculens.syncTransferFeePreview = syncTransferFeePreview;
   window.Inoculens.route = route;

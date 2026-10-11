@@ -4029,7 +4029,8 @@
             { id: 'a1', name: 'Exchange', ticker: 'BTC', note: 'my hedge', createdAt: '2026-10-06T00:00:00.000Z' }
           ],
           trades: [
-            { id: 'a-xfer', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: 'a very long note that certainly overflows its row on any screen', accountId: 'a1', networkFee: 0.01, execLock: { price: 20732.79, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
+            { id: 'a-xfer', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: 'a very long note that certainly overflows its row on any screen', accountId: 'a1', networkFee: 0.01, execLock: { price: 20732.79, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a-buy', type: 'buy', symbol: 'BTC', qty: 0.5, total: 25000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: 'ok', accountId: 'a1', fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
           ],
           priceOverrides: {}
         });
@@ -4045,6 +4046,8 @@
         try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
         var noteLab = document.querySelector('[data-trade="a-xfer"] [data-label="Note"] .stat-label');
         assert(noteLab !== null && noteLab.querySelector('.info-dot') !== null, 'Note label must carry ⓘ');
+        var shortDot = document.querySelector('[data-trade="a-buy"] [data-label="Note"] .stat-label .info-dot');
+        assert(shortDot !== null && shortDot.style.display === 'none', 'fitting values must hide their ⓘ');
         var rateLab = document.querySelector('[data-trade="a-xfer"] [data-label="Fee in fiat rate"] .stat-label');
         assert(rateLab !== null && rateLab.querySelector('.info-dot') !== null, 'rate label must carry ⓘ');
         var metaLab = document.querySelector('#account-detail .detail-meta-label .info-dot, #account-detail .detail-meta-block .info-dot');

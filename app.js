@@ -3504,9 +3504,10 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   }
   if (hv) hv.title = hvTarget ? hvTarget.textContent : '';
   fitHeroValue();
-  // Invested amount: cost basis of current holdings (entry × held, already
-  // in the display fiat at each trade's locked official rate). Sits between
-  // value and pill on one small line; truncates, never resizes the box.
+  // Invested amount: lifetime gross in (every buy + valued income at its
+  // locked historical rate) — never reduced by sells, fees or transfers.
+  // Sits between value and pill on one small line; truncates, never resizes
+  // the box.
   var hi = document.getElementById('hero-invested');
   if (hi) {
     if (!rows.length) {
@@ -3514,11 +3515,16 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
       hi.hidden = true;
     } else {
       var inv = 0;
-      rows.forEach(function (p) {
-        var q = Number(p.qtyHeld);
-        var e = Number(p.avgEntry);
-        if (isFinite(q) && isFinite(e) && q > 0) inv += q * e;
-      });
+      try {
+        var dtrInv = dtradesOpt || convertTrades(st.trades, main);
+        dtrInv.forEach(function (t) {
+          if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
+          var q = Number(t.qty);
+          if (!isFinite(q) || q <= 0) return;
+          var nn = normalizeTrade(t);
+          if (isFinite(nn.netMain) && nn.netMain > 0) inv += nn.netMain;
+        });
+      } catch (e) { inv = 0; }
       hi.hidden = false;
       hi.textContent = 'INVESTED AMOUNT: ' + fmtMoney(inv, main);
     }

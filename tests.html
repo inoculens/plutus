@@ -1399,7 +1399,30 @@
         var hi = document.getElementById('hero-invested');
         assert(hi !== null, 'hero invested line missing');
         assert(hi.textContent.indexOf('INVESTED AMOUNT') !== -1, 'invested label missing: ' + hi.textContent);
-        assert(hi.textContent.indexOf('60') !== -1, 'spec fixture holds 1 BTC at 60k entry, got: ' + hi.textContent);
+        assert(hi.textContent.indexOf('120') !== -1, 'spec fixture bought 50k + 70k = 120k lifetime, got: ' + hi.textContent);
+        navHome();
+      });
+
+      test('invested tracks lifetime buys through fees, transfers and sells', function () {
+        var L = window.Inoculens;
+        var fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'iv-acct', name: 'Iv BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 'iv-a', type: 'buy', symbol: 'BTC', qty: 1, total: 100, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'iv-acct', fxLock: fx, createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'iv-b', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'iv-acct', networkFee: 0.01, fxLock: fx, createdAt: '2026-02-01T00:00:00.000Z' },
+            { id: 'iv-c', type: 'sell', symbol: 'BTC', qty: 0.49, total: 50, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'iv-acct', fxLock: fx, createdAt: '2026-03-01T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        init();
+        navHome();
+        render();
+        var hi2 = document.getElementById('hero-invested');
+        assert(hi2 !== null && hi2.textContent.indexOf('100') !== -1, 'invested must stay the lifetime 100 buy, got: ' + (hi2 && hi2.textContent));
         navHome();
       });
 

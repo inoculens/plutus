@@ -3778,6 +3778,55 @@
       });
     })();
 
+    // === Fee rate tap-to-retry tests ===
+    (function transferFeeRetryTests() {
+      var L = window.Inoculens || {};
+      function flush() { return new Promise(function (res) { setTimeout(res, 0); }); }
+      testAsync('tapping an unknown fee rate retries the lookup on demand', function () {
+        var origFetch = window.fetch;
+        var krakenOk = false;
+        window.fetch = function (url) {
+          var u = String(url);
+          if (u.indexOf('coingecko') !== -1) return Promise.resolve({ ok: false, status: 429 });
+          if (u.indexOf('kraken') !== -1 && krakenOk) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ error: [], result: { XXBTZEUR: [[1768435200, '38000.0', '38200.0', '37900.0', '38123.0', '38100.0', '123.4', 5678]], last: '1768435200' } }); } });
+          }
+          return Promise.resolve({ ok: false, status: 429 });
+        };
+        function restore() { window.fetch = origFetch; try { L.clearHistCache(); } catch (e) { /* ignore */ } }
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 't2', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-01-15', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', toAccountId: 'a2', networkFee: 0.01, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        try { L.clearHistCache(); } catch (e) { /* ignore */ }
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        return flush().then(flush).then(flush).then(function () {
+          var row = document.querySelector('[data-trade="t2"] [data-label="Fee Fiat Rate"]');
+          assert(row !== null, 'fee rate row must render');
+          assert(row.textContent.indexOf('—') !== -1, 'rate must start unknown, got ' + row.textContent);
+          krakenOk = true;
+          row.click();
+          return flush().then(flush).then(flush);
+        }).then(function () {
+          restore();
+          var hit = L.getHistCached('BTC', '2026-01-15', 'EUR', 'crypto');
+          assert(hit && hit.price === 38123, 'tap must fill the cache on demand, got ' + JSON.stringify(hit));
+          navHome();
+        }, function (e) { restore(); throw e; });
+      });
+    })();
+
     renderResults();
   </script>
 </body>

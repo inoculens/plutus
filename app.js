@@ -2451,6 +2451,50 @@ function getHistCached(symbol, date, vs, kind) {
   return null;
 }
 
+// Manual retry for one trade's historical quote (e.g. tapping an unknown
+// Fee Fiat Rate): clears any cooldown for that quote and fetches now,
+// bypassing the backoff that spaces out automatic attempts. Repaints on
+// success; a failed tap simply leaves the '—' in place.
+function retryFeeRate(tradeId) {
+  var st = null;
+  try { st = loadState(); } catch (e) { return; }
+  var tr = null;
+  (st.trades || []).forEach(function (t) { if (t && t.id === tradeId) tr = t; });
+  if (!tr) return;
+  var sym = String(tr.symbol || '').toUpperCase();
+  var day = (typeof tr.date === 'string') ? tr.date.slice(0, 10) : '';
+  var mainU = String((st.settings && st.settings.mainCurrency) || '').toUpperCase();
+  if (!sym || !isValidDateStr(day) || isFutureDateStr(day) || !mainU) return;
+  var kd = '';
+  try {
+    var a = accountById(st, tr.accountId);
+    if (a && typeof a.kind === 'string') kd = a.kind.trim().toLowerCase();
+  } catch (e) { kd = ''; }
+  if (kd === 'custom' || kd === 'cash') return;
+  if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
+  var kk = kd === 'stock' ? 'stock' : 'crypto';
+  var key = sym + '|' + day + '|' + mainU + '|' + kk;
+  try { delete histFailKeys[key]; } catch (e) { /* ignore */ }
+  if (histInflight[key]) return;
+  var hit = null;
+  try { hit = getHistCached(sym, day, mainU, kk); } catch (e) { hit = null; }
+  if (hit) { try { render(); } catch (e) { /* ignore */ } return; }
+  histInflight[key] = true;
+  fetchHistoricalPrice(sym, day, mainU, kd).then(function (r) {
+    delete histInflight[key];
+    var price = (r && typeof r === 'object') ? r.price : r;
+    if (isFinite(Number(price)) && Number(price) > 0) {
+      try {
+        setHistCached(sym, day, mainU, kk, Number(price),
+          (r && typeof r === 'object' && r.day) ? ('Stooq-' + r.day) : 'history',
+          (r && typeof r === 'object') ? !!r.interpolated : false);
+        saveHistCache();
+      } catch (e) { /* ignore */ }
+      try { render(); } catch (e) { /* ignore */ }
+    } else { histNoteFail(key); }
+  }, function () { delete histInflight[key]; histNoteFail(key); });
+}
+
 function setHistCached(symbol, date, vs, kind, price, source, interpolated) {
   if (!isFinite(Number(price)) || Number(price) <= 0) return;
   loadHistCache()[histCacheKey(symbol, date, vs, kind)] = {
@@ -2724,6 +2768,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.roundHalfUp2 = roundHalfUp2;
   window.Inoculens.frozenExecOf = frozenExecOf;
   window.Inoculens.freezeExecLock = freezeExecLock;
+  window.Inoculens.retryFeeRate = retryFeeRate;
   window.Inoculens.priceOverrideEntry = priceOverrideEntry;
   window.Inoculens.priceOverrideFor = priceOverrideFor;
   window.Inoculens.resolveExecPrice = resolveExecPrice;
@@ -4237,11 +4282,21 @@ function tradeBlock(t, main, accountNameById, kind) {
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
       box.appendChild(statRow('Network fee', feeTxtT, t.networkFee, false));
       // Fee Fiat Rate sits right after Network fee — it is the rate behind
-      // the (≈) above, frozen at the tx date.
+      // the (≈) above, frozen at the tx date. Unknown: tap retries the
+      // lookup on demand instead of waiting for the backoff.
       var feeRateTxt = (xferRate !== null)
         ? fmtMoney(xferRate.price, xferRate.ccy) + ' / ' + tSym
         : '—';
-      box.appendChild(rateRow('Fee Fiat Rate', feeRateTxt));
+      var feeRateEl = rateRow('Fee Fiat Rate', feeRateTxt);
+      if (xferRate === null) {
+        feeRateEl.title = 'Tap to retry the rate lookup';
+        (function (el, id) {
+          el.addEventListener('click', function () {
+            try { retryFeeRate(id); } catch (e) { /* ignore */ }
+          });
+        })(feeRateEl, t.id);
+      }
+      box.appendChild(feeRateEl);
     }
     box.appendChild(statRow('Received', fmtQty(netQ) + ' ' + tSym, netQ, false));
     if ((Number(t.total) > 0 || Number(t.fee) > 0)) {

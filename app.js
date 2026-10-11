@@ -3529,11 +3529,12 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
       hi.textContent = 'INVESTED AMOUNT: ' + fmtMoney(inv, main);
     }
   }
-  // Spent amount: lifetime gross fiat out — sell proceeds plus the cash legs
-  // of expense and transfer records, each at its locked historical rate.
-  // Never reduced by anything; appreciation can push it above invested, and
-  // value + spent − invested reconciles to total P&L. feeMain is never added:
-  // the all-in totals already include it.
+  // Spent amount: lifetime gross fiat out — sell proceeds, the cash legs of
+  // expense and transfer records, plus crypto fees and crypto expenses
+  // valued at the frozen tx-date rate (the same ≈ the cards show; 0 while
+  // the rate is unknown, never a guess). Each leg uses its locked
+  // historical rate. Never reduced by anything; appreciation can push it
+  // above invested. feeMain is never added: the all-in totals include it.
   var hs = document.getElementById('hero-spent');
   if (hs) {
     if (!rows.length) {
@@ -3543,6 +3544,12 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
       var spent = 0;
       try {
         var dtrSpent = dtradesOpt || convertTrades(st.trades, main);
+        var kindsSpent = {};
+        try {
+          (st.accounts || []).forEach(function (a) {
+            if (a && a.ticker) kindsSpent[String(a.ticker).toUpperCase()] = a.kind;
+          });
+        } catch (e) { kindsSpent = {}; }
         dtrSpent.forEach(function (t) {
           if (!t) return;
           var sn = normalizeTrade(t);
@@ -3550,6 +3557,18 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
             if (isFinite(sn.totalMain) && sn.totalMain > 0) spent += sn.totalMain;
           } else if (t.type === 'expense' || t.type === 'transfer') {
             if (isFinite(sn.netMain) && sn.netMain > 0) spent += sn.netMain;
+            var cq = (t.type === 'transfer')
+              ? ((t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee))
+              : ((t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? 0 : Number(t.qty));
+            if (isFinite(cq) && cq > 0) {
+              var sym = String(t.symbol || '').toUpperCase();
+              var kd = kindsSpent[sym];
+              var kr = null;
+              try { kr = resolveExecPrice(t, main, (typeof kd === 'string') ? kd : undefined); } catch (e) { kr = null; }
+              if (kr !== null && isFinite(Number(kr.price)) && Number(kr.price) > 0) {
+                spent += cq * Number(kr.price);
+              }
+            }
           }
         });
       } catch (e) { spent = 0; }

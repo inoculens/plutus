@@ -4140,11 +4140,12 @@ function startInlineLabelEdit(accId) {
   }
   if (!block || block.querySelector('[data-label-input]')) return;
   block.innerHTML = '';
-  var input = document.createElement('input');
+  var input = document.createElement('textarea');
   input.setAttribute('data-label-input', '1');
   input.value = acc.address || '';
   input.setAttribute('aria-label', 'Label for ' + acc.name);
   input.setAttribute('maxlength', '128');
+  input.setAttribute('rows', '3');
   input.setAttribute('placeholder', 'e.g. cold storage');
   input.setAttribute('autocomplete', 'off');
   var row = document.createElement('div');
@@ -4191,7 +4192,8 @@ function startInlineLabelEdit(accId) {
   cancelBtn.addEventListener('mousedown', function (e) { if (e && e.preventDefault) e.preventDefault(); });
   cancelBtn.addEventListener('click', cancelFn);
   input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') commit();
+    // Plain Enter inserts a newline (multi-line label); Ctrl/Cmd+Enter saves.
+    if ((e.key === 'Enter') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') cancelFn();
   });
   input.addEventListener('blur', commit);
@@ -7599,6 +7601,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.heldQtyFor = heldQtyFor;
   window.Inoculens.openPrefillTrade = openPrefillTrade;
   window.Inoculens.openEditTrade = openEditTrade;
+  window.Inoculens.startInlineLabelEdit = startInlineLabelEdit;
   window.Inoculens.openNoteDialog = openNoteDialog;
   window.Inoculens.openErrorDialog = openErrorDialog;
   window.Inoculens.applyColorToSelection = applyColorToSelection;

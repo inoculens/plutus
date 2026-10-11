@@ -4056,6 +4056,45 @@
       });
     })();
 
+    // === Header order + multiline label tests ===
+    (function headerLabelTests() {
+      var L = window.Inoculens || {};
+      test('sync icon sits directly left of settings', function () {
+        var sync = document.getElementById('tb-sync');
+        var set = document.getElementById('tb-settings');
+        assert(sync && set, 'header buttons missing');
+        assert(set.previousElementSibling === sync, 'sync must sit directly left of settings');
+      });
+      test('account label edits multiline text', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        L.startInlineLabelEdit('a1');
+        var area = document.querySelector('[data-label-input]');
+        assert(area && area.tagName.toLowerCase() === 'textarea', 'label editor must be multiline');
+        area.value = 'line one\nline two';
+        area.dispatchEvent(new Event('change', { bubbles: true }));
+        var saveBtn = document.querySelector('.label-edit-row .primary');
+        assert(saveBtn, 'label editor needs Save');
+        saveBtn.click();
+        var st = L.loadState();
+        var acc = L.accountById(st, 'a1');
+        assert(acc && acc.address === 'line one\nline two', 'multiline label must persist, got ' + JSON.stringify(acc && acc.address));
+        var lab = document.querySelector('#account-detail [data-label="Label"]');
+        assert(lab !== null, 'saved label must render on the detail page');
+        navHome();
+      });
+    })();
+
     renderResults();
   </script>
 </body>

@@ -1221,12 +1221,42 @@
         var trades = [{ id: 'fb-a', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-15', fee: 0, feeCurrency: 'EUR' }];
         return H.ensureHistoricalExec(trades, 'EUR').then(function (first) {
           assert(first === false, 'failed fill reports no change');
-          assert(calls === 3, 'first pass should try all sources, got ' + calls);
+          assert(calls === 4, 'first pass should try all sources, got ' + calls);
           return H.ensureHistoricalExec(trades, 'EUR');
         }).then(function (second) {
           restore();
           assert(second === false, 'second pass reports no change');
-          assert(calls === 3, 'failed key must cool down, not refetch every render, got ' + calls + ' calls');
+          assert(calls === 4, 'failed key must cool down, not refetch every render, got ' + calls + ' calls');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('coinbase fallback serves when the first three sources miss', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        try { H.clearHistCache(); } catch (e) { /* ignore */ }
+        var urls = [];
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('coingecko') !== -1) {
+            return Promise.resolve({ ok: false, status: 401 });
+          }
+          if (String(url).indexOf('kraken') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ error: [], result: {} }); } });
+          }
+          if (String(url).indexOf('stooq.com') !== -1) {
+            return Promise.resolve({ ok: false, status: 403 });
+          }
+          if (String(url).indexOf('coinbase') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve([[1651363200, 37900, 38200, 38000, 38123, 123.4]]); } });
+          }
+          return Promise.reject(new Error('unexpected ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return H.fetchHistoricalPrice('BTC', '2022-05-01', 'USD').then(function (p) {
+          restore();
+          assert(p === 38123, 'coinbase daily close wrong: ' + p);
+          assert(urls.some(function (u) { return u.indexOf('coinbase') !== -1 && u.indexOf('BTC-USD') !== -1 && u.indexOf('granularity=86400') !== -1; }), 'must hit coinbase daily candles, got ' + urls.join(' | '));
+          try { H.clearHistCache(); } catch (e) { /* ignore */ }
         }, function (e) { restore(); throw e; });
       });
 
@@ -3885,6 +3915,7 @@
           assert(row && String(row.title).indexOf('CoinGecko HTTP 429') !== -1, 'tooltip must name the coingecko failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Kraken HTTP 429') !== -1, 'tooltip must name the kraken failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Stooq HTTP 429') !== -1, 'tooltip must name the stooq failure, got ' + JSON.stringify(row && row.title));
+          assert(row && String(row.title).indexOf('Coinbase HTTP 429') !== -1, 'tooltip must name the coinbase failure, got ' + JSON.stringify(row && row.title));
           var noteTxt = document.getElementById('note-dialog-text');
           assert(noteTxt && noteTxt.textContent.indexOf('CoinGecko HTTP 429') !== -1, 'failed tap must pop the cause visibly, got ' + JSON.stringify(noteTxt && noteTxt.textContent));
           try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }

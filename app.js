@@ -2593,7 +2593,10 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   function deepFallback() {
     return krakenFallback().then(function (kp) {
       if (isFinite(kp) && kp > 0) { histDiagClear(sym, dateStr.slice(0, 10), cur); return kp; }
-      return fetchStooqCryptoHistory(sym, dateStr, cur);
+      return fetchStooqCryptoHistory(sym, dateStr, cur).then(function (sp) {
+        if (isFinite(sp) && sp > 0) return sp;
+        return fetchCoinbaseHistory(sym, dateStr, cur);
+      });
     });
   }
   var day10 = dateStr.slice(0, 10);
@@ -2721,6 +2724,58 @@ function fetchStooqCryptoHistory(sym, dateStr, vs) {
     var msg = String((e && e.message) || e);
     if (msg.indexOf('stooq-http-') === 0) histDiagNote(s, day, c, 'Stooq HTTP ' + msg.slice(11));
     else histDiagNote(s, day, c, 'Stooq unreachable');
+    return null;
+  });
+}
+
+// Fourth source for crypto history, reached only when the first three all
+// miss (e.g. a browser that blocks stooq.com): Coinbase Exchange public
+// candles, daily granularity (no key, CORS-enabled). Majors with USD/EUR/GBP
+// books; other fiats via USD + historical ECB.
+var COINBASE_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
+function fetchCoinbaseHistory(sym, dateStr, vs) {
+  var s = String(sym || '').trim().toUpperCase();
+  var c = String(vs || '').trim().toUpperCase();
+  var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
+  if (COINBASE_SYMBOLS.indexOf(s) === -1 || !isValidDateStr(day) || isFutureDateStr(day)) {
+    if (COINBASE_SYMBOLS.indexOf(s) === -1) histDiagNote(s, day, c, 'Coinbase: asset not covered');
+    return Promise.resolve(null);
+  }
+  var fiat = (c === 'EUR' || c === 'GBP') ? c : 'USD';
+  var start = Math.floor(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) / 1000);
+  if (!isFinite(start) || start <= 0) return Promise.resolve(null);
+  var url = 'https://api.exchange.coinbase.com/products/' + encodeURIComponent(s + '-' + fiat) +
+    '/candles?start=' + encodeURIComponent(day + 'T00:00:00Z') +
+    '&end=' + encodeURIComponent(day + 'T23:59:59Z') + '&granularity=86400';
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  if (!capturedFetch) return Promise.resolve(null);
+  return capturedFetch(url).then(function (res) {
+    if (!res.ok) throw new Error('coinbase-http-' + res.status);
+    return res.json();
+  }).then(function (data) {
+    // Candle: [time, low, high, open, close, volume].
+    var candles = Array.isArray(data) ? data : null;
+    if (!candles) return null;
+    for (var k = 0; k < candles.length; k++) {
+      var cd = candles[k];
+      if (!cd || !isFinite(Number(cd[0])) || !isFinite(Number(cd[4]))) continue;
+      var tt = Number(cd[0]);
+      if (tt >= start && tt < start + 86400 && Number(cd[4]) > 0) {
+        var close = Number(cd[4]);
+        if (fiat === c) { histDiagClear(s, day, c); return close; }
+        return fetchEcbRate(day, 'USD', c).then(function (r) {
+          var v = close * Number(r.rate);
+          if (isFinite(v) && v > 0) { histDiagClear(s, day, c); return v; }
+          return null;
+        }, function () { return null; });
+      }
+    }
+    histDiagNote(s, day, c, 'Coinbase: no candle for date');
+    return null;
+  }).then(null, function (e) {
+    var msg = String((e && e.message) || e);
+    if (msg.indexOf('coinbase-http-') === 0) histDiagNote(s, day, c, 'Coinbase HTTP ' + msg.slice(14));
+    else histDiagNote(s, day, c, 'Coinbase unreachable');
     return null;
   });
 }

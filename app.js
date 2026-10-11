@@ -2717,7 +2717,6 @@ function fetchStooqCryptoHistory(sym, dateStr, vs) {
     return null;
   });
 }
-}
 
 function fetchHistoricalStockPrice(symbol, dateStr, vs) {
   var sym = String(symbol || '').trim().toUpperCase();

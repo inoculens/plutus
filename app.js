@@ -2600,6 +2600,7 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
     });
   }
   var day10 = dateStr.slice(0, 10);
+  function coingeckoAndBeyond() {
   return capturedFetch(url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
@@ -2628,9 +2629,16 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
     else histDiagNote(sym, day10, cur, 'CoinGecko unreachable');
     return deepFallback();
   });
+  }
+  // Most reliable source first: Coinbase public candles (no key, generous
+  // limits, deep history, CORS-open). The rest of the chain follows on a miss.
+  return fetchCoinbaseHistory(sym, dateStr, cur).then(function (cb) {
+    if (isFinite(cb) && cb > 0) return cb;
+    return coingeckoAndBeyond();
+  });
 }
 
-// Second source for crypto history when CoinGecko fails or omits the fiat:
+// Third source for crypto history when the first two fail or omit the fiat:
 // Kraken public OHLC, daily close (no key, CORS-enabled). Majors only;
 // USD/EUR direct, other fiats via the USD pivot + historical ECB.
 var KRAKEN_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
@@ -2728,9 +2736,9 @@ function fetchStooqCryptoHistory(sym, dateStr, vs) {
   });
 }
 
-// Fourth source for crypto history, reached only when the first three all
-// miss (e.g. a browser that blocks stooq.com): Coinbase Exchange public
-// candles, daily granularity (no key, CORS-enabled). Majors with USD/EUR/GBP
+// Coinbase Exchange public candles, daily granularity (no key, CORS-enabled).
+// Primary history source (tried first): majors with USD/EUR/GBP books;
+// other fiats via USD + historical ECB. Majors with USD/EUR/GBP
 // books; other fiats via USD + historical ECB.
 var COINBASE_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
 function fetchCoinbaseHistory(sym, dateStr, vs) {

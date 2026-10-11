@@ -2261,11 +2261,60 @@ function saveHistCache() {
   } catch (e) { /* private mode / quota: memory cache still works */ }
 }
 
-// Keys that failed this session (network/429/dead source): skipped by later
-// ensureHistoricalExec passes so one outage doesn't hammer the price APIs on
-// every render (which also starves the live-price quota). Cleared with the
-// cache; a fiat switch still retries (different key).
-var histFailKeys = {};
+// Keys that failed recently (network/429/dead source): later passes skip
+// them until a short cooldown lapses, so one outage doesn't hammer the price
+// APIs on every render (which also starves the live-price quota) — but unlike
+// a session pin, a later render or a timed retry still heals the row.
+var histFailKeys = {}; // key -> {fails, at}
+var HIST_FAIL_MAX = 5;
+function histCooldownMs(fails) {
+  return Math.min(60000 * Math.pow(2, Math.max(0, (fails || 1) - 1)), 300000);
+}
+function histBlocked(key) {
+  var f = histFailKeys[key];
+  if (!f) return false;
+  if ((f.fails || 0) >= HIST_FAIL_MAX) return true;
+  return (Date.now() - (f.at || 0)) < histCooldownMs(f.fails);
+}
+function histNoteFail(key) {
+  var f = histFailKeys[key] || { fails: 0, at: 0 };
+  f.fails = (f.fails || 0) + 1;
+  f.at = Date.now();
+  histFailKeys[key] = f;
+  histRetryLater(key);
+}
+// Timed retry so an open page heals without waiting for the next render.
+// Bounded by HIST_FAIL_MAX; each attempt re-caches and repaints on success.
+function histRetryLater(key) {
+  var f = histFailKeys[key];
+  if (!f || (f.fails || 0) >= HIST_FAIL_MAX) return;
+  var delay = histCooldownMs(f.fails);
+  setTimeout(function () {
+    try {
+      var parts = String(key).split('|');
+      if (parts.length !== 4) return;
+      if (histInflight[key] || histBlocked(key)) return;
+      var hit = null;
+      try { hit = getHistCached(parts[0], parts[1], parts[2], parts[3]); } catch (e) { hit = null; }
+      if (hit) { try { delete histFailKeys[key]; } catch (e) { /* ignore */ } return; }
+      histInflight[key] = true;
+      fetchHistoricalPrice(parts[0], parts[1], parts[2], parts[3] === 'stock' ? 'stock' : undefined).then(function (r) {
+        delete histInflight[key];
+        var price = (r && typeof r === 'object') ? r.price : r;
+        if (isFinite(Number(price)) && Number(price) > 0) {
+          try {
+            setHistCached(parts[0], parts[1], parts[2], parts[3], Number(price),
+              (r && typeof r === 'object' && r.day) ? ('Stooq-' + r.day) : 'history',
+              (r && typeof r === 'object') ? !!r.interpolated : false);
+            saveHistCache();
+          } catch (e) { /* ignore */ }
+          try { delete histFailKeys[key]; } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        } else { histNoteFail(key); }
+      }, function () { delete histInflight[key]; histNoteFail(key); });
+    } catch (e) { /* ignore */ }
+  }, delay);
+}
 
 // History fetches currently in flight, by the same key: shared by
 // freezeExecLock + ensureHistoricalExec so a save and its first repaint never
@@ -2450,6 +2499,7 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
     '/history?date=' + encodeURIComponent(gd);
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) return Promise.resolve(null);
+  function krakenFallback() { return fetchKrakenHistory(sym, dateStr, cur); }
   return capturedFetch(url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
@@ -2460,11 +2510,64 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
     // Bridge unsupported vs via the USD pivot + HISTORICAL ECB USD->main.
     if (curLow !== 'usd') {
       var pu = cp ? Number(cp.usd) : NaN;
-      if (!isFinite(pu) || pu <= 0) return null;
-      return fetchEcbRate(dateStr.slice(0, 10), 'USD', cur).then(function (r) {
-        var v = pu * Number(r.rate);
-        return (isFinite(v) && v > 0) ? v : null;
-      }, function () { return null; });
+      if (isFinite(pu) && pu > 0) {
+        return fetchEcbRate(dateStr.slice(0, 10), 'USD', cur).then(function (r) {
+          var v = pu * Number(r.rate);
+          return (isFinite(v) && v > 0) ? v : null;
+        }, function () { return null; });
+      }
+    }
+    return null;
+  }).then(function (p) {
+    if (isFinite(p) && p > 0) return p;
+    return krakenFallback();
+  }, function () { return krakenFallback(); });
+}
+
+// Second source for crypto history when CoinGecko fails or omits the fiat:
+// Kraken public OHLC, daily close (no key, CORS-enabled). Majors only;
+// USD/EUR direct, other fiats via the USD pivot + historical ECB.
+var KRAKEN_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
+function fetchKrakenHistory(sym, dateStr, vs) {
+  var s = String(sym || '').trim().toUpperCase();
+  var c = String(vs || '').trim().toUpperCase();
+  var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
+  if (KRAKEN_SYMBOLS.indexOf(s) === -1 || !isValidDateStr(day) || isFutureDateStr(day)) return Promise.resolve(null);
+  var fiat = (c === 'EUR') ? 'EUR' : 'USD';
+  var start = Math.floor(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) / 1000);
+  if (!isFinite(start) || start <= 0) return Promise.resolve(null);
+  var url = 'https://api.kraken.com/0/public/OHLC?pair=' + encodeURIComponent(s + fiat) +
+    '&interval=1440&since=' + Math.max(0, start - 172800);
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  if (!capturedFetch) return Promise.resolve(null);
+  return capturedFetch(url).then(function (res) {
+    if (!res.ok) throw new Error('kraken-http-' + res.status);
+    return res.json();
+  }).then(function (data) {
+    var err = data && data.error;
+    if (err && err.length) throw new Error('kraken-' + err.join(','));
+    var result = data && data.result;
+    var candles = null;
+    if (result && typeof result === 'object') {
+      var keys = Object.keys(result);
+      for (var i = 0; i < keys.length; i++) {
+        if (keys[i] === 'last') continue;
+        if (Array.isArray(result[keys[i]])) { candles = result[keys[i]]; break; }
+      }
+    }
+    if (!candles) return null;
+    for (var k = 0; k < candles.length; k++) {
+      var cd = candles[k];
+      if (!cd || !isFinite(Number(cd[0])) || !isFinite(Number(cd[4]))) continue;
+      var tt = Number(cd[0]);
+      if (tt >= start && tt < start + 86400 && Number(cd[4]) > 0) {
+        var close = Number(cd[4]);
+        if (fiat === c) return close;
+        return fetchEcbRate(day, 'USD', c).then(function (r) {
+          var v = close * Number(r.rate);
+          return (isFinite(v) && v > 0) ? v : null;
+        }, function () { return null; });
+      }
     }
     return null;
   }).then(null, function () { return null; });
@@ -2576,7 +2679,7 @@ function ensureHistoricalExec(trades, main, kinds) {
     try { if (priceOverrideFor(sym) !== null) return; } catch (e) { /* fall through */ }
     if (frozenExecOf(t)) return; // frozen quote on the trade: no network needed
     if (getHistCached(sym, day, m, kk)) return;
-    if (histFailKeys[key]) return; // failed already this session: don't hammer
+    if (histBlocked(key)) return; // failed recently: retry after cooldown, not every render
     if (histInflight[key]) return; // already fetching (e.g. save just froze it)
     histInflight[key] = true;
     jobs.push(fetchHistoricalPrice(sym, day, m, kd).then(function (r) {
@@ -2588,9 +2691,9 @@ function ensureHistoricalExec(trades, main, kinds) {
         setHistCached(sym, day, m, kk, Number(price), src, interp);
         return true;
       }
-      histFailKeys[key] = true;
+      histNoteFail(key);
       return false;
-    }, function () { delete histInflight[key]; histFailKeys[key] = true; return false; }));
+    }, function () { delete histInflight[key]; histNoteFail(key); return false; }));
   });
   if (!jobs.length) return Promise.resolve(false);
   return Promise.all(jobs).then(function (flags) {

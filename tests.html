@@ -1221,12 +1221,36 @@
         var trades = [{ id: 'fb-a', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-15', fee: 0, feeCurrency: 'EUR' }];
         return H.ensureHistoricalExec(trades, 'EUR').then(function (first) {
           assert(first === false, 'failed fill reports no change');
-          assert(calls === 1, 'first pass should attempt once, got ' + calls);
+          assert(calls === 2, 'first pass should try primary + fallback, got ' + calls);
           return H.ensureHistoricalExec(trades, 'EUR');
         }).then(function (second) {
           restore();
           assert(second === false, 'second pass reports no change');
-          assert(calls === 1, 'failed key must not refetch this session, got ' + calls + ' calls');
+          assert(calls === 2, 'failed key must cool down, not refetch every render, got ' + calls + ' calls');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('kraken fallback serves the daily close when coingecko fails', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        try { H.clearHistCache(); } catch (e) { /* ignore */ }
+        var urls = [];
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('coingecko') !== -1) {
+            return Promise.resolve({ ok: false, status: 429 });
+          }
+          if (String(url).indexOf('kraken') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ error: [], result: { XXBTZEUR: [[1768435200, '38000.0', '38200.0', '37900.0', '38123.0', '38100.0', '123.4', 5678]], last: '1768435200' } }); } });
+          }
+          return Promise.reject(new Error('unexpected ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return H.fetchHistoricalPrice('BTC', '2026-01-15', 'EUR').then(function (p) {
+          restore();
+          assert(p === 38123, 'kraken daily close wrong: ' + p);
+          assert(urls.some(function (u) { return u.indexOf('kraken') !== -1 && u.indexOf('pair=BTCEUR') !== -1 && u.indexOf('interval=1440') !== -1; }), 'must hit kraken OHLC daily, got ' + urls.join(' | '));
+          try { H.clearHistCache(); } catch (e) { /* ignore */ }
         }, function (e) { restore(); throw e; });
       });
 

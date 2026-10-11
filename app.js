@@ -4868,7 +4868,7 @@ function renderAccountDetail(st, id) {
   host.appendChild(stats);
   if (Math.abs(feesSum) > 1e-9) {
     var feesLine = document.createElement('p');
-    feesLine.className = 'muted fees-line';
+    feesLine.className = 'fees-line';
     feesLine.setAttribute('data-label', 'Total fees paid');
     feesLine.setAttribute('data-value', String(feesSum));
     feesLine.textContent = 'Total fees paid: ' + fmtMoney(feesSum, main);

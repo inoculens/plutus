@@ -1867,6 +1867,9 @@
             var feesLine = det2.querySelector('[data-label="Total fees paid"]');
             assert(feesLine !== null, 'fees must render as a line below the 8-card grid');
             assert(feesLine.getAttribute('data-value') === '1', 'fees line value wrong: ' + feesLine.getAttribute('data-value'));
+            var feesStyle = getComputedStyle(feesLine);
+            assert(feesStyle.borderColor.indexOf('251, 146, 60') !== -1, 'fees must wear the orange pill, got ' + feesStyle.borderColor);
+            assert(feesStyle.borderRadius !== '0px', 'fees must be pill-shaped, got ' + feesStyle.borderRadius);
             assert(det2.querySelector('.card[data-label="Fees paid"]') === null, 'fees must not be a 9th grid card');
             navHome();
           } finally {

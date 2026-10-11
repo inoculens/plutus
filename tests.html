@@ -4098,6 +4098,7 @@
         assert(labVal !== null && labVal.classList.contains('detail-meta-multiline'), 'label must render wrapped multiline');
         assert(labVal.textContent.indexOf('line one') !== -1 && labVal.textContent.indexOf('line two') !== -1, 'wrapped label must show every line');
         assert(lab !== null && lab.classList.contains('detail-meta-stacked'), 'label row must stack caption above text');
+        assert(lab.querySelector('.info-dot') === null, 'fully visible label must not carry ⓘ');
         navHome();
       });
     })();

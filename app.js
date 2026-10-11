@@ -4708,7 +4708,8 @@ function detailMetaRow(label, text, title) {
   v.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
   });
-  infoDot(l, open, v);
+  // Wrapped rows (multi-line labels) show everything: no hidden info, no dot.
+  if (!v.classList.contains('detail-meta-multiline')) infoDot(l, open, v);
   d.appendChild(l);
   d.appendChild(v);
   return d;

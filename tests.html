@@ -1221,12 +1221,39 @@
         var trades = [{ id: 'fb-a', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-15', fee: 0, feeCurrency: 'EUR' }];
         return H.ensureHistoricalExec(trades, 'EUR').then(function (first) {
           assert(first === false, 'failed fill reports no change');
-          assert(calls === 2, 'first pass should try primary + fallback, got ' + calls);
+          assert(calls === 3, 'first pass should try all sources, got ' + calls);
           return H.ensureHistoricalExec(trades, 'EUR');
         }).then(function (second) {
           restore();
           assert(second === false, 'second pass reports no change');
-          assert(calls === 2, 'failed key must cool down, not refetch every render, got ' + calls + ' calls');
+          assert(calls === 3, 'failed key must cool down, not refetch every render, got ' + calls + ' calls');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('stooq fallback covers dates beyond coingecko and kraken', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        try { H.clearHistCache(); } catch (e) { /* ignore */ }
+        var urls = [];
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('coingecko') !== -1) {
+            return Promise.resolve({ ok: false, status: 401 });
+          }
+          if (String(url).indexOf('kraken') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ error: [], result: {} }); } });
+          }
+          if (String(url).indexOf('stooq.com') !== -1) {
+            return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Date,Open,High,Low,Close,Volume\n2022-05-01,38000,38200,37900,38123,123.4'); } });
+          }
+          return Promise.reject(new Error('unexpected ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return H.fetchHistoricalPrice('BTC', '2022-05-01', 'USD').then(function (p) {
+          restore();
+          assert(p === 38123, 'stooq daily close wrong: ' + p);
+          assert(urls.some(function (u) { return u.indexOf('stooq.com') !== -1 && u.indexOf('s=btcusd') !== -1; }), 'must hit stooq BTC, got ' + urls.join(' | '));
+          try { H.clearHistCache(); } catch (e) { /* ignore */ }
         }, function (e) { restore(); throw e; });
       });
 
@@ -3858,6 +3885,7 @@
           restore();
           assert(row && String(row.title).indexOf('CoinGecko HTTP 429') !== -1, 'tooltip must name the coingecko failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Kraken HTTP 429') !== -1, 'tooltip must name the kraken failure, got ' + JSON.stringify(row && row.title));
+          assert(row && String(row.title).indexOf('Stooq HTTP 429') !== -1, 'tooltip must name the stooq failure, got ' + JSON.stringify(row && row.title));
           navHome();
         }, function (e) { restore(); throw e; });
       });

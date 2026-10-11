@@ -2583,6 +2583,12 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) return Promise.resolve(null);
   function krakenFallback() { return fetchKrakenHistory(sym, dateStr, cur); }
+  function deepFallback() {
+    return krakenFallback().then(function (kp) {
+      if (isFinite(kp) && kp > 0) return kp;
+      return fetchStooqCryptoHistory(sym, dateStr, cur);
+    });
+  }
   var day10 = dateStr.slice(0, 10);
   return capturedFetch(url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
@@ -2605,12 +2611,12 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
     return null;
   }).then(function (p) {
     if (isFinite(p) && p > 0) return p;
-    return krakenFallback();
+    return deepFallback();
   }, function (e) {
     var msg = String((e && e.message) || e);
     if (msg.indexOf('price-http-') === 0) histDiagNote(sym, day10, cur, 'CoinGecko HTTP ' + msg.slice(11));
     else histDiagNote(sym, day10, cur, 'CoinGecko unreachable');
-    return krakenFallback();
+    return deepFallback();
   });
 }
 
@@ -2671,6 +2677,46 @@ function fetchKrakenHistory(sym, dateStr, vs) {
     else histDiagNote(s, day, c, 'Kraken unreachable');
     return null;
   });
+}
+
+// Deep-history fallback for dates the other sources can't reach (CoinGecko
+// free stops at 365 days, Kraken daily keeps ~720 candles): Stooq daily
+// close, BTC/ETH only, always via USD + historical ECB. Same host and
+// parser the stock path already uses.
+var STOOQ_CRYPTO = { BTC: 'btcusd', ETH: 'ethusd' };
+function fetchStooqCryptoHistory(sym, dateStr, vs) {
+  var s = String(sym || '').trim().toUpperCase();
+  var c = String(vs || '').trim().toUpperCase();
+  var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
+  var sq = STOOQ_CRYPTO[s];
+  if (!sq || !isValidDateStr(day) || isFutureDateStr(day)) {
+    if (!sq) histDiagNote(s, day, c, 'Stooq: asset not covered');
+    return Promise.resolve(null);
+  }
+  var compact = toStooqDay(day);
+  var url = 'https://stooq.com/q/d/l/?s=' + encodeURIComponent(sq) +
+    '&d1=' + encodeURIComponent(compact) + '&d2=' + encodeURIComponent(compact) + '&i=d';
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  if (!capturedFetch) return Promise.resolve(null);
+  return capturedFetch(url).then(function (res) {
+    if (!res.ok) throw new Error('stooq-http-' + res.status);
+    return res.text();
+  }).then(function (csv) {
+    var usd = parseStooqDaily(csv, compact);
+    if (!isFinite(usd) || usd <= 0) { histDiagNote(s, day, c, 'Stooq: no quote for date'); return null; }
+    if (c === 'USD') { histDiagClear(s, day, c); return usd; }
+    return fetchEcbRate(day, 'USD', c).then(function (r) {
+      var v = usd * Number(r.rate);
+      if (isFinite(v) && v > 0) { histDiagClear(s, day, c); return v; }
+      return null;
+    }, function () { return null; });
+  }).then(null, function (e) {
+    var msg = String((e && e.message) || e);
+    if (msg.indexOf('stooq-http-') === 0) histDiagNote(s, day, c, 'Stooq HTTP ' + msg.slice(11));
+    else histDiagNote(s, day, c, 'Stooq unreachable');
+    return null;
+  });
+}
 }
 
 function fetchHistoricalStockPrice(symbol, dateStr, vs) {

@@ -204,6 +204,26 @@ function numGte0(v, allowEmpty) {
   return n;
 }
 
+// Optional on-chain transaction hash, stored on the trade and linked to
+// mempool.space in the record view. Blank/missing means absent (valid);
+// when present it must look like a real hash: optional 0x prefix, then
+// 8–128 alphanumerics (covers 64-hex BTC, 0x EVM and base58-style ids).
+function isValidTxid(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return true;
+  if (typeof v !== 'string' && typeof v !== 'number') return false;
+  return /^(0x)?[A-Za-z0-9]{8,128}$/.test(String(v).trim());
+}
+
+function txExplorerUrl(txid) {
+  return 'https://mempool.space/tx/' + encodeURIComponent(String(txid).trim());
+}
+
+function shortTxid(txid) {
+  var s = String(txid).trim();
+  if (s.length <= 20) return s;
+  return s.slice(0, 8) + '…' + s.slice(-6);
+}
+
 function isValidImportTrade(t, accountIds) {
   if (!t || typeof t !== 'object' || Array.isArray(t)) return false;
   if (TRADE_TYPES.indexOf(t.type) === -1) return false;
@@ -216,6 +236,8 @@ function isValidImportTrade(t, accountIds) {
   if (t.feeCurrency !== undefined && t.feeCurrency !== null && String(t.feeCurrency).trim() !== '') {
     if (!isValidCurrencyCode(t.feeCurrency)) return false;
   }
+  // txid is optional metadata; when present it must look like a tx hash
+  if (!isValidTxid(t.txid)) return false;
   // networkFee: on-chain fee denominated in the transferred asset itself
   if (t.networkFee !== undefined && t.networkFee !== null && String(t.networkFee).trim() !== '') {
     if (typeof t.networkFee !== 'number' && typeof t.networkFee !== 'string') return false;
@@ -329,6 +351,7 @@ function normalizeTradeForStore(t) {
   if (typeof c.symbol === 'string') c.symbol = c.symbol.trim().toUpperCase();
   if (typeof c.currency === 'string' && c.currency.trim() !== '') c.currency = c.currency.trim().toUpperCase();
   if (typeof c.feeCurrency === 'string' && c.feeCurrency.trim() !== '') c.feeCurrency = c.feeCurrency.trim().toUpperCase();
+  if (typeof c.txid === 'string' && c.txid.trim() !== '') c.txid = c.txid.trim();
   return c;
 }
 
@@ -1642,6 +1665,7 @@ function validateTrade(t, heldQty) {
   if (t.feeCurrency !== undefined && t.feeCurrency !== null && String(t.feeCurrency).trim() !== '') {
     if (!isValidCurrencyCode(t.feeCurrency)) return 'fee currency invalid';
   }
+  if (!isValidTxid(t.txid)) return 'transaction ID looks invalid — paste the full tx hash';
   if (t.currency !== undefined && t.currency !== null && String(t.currency).trim() !== '') {
     if (!isValidCurrencyCode(t.currency)) return 'currency invalid';
   }
@@ -4154,6 +4178,27 @@ function tradeBlock(t, main, accountNameById, kind) {
     }
     box.appendChild(noteRow);
   }
+  if (t.txid && isValidTxid(t.txid)) {
+    var txFull = String(t.txid).trim();
+    var txRow = document.createElement('div');
+    txRow.className = 'stat-row';
+    txRow.setAttribute('data-label', 'Tx');
+    var txL = document.createElement('span');
+    txL.className = 'stat-label';
+    txL.textContent = 'Tx';
+    var txV = document.createElement('span');
+    txV.className = 'stat-val num';
+    var txA = document.createElement('a');
+    txA.href = txExplorerUrl(txFull);
+    txA.target = '_blank';
+    txA.rel = 'noopener';
+    txA.textContent = shortTxid(txFull);
+    txA.title = txFull;
+    txV.appendChild(txA);
+    txRow.appendChild(txL);
+    txRow.appendChild(txV);
+    box.appendChild(txRow);
+  }
   if (t.type === 'buy' || t.type === 'sell') {
     box.appendChild(statRow('Amount', fmtQty(t.qty) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
   }
@@ -5165,6 +5210,9 @@ function buildTradeForm() {
     '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p>' +
     '<label for="t-note">Note</label>' +
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
+    '<label for="t-txid">Transaction ID</label>' +
+    '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash">' +
+    '<p class="fld-hint">Optional — saved with the record and linked to mempool.space.</p>' +
     '<label for="t-manual-rate">Manual FX rate (fallback when ECB is unavailable)</label>' +
     '<input id="t-manual-rate" inputmode="decimal" placeholder="e.g. 0.92">' +
     '<label for="t-manual-price">Manual exec price (this trade only, in trade fiat)</label>' +
@@ -5373,6 +5421,7 @@ function resetTradeForm() {
   if (clab) clab.hidden = true;
   uiSetVal('t-fee', '');
   uiSetVal('t-note', '');
+  uiSetVal('t-txid', '');
   uiSetVal('t-networkfee', '');
   uiSetVal('t-manual-rate', '');
   uiSetVal('t-manual-price', '');
@@ -5472,6 +5521,7 @@ function openEditTrade(tradeId) {
   uiSetVal('t-date', tr.date || todayStr());
   uiSetVal('t-fee', tr.fee !== undefined && tr.fee !== null ? String(tr.fee) : '');
   uiSetVal('t-note', tr.note || '');
+  uiSetVal('t-txid', tr.txid !== undefined && tr.txid !== null ? String(tr.txid) : '');
   uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
   if (tr.type === 'transfer') {
     var trQty = Number(tr.qty);
@@ -5565,6 +5615,8 @@ function onTradeSubmit(ev) {
   if (!isValidDateStr(date)) { tradeFormError('Date must be YYYY-MM-DD.'); return; }
   if (isFutureDateStr(date)) { tradeFormError('date cannot be in the future'); return; }
   var note = uiVal('t-note', '').trim();
+  var txid = uiVal('t-txid', '').trim();
+  if (txid !== '' && !isValidTxid(txid)) { tradeFormError('Transaction ID looks invalid — paste the full tx hash.'); return; }
   var manualRateRaw = uiVal('t-manual-rate', '').trim();
   var manualPriceRaw = uiVal('t-manual-price', '').trim();
   var manualRate = (manualRateRaw === '') ? null : Number(manualRateRaw);
@@ -5616,7 +5668,7 @@ function onTradeSubmit(ev) {
       // Freeze reference exec quotes in the background (saving never waits).
       try { freezeExecLock(sellLeg.id, fromSym, date, String(main).toUpperCase(), (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }
       try { freezeExecLock(buyLeg.id, toSym, date, String(main).toUpperCase(), (toAccSwap && toAccSwap.kind) || undefined); } catch (e) { /* ignore */ }
-      uiSetVal('t-qty', ''); uiSetVal('t-toqty', ''); uiSetVal('t-total', ''); uiSetVal('t-note', ''); uiSetVal('t-manual-rate', ''); uiSetVal('t-manual-price', '');
+      uiSetVal('t-qty', ''); uiSetVal('t-toqty', ''); uiSetVal('t-total', ''); uiSetVal('t-note', ''); uiSetVal('t-txid', ''); uiSetVal('t-manual-rate', ''); uiSetVal('t-manual-price', '');
       var dd = document.getElementById('t-date'); if (dd) dd.value = todayStr();
       tradeFormError(null);
       lockSubmit(false, 'Add record');
@@ -5789,6 +5841,7 @@ function onTradeSubmit(ev) {
         accountId: accountId,
         createdAt: prev.createdAt || new Date().toISOString()
       };
+      if (txid !== '') trade.txid = txid;
       withFeeLock(trade);
       // Reference exec quote: manual wins; else keep the frozen quote when the
       // identifying fields are untouched; otherwise refreeze after save.
@@ -5860,6 +5913,7 @@ function onTradeSubmit(ev) {
       accountId: accountId,
       createdAt: new Date().toISOString()
     };
+    if (txid !== '') trade.txid = txid;
     withFeeLock(trade);
     if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
     if (side === 'expense' && qty === null) { delete trade.qty; }
@@ -5893,6 +5947,7 @@ function onTradeSubmit(ev) {
     uiSetVal('t-toqty', '');
     uiSetVal('t-total', '');
     uiSetVal('t-note', '');
+    uiSetVal('t-txid', '');
     uiSetVal('t-networkfee', '');
     uiSetVal('t-manual-rate', '');
     uiSetVal('t-manual-price', '');
@@ -6618,7 +6673,7 @@ function downloadTradesCsv() {
   var st = loadState();
   var accName = {};
   (st.accounts || []).forEach(function (a) { accName[a.id] = a.name; });
-  var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'fxRate', 'fxSource']];
+  var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'txid', 'fxRate', 'fxSource']];
   ledgerSortByDate(st.trades || []).forEach(function (t) {
     rows.push([
       t.id || '', t.date || '', t.type || '', String(t.symbol || '').toUpperCase(),
@@ -6629,6 +6684,7 @@ function downloadTradesCsv() {
       accName[t.accountId] || t.accountId || '',
       (t.toAccountId ? (accName[t.toAccountId] || t.toAccountId) : ''),
       t.note || '',
+      t.txid || '',
       (t.fxLock && t.fxLock.rate) || '',
       (t.fxLock && t.fxLock.source) || ''
     ]);
@@ -7038,6 +7094,9 @@ if (typeof window !== 'undefined') {
   window.Inoculens.TRADE_CCY_OPTIONS = TRADE_CCY_OPTIONS;
   window.Inoculens.saveStateGuarded = saveStateGuarded;
   window.Inoculens.isValidImportTrade = isValidImportTrade;
+  window.Inoculens.isValidTxid = isValidTxid;
+  window.Inoculens.txExplorerUrl = txExplorerUrl;
+  window.Inoculens.shortTxid = shortTxid;
   window.Inoculens.renderAccounts = renderAccounts;
   window.Inoculens.openAccountDialog = openAccountDialog;
   window.Inoculens.createAccount = createAccount;

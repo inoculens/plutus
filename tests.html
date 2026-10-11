@@ -3499,6 +3499,97 @@
       });
     })();
 
+    // === Transaction ID tests (optional hash linked to mempool.space) ===
+    (function txidTests() {
+      var L = window.Inoculens || {};
+      var HASH = new Array(65).join('a'); // 64-hex BTC-style hash
+      test('isValidTxid accepts hashes, blank means absent, junk rejected', function () {
+        assert(L.isValidTxid(HASH) === true, '64-hex hash should pass');
+        assert(L.isValidTxid('0x' + HASH) === true, '0x-prefixed hash should pass');
+        assert(L.isValidTxid('') === true, 'blank means absent');
+        assert(L.isValidTxid(undefined) === true, 'missing means absent');
+        assert(L.isValidTxid('abc') === false, 'too short must fail');
+        assert(L.isValidTxid('not a hash!!') === false, 'spaces/bangs must fail');
+        assert(L.txExplorerUrl(HASH) === 'https://mempool.space/tx/' + HASH, 'must point at mempool.space');
+      });
+
+      test('record with txid saves it and links to mempool.space', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openPrefillTrade('a1');
+        document.getElementById('t-side').value = 'buy';
+        document.getElementById('t-qty').value = '0.5';
+        document.getElementById('t-total').value = '25000';
+        document.getElementById('t-currency').value = 'EUR';
+        document.getElementById('t-currency').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        document.getElementById('t-note').value = '';
+        document.getElementById('t-txid').value = HASH;
+        onTradeSubmit({ preventDefault: function () {} });
+        var st = L.loadState();
+        assert(st.trades.length === 2, 'buy with txid should save, got ' + st.trades.length);
+        var last = st.trades[st.trades.length - 1];
+        assert(last.txid === HASH, 'txid must be stored, got ' + JSON.stringify(last.txid));
+        navTo('a1');
+        route();
+        var a = document.querySelector('#account-detail a[href="https://mempool.space/tx/' + HASH + '"]');
+        assert(a !== null, 'record view must link the txid to mempool.space');
+        assert(a.target === '_blank', 'mempool link must open in a new tab');
+        // Edit round-trips the hash back into the field.
+        openEditTrade(last.id);
+        assert(document.getElementById('t-txid').value === HASH, 'edit should prefill txid, got ' + document.getElementById('t-txid').value);
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        navHome();
+      });
+
+      test('bad txid never saves; import round-trips txid', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openPrefillTrade('a1');
+        document.getElementById('t-side').value = 'buy';
+        document.getElementById('t-qty').value = '0.5';
+        document.getElementById('t-total').value = '25000';
+        document.getElementById('t-currency').value = 'EUR';
+        document.getElementById('t-currency').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        document.getElementById('t-note').value = '';
+        document.getElementById('t-txid').value = 'not a hash!!';
+        onTradeSubmit({ preventDefault: function () {} });
+        assert(L.loadState().trades.length === 0, 'bad txid must not save');
+        var err = document.getElementById('t-error');
+        assert(err && err.hidden === false, 'bad txid must surface a form error');
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        // Export/import keeps a good txid; a bad one rejects atomically.
+        var good = { id: 'g1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', accountId: 'a1', txid: HASH, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' } };
+        var env = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [{ id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }], trades: [good] });
+        var back = L.importState(env);
+        assert(back.trades.length === 1 && back.trades[0].txid === HASH, 'txid must survive export/import');
+        var before = L.loadState();
+        var bad = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [{ id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }], trades: [{ id: 'b1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', accountId: 'a1', txid: '!!!', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' } }] });
+        try { L.importState(bad); assert(false, 'bad txid import should throw'); }
+        catch (e) { assert(String((e && e.message) || e).indexOf('import failed') !== -1, 'wrong error: ' + ((e && e.message) || e)); }
+        assert(JSON.stringify(L.loadState()) === JSON.stringify(before), 'state changed after rejected txid import');
+      });
+    })();
+
     renderResults();
   </script>
 </body>

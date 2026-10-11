@@ -4063,6 +4063,53 @@
       });
     })();
 
+    // === Security tests (swap-pair delete, CSV neutralization) ===
+    (function securityTests() {
+      var L = window.Inoculens || {};
+      function flush() { return new Promise(function (res) { setTimeout(res, 0); }); }
+      testAsync('deleting one swap leg removes the pair', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Hot', ticker: 'ETH', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 's-sell', type: 'sell', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', swapId: 'sw1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 's-buy', type: 'buy', symbol: 'ETH', qty: 10, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a2', swapId: 'sw1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        render();
+        deleteTrade('s-sell');
+        assert(document.getElementById('confirm-message').textContent.indexOf('swap') !== -1, 'pair delete must say swap');
+        document.getElementById('confirm-cancel').click();
+        return flush().then(function () {
+          assert(L.loadState().trades.length === 2, 'cancelled pair delete must keep both legs');
+          deleteTrade('s-sell');
+          document.getElementById('confirm-ok').click();
+          return flush().then(function () {
+            var left = L.loadState().trades;
+            assert(left.length === 0, 'confirmed pair delete must remove both legs, got ' + left.length);
+            navHome();
+          });
+        });
+      });
+      test('csvSafeText neutralizes formulas, leaves data intact', function () {
+        var f = L.csvSafeText;
+        assert(typeof f === 'function', 'csvSafeText missing');
+        assert(f('=cmd|xx') === "'=cmd|xx", 'equals trigger must be quoted');
+        assert(f('+123') === "'+123", 'plus trigger must be quoted');
+        assert(f('-5') === "'-5", 'minus trigger must be quoted');
+        assert(f('@ref') === "'@ref", 'at trigger must be quoted');
+        assert(f('plain note') === 'plain note', 'plain text untouched');
+        assert(f('a"b,c\nd') === '"a""b,c\nd"', 'quoting still applies');
+        assert(f(12.5) === '12.5', 'numbers untouched');
+        assert(f('') === '' && f(null) === '' && f(undefined) === '', 'empties stay empty');
+      });
+    })();
+
     // === Header order + multiline label tests ===
     (function headerLabelTests() {
       var L = window.Inoculens || {};

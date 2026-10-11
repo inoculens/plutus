@@ -5121,12 +5121,27 @@ function deleteTrade(id) {
   var doomed = null;
   (st.trades || []).forEach(function (t) { if (t && t.id === id) doomed = t; });
   if (!doomed) return; // unknown id: no write
+  // Swap legs live and die as a pair: deleting one side alone would orphan
+  // the other (a costless sale booking phantom gains, or a purposeless buy
+  // inflating holdings) and corrupt P&L.
+  var pair = [];
+  if (doomed.swapId) {
+    (st.trades || []).forEach(function (t) {
+      if (t && t.swapId === doomed.swapId && t.id !== doomed.id) pair.push(t);
+    });
+  }
   var desc = (doomed.type === 'sell' ? 'Sell ' : 'Buy ') + doomed.qty + ' ' +
     String(doomed.symbol || '') + ' (' + (doomed.date || 'no date') + ')';
-  confirmAction('Delete trade', 'Delete trade ' + desc + '? This cannot be undone.', 'Delete', true).then(function (ok) {
+  var msg = pair.length
+    ? 'Delete swap (' + desc + ' + its linked leg)? This cannot be undone.'
+    : 'Delete trade ' + desc + '? This cannot be undone.';
+  confirmAction('Delete trade', msg, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();
-    var kept = (s2.trades || []).filter(function (t) { return !t || t.id !== id; });
+    var drop = {};
+    drop[id] = true;
+    pair.forEach(function (t) { drop[t.id] = true; });
+    var kept = (s2.trades || []).filter(function (t) { return !t || !drop[t.id]; });
     if (kept.length === (s2.trades || []).length) return;
     s2.trades = kept;
     if (!saveStateGuarded(s2)) return;
@@ -7161,6 +7176,16 @@ function csvEsc(v) {
   return s;
 }
 
+// Free-text cells (notes, account names, labels): a leading = + - @ would
+// run as a spreadsheet formula on open (payloads can arrive via an imported
+// backup). The single-quote prefix renders invisibly in Excel/Sheets and
+// keeps numeric columns untouched.
+function csvSafeText(v) {
+  var s = String(v === null || v === undefined ? '' : v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return csvEsc(s);
+}
+
 function downloadTextFile(name, text, mime) {
   var blob = new Blob([text], { type: mime || 'text/csv' });
   var urls = window.URL || window.webkitURL;
@@ -7188,15 +7213,21 @@ function downloadTradesCsv() {
       t.total !== undefined && t.total !== null ? t.total : '',
       t.currency || '', t.fee !== undefined && t.fee !== null ? t.fee : '',
       t.feeCurrency || '', t.networkFee !== undefined && t.networkFee !== null ? t.networkFee : '',
-      accName[t.accountId] || t.accountId || '',
-      (t.toAccountId ? (accName[t.toAccountId] || t.toAccountId) : ''),
-      t.note || '',
-      t.txid || '',
+      { text: accName[t.accountId] || t.accountId || '' },
+      { text: (t.toAccountId ? (accName[t.toAccountId] || t.toAccountId) : '') },
+      { text: t.note || '' },
+      { text: t.txid || '' },
       (t.fxLock && t.fxLock.rate) || '',
       (t.fxLock && t.fxLock.source) || ''
     ]);
   });
-  downloadTextFile('plutus.inoculens.com-trades-' + backupStamp() + '.csv', rows.map(function (r) { return r.map(csvEsc).join(','); }).join('\n'), 'text/csv');
+  downloadTextFile('plutus.inoculens.com-trades-' + backupStamp() + '.csv', rows.map(function (r) {
+    return r.map(function (c) {
+      // Free-text cells are wrapped ({text}) so formula triggers get
+      // neutralized; numeric and validated-code cells stay spreadsheet-clean.
+      return (c && typeof c === 'object') ? csvSafeText(c.text) : csvEsc(c);
+    }).join(',');
+  }).join('\n'), 'text/csv');
 }
 
 function downloadLotsCsv() {
@@ -7215,7 +7246,7 @@ function downloadLotsCsv() {
       var syms = pf.states[accId];
       Object.keys(syms).forEach(function (sym) {
         (syms[sym].lots || []).forEach(function (l) {
-          rows.push([sym, l.openDate || '', l.closeDate || '', l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, accName[accId] || accId]);
+          rows.push([sym, l.openDate || '', l.closeDate || '', l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, { text: accName[accId] || accId }]);
         });
       });
     });
@@ -7226,7 +7257,9 @@ function downloadLotsCsv() {
       });
     });
   }
-  downloadTextFile('plutus.inoculens.com-tax-lots-' + backupStamp() + '.csv', rows.map(function (r) { return r.map(csvEsc).join(','); }).join('\n'), 'text/csv');
+  downloadTextFile('plutus.inoculens.com-tax-lots-' + backupStamp() + '.csv', rows.map(function (r) {
+    return r.map(function (c) { return (c && typeof c === 'object') ? csvSafeText(c.text) : csvEsc(c); }).join(',');
+  }).join('\n'), 'text/csv');
 }
 
 // --- Hero allocation (compact ring inside the Total balance panel; home stays one calm panel) ---
@@ -7637,6 +7670,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.fitHeroValue = fitHeroValue;
   window.Inoculens.downloadTradesCsv = downloadTradesCsv;
   window.Inoculens.downloadLotsCsv = downloadLotsCsv;
+  window.Inoculens.csvSafeText = csvSafeText;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', init);
   }

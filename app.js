@@ -4387,6 +4387,20 @@ function openFeeExplainer(t, main, feeQty, rate) {
   openNoteDialog(lines.join('\n'), 'Transfer fees');
 }
 
+// Discoverability for tap-for-info rows: an ⓘ badge on the label that
+// opens the same popup as the value. Used everywhere a row hides fuller
+// info behind a tap (Transfer fees explainer, Rate/Note/detail overflows).
+function infoDot(labelEl, openFn) {
+  if (!labelEl || typeof openFn !== 'function') return;
+  var dot = document.createElement('span');
+  dot.className = 'info-dot';
+  dot.textContent = 'ⓘ';
+  dot.setAttribute('aria-hidden', 'true');
+  labelEl.appendChild(dot);
+  try { labelEl.style.cursor = 'pointer'; } catch (e) { /* ignore */ }
+  labelEl.addEventListener('click', function () { try { openFn(); } catch (e) { /* ignore */ } });
+}
+
 function rateRow(label, text) {
   var rate = document.createElement('div');
   rate.className = 'stat-row rate-line';
@@ -4400,17 +4414,19 @@ function rateRow(label, text) {
   rv.setAttribute('role', 'button');
   rv.setAttribute('tabindex', '0');
   rv.setAttribute('aria-label', 'Show full rate');
-  rv.addEventListener('click', function () {
+  function openRate() {
     // Popup only when the text actually overflows the row.
     if (rv.scrollWidth <= rv.clientWidth + 1) return;
     openNoteDialog(text, label);
-  });
+  }
+  rv.addEventListener('click', openRate);
   rv.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      rv.click();
+      openRate();
     }
   });
+  infoDot(rl, openRate);
   rate.appendChild(rl);
   rate.appendChild(rv);
   return rate;
@@ -4491,6 +4507,7 @@ function tradeBlock(t, main, accountNameById, kind) {
       // Tap explains the two numbers in plain language (market worth vs
       // booked cost) — the card stays clean, the math stays one tap away.
       var feeValT = feeRowT.querySelector('.stat-val');
+      var feeLabT = feeRowT.querySelector('.stat-label');
       if (feeValT) {
         feeValT.setAttribute('role', 'button');
         feeValT.setAttribute('tabindex', '0');
@@ -4502,6 +4519,7 @@ function tradeBlock(t, main, accountNameById, kind) {
           feeValT.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
           });
+          infoDot(feeLabT, open);
         })(t, main, xferFee, xferRate);
       }
       box.appendChild(feeRowT);
@@ -4584,17 +4602,21 @@ function tradeBlock(t, main, accountNameById, kind) {
       noteVal.setAttribute('tabindex', '0');
       noteVal.setAttribute('aria-label', 'Show full note');
       noteVal.title = String(t.note);
-      noteVal.addEventListener('click', function () {
-        // Popup only when the text actually overflows the row.
-        if (noteVal.scrollWidth <= noteVal.clientWidth + 1) return;
-        openNoteDialog(t.note);
-      });
-      noteVal.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          noteVal.click();
+      (function (val, txt) {
+        function open() {
+          // Popup only when the text actually overflows the row.
+          if (val.scrollWidth <= val.clientWidth + 1) return;
+          openNoteDialog(txt);
         }
-      });
+        val.addEventListener('click', open);
+        val.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            open();
+          }
+        });
+        infoDot(noteRow.querySelector('.stat-label'), open);
+      })(noteVal, t.note);
     }
     box.appendChild(noteRow);
   }
@@ -4654,6 +4676,7 @@ function detailMetaRow(label, text, title) {
   v.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
   });
+  infoDot(l, open);
   d.appendChild(l);
   d.appendChild(v);
   return d;

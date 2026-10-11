@@ -4021,6 +4021,36 @@
         try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
         navHome();
       });
+      test('info dots mark every tappable row and open its popup', function () {
+        var fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', note: 'my hedge', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 'a-xfer', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: 'a very long note that certainly overflows its row on any screen', accountId: 'a1', networkFee: 0.01, execLock: { price: 20732.79, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        var feeLab = document.querySelector('[data-trade="a-xfer"] [data-label="Transfer fees"] .stat-label');
+        assert(feeLab !== null && feeLab.querySelector('.info-dot') !== null, 'Transfer fees label must carry ⓘ');
+        feeLab.click();
+        var txt = document.getElementById('note-dialog-text').textContent;
+        assert(txt.indexOf('transfer-day price') !== -1, 'label tap must open the explainer, got ' + txt);
+        try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        var noteLab = document.querySelector('[data-trade="a-xfer"] [data-label="Note"] .stat-label');
+        assert(noteLab !== null && noteLab.querySelector('.info-dot') !== null, 'Note label must carry ⓘ');
+        var rateLab = document.querySelector('[data-trade="a-xfer"] [data-label="Fee in fiat rate"] .stat-label');
+        assert(rateLab !== null && rateLab.querySelector('.info-dot') !== null, 'rate label must carry ⓘ');
+        var metaLab = document.querySelector('#account-detail .detail-meta-label .info-dot, #account-detail .detail-meta-block .info-dot');
+        assert(metaLab !== null, 'account detail meta must carry ⓘ');
+        navHome();
+      });
     })();
 
     renderResults();

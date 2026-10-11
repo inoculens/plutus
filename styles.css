@@ -1546,6 +1546,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 .side-transfer { color: #7dd3fc; background: rgba(125,211,252,0.1); border-color: rgba(125,211,252,0.25); }
 /* Computed-only transfer fee: visibly non-editable. */
 #t-networkfee[readonly] { opacity: 0.55; cursor: not-allowed; background: var(--surface-2); }
+/* Tap-for-info affordance: ⓘ badge on labels whose value opens a popup. */
+.info-dot { opacity: 0.55; font-size: 0.82em; margin-left: 0.3rem; }
 /* Transfer-fees card value opens the plain-language explainer. */
 .trade-block .stat-row[data-label="Transfer fees"] .stat-val { cursor: pointer; }
 .side-income { color: #c4b5fd; background: rgba(167,139,250,0.12); border-color: rgba(167,139,250,0.28); }

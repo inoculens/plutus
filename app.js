@@ -5574,8 +5574,8 @@ function buildTradeForm() {
     '<input id="t-date" type="date">' +
     '<details class="adv"><summary>Details</summary>' +
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
-    '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005">' +
-    '<p class="fld-hint" id="t-networkfee-hint">On-chain gas / miner fee taken from the moved amount. Tracked as a real loss. Auto-filled from sent − received when both are entered.</p></div>' +
+    '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
+    '<p class="fld-hint" id="t-networkfee-hint">Computed as sent − received — type the two amounts above, never this field.</p></div>' +
     '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat)</label>' +
     '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
     '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p></div>' +
@@ -5736,10 +5736,9 @@ function syncTradeTypeUI() {
   try { syncTransferFeePreview(); } catch (e) { /* ignore */ }
 }
 
-// Transfer send/receive helper: fee = sent − received. When both are valid
-// the Details network-fee field is auto-filled and the hint shows what will
-// be recorded as the loss (exchange + network fee). When received is blank
-// the manual network-fee field stays as the fallback (legacy path).
+// Transfer send/receive helper: fee = sent − received. The fee field is
+// computed-only (read-only in the form): the two amounts are the source of
+// truth, so a saved fee can never contradict them. Received is required.
 // Derived amounts are rounded to 8 decimals (the app's quantity precision):
 // raw binary subtraction leaves dust like 0.000017260000000000062.
 function roundQty8(v) {
@@ -5771,9 +5770,10 @@ function syncTransferFeePreview() {
   if (!r) {
     var recvTxt = String(uiVal('t-toqty', '')).trim();
     if (hint) {
-      if (recvTxt === '') hint.textContent = 'Enter what arrived — the fee is filled in for you. Leave blank to type the fee manually under Details.';
+      if (recvTxt === '') hint.textContent = 'Enter what arrived — the fee below fills in itself.';
       else hint.textContent = 'Received must be > 0 and at most what you sent.';
     }
+    if (feeInput) feeInput.value = '';
     return;
   }
   if (feeInput) feeInput.value = String(r.fee);
@@ -6120,11 +6120,11 @@ function onTradeSubmit(ev) {
   var netRaw = uiVal('t-networkfee', '');
   var networkFee = (netRaw === undefined || netRaw === null || String(netRaw).trim() === '') ? 0 : Number(netRaw);
   var toQtyRaw = uiVal('t-toqty', '');
-  // Send + receive mode: the fee is the difference (exchange + network fee),
-  // recorded as the loss — e.g. exchange → self-custody or wallet → wallet.
-  // When received is entered it wins over the manual Details fee; when it is
-  // blank the manual fee stays as the fallback (legacy path).
-  if (side === 'transfer' && String(toQtyRaw).trim() !== '') {
+  // Send + receive mode: the fee is always the difference (exchange +
+  // network fee), recorded as the loss — e.g. exchange → self-custody or
+  // wallet → wallet. Received is required; the fee field is computed-only.
+  if (side === 'transfer') {
+    if (String(toQtyRaw).trim() === '') { tradeFormError('Enter what you received (> 0).'); return; }
     var sentChk = Number(qtyRaw);
     var recvChk = Number(toQtyRaw);
     if (!isFinite(sentChk) || sentChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
@@ -6152,11 +6152,6 @@ function onTradeSubmit(ev) {
     if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid — pick one or enter a 2–10 letter code.'); return; }
   } else if (side === 'transfer') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
-    if (String(toQtyRaw).trim() !== '') {
-      var recvV = Number(toQtyRaw);
-      if (!isFinite(recvV) || recvV <= 0) { tradeFormError('Received must be > 0.'); return; }
-      if (recvV > qty) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
-    }
     if (!isFinite(networkFee) || networkFee < 0 || networkFee >= qty) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     // No destination: on-chain move inside this account (fresh address, same
     // owner). With one: it must be a different account with the same asset.

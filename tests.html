@@ -3571,6 +3571,42 @@
         assert(err && err.hidden === false, 'over-received must surface a form error');
         try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
       });
+
+      test('transfer fee is computed-only and received is required', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openPrefillTrade('a1');
+        document.getElementById('t-side').value = 'transfer';
+        document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
+        assert(document.getElementById('t-networkfee').readOnly === true, 'fee field must be read-only computed');
+        // Live preview fills the fee as both amounts are typed.
+        document.getElementById('t-qty').value = '1';
+        document.getElementById('t-qty').dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('t-toqty').value = '0.99';
+        document.getElementById('t-toqty').dispatchEvent(new Event('input', { bubbles: true }));
+        assert(document.getElementById('t-networkfee').value === '0.01', 'preview must compute the fee, got ' + document.getElementById('t-networkfee').value);
+        // Blank received never saves, even with a (now untypeable) fee present.
+        document.getElementById('t-toqty').value = '';
+        document.getElementById('t-toaccount').value = 'a2';
+        document.getElementById('t-total').value = '';
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        onTradeSubmit({ preventDefault: function () {} });
+        assert(L.loadState().trades.length === 1, 'blank received must not save');
+        var err = document.getElementById('t-error');
+        assert(err && err.hidden === false, 'blank received must surface a form error');
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+      });
     })();
 
     // === Transaction ID tests (optional hash linked to mempool.space) ===

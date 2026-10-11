@@ -1544,6 +1544,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 
 /* ————— Ultimate tracker: trade types + hero allocation ————— */
 .side-transfer { color: #7dd3fc; background: rgba(125,211,252,0.1); border-color: rgba(125,211,252,0.25); }
+/* Computed-only transfer fee: visibly non-editable. */
+#t-networkfee[readonly] { opacity: 0.55; cursor: not-allowed; background: var(--surface-2); }
 .side-income { color: #c4b5fd; background: rgba(167,139,250,0.12); border-color: rgba(167,139,250,0.28); }
 .side-expense { color: #fdba74; background: rgba(251,146,60,0.1); border-color: rgba(251,146,60,0.28); }
 

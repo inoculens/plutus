@@ -5575,7 +5575,7 @@ function buildTradeForm() {
     '<details class="adv"><summary>Details</summary>' +
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
-    '<p class="fld-hint" id="t-networkfee-hint">Computed as sent − received — type the two amounts above, never this field.</p></div>' +
+    '<p class="fld-hint" id="t-networkfee-hint">Fee calculated automatically from the send and received inputs above.</p></div>' +
     '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat)</label>' +
     '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
     '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p></div>' +

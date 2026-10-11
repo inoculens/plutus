@@ -2493,6 +2493,13 @@ function feeFailMsg(id, key) {
   feeRateErr[id] = 'History lookup failed' + (detail ? ' (' + detail + ')' : '') + ' — tap to retry';
   feeRateTitle(id, feeRateErr[id]);
 }
+// Tap-path failure: same record plus a visible reason popup (hover tooltips
+// don't exist on touch screens, and a silent row leaves nothing to debug).
+function feeFailTap(id, key) {
+  histNoteFail(key);
+  feeFailMsg(id, key);
+  try { openNoteDialog(feeRateErr[id], 'Fee Fiat Rate'); } catch (e) { /* ignore */ }
+}
 function retryFeeRate(tradeId) {
   var st = null;
   try { st = loadState(); } catch (e) { return; }
@@ -2530,8 +2537,8 @@ function retryFeeRate(tradeId) {
       } catch (e) { /* ignore */ }
       try { delete feeRateErr[tradeId]; } catch (e) { /* ignore */ }
       try { render(); } catch (e) { /* ignore */ }
-    } else { histNoteFail(key); feeFailMsg(tradeId, key); }
-  }, function () { delete histInflight[key]; histNoteFail(key); feeFailMsg(tradeId, key); });
+    } else { feeFailTap(tradeId, key); }
+  }, function () { delete histInflight[key]; feeFailTap(tradeId, key); });
 }
 
 function setHistCached(symbol, date, vs, kind, price, source, interpolated) {
@@ -2585,7 +2592,7 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   function krakenFallback() { return fetchKrakenHistory(sym, dateStr, cur); }
   function deepFallback() {
     return krakenFallback().then(function (kp) {
-      if (isFinite(kp) && kp > 0) return kp;
+      if (isFinite(kp) && kp > 0) { histDiagClear(sym, dateStr.slice(0, 10), cur); return kp; }
       return fetchStooqCryptoHistory(sym, dateStr, cur);
     });
   }

@@ -3882,10 +3882,13 @@
           return flush().then(flush).then(flush);
         }).then(function () {
           var row = document.querySelector('[data-trade="t2"] [data-label="Fee Fiat Rate"]');
-          restore();
           assert(row && String(row.title).indexOf('CoinGecko HTTP 429') !== -1, 'tooltip must name the coingecko failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Kraken HTTP 429') !== -1, 'tooltip must name the kraken failure, got ' + JSON.stringify(row && row.title));
           assert(row && String(row.title).indexOf('Stooq HTTP 429') !== -1, 'tooltip must name the stooq failure, got ' + JSON.stringify(row && row.title));
+          var noteTxt = document.getElementById('note-dialog-text');
+          assert(noteTxt && noteTxt.textContent.indexOf('CoinGecko HTTP 429') !== -1, 'failed tap must pop the cause visibly, got ' + JSON.stringify(noteTxt && noteTxt.textContent));
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+          restore();
           navHome();
         }, function (e) { restore(); throw e; });
       });

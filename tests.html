@@ -3688,6 +3688,8 @@
           var nf = block.querySelector('[data-label="Network fee"]');
           assert(nf !== null && nf.textContent.indexOf('≈') !== -1, 'network fee must carry its fiat value: ' + (nf && nf.textContent));
           assert(nf.textContent.indexOf('500') !== -1, 'fee fiat 0.01 x 50000 = 500, got: ' + nf.textContent);
+          var order = Array.prototype.map.call(block.querySelectorAll('.trade-facts > .stat-row'), function (r) { return r.getAttribute('data-label'); });
+          assert(order.indexOf('Fee Fiat Rate') === order.indexOf('Network fee') + 1, 'Fee Fiat Rate must sit right after Network fee, got: ' + order.join(' | '));
           try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
           navHome();
         } finally {

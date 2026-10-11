@@ -4032,6 +4032,35 @@ function resolveExecPrice(t, main, kind) {
   return null;
 }
 
+function rateRow(label, text) {
+  var rate = document.createElement('div');
+  rate.className = 'stat-row rate-line';
+  rate.setAttribute('data-label', label);
+  var rl = document.createElement('span');
+  rl.className = 'stat-label';
+  rl.textContent = label;
+  var rv = document.createElement('span');
+  rv.className = 'stat-val muted';
+  rv.textContent = text;
+  rv.setAttribute('role', 'button');
+  rv.setAttribute('tabindex', '0');
+  rv.setAttribute('aria-label', 'Show full rate');
+  rv.addEventListener('click', function () {
+    // Popup only when the text actually overflows the row.
+    if (rv.scrollWidth <= rv.clientWidth + 1) return;
+    openNoteDialog(text, label);
+  });
+  rv.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      rv.click();
+    }
+  });
+  rate.appendChild(rl);
+  rate.appendChild(rv);
+  return rate;
+}
+
 function tradeBlock(t, main, accountNameById, kind) {
   var n = normalizeTrade(t);
   // The Converted row only earns its place when there is something to
@@ -4104,6 +4133,12 @@ function tradeBlock(t, main, accountNameById, kind) {
       var feeTxtT = fmtQty(t.networkFee) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
       box.appendChild(statRow('Network fee', feeTxtT, t.networkFee, false));
+      // Fee Fiat Rate sits right after Network fee — it is the rate behind
+      // the (≈) above, frozen at the tx date.
+      var feeRateTxt = (xferRate !== null)
+        ? fmtMoney(xferRate.price, xferRate.ccy) + ' / ' + tSym
+        : '—';
+      box.appendChild(rateRow('Fee Fiat Rate', feeRateTxt));
     }
     box.appendChild(statRow('Received', fmtQty(netQ) + ' ' + tSym, netQ, false));
     if ((Number(t.total) > 0 || Number(t.fee) > 0)) {
@@ -4148,43 +4183,11 @@ function tradeBlock(t, main, accountNameById, kind) {
       box.appendChild(statRow('Real price', fmtMoney(realP, main) + ' / ' + symU, realP, false));
     }
   }
-  // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate becomes the
-  // frozen Fee Fiat Rate (only when a fee was actually paid), and the fiat
-  // Fee row is gone for transfers — the network fee IS the fee.
-  var rateLabel = isXfer ? 'Fee Fiat Rate' : 'Rate';
-  var rateText = fxBadgeText(t);
-  if (isXfer) {
-    rateText = (xferRate !== null)
-      ? fmtMoney(xferRate.price, xferRate.ccy) + ' / ' + String(t.symbol || '').toUpperCase()
-      : '—';
-  }
-  if (!isXfer || xferFee > 0) {
-  var rate = document.createElement('div');
-  rate.className = 'stat-row rate-line';
-  rate.setAttribute('data-label', rateLabel);
-  var rl = document.createElement('span');
-  rl.className = 'stat-label';
-  rl.textContent = rateLabel;
-  var rv = document.createElement('span');
-  rv.className = 'stat-val muted';
-  rv.textContent = rateText;
-  rv.setAttribute('role', 'button');
-  rv.setAttribute('tabindex', '0');
-  rv.setAttribute('aria-label', 'Show full rate');
-  rv.addEventListener('click', function () {
-    // Popup only when the text actually overflows the row.
-    if (rv.scrollWidth <= rv.clientWidth + 1) return;
-    openNoteDialog(rateText, rateLabel);
-  });
-  rv.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      rv.click();
-    }
-  });
-  rate.appendChild(rl);
-  rate.appendChild(rv);
-  box.appendChild(rate);
+  // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate is gone for
+  // transfers (Fee Fiat Rate lives next to Network fee instead), and the
+  // fiat Fee row is gone too — the network fee IS the fee.
+  if (!isXfer) {
+    box.appendChild(rateRow('Rate', fxBadgeText(t)));
   }
   if (!isXfer) {
   var feeRow = statRow('Fee', fmtFeeAmount(t), t.fee, false);

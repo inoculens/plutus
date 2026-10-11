@@ -4094,6 +4094,7 @@
         var labVal = lab.querySelector ? lab.querySelector('.detail-meta-val') : null;
         assert(labVal !== null && labVal.classList.contains('detail-meta-multiline'), 'label must render wrapped multiline');
         assert(labVal.textContent.indexOf('line one') !== -1 && labVal.textContent.indexOf('line two') !== -1, 'wrapped label must show every line');
+        assert(lab !== null && lab.classList.contains('detail-meta-stacked'), 'label row must stack caption above text');
         navHome();
       });
     })();

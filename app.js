@@ -4685,6 +4685,8 @@ function detailMetaRow(label, text, title) {
   var d = document.createElement('div');
   d.className = 'detail-meta';
   d.setAttribute('data-label', label);
+  // Account labels stack: caption on top, wrapped text underneath.
+  if (String(label) === 'Label') d.classList.add('detail-meta-stacked');
   var l = document.createElement('span');
   l.className = 'detail-meta-label';
   l.textContent = label;

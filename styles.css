@@ -1607,6 +1607,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   overflow: visible;
   overflow-wrap: anywhere;
 }
+/* Label rows stack: caption above, text underneath. */
+.detail-meta-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+}
 .label-edit-row {
   display: flex;
   gap: 0.6rem;

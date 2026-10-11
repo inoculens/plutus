@@ -3591,6 +3591,43 @@
       });
     })();
 
+    // === Converted-row tests (only when there is something to convert) ===
+    (function convertedRowTests() {
+      var L = window.Inoculens || {};
+      function seedConverted(main, currency, pair, rate) {
+        L.saveState({
+          settings: { mainCurrency: main, costMethod: 'average' },
+          accounts: [
+            { id: 'c-acct', name: 'C BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 'c-a', type: 'buy', symbol: 'BTC', qty: 1, total: 100, currency: currency, date: '2026-01-01', fee: 0, feeCurrency: currency, note: '', accountId: 'c-acct', fxLock: { pair: pair, rate: rate, source: 'ECB-2026-01-01', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('c-acct');
+        route();
+        render();
+      }
+      test('same-fiat view hides the duplicate Converted row', function () {
+        seedConverted('EUR', 'EUR', 'EUR/EUR', 1);
+        var det = document.getElementById('account-detail');
+        assert(det.querySelector('[data-label="Paid"]') !== null, 'Paid row must stay');
+        assert(det.querySelector('[data-label="Converted"]') === null, 'EUR trade in EUR view must not print the same number twice');
+        navHome();
+      });
+      test('cross-fiat view keeps the Converted row', function () {
+        seedConverted('RON', 'EUR', 'EUR/RON', 4.97);
+        var det = document.getElementById('account-detail');
+        assert(det.querySelector('[data-label="Paid"]') !== null, 'Paid row must stay');
+        var conv = det.querySelector('[data-label="Converted"]');
+        assert(conv !== null, 'EUR trade in RON view must still convert');
+        assert(conv.textContent.indexOf('RON') !== -1 || Number(conv.getAttribute('data-value')) === 497, 'converted value wrong: ' + conv.textContent);
+        navHome();
+      });
+    })();
+
     renderResults();
   </script>
 </body>

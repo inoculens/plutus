@@ -4034,6 +4034,10 @@ function resolveExecPrice(t, main, kind) {
 
 function tradeBlock(t, main, accountNameById, kind) {
   var n = normalizeTrade(t);
+  // The Converted row only earns its place when there is something to
+  // convert: same-fiat views would just print the native number twice.
+  var tCcy = String(t.currency || '').toUpperCase();
+  var showConverted = tCcy === '' || tCcy !== String(main || '').toUpperCase();
   var box = document.createElement('article');
   box.className = 'trade-block';
   box.setAttribute('data-trade', t.id || '');
@@ -4092,7 +4096,7 @@ function tradeBlock(t, main, accountNameById, kind) {
     box.appendChild(statRow('Received', fmtQty(t.qty) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
     if (Number(t.total) > 0) {
       box.appendChild(statRow('Value', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
-      box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
+      if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     } else {
       box.appendChild(statRow('Value', '— (free)', null, false));
     }
@@ -4102,11 +4106,11 @@ function tradeBlock(t, main, accountNameById, kind) {
     }
     if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
       box.appendChild(statRow('Fiat lost', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
-      box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
+      if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     }
   } else {
     box.appendChild(statRow('Paid', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
-    box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
+    if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     // Real price is calculated, never quoted: the FULL all-in total converted
     // at the historical FX rate (or manual rate), divided by qty received —
     // e.g. 50 EUR / 0.00058193 BTC = 85920.99. Shown rounded half-up to 2

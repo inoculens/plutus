@@ -3630,6 +3630,128 @@
       });
     })();
 
+    // === Transfer fee fiat tests (frozen tx-date Fee Fiat Rate, no fiat Fee) ===
+    (function transferFeeFiatTests() {
+      var L = window.Inoculens || {};
+      function seedTransferBase() {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+      }
+      test('transfer hides fiat rows and freezes the manual fee rate', function () {
+        var origFetch = window.fetch;
+        window.fetch = function () { return Promise.reject(new Error('offline')); };
+        try {
+          seedTransferBase();
+          try { L.clearHistCache(); } catch (e) { /* ignore */ }
+          openPrefillTrade('a1');
+          document.getElementById('t-side').value = 'transfer';
+          document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
+          assert(document.getElementById('t-feefiat-row').hidden === true, 'fiat Fee row must hide for transfers');
+          assert(document.getElementById('t-total-row').hidden === true, 'Total row must hide for transfers');
+          assert(document.getElementById('t-currency-row').hidden === true, 'Currency row must hide for transfers');
+          document.getElementById('t-qty').value = '1';
+          document.getElementById('t-qty').dispatchEvent(new Event('input', { bubbles: true }));
+          document.getElementById('t-toqty').value = '0.99';
+          document.getElementById('t-toqty').dispatchEvent(new Event('input', { bubbles: true }));
+          document.getElementById('t-toaccount').value = 'a2';
+          document.getElementById('t-total').value = '';
+          document.getElementById('t-date').value = '2026-03-01';
+          document.getElementById('t-fee').value = '';
+          document.getElementById('t-manual-price').value = '50000';
+          onTradeSubmit({ preventDefault: function () {} });
+          var st = L.loadState();
+          assert(st.trades.length === 2, 'transfer should save, got ' + st.trades.length);
+          var last = st.trades[st.trades.length - 1];
+          assert(last.fee === 0 && last.total === 0, 'transfer carries no fiat of its own, got ' + JSON.stringify({ fee: last.fee, total: last.total }));
+          assert(last.execLock && last.execLock.price === 50000 && last.execLock.source === 'manual', 'manual price must freeze as the fee rate, got ' + JSON.stringify(last.execLock));
+          navTo('a1');
+          route();
+          render();
+          var det = document.getElementById('account-detail');
+          var block = det.querySelector('[data-trade="' + last.id + '"]');
+          assert(block !== null, 'transfer block must render');
+          assert(block.querySelector('[data-label="Fee"]') === null, 'fiat Fee row must be gone for transfers');
+          assert(block.querySelector('[data-label="Rate"]') === null, 'meaningless 1:1 Rate must be gone for transfers');
+          var fr = block.querySelector('[data-label="Fee Fiat Rate"]');
+          assert(fr !== null, 'Fee Fiat Rate row must render');
+          assert(fr.textContent.indexOf('BTC') !== -1 && fr.textContent.indexOf('50') !== -1, 'fee rate wrong: ' + fr.textContent);
+          var nf = block.querySelector('[data-label="Network fee"]');
+          assert(nf !== null && nf.textContent.indexOf('≈') !== -1, 'network fee must carry its fiat value: ' + (nf && nf.textContent));
+          assert(nf.textContent.indexOf('500') !== -1, 'fee fiat 0.01 x 50000 = 500, got: ' + nf.textContent);
+          try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+          navHome();
+        } finally {
+          window.fetch = origFetch;
+        }
+      });
+
+      test('transfer without a known rate shows crypto-only fee and — rate', function () {
+        var origFetch = window.fetch;
+        window.fetch = function () { return Promise.reject(new Error('offline')); };
+        try {
+          seedTransferBase();
+          try { L.clearHistCache(); } catch (e) { /* ignore */ }
+          openPrefillTrade('a1');
+          document.getElementById('t-side').value = 'transfer';
+          document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
+          document.getElementById('t-qty').value = '1';
+          document.getElementById('t-toqty').value = '0.99';
+          document.getElementById('t-toqty').dispatchEvent(new Event('input', { bubbles: true }));
+          document.getElementById('t-toaccount').value = 'a2';
+          document.getElementById('t-total').value = '';
+          document.getElementById('t-date').value = '2026-03-01';
+          document.getElementById('t-fee').value = '';
+          document.getElementById('t-manual-price').value = '';
+          onTradeSubmit({ preventDefault: function () {} });
+          var st = L.loadState();
+          var last = st.trades[st.trades.length - 1];
+          assert(!('execLock' in last), 'offline with no manual must leave no frozen quote, got ' + JSON.stringify(last.execLock));
+          navTo('a1');
+          route();
+          render();
+          var det = document.getElementById('account-detail');
+          var block = det.querySelector('[data-trade="' + last.id + '"]');
+          assert(block !== null, 'transfer block must render');
+          var fr = block.querySelector('[data-label="Fee Fiat Rate"]');
+          assert(fr !== null && fr.textContent.indexOf('—') !== -1, 'unknown rate must be —, never a guess, got ' + (fr && fr.textContent));
+          var nf = block.querySelector('[data-label="Network fee"]');
+          assert(nf !== null && nf.textContent.indexOf('≈') === -1, 'crypto-only fee must not invent fiat: ' + (nf && nf.textContent));
+          try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+          navHome();
+        } finally {
+          window.fetch = origFetch;
+        }
+      });
+
+      testAsync('history fill covers transfers (frozen on next paint)', function () {
+        var origFetch = window.fetch;
+        try { L.clearHistCache(); } catch (e) { /* ignore */ }
+        window.fetch = function (url) {
+          return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ market_data: { current_price: { eur: 38123, usd: 41200 } } }); } });
+        };
+        function restore() { window.fetch = origFetch; }
+        return L.ensureHistoricalExec(
+          [{ id: 'h-t', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-01-15', fee: 0, feeCurrency: 'EUR', networkFee: 0.01 }],
+          'EUR'
+        ).then(function (changed) {
+          restore();
+          assert(changed === true, 'transfer history must fill the cache');
+          var hit = L.getHistCached('BTC', '2026-01-15', 'EUR', 'crypto');
+          assert(hit && hit.price === 38123, 'bad cached transfer quote: ' + JSON.stringify(hit));
+        }, function (e) { restore(); throw e; });
+      });
+    })();
+
     renderResults();
   </script>
 </body>

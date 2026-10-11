@@ -2562,7 +2562,7 @@ function ensureHistoricalExec(trades, main, kinds) {
   var seen = {};
   var jobs = [];
   (trades || []).forEach(function (t) {
-    if (!t || (t.type !== 'buy' && t.type !== 'sell')) return;
+    if (!t || (t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer')) return;
     var sym = String((t && t.symbol) || '').toUpperCase();
     var day = (t && typeof t.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t.date)) ? t.date.slice(0, 10) : '';
     if (!sym || !isValidDateStr(day) || isFutureDateStr(day)) return;
@@ -4084,11 +4084,28 @@ function tradeBlock(t, main, accountNameById, kind) {
   del.addEventListener('click', function () { deleteTrade(del.getAttribute('data-del')); });
   head.appendChild(del);
   box.appendChild(head);
+  var isXfer = t.type === 'transfer';
+  // Transfer fee valuation: the network fee in fiat at the frozen tx-date
+  // rate. Resolved once here and reused by the Network fee (≈) and Fee Fiat
+  // Rate rows; null (→ '—') when nothing is known, never a guess.
+  var xferFee = 0;
+  var xferRate = null;
+  if (isXfer) {
+    var nfRawX = (t.networkFee === undefined || t.networkFee === null) ? '' : String(t.networkFee).trim();
+    xferFee = (nfRawX === '') ? 0 : Number(t.networkFee);
+    if (!isFinite(xferFee) || xferFee < 0) xferFee = 0;
+    try { xferRate = resolveExecPrice(t, main, kind); } catch (e) { xferRate = null; }
+  }
   if (t.type === 'transfer') {
-    var netQ = Number(t.qty) - ((t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee));
-    box.appendChild(statRow('Moved', fmtQty(t.qty) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
-    if (Number(t.networkFee) > 0) box.appendChild(statRow('Network fee', fmtQty(t.networkFee) + ' ' + String(t.symbol || '').toUpperCase(), t.networkFee, false));
-    box.appendChild(statRow('Received', fmtQty(netQ) + ' ' + String(t.symbol || '').toUpperCase(), netQ, false));
+    var tSym = String(t.symbol || '').toUpperCase();
+    var netQ = Number(t.qty) - xferFee;
+    box.appendChild(statRow('Moved', fmtQty(t.qty) + ' ' + tSym, t.qty, false));
+    if (xferFee > 0) {
+      var feeTxtT = fmtQty(t.networkFee) + ' ' + tSym;
+      if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
+      box.appendChild(statRow('Network fee', feeTxtT, t.networkFee, false));
+    }
+    box.appendChild(statRow('Received', fmtQty(netQ) + ' ' + tSym, netQ, false));
     if ((Number(t.total) > 0 || Number(t.fee) > 0)) {
       box.appendChild(statRow('Fiat cost', fmtMoney(n.netMain, main), n.netMain, false));
     }
@@ -4131,22 +4148,33 @@ function tradeBlock(t, main, accountNameById, kind) {
       box.appendChild(statRow('Real price', fmtMoney(realP, main) + ' / ' + symU, realP, false));
     }
   }
+  // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate becomes the
+  // frozen Fee Fiat Rate (only when a fee was actually paid), and the fiat
+  // Fee row is gone for transfers — the network fee IS the fee.
+  var rateLabel = isXfer ? 'Fee Fiat Rate' : 'Rate';
+  var rateText = fxBadgeText(t);
+  if (isXfer) {
+    rateText = (xferRate !== null)
+      ? fmtMoney(xferRate.price, xferRate.ccy) + ' / ' + String(t.symbol || '').toUpperCase()
+      : '—';
+  }
+  if (!isXfer || xferFee > 0) {
   var rate = document.createElement('div');
   rate.className = 'stat-row rate-line';
-  rate.setAttribute('data-label', 'Rate');
+  rate.setAttribute('data-label', rateLabel);
   var rl = document.createElement('span');
   rl.className = 'stat-label';
-  rl.textContent = 'Rate';
+  rl.textContent = rateLabel;
   var rv = document.createElement('span');
   rv.className = 'stat-val muted';
-  rv.textContent = fxBadgeText(t);
+  rv.textContent = rateText;
   rv.setAttribute('role', 'button');
   rv.setAttribute('tabindex', '0');
   rv.setAttribute('aria-label', 'Show full rate');
   rv.addEventListener('click', function () {
     // Popup only when the text actually overflows the row.
     if (rv.scrollWidth <= rv.clientWidth + 1) return;
-    openNoteDialog(fxBadgeText(t), 'Rate');
+    openNoteDialog(rateText, rateLabel);
   });
   rv.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -4157,8 +4185,11 @@ function tradeBlock(t, main, accountNameById, kind) {
   rate.appendChild(rl);
   rate.appendChild(rv);
   box.appendChild(rate);
+  }
+  if (!isXfer) {
   var feeRow = statRow('Fee', fmtFeeAmount(t), t.fee, false);
   box.appendChild(feeRow);
+  }
   if (t.note) {
     var noteRow = statRow('Note', String(t.note), null, false);
     var noteVal = noteRow.querySelector('.stat-val');
@@ -5210,9 +5241,9 @@ function buildTradeForm() {
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Network fee (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005">' +
     '<p class="fld-hint" id="t-networkfee-hint">On-chain gas / miner fee taken from the moved amount. Tracked as a real loss. Auto-filled from sent − received when both are entered.</p></div>' +
-    '<label for="t-fee">Fee (fiat)</label>' +
+    '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat)</label>' +
     '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
-    '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p>' +
+    '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p></div>' +
     '<label for="t-note">Note</label>' +
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
     '<label for="t-txid">Transaction ID</label>' +
@@ -5266,9 +5297,18 @@ function syncTradeTypeUI() {
   setHidden('t-toaccount-row', !(isTransfer || isSwap));
   setHidden('t-toqty-row', !(isSwap || isTransfer));
   setHidden('t-networkfee-row', !(isTransfer));
-  // Total row: optional for income/transfer/expense, required for buy/sell/swap fiat value
-  setHidden('t-total-row', false);
-  setHidden('t-currency-row', false);
+  // Transfers carry no fiat of their own: the network fee IS the fee, valued
+  // in fiat at the frozen historical rate. Fiat fee + total + currency stay
+  // for the other types only.
+  setHidden('t-feefiat-row', isTransfer);
+  setHidden('t-total-row', isTransfer);
+  setHidden('t-currency-row', isTransfer);
+  if (isTransfer) {
+    var custT = document.getElementById('t-custom-ccy');
+    if (custT) custT.hidden = true;
+    var clabT = document.getElementById('t-custom-ccy-label');
+    if (clabT) clabT.hidden = true;
+  }
   if (isTransfer) {
     setLabel('t-qty-label', 'You send');
     setLabel('t-toqty-label', 'You receive');
@@ -5300,6 +5340,18 @@ function syncTradeTypeUI() {
     setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
+  }
+  if (!isTransfer) {
+    // Leaving a transfer must restore the custom-currency input when the
+    // (now visible again) Currency select sits on Other….
+    try {
+      var ccySel = document.getElementById('t-currency');
+      var needCustom = !!(ccySel && ccySel.value === 'CUSTOM');
+      var custR = document.getElementById('t-custom-ccy');
+      if (custR) custR.hidden = !needCustom;
+      var clabR = document.getElementById('t-custom-ccy-label');
+      if (clabR) clabR.hidden = !needCustom;
+    } catch (e) { /* ignore */ }
   }
   // Rebuild to-account options: transfer = same ticker only, swap = any other account.
   try {
@@ -5752,6 +5804,12 @@ function onTradeSubmit(ev) {
   if (!isFinite(networkFee) || networkFee < 0) { tradeFormError('Network fee must be >= 0.'); return; }
   var qty = (side === 'expense' && String(qtyRaw).trim() === '') ? null : Number(qtyRaw);
   var total = (String(totalRaw).trim() === '') ? (side === 'buy' || side === 'sell' ? NaN : 0) : Number(totalRaw);
+  if (side === 'transfer') {
+    // Transfers carry no fiat of their own: the network fee IS the fee,
+    // valued in fiat at the frozen historical rate. Ignore any stale fiat
+    // inputs (the rows are hidden for transfers).
+    fee = 0; total = 0; currency = String(main).toUpperCase(); feeCurrency = currency;
+  }
   // Per-type validation (messages match legacy for buy/sell so tests keep passing).
   if (side === 'buy' || side === 'sell') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
@@ -5773,9 +5831,6 @@ function onTradeSubmit(ev) {
       if (toAccT.id === accountId) { tradeFormError('Transfer needs two different accounts.'); return; }
       if (String(toAccT.ticker).toUpperCase() !== symbol) { tradeFormError('Transfer needs the same asset in both accounts — use Swap for different assets.'); return; }
     }
-    if (String(totalRaw).trim() !== '' && (!isFinite(total) || total < 0)) { tradeFormError('Total must be >= 0.'); return; }
-    if (String(totalRaw).trim() !== '' && !isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid.'); return; }
-    if (String(totalRaw).trim() === '') { total = 0; currency = String(main).toUpperCase(); }
   } else if (side === 'income') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
     if (String(totalRaw).trim() !== '' && (!isFinite(total) || total < 0)) { tradeFormError('Total must be >= 0.'); return; }
@@ -5853,9 +5908,10 @@ function onTradeSubmit(ev) {
       withFeeLock(trade);
       // Reference exec quote: manual wins; else keep the frozen quote when the
       // identifying fields are untouched; otherwise refreeze after save.
-      // Non-buy/sell rows never show Exec, so they carry no execLock.
+      // Transfers freeze it too: it values the network fee in fiat at the
+      // tx-date rate (Fee Fiat Rate). Other rows carry no execLock.
       var needRefreeze = false;
-      if (side === 'buy' || side === 'sell') {
+      if (side === 'buy' || side === 'sell' || side === 'transfer') {
         if (manualPrice !== null) {
           // Manual quote follows the trade's Currency field (like total and
           // fee), never the header display fiat — display converts it.
@@ -5925,7 +5981,7 @@ function onTradeSubmit(ev) {
     withFeeLock(trade);
     if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
     if (side === 'expense' && qty === null) { delete trade.qty; }
-    if (side === 'buy' || side === 'sell') {
+    if (side === 'buy' || side === 'sell' || side === 'transfer') {
       if (manualPrice !== null) {
         // Same rule as the edit path: the manual quote follows the trade's
         // Currency field, never the header display fiat.
@@ -5946,7 +6002,7 @@ function onTradeSubmit(ev) {
     if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
     st.trades.push(trade);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
-    if ((side === 'buy' || side === 'sell') && manualPrice === null) {
+    if ((side === 'buy' || side === 'sell' || side === 'transfer') && manualPrice === null) {
       // No manual quote: freeze the reference exec price in the background.
       // Saving never waits on it; failure just leaves the legacy async path.
       try { freezeExecLock(trade.id, symbol, date, mainU, (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }

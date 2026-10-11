@@ -3529,6 +3529,34 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
       hi.textContent = 'INVESTED AMOUNT: ' + fmtMoney(inv, main);
     }
   }
+  // Spent amount: lifetime gross fiat out — sell proceeds plus the cash legs
+  // of expense and transfer records, each at its locked historical rate.
+  // Never reduced by anything; appreciation can push it above invested, and
+  // value + spent − invested reconciles to total P&L. feeMain is never added:
+  // the all-in totals already include it.
+  var hs = document.getElementById('hero-spent');
+  if (hs) {
+    if (!rows.length) {
+      hs.textContent = '';
+      hs.hidden = true;
+    } else {
+      var spent = 0;
+      try {
+        var dtrSpent = dtradesOpt || convertTrades(st.trades, main);
+        dtrSpent.forEach(function (t) {
+          if (!t) return;
+          var sn = normalizeTrade(t);
+          if (t.type === 'sell') {
+            if (isFinite(sn.totalMain) && sn.totalMain > 0) spent += sn.totalMain;
+          } else if (t.type === 'expense' || t.type === 'transfer') {
+            if (isFinite(sn.netMain) && sn.netMain > 0) spent += sn.netMain;
+          }
+        });
+      } catch (e) { spent = 0; }
+      hs.hidden = false;
+      hs.textContent = 'SPENT AMOUNT: ' + fmtMoney(spent, main);
+    }
+  }
   var hp = document.getElementById('hero-pl');
   if (hp) {
     if (!rows.length || !plKnown) {

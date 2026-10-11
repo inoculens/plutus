@@ -433,7 +433,8 @@ section h2, aside h2 {
 
 .hero-pl { margin: 0 0 0.15rem; display: inline-block; min-height: 2.2rem; }
 
-.hero-invested {
+.hero-invested,
+.hero-spent {
   margin: 0 0 0.3rem;
   color: var(--muted);
   font-size: 0.78rem;
@@ -445,7 +446,8 @@ section h2, aside h2 {
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
-.hero-invested[hidden] { display: none; }
+.hero-invested[hidden],
+.hero-spent[hidden] { display: none; }
 
 .pill {
   border-radius: 999px;

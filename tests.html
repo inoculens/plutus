@@ -47,6 +47,7 @@
         <section id="hero" aria-label="Portfolio total">
           <p class="hero-value" id="hero-value">—</p>
           <p class="hero-invested" id="hero-invested"></p>
+          <p class="hero-spent" id="hero-spent"></p>
           <p class="hero-pl" id="hero-pl"></p>
           <div class="hero-alloc" id="hero-alloc" hidden></div>
         </section>
@@ -1423,6 +1424,9 @@
         render();
         var hi2 = document.getElementById('hero-invested');
         assert(hi2 !== null && hi2.textContent.indexOf('100') !== -1, 'invested must stay the lifetime 100 buy, got: ' + (hi2 && hi2.textContent));
+        var hs2 = document.getElementById('hero-spent');
+        assert(hs2 !== null && hs2.textContent.indexOf('SPENT AMOUNT') !== -1, 'spent label missing: ' + (hs2 && hs2.textContent));
+        assert(hs2.textContent.indexOf('50') !== -1, 'spent must be the lifetime 50 sell proceeds, got: ' + hs2.textContent);
         navHome();
       });
 

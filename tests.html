@@ -3952,6 +3952,77 @@
       });
     })();
 
+    // === Transfer fee audit tests (owner fixture: math must be exact) ===
+    (function transferFeeAuditTests() {
+      var L = window.Inoculens || {};
+      // Owner card: bought 0.00147872 BTC for €30 (entry €20,287.82), moved it
+      // with fee 0.00001726 at frozen tx-day price €20,732.79.
+      function auditTrades() {
+        var fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        return [
+          { id: 'a-buy', type: 'buy', symbol: 'BTC', qty: 0.00147872, total: 30, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', accountId: 'a1', fxLock: fx },
+          { id: 'a-xfer', type: 'transfer', symbol: 'BTC', qty: 0.00147872, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', accountId: 'a1', toAccountId: 'a2', networkFee: 0.00001726, execLock: { price: 20732.79, vs: 'EUR', source: 'history' }, fxLock: fx }
+        ];
+      }
+      test('transfer fee books exactly fee-basis in every engine', function () {
+        var tr = auditTrades();
+        var expectCost = 30 * 0.00001726 / 0.00147872; // basis slice, by definition
+        var avg = L.computeAverage(tr).get('BTC');
+        assert(Math.abs(avg.realized + expectCost) < 1e-9, 'average realized must be -feeCost, got ' + avg.realized);
+        assert(Math.abs(avg.qty - 0.00146146) < 1e-9, 'average must hold sent minus fee, got ' + avg.qty);
+        var fifo = L.computeFifo(tr).get('BTC');
+        assert(Math.abs(fifo.realized + expectCost) < 1e-9, 'fifo realized must equal average, got ' + fifo.realized);
+        assert(Math.abs(fifo.qty - 0.00146146) < 1e-9, 'fifo qty must equal average, got ' + fifo.qty);
+        var feeLots = fifo.lots.filter(function (l) { return l.proceeds === 0; });
+        var lotLoss = feeLots.reduce(function (s, l) { return s + l.gain; }, 0);
+        assert(Math.abs(lotLoss + expectCost) < 1e-9, 'fifo fee lots must sum to -feeCost, got ' + lotLoss);
+        ['average', 'fifo'].forEach(function (m) {
+          var pf = L.computePortfolio(tr, {}, m);
+          assert(Math.abs(pf.totals.realized + expectCost) < 1e-9, m + ' portfolio realized must be -feeCost, got ' + pf.totals.realized);
+          var src = pf.byAccount.a1.get('BTC');
+          assert(Math.abs(src.realized + expectCost) < 1e-9, m + ' source account carries the fee, got ' + src.realized);
+          var dst = pf.byAccount.a2.get('BTC');
+          assert(Math.abs(dst.qtyHeld - 0.00146146) < 1e-9, m + ' dest must receive net, got ' + dst.qtyHeld);
+          assert(Math.abs((src.qtyHeld * src.avgEntry) + (dst.qtyHeld * dst.avgEntry) + expectCost - 30) < 1e-9, m + ' cost conservation broke');
+        });
+      });
+      test('card memo and books differ only by the market move', function () {
+        var worth = 0.00001726 * 20732.79; // what the card ≈ shows
+        var cost = 30 * 0.00001726 / 0.00147872; // what the books record
+        assert(worth > 0.35 && worth < 0.37, 'memo must read ~0.36, got ' + worth);
+        assert(cost > 0.34 && cost < 0.36, 'books must read ~0.35, got ' + cost);
+        var gap = worth - cost;
+        assert(gap > 0.005 && gap < 0.02, 'gap must be the ~1 cent appreciation, got ' + gap);
+      });
+      test('tapping Transfer fees explains market worth vs booked cost', function () {
+        var fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 'a-buy', type: 'buy', symbol: 'BTC', qty: 0.00147872, total: 30, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a-xfer', type: 'transfer', symbol: 'BTC', qty: 0.00147872, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', toAccountId: 'a2', networkFee: 0.00001726, execLock: { price: 20732.79, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        var val = document.querySelector('[data-trade="a-xfer"] [data-label="Transfer fees"] .stat-val');
+        assert(val !== null, 'fee value must render');
+        val.click();
+        var txt = document.getElementById('note-dialog-text').textContent;
+        assert(/0[.,]36/.test(txt), 'explainer must show the ~0.36 market worth, got ' + txt);
+        assert(txt.indexOf('average entry') !== -1, 'explainer must name the booked cost basis, got ' + txt);
+        try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        navHome();
+      });
+    })();
+
     renderResults();
   </script>
 </body>

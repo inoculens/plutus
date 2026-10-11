@@ -4354,6 +4354,39 @@ function resolveExecPrice(t, main, kind) {
   return null;
 }
 
+// Plain-language fee economics for transfer cards: what the fee was worth
+// at move time vs what the books record (original cost). Numbers come from
+// the record itself; nothing here touches P&L.
+function openFeeExplainer(t, main, feeQty, rate) {
+  var sym = String((t && t.symbol) || '').toUpperCase();
+  var fq = Number(feeQty);
+  var worth = (rate !== null && isFinite(fq) && fq > 0)
+    ? fmtMoney(fq * rate.price, rate.ccy) : null;
+  var rateTxt = (rate !== null)
+    ? fmtMoney(rate.price, rate.ccy) + ' / ' + sym : null;
+  var entry = 0;
+  try {
+    var st = loadState();
+    var dtr = convertTrades(st.trades || [], main);
+    var eng = computeAverage(dtr);
+    var pos = eng.get(sym) || eng.get(String((t && t.symbol) || ''));
+    if (pos && isFinite(Number(pos.avgEntry)) && Number(pos.avgEntry) > 0) entry = Number(pos.avgEntry);
+  } catch (e) { entry = 0; }
+  var lines = [];
+  if (worth !== null && rateTxt !== null) {
+    lines.push('Worth ' + worth + ' at the transfer-day price (' + rateTxt + ').');
+  } else {
+    lines.push('No rate known yet for this move — tap Fee in fiat rate to retry the lookup.');
+  }
+  if (worth !== null && entry > 0) {
+    lines.push('Books record its ' + fmtMoney(fq * entry, main) + ' cost (your ' + fmtMoney(entry, main) + ' average entry) as the realized loss.');
+    lines.push('The difference is the market move while you held — not an error.');
+  } else if (worth !== null) {
+    lines.push('Books record what those coins cost you when bought — not this market value.');
+  }
+  openNoteDialog(lines.join('\n'), 'Transfer fees');
+}
+
 function rateRow(label, text) {
   var rate = document.createElement('div');
   rate.className = 'stat-row rate-line';
@@ -4454,7 +4487,24 @@ function tradeBlock(t, main, accountNameById, kind) {
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
-      box.appendChild(statRow('Transfer fees', feeTxtT, t.networkFee, false));
+      var feeRowT = statRow('Transfer fees', feeTxtT, t.networkFee, false);
+      // Tap explains the two numbers in plain language (market worth vs
+      // booked cost) — the card stays clean, the math stays one tap away.
+      var feeValT = feeRowT.querySelector('.stat-val');
+      if (feeValT) {
+        feeValT.setAttribute('role', 'button');
+        feeValT.setAttribute('tabindex', '0');
+        feeValT.setAttribute('aria-label', 'Explain the transfer fee');
+        feeValT.title = 'Tap to explain this fee';
+        (function (tr, mn, fq, rt) {
+          function open() { try { openFeeExplainer(tr, mn, fq, rt); } catch (e) { /* ignore */ } }
+          feeValT.addEventListener('click', open);
+          feeValT.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+          });
+        })(t, main, xferFee, xferRate);
+      }
+      box.appendChild(feeRowT);
       // Fee in fiat rate sits right after Transfer fees — it is the rate behind
       // the (≈) above, frozen at the tx date. Unknown: tap retries the
       // lookup on demand instead of waiting for the backoff.

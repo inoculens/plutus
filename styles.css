@@ -1066,6 +1066,13 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   text-overflow: ellipsis;
   cursor: pointer;
 }
+/* Tx hash link keeps the transfer-pill blue in every state — visited links
+   must never fall back to the browser default purple. */
+.trade-block a.tx-link,
+.trade-block a.tx-link:link,
+.trade-block a.tx-link:visited,
+.trade-block a.tx-link:hover,
+.trade-block a.tx-link:active { color: #7dd3fc; }
 #note-dialog-text {
   margin: 0.4rem 0 0;
   line-height: 1.65;

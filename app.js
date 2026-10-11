@@ -4189,6 +4189,7 @@ function tradeBlock(t, main, accountNameById, kind) {
     var txV = document.createElement('span');
     txV.className = 'stat-val num';
     var txA = document.createElement('a');
+    txA.className = 'tx-link';
     txA.href = txExplorerUrl(txFull);
     txA.target = '_blank';
     txA.rel = 'noopener';

@@ -3545,6 +3545,7 @@
         var a = document.querySelector('#account-detail a[href="https://mempool.space/tx/' + HASH + '"]');
         assert(a !== null, 'record view must link the txid to mempool.space');
         assert(a.target === '_blank', 'mempool link must open in a new tab');
+        assert(a.classList.contains('tx-link'), 'mempool link must carry tx-link so its color persists after visiting');
         // Edit round-trips the hash back into the field.
         openEditTrade(last.id);
         assert(document.getElementById('t-txid').value === HASH, 'edit should prefill txid, got ' + document.getElementById('t-txid').value);

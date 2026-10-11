@@ -2463,6 +2463,14 @@ function feeRateWhy(t, kind) {
   if (kd !== 'stock' && !SYMBOL_MAP[sym]) return 'No market history for this asset — tap to retry anyway';
   return 'Tap to retry the rate lookup';
 }
+// Point the row's tooltip at new text without repainting (a full render
+// would yank the scroll to the top via route()).
+function feeRateTitle(id, text) {
+  try {
+    var el = document.querySelector('[data-trade="' + id + '"] [data-label="Fee Fiat Rate"]');
+    if (el) el.title = String(text);
+  } catch (e) { /* ignore */ }
+}
 function retryFeeRate(tradeId) {
   var st = null;
   try { st = loadState(); } catch (e) { return; }
@@ -2500,8 +2508,8 @@ function retryFeeRate(tradeId) {
       } catch (e) { /* ignore */ }
       try { delete feeRateErr[tradeId]; } catch (e) { /* ignore */ }
       try { render(); } catch (e) { /* ignore */ }
-    } else { histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; try { render(); } catch (e) { /* ignore */ } }
-  }, function () { delete histInflight[key]; histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; try { render(); } catch (e) { /* ignore */ } });
+    } else { histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; feeRateTitle(tradeId, feeRateErr[tradeId]); }
+  }, function () { delete histInflight[key]; histNoteFail(key); feeRateErr[tradeId] = 'Price hosts unreachable — check connection, then tap to retry'; feeRateTitle(tradeId, feeRateErr[tradeId]); });
 }
 
 function setHistCached(symbol, date, vs, kind, price, source, interpolated) {

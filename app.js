@@ -5353,14 +5353,19 @@ function syncTradeTypeUI() {
 // the Details network-fee field is auto-filled and the hint shows what will
 // be recorded as the loss (exchange + network fee). When received is blank
 // the manual network-fee field stays as the fallback (legacy path).
+// Derived amounts are rounded to 8 decimals (the app's quantity precision):
+// raw binary subtraction leaves dust like 0.000017260000000000062.
+function roundQty8(v) {
+  var r = Math.round(Number(v) * 1e8) / 1e8;
+  return (Math.abs(r) < 1e-12) ? 0 : r;
+}
 function transferFeeFrom(sentRaw, recvRaw) {
   var sent = Number(sentRaw);
   var recv = Number(recvRaw);
   if (String(recvRaw).trim() === '') return null;
   if (!isFinite(sent) || sent <= 0) return null;
   if (!isFinite(recv) || recv <= 0 || recv > sent) return null;
-  var fee = sent - recv;
-  if (Math.abs(fee) < 1e-12) fee = 0;
+  var fee = roundQty8(sent - recv);
   if (!(fee >= 0 && fee < sent)) return null;
   return { sent: sent, recv: recv, fee: fee };
 }
@@ -5532,8 +5537,7 @@ function openEditTrade(tradeId) {
     var trQty = Number(tr.qty);
     var trNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
     if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
-      var recv = trQty - trNf;
-      if (Math.abs(recv) < 1e-12) recv = 0;
+      var recv = roundQty8(trQty - trNf);
       uiSetVal('t-toqty', String(recv));
     }
   }
@@ -5739,8 +5743,7 @@ function onTradeSubmit(ev) {
     if (!isFinite(sentChk) || sentChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
     if (!isFinite(recvChk) || recvChk <= 0) { tradeFormError('Received must be > 0.'); return; }
     if (recvChk > sentChk) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
-    networkFee = sentChk - recvChk;
-    if (Math.abs(networkFee) < 1e-12) networkFee = 0;
+    networkFee = roundQty8(sentChk - recvChk);
     uiSetVal('t-networkfee', String(networkFee));
   }
   var toAccId = uiVal('t-toaccount', '');

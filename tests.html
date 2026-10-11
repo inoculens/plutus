@@ -3444,6 +3444,8 @@
         assert(f('1', '') === null, 'blank received is the manual-fee fallback, got non-null');
         assert(f('0', '0') === null, 'non-positive amounts must be null');
         assert(f('1', '0') === null, 'zero received must be null');
+        var dust = f('1', '0.99998274');
+        assert(dust && dust.fee === 0.00001726, 'binary subtraction dust must round to 8dp, got ' + JSON.stringify(dust));
       });
 
       test('transfer submit stores sent minus received as the fee', function () {

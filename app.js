@@ -4661,7 +4661,7 @@ function rateRow(label, text) {
   return rate;
 }
 
-function tradeBlock(t, main, accountNameById, kind) {
+function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   var n = normalizeTrade(t);
   // The Converted row only earns its place when there is something to
   // convert: same-fiat views would just print the native number twice.
@@ -4886,7 +4886,127 @@ function tradeBlock(t, main, accountNameById, kind) {
   facts.className = 'trade-facts';
   Array.prototype.forEach.call(box.querySelectorAll(':scope > .stat-row'), function (r) { facts.appendChild(r); });
   box.appendChild(facts);
+  // FIFO lot linkage: slices of this record closed elsewhere (buys/income)
+  // or slices closed by this record (sells). Average pools cost, so there is
+  // nothing truthful to link — fifoCtx is null outside FIFO mode.
+  if (fifoCtx && t && typeof t.id === 'string' && t.id !== '') {
+    if (t.type === 'buy' || t.type === 'income') {
+      var buySlices = (fifoCtx.links.byBuy[t.id] || []);
+      if (buySlices.length) box.appendChild(soldBlock(t, buySlices, fifoCtx));
+    } else if (t.type === 'sell') {
+      var closeSlices = (fifoCtx.links.byClose[t.id] || []);
+      if (closeSlices.length) box.appendChild(closedBlock(t, closeSlices, fifoCtx));
+    }
+  }
   return box;
+}
+
+// Group closed FIFO lots by opening / closing trade id. Lots without an id
+// on the relevant side (legacy id-less trades) keep their math but opt out
+// of per-record linkage.
+function fifoLinksFor(lots) {
+  var byBuy = {};
+  var byClose = {};
+  (lots || []).forEach(function (l) {
+    if (!l) return;
+    if (l.buyId) (byBuy[l.buyId] = byBuy[l.buyId] || []).push(l);
+    if (l.sellId) (byClose[l.sellId] = byClose[l.sellId] || []).push(l);
+  });
+  return { byBuy: byBuy, byClose: byClose };
+}
+
+function lotKindOf(l) {
+  if (l && l.kind === 'expense') return 'expense';
+  if (l && l.kind === 'network-fee') return 'network-fee';
+  return 'sell';
+}
+
+// Human reference to a linked record: code + date + type. Falls back to the
+// lot's own dates when the trade itself is out of view (another page) or
+// gone — the code still identifies it.
+function lotRefText(other, otherId, fallbackDate) {
+  var code = tradeDisplayId(other && other.id ? other : otherId);
+  var date = (other && other.date) || fallbackDate || '';
+  var type = (other && other.type) ? String(other.type).toLowerCase() : 'record';
+  return code + ' · ' + fmtDateDmy(date) + ' ' + type;
+}
+
+function lotLink(l, targetId, fallbackDate, ctx, sym, verb) {
+  var ref = (targetId && ctx.byId[targetId]) || null;
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'lot-link';
+  if (targetId) b.setAttribute('data-goto', targetId);
+  var code = tradeDisplayId(ref && ref.id ? ref : targetId);
+  b.setAttribute('aria-label', 'Show linked record ' + code);
+  b.title = 'Show linked record ' + code;
+  b.textContent = fmtQty(l.qty) + ' ' + sym + ' ' + verb + ' ' + lotRefText(ref, targetId, fallbackDate) +
+    ' (' + fmtMoney(l.gain, ctx.main) + ')';
+  b.addEventListener('click', function () { ctx.go(targetId); });
+  return b;
+}
+
+// Buy/income card: which later records consumed this buy, and whether it is
+// fully closed. Fee/expense slices get their own verbs so partial states
+// always reconcile with the engine.
+function soldBlock(t, slices, ctx) {
+  var sym = String(t.symbol || '').toUpperCase();
+  var bought = Number(t.qty);
+  var closed = 0;
+  var hasSell = false;
+  var i;
+  for (i = 0; i < slices.length; i++) {
+    closed += Number(slices[i].qty) || 0;
+    if (lotKindOf(slices[i]) === 'sell') hasSell = true;
+  }
+  var full = isFinite(bought) && bought > 0 && closed >= bought - 1e-9;
+  var scope = (isFinite(bought) && bought > 0)
+    ? fmtQty(closed) + ' of ' + fmtQty(bought) + ' ' + sym
+    : fmtQty(closed) + ' ' + sym;
+  var wrap = document.createElement('div');
+  wrap.className = 'lot-links';
+  wrap.setAttribute('data-lot-links', 'sold');
+  var head = document.createElement('div');
+  head.className = 'lot-links-head';
+  head.textContent = hasSell
+    ? (full ? 'Sold · in full' : 'Sold · partially (' + scope + ')')
+    : (full ? 'Consumed · in full' : 'Consumed · partially (' + scope + ')');
+  wrap.appendChild(head);
+  slices.forEach(function (l) {
+    var kind = lotKindOf(l);
+    var verb = kind === 'sell' ? 'sold in' : (kind === 'expense' ? 'lost to expense in' : 'fee in');
+    wrap.appendChild(lotLink(l, l.sellId, l.closeDate, ctx, sym, verb));
+  });
+  return wrap;
+}
+
+// Sell card: which earlier buys this sale ate, oldest first.
+function closedBlock(t, slices, ctx) {
+  var sym = String(t.symbol || '').toUpperCase();
+  var wrap = document.createElement('div');
+  wrap.className = 'lot-links';
+  wrap.setAttribute('data-lot-links', 'closed');
+  var head = document.createElement('div');
+  head.className = 'lot-links-head';
+  head.textContent = 'Closed from';
+  wrap.appendChild(head);
+  slices.forEach(function (l) {
+    var ref = (l.buyId && ctx.byId[l.buyId]) || null;
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lot-link';
+    if (l.buyId) b.setAttribute('data-goto', l.buyId);
+    var code = tradeDisplayId(ref && ref.id ? ref : l.buyId);
+    b.setAttribute('aria-label', 'Show linked record ' + code);
+    b.title = 'Show linked record ' + code;
+    b.textContent = fmtQty(l.qty) + ' ' + sym + ' ← ' + lotRefText(ref, l.buyId, l.openDate) +
+      ' (' + fmtMoney(l.gain, ctx.main) + ')';
+    (function (id) {
+      b.addEventListener('click', function () { ctx.go(id); });
+    })(l.buyId);
+    wrap.appendChild(b);
+  });
+  return wrap;
 }
 
 function detailMetaRow(label, text, title) {
@@ -4944,6 +5064,29 @@ function renderAccountDetail(st, id) {
     rows = computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
   }
   var atrades = accountTrades({ trades: dtrades }, acc.id);
+  // FIFO lot linkage, resolved once for every visible card: every trade by
+  // id (all accounts, so cross-account transfer closes still resolve) and
+  // every closed lot grouped by opening / closing trade. Average pools cost
+  // and links nothing — fifoCtx stays null there.
+  var tradeById = {};
+  (dtrades || []).forEach(function (t) {
+    if (t && typeof t.id === 'string' && t.id !== '') tradeById[t.id] = t;
+  });
+  var fifoLinks = { byBuy: {}, byClose: {} };
+  if (method === 'fifo' && pfDet && pfDet.byAccount) {
+    try {
+      var lotsAll = [];
+      Object.keys(pfDet.byAccount).forEach(function (aid) {
+        var mm = pfDet.byAccount[aid];
+        function grab(r) { ((r && r.lots) || []).forEach(function (l) { lotsAll.push(l); }); }
+        if (mm && typeof mm.forEach === 'function') {
+          if (typeof Map !== 'undefined' && mm instanceof Map) mm.forEach(function (r) { grab(r); });
+          else if (Array.isArray(mm)) mm.forEach(function (r) { grab(r); });
+        }
+      });
+      fifoLinks = fifoLinksFor(lotsAll);
+    } catch (e) { fifoLinks = { byBuy: {}, byClose: {} }; }
+  }
   host.innerHTML = '';
   var head = document.createElement('div');
   head.className = 'account-head detail-head';
@@ -5180,8 +5323,54 @@ function renderAccountDetail(st, id) {
     var frag = (typeof document.createDocumentFragment === 'function')
       ? document.createDocumentFragment()
       : null;
+    // Linked-record jumps: same-page targets scroll + flash in place, while
+    // off-page (paged-out) targets jump to their page first, then flash.
+    var flashTradeCard = function (el) {
+      try {
+        if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+      } catch (e) { /* ignore */ }
+      try {
+        el.classList.add('flash');
+        setTimeout(function () { try { el.classList.remove('flash'); } catch (e4) { /* ignore */ } }, 1600);
+      } catch (e5) { /* ignore */ }
+    };
+    var gotoTrade = function (id) {
+      if (typeof id !== 'string' || id === '') return;
+      var target = null;
+      try {
+        var cards = host.querySelectorAll('[data-trade]');
+        for (var i = 0; i < cards.length; i++) {
+          if (cards[i].getAttribute('data-trade') === id) { target = cards[i]; break; }
+        }
+      } catch (e) { target = null; }
+      if (target) { flashTradeCard(target); return; }
+      var idx = -1;
+      for (var k = 0; k < sortedTrades.length; k++) {
+        if (sortedTrades[k] && sortedTrades[k].id === id) { idx = k; break; }
+      }
+      if (idx < 0) return;
+      var pg = Math.floor(idx / tradePageSize);
+      if (pg === tradePage) return;
+      tradePageSetFor(acc.id, pg, tradeTotal);
+      render();
+      try {
+        setTimeout(function () {
+          var el = null;
+          try {
+            var cs = document.querySelectorAll('#account-detail [data-trade]');
+            for (var j = 0; j < cs.length; j++) {
+              if (cs[j].getAttribute('data-trade') === id) { el = cs[j]; break; }
+            }
+          } catch (e2) { el = null; }
+          if (el) flashTradeCard(el);
+        }, 60);
+      } catch (e3) { /* ignore */ }
+    };
+    var fifoCtx = (method === 'fifo')
+      ? { links: fifoLinks, byId: tradeById, main: main, go: gotoTrade }
+      : null;
     for (var ti = tradeStart; ti < tradeEnd; ti++) {
-      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind);
+      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind, fifoCtx);
       if (frag) frag.appendChild(tb);
       else host.appendChild(tb);
     }
@@ -5203,35 +5392,6 @@ function renderAccountDetail(st, id) {
     eAdd.addEventListener('click', function () { openPrefillTrade(acc.id, true); });
     emptyTrades.appendChild(eAdd);
     host.appendChild(emptyTrades);
-  }
-  // FIFO cost basis is only visible here: closed lots with holding periods,
-  // so the method toggle shows its work instead of just changing numbers.
-  if (method === 'fifo') {
-    var allLots = [];
-    rows.forEach(function (r) {
-      (r.lots || []).forEach(function (l) { allLots.push(l); });
-    });
-    if (allLots.length) {
-      allLots.sort(function (a, b) {
-        var ca = String(a.closeDate || ''), cb = String(b.closeDate || '');
-        return ca < cb ? 1 : ca > cb ? -1 : 0;
-      });
-      var lotHead = document.createElement('h2');
-      lotHead.className = 'section-title';
-      lotHead.textContent = 'Closed lots (FIFO)';
-      host.appendChild(lotHead);
-      var lotBox = document.createElement('article');
-      lotBox.className = 'trade-block';
-      allLots.forEach(function (l) {
-        var sym = String(l.symbol || (rows.length ? rows[0].symbol : '') || '').toUpperCase();
-        lotBox.appendChild(statRow(
-          fmtDateDmy(l.openDate || '') + ' → ' + fmtDateDmy(l.closeDate || ''),
-          fmtQty(l.qty) + ' ' + sym + ' · ' + fmtMoney(l.gain, main) + ' (' + l.holdingDays + 'd)',
-          l.gain, true
-        ));
-      });
-      host.appendChild(lotBox);
-    }
   }
 }
 
@@ -8016,6 +8176,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.csvSafeText = csvSafeText;
   window.Inoculens.fmtDateDmy = fmtDateDmy;
   window.Inoculens.tradeDisplayId = tradeDisplayId;
+  window.Inoculens.fifoLinksFor = fifoLinksFor;
   window.Inoculens.parseDateInput = parseDateInput;
   window.Inoculens.todayDmy = todayDmy;
   window.Inoculens.fmtDateTimeDmy = fmtDateTimeDmy;

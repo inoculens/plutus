@@ -1084,6 +1084,40 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
 }
 .trade-block:last-child { margin-bottom: 0; }
+/* FIFO lot linkage: per-record Sold / Closed-from lines replacing the old
+   detached dump. Ellipsis keeps the fixed box shape; tap jumps to the card. */
+.lot-links {
+  flex: 1 1 100%;
+  margin-top: 0.35rem;
+  border-top: 1px dashed var(--border-strong);
+  padding-top: 0.4rem;
+  display: grid;
+  gap: 0.3rem;
+}
+.lot-links-head {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+.lot-link {
+  min-height: 0;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lot-link:hover { border-color: var(--border-strong); background: rgba(255, 255, 255, 0.03); }
+.trade-block.flash { animation: trade-flash 1.6s ease; }
+@keyframes trade-flash {
+  0%, 100% { box-shadow: none; }
+  20%, 60% { box-shadow: 0 0 0 2px var(--hairline-gold); }
+}
 .trade-head { display: flex; align-items: center; gap: 0.8rem; padding-bottom: 0.2rem; }
 
 .side {

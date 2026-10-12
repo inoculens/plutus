@@ -4652,22 +4652,30 @@ function rateRow(label, text) {
   var rv = document.createElement('span');
   rv.className = 'stat-val muted';
   rv.textContent = text;
-  rv.setAttribute('role', 'button');
-  rv.setAttribute('tabindex', '0');
-  rv.setAttribute('aria-label', 'Show full rate');
+  // The ⓘ badge (and the "show full" affordance) exists only when a popup
+  // is possible at all: a '—' placeholder can never overflow, so wiring it
+  // would leave a badge that opens nothing. Real values stay runtime-gated
+  // (badge shows only while the text is actually truncated).
+  var hasContent = String(text === undefined || text === null ? '' : text).trim() !== '' &&
+    String(text).trim() !== '—';
   function openRate() {
     // Popup only when the text actually overflows the row.
     if (rv.scrollWidth <= rv.clientWidth + 1) return;
     openNoteDialog(text, label);
   }
-  rv.addEventListener('click', openRate);
-  rv.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      openRate();
-    }
-  });
-  infoDot(rl, openRate, rv);
+  if (hasContent) {
+    rv.setAttribute('role', 'button');
+    rv.setAttribute('tabindex', '0');
+    rv.setAttribute('aria-label', 'Show full rate');
+    rv.addEventListener('click', openRate);
+    rv.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openRate();
+      }
+    });
+    infoDot(rl, openRate, rv);
+  }
   rate.appendChild(rl);
   rate.appendChild(rv);
   return rate;

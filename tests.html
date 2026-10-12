@@ -4153,6 +4153,31 @@
         assert(metaLab !== null, 'account detail meta must carry ⓘ');
         navHome();
       });
+      test('placeholder rows carry no dead ⓘ badges', function () {
+        var fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'c-acct', name: 'C Gold', ticker: 'GOLD', kind: 'custom', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 'c-xfer', type: 'transfer', symbol: 'GOLD', qty: 1, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'c-acct', networkFee: 0.5, fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('c-acct');
+        route();
+        render();
+        var row = document.querySelector('[data-trade="c-xfer"] [data-label="Fee in fiat rate"]');
+        assert(row !== null, 'fee-rate row must render');
+        var val = row.querySelector('.stat-val');
+        assert(val !== null && val.textContent === '—', 'unknown rate must show —, got ' + (val && val.textContent));
+        assert(row.querySelector('.info-dot') === null, 'placeholder row must not carry ⓘ');
+        var live = document.querySelector('[data-trade="c-xfer"] [data-label="Transfer fees"] .stat-label .info-dot');
+        assert(live !== null, 'explainer row must keep its ⓘ');
+        navHome();
+      });
     })();
 
     // === Security tests (swap-pair delete, CSV neutralization) ===

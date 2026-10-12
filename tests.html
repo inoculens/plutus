@@ -4440,6 +4440,10 @@
         var rgb = fg[1].split(',').map(function (x) { return Number(x.trim()); });
         assert(rgb.length >= 3 && rgb[0] > 220 && rgb[1] > 220 && rgb[2] > 220, 'date text must be near-white gray, got ' + cs.color);
         assert(Math.max(rgb[0], rgb[1], rgb[2]) - Math.min(rgb[0], rgb[1], rgb[2]) < 30, 'date text must be neutral gray, got ' + cs.color);
+        var bd = /rgba?\(([^)]+)\)/.exec(cs.borderTopColor || cs.borderColor || '');
+        assert(bd !== null, 'date pill must have a visible border');
+        var brgb = bd[1].split(',').map(function (x) { return Number(x.trim()); });
+        assert(brgb.length >= 3 && brgb[0] > 220 && brgb[1] > 220 && brgb[2] > 220, 'date pill border must be near-white gray, got ' + (cs.borderTopColor || cs.borderColor));
         assert((cs.borderRadius || '').indexOf('999px') !== -1, 'date must be a pill (999px radius), got ' + cs.borderRadius);
         L.tradePageSizeSet(25);
         L.tradePageSetFor('pg-acct', 0, 1);

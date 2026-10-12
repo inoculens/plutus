@@ -4428,7 +4428,7 @@
         var when = document.querySelector('#account-detail .trade-when');
         assert(when !== null, 'record date must render');
         var side = document.querySelector('#account-detail .trade-head .side');
-        assert(side !== null && (side.compareDocumentPosition(when) & Node.DOCUMENT_POSITION_FOLLOWING), 'date must sit next to (after) the action pill');
+        assert(side !== null && (when.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING), 'date must sit before the action pill');
         var cs = window.getComputedStyle(when);
         var bg = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor || '');
         assert(bg !== null, 'date pill must have a background, got ' + cs.backgroundColor);

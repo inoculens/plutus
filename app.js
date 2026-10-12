@@ -4640,6 +4640,10 @@ function tradeBlock(t, main, accountNameById, kind) {
   var side = document.createElement('span');
   side.className = 'side ' + meta.cls;
   side.textContent = meta.label;
+  var when = document.createElement('span');
+  when.className = 'trade-when muted';
+  when.textContent = fmtDateDmy(t.date || '');
+  head.appendChild(when);
   head.appendChild(side);
   var whatTxt = '';
   if (t.type === 'transfer' && t.toAccountId && accountNameById) {
@@ -4656,10 +4660,6 @@ function tradeBlock(t, main, accountNameById, kind) {
     what.textContent = whatTxt;
     head.appendChild(what);
   }
-  var when = document.createElement('span');
-  when.className = 'trade-when muted';
-  when.textContent = fmtDateDmy(t.date || '');
-  head.appendChild(when);
   var edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'quiet trade-edit';

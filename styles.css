@@ -853,11 +853,17 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   font-size: 0.85rem;
   white-space: nowrap;
   flex: 0 0 auto;
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .per-page select {
+  width: auto;
+  min-width: 4.6rem;
   min-height: 2.4rem;
-  padding: 0.3rem 0.6rem;
+  padding: 0.3rem 2.3rem 0.3rem 0.7rem;
+  text-align: center;
 }
 
 .trade-pager { margin: 0.9rem 0 0.4rem; }

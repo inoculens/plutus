@@ -4404,6 +4404,10 @@
         // One line: range, pager and per-page share the same row.
         var tops = [range, pager, sel.closest('.per-page')].map(function (el) { return el.offsetTop; });
         assert(tops[0] === tops[1] && tops[1] === tops[2], 'bar must not wrap to two lines, tops ' + tops.join(','));
+        // Dropdown must clear its chevron: global select draws the arrow at
+        // right 0.85rem, so padding-right must leave room for the digits.
+        var padR = parseFloat(window.getComputedStyle(sel).paddingRight) || 0;
+        assert(padR >= 28, 'per-page digits must clear the arrow, padding-right ' + padR + 'px');
         // Single-page shape: selector still at the bottom, pager gone.
         seedPg(1);
         L.tradePageSetFor('pg-acct', 0, 1);

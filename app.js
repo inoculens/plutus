@@ -964,6 +964,13 @@ function ledgerSym(t) {
   return String((t && t.symbol) || '').trim().toUpperCase();
 }
 
+// Stable linkage key for FIFO lot tracing (per-record Sold / Closed-from
+// lines). Null when a legacy trade carries no id — such lots keep their
+// math but opt out of per-record linkage.
+function ledgerTradeId(t) {
+  return (t && typeof t.id === 'string' && t.id !== '') ? t.id : null;
+}
+
 function computeAverage(trades) {
   var bySym = new Map();
   var list = ledgerSortByDate(trades);
@@ -1070,7 +1077,7 @@ function computeFifo(trades) {
     if (t.type === 'buy' || t.type === 'income') {
       var qb = Number(t.qty);
       if (!isFinite(qb) || qb <= 0) continue;
-      q.push({ qty: qb, unitCost: qb > 0 ? n.netMain / qb : 0, date: t.date }); // all-in unit cost
+      q.push({ qty: qb, unitCost: qb > 0 ? n.netMain / qb : 0, date: t.date, buyId: ledgerTradeId(t) }); // all-in unit cost
       st.fees = (st.fees || 0) + n.feeMain; // display-only
     } else if (t.type === 'sell') {
       var qty = Number(t.qty);
@@ -1097,7 +1104,10 @@ function computeFifo(trades) {
           proceeds: proceeds,
           cost: cost,
           gain: proceeds - cost,
-          holdingDays: ledgerHoldingDays(lot.date, t.date)
+          holdingDays: ledgerHoldingDays(lot.date, t.date),
+          buyId: lot.buyId || null,
+          sellId: ledgerTradeId(t),
+          kind: 'sell'
         });
         st.realized += proceeds - cost;
         lot.qty -= take;
@@ -1125,7 +1135,10 @@ function computeFifo(trades) {
               proceeds: 0,
               cost: costE,
               gain: -costE,
-              holdingDays: ledgerHoldingDays(lote.date, t.date)
+              holdingDays: ledgerHoldingDays(lote.date, t.date),
+              buyId: lote.buyId || null,
+              sellId: ledgerTradeId(t),
+              kind: 'expense'
             });
             st.realized -= costE;
             lote.qty -= takeE;
@@ -1159,7 +1172,7 @@ function computeFifo(trades) {
       while (leftT > LEDGER_EPS && q.length > 0) {
         var lotT = q[0];
         var takeT = Math.min(lotT.qty, leftT);
-        removed.push({ qty: takeT, unitCost: lotT.unitCost, openDate: lotT.date });
+        removed.push({ qty: takeT, unitCost: lotT.unitCost, openDate: lotT.date, buyId: lotT.buyId || null });
         lotT.qty -= takeT;
         leftT -= takeT;
         if (lotT.qty <= LEDGER_EPS) q.shift();
@@ -1180,7 +1193,10 @@ function computeFifo(trades) {
             proceeds: 0,
             cost: fc,
             gain: -fc,
-            holdingDays: ledgerHoldingDays(rl.openDate, t.date)
+            holdingDays: ledgerHoldingDays(rl.openDate, t.date),
+            buyId: rl.buyId || null,
+            sellId: ledgerTradeId(t),
+            kind: 'network-fee'
           });
         }
       }
@@ -1192,7 +1208,7 @@ function computeFifo(trades) {
         for (var ni = 0; ni < removed.length; ni++) {
           var ol = removed[ni];
           var keep = ol.qty * (netQtyT / tQty);
-          if (keep > LEDGER_EPS) q.push({ qty: keep, unitCost: ol.unitCost, date: ol.openDate });
+          if (keep > LEDGER_EPS) q.push({ qty: keep, unitCost: ol.unitCost, date: ol.openDate, buyId: ol.buyId || null });
         }
         // Keep FIFO order stable: moved lots go to back (they are still oldest economically, but queue order preserved by re-append; sort by date to keep oldest-first).
         q.sort(function (a, b) { return String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0; });
@@ -1318,7 +1334,7 @@ function computePortfolio(allTrades, live, method) {
       sb.fees += n.feeMain; // display-only
       totals.invested += n.netMain;
       totals.feesFiat += n.feeMain;
-      if (isFifo) sb.queue.push({ qty: qb, unitCost: qb > 0 ? cb / qb : 0, date: t.date });
+      if (isFifo) sb.queue.push({ qty: qb, unitCost: qb > 0 ? cb / qb : 0, date: t.date, buyId: ledgerTradeId(t) });
     } else if (t.type === 'income') {
       var qi = Number(t.qty);
       if (!isFinite(qi) || qi <= 0) return;
@@ -1332,7 +1348,7 @@ function computePortfolio(allTrades, live, method) {
       totals.income += n.totalMain;
       totals.incomeQty += qi;
       totals.feesFiat += n.feeMain;
-      if (isFifo) si.queue.push({ qty: qi, unitCost: qi > 0 ? ci / qi : 0, date: t.date });
+      if (isFifo) si.queue.push({ qty: qi, unitCost: qi > 0 ? ci / qi : 0, date: t.date, buyId: ledgerTradeId(t) });
     } else if (t.type === 'sell') {
       var qs = Number(t.qty);
       if (!isFinite(qs) || qs <= 0) return;
@@ -1353,7 +1369,7 @@ function computePortfolio(allTrades, live, method) {
           var take = Math.min(lot.qty, left);
           var pc = take * unitP;
           var cc = take * lot.unitCost;
-          ss.lots.push({ openDate: lot.date, closeDate: t.date, qty: take, proceeds: pc, cost: cc, gain: pc - cc, holdingDays: ledgerHoldingDays(lot.date, t.date), accountId: t.accountId, symbol: sym });
+          ss.lots.push({ openDate: lot.date, closeDate: t.date, qty: take, proceeds: pc, cost: cc, gain: pc - cc, holdingDays: ledgerHoldingDays(lot.date, t.date), accountId: t.accountId, symbol: sym, buyId: lot.buyId || null, sellId: ledgerTradeId(t), kind: 'sell' });
           ss.realized += pc - cc;
           totals.realized += pc - cc;
           lot.qty -= take;
@@ -1400,7 +1416,7 @@ function computePortfolio(allTrades, live, method) {
               var le2 = se.queue[0];
               var tk = Math.min(le2.qty, lE);
               var ce2 = tk * le2.unitCost;
-              se.lots.push({ openDate: le2.date, closeDate: t.date, qty: tk, proceeds: 0, cost: ce2, gain: -ce2, holdingDays: ledgerHoldingDays(le2.date, t.date), accountId: t.accountId, symbol: sym, kind: 'expense' });
+              se.lots.push({ openDate: le2.date, closeDate: t.date, qty: tk, proceeds: 0, cost: ce2, gain: -ce2, holdingDays: ledgerHoldingDays(le2.date, t.date), accountId: t.accountId, symbol: sym, kind: 'expense', buyId: le2.buyId || null, sellId: ledgerTradeId(t) });
               se.realized -= ce2;
               totals.realized -= ce2;
               totals.feesCryptoMain += ce2;
@@ -1462,7 +1478,7 @@ function computePortfolio(allTrades, live, method) {
         while (lt > LEDGER_EPS && from.queue.length) {
           var ltf = from.queue[0];
           var tkf = Math.min(ltf.qty, lt);
-          removed.push({ qty: tkf, unitCost: ltf.unitCost, openDate: ltf.date });
+          removed.push({ qty: tkf, unitCost: ltf.unitCost, openDate: ltf.date, buyId: ltf.buyId || null });
           ltf.qty -= tkf;
           lt -= tkf;
           if (ltf.qty <= LEDGER_EPS) from.queue.shift();
@@ -1474,7 +1490,7 @@ function computePortfolio(allTrades, live, method) {
             var fsh = rl.qty * (feeQ / tQty);
             if (fsh <= LEDGER_EPS) return;
             var fco = fsh * rl.unitCost;
-            from.lots.push({ openDate: rl.openDate, closeDate: t.date, qty: fsh, proceeds: 0, cost: fco, gain: -fco, holdingDays: ledgerHoldingDays(rl.openDate, t.date), accountId: t.accountId, symbol: sym, kind: 'network-fee' });
+            from.lots.push({ openDate: rl.openDate, closeDate: t.date, qty: fsh, proceeds: 0, cost: fco, gain: -fco, holdingDays: ledgerHoldingDays(rl.openDate, t.date), accountId: t.accountId, symbol: sym, kind: 'network-fee', buyId: rl.buyId || null, sellId: ledgerTradeId(t) });
           });
         }
         from.realized -= feeC + fiatT;
@@ -1491,7 +1507,7 @@ function computePortfolio(allTrades, live, method) {
         if (netQ > LEDGER_EPS && tQty > 0) {
           removed.forEach(function (rl) {
             var keep = rl.qty * (netQ / tQty);
-            if (keep > LEDGER_EPS) to.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate });
+            if (keep > LEDGER_EPS) to.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
           });
           to.queue.sort(function (a, b) { return String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0; });
           var trq = 0, trc = 0;

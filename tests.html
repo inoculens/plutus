@@ -4420,7 +4420,7 @@
         L.tradePageSetFor('pg-acct', 0, 1);
         navHome();
       });
-      test('record dates wear a bright gray pill next to the action pill', function () {
+      test('record dates wear an unfilled gray pill next to the action pill', function () {
         L.tradePageSizeSet(25);
         L.tradePageSetFor('pg-acct', 0, 1);
         seedPg(1);
@@ -4430,10 +4430,16 @@
         var side = document.querySelector('#account-detail .trade-head .side');
         assert(side !== null && (side.compareDocumentPosition(when) & Node.DOCUMENT_POSITION_FOLLOWING), 'date must sit next to (after) the action pill');
         var cs = window.getComputedStyle(when);
-        var m = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor || '');
-        assert(m !== null, 'date must have a filled pill background, got ' + cs.backgroundColor);
-        var rgb = m[1].split(',').map(function (x) { return Number(x.trim()); });
-        assert(rgb.length >= 3 && rgb[0] > 180 && rgb[1] > 180 && rgb[2] > 180, 'pill must be bright gray, got ' + cs.backgroundColor);
+        var bg = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor || '');
+        assert(bg !== null, 'date pill must have a background, got ' + cs.backgroundColor);
+        var parts = bg[1].split(',').map(function (x) { return Number(x.trim()); });
+        var alpha = parts.length >= 4 ? parts[3] : 1;
+        assert(alpha <= 0.2, 'date pill must stay unfilled like the other pills (alpha ' + alpha + ')');
+        var fg = /rgba?\(([^)]+)\)/.exec(cs.color || '');
+        assert(fg !== null, 'date pill must have bright text');
+        var rgb = fg[1].split(',').map(function (x) { return Number(x.trim()); });
+        assert(rgb.length >= 3 && rgb[0] > 150 && rgb[1] > 150 && rgb[2] > 150, 'date text must be bright gray, got ' + cs.color);
+        assert(Math.max(rgb[0], rgb[1], rgb[2]) - Math.min(rgb[0], rgb[1], rgb[2]) < 30, 'date text must be neutral gray, got ' + cs.color);
         assert((cs.borderRadius || '').indexOf('999px') !== -1, 'date must be a pill (999px radius), got ' + cs.borderRadius);
         L.tradePageSizeSet(25);
         L.tradePageSetFor('pg-acct', 0, 1);

@@ -1100,12 +1100,17 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .side-sell { color: var(--loss); background: var(--loss-bg); border-color: rgba(248,113,113,0.25); }
 
 .trade-what { font-weight: 600; letter-spacing: -0.01em; }
+/* Date pill speaks the same language as the other pills (Buy/Sell, fees,
+   spent): translucent tint wash + bright text + matching border, never a
+   solid fill. Neutral gray variant. */
 .trade-when {
-  font-size: 0.78rem;
-  font-weight: 650;
-  color: #14181f;
-  background: #cdd5e1;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #c3cad4;
+  background: rgba(154, 163, 178, 0.1);
+  border: 1px solid rgba(154, 163, 178, 0.28);
   border-radius: 999px;
   padding: 0.22rem 0.65rem;
   flex-shrink: 0;

@@ -4451,6 +4451,162 @@
       });
     })();
 
+    // === FIFO linkage tests (per-record Sold / Closed-from, id pills) ===
+    (function fifoLinkageTests() {
+      var L = window.Inoculens || {};
+      var FXL = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+      function lkTrade(id, type, qty, total, date) {
+        return { id: id, type: type, symbol: 'BTC', qty: qty, total: total, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', note: '', accountId: 'lk-acct', fxLock: FXL, createdAt: date + 'T00:00:00.000Z' };
+      }
+      function seedLk(method, trades) {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: method },
+          accounts: [{ id: 'lk-acct', name: 'Lk BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: trades,
+          priceOverrides: {}
+        });
+      }
+      function openLk() {
+        if (typeof init === 'function') init();
+        navTo('lk-acct');
+        route();
+        render();
+      }
+      function cardFor(id) {
+        var cards = document.querySelectorAll('#account-detail .trade-block[data-trade]');
+        for (var i = 0; i < cards.length; i++) {
+          if (cards[i].getAttribute('data-trade') === id) return cards[i];
+        }
+        return null;
+      }
+      function baseTrades() {
+        return [
+          lkTrade('lk-b1', 'buy', 1, 50000, '2026-01-01'),
+          lkTrade('lk-b2', 'buy', 1, 70000, '2026-02-01'),
+          lkTrade('lk-s1', 'sell', 1.5, 120000, '2026-03-01'),
+          lkTrade('lk-s2', 'sell', 0.3, 27000, '2026-04-01')
+        ];
+      }
+      function waitLk(fn, ms, what) {
+        return new Promise(function (resolve, reject) {
+          var t0 = Date.now();
+          (function poll() {
+            var v = null;
+            try { v = fn(); } catch (e) { reject(e); return; }
+            if (v) resolve(v);
+            else if (Date.now() - t0 > ms) reject(new Error('timed out waiting for ' + what));
+            else setTimeout(poll, 100);
+          })();
+        });
+      }
+
+      test('fifo lots carry buy and sell ids, math unchanged', function () {
+        var f = L.computeFifo(baseTrades());
+        var lots = [];
+        f.forEach(function (v) { (v.lots || []).forEach(function (l) { lots.push(l); }); });
+        assert(lots.length === 3, 'expected 3 closed lots, got ' + lots.length);
+        assert(lots[0].buyId === 'lk-b1' && lots[0].sellId === 'lk-s1' && lots[0].kind === 'sell', 'lot0 linkage wrong');
+        assert(lots[1].buyId === 'lk-b2' && lots[1].sellId === 'lk-s1', 'lot1 linkage wrong');
+        assert(lots[2].buyId === 'lk-b2' && lots[2].sellId === 'lk-s2', 'lot2 linkage wrong');
+        assert(lots[0].gain === 30000, 'lot math must not move, got ' + lots[0].gain);
+      });
+
+      test('tradeDisplayId is stable with an id-less fallback', function () {
+        assert(L.tradeDisplayId({ id: 'abc123' }) === L.tradeDisplayId({ id: 'abc123' }), 'same id must give same code');
+        var code = L.tradeDisplayId({ id: 'abc123' });
+        assert(code.charAt(0) === '#' && code.length === 7, 'code shape wrong: ' + code);
+        assert(L.tradeDisplayId({ id: 'abc123' }) !== L.tradeDisplayId({ id: 'xyz999' }), 'distinct ids must differ');
+        var f1 = L.tradeDisplayId({ date: '2026-01-01', type: 'buy', symbol: 'BTC', qty: 1, total: 10, accountId: 'a1' });
+        var f2 = L.tradeDisplayId({ date: '2026-01-01', type: 'buy', symbol: 'BTC', qty: 1, total: 10, accountId: 'a1' });
+        assert(f1 === f2 && f1.charAt(0) === '#', 'id-less fallback must be stable');
+      });
+
+      test('fifo cards link buys to sales and drop the raw dump', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('lk-acct', 0, 4);
+        seedLk('fifo', baseTrades());
+        openLk();
+        // Every card carries date → id → type pills.
+        var heads = document.querySelectorAll('#account-detail .trade-block[data-trade] .trade-head');
+        assert(heads.length === 4, 'expected 4 cards, got ' + heads.length);
+        Array.prototype.forEach.call(heads, function (h) {
+          var idEl = h.querySelector('.trade-id');
+          assert(idEl !== null && idEl.textContent.charAt(0) === '#', 'id pill missing');
+          var kids = h.children;
+          assert(kids[0].classList.contains('trade-when') && kids[1].classList.contains('trade-id') && kids[2].className.indexOf('side') !== -1, 'pill order must be date, id, type');
+        });
+        // b1 sold in full by s1; b2 partially closed by s1 + s2.
+        var b1 = cardFor('lk-b1');
+        var sold1 = b1.querySelector('[data-lot-links="sold"]');
+        assert(sold1 !== null && sold1.textContent.indexOf('in full') !== -1, 'b1 must read sold in full');
+        assert(sold1.querySelector('[data-goto="lk-s1"]') !== null, 'b1 must link s1');
+        var b2 = cardFor('lk-b2');
+        var sold2 = b2.querySelector('[data-lot-links="sold"]');
+        assert(sold2 !== null && sold2.textContent.indexOf('partially') !== -1, 'b2 must read partially, got ' + sold2.textContent);
+        // s1 closed from both buys; s2 from b2 only.
+        var s1 = cardFor('lk-s1');
+        var closed1 = s1.querySelector('[data-lot-links="closed"]');
+        assert(closed1 !== null, 's1 must show Closed from');
+        assert(closed1.querySelectorAll('.lot-link').length === 2, 's1 must link two buys');
+        var s2 = cardFor('lk-s2');
+        assert(s2.querySelector('[data-lot-links="closed"] [data-goto="lk-b2"]') !== null, 's2 must link b2');
+        // Linked references carry the target code.
+        var b1code = b1.querySelector('.trade-id').textContent;
+        assert(closed1.textContent.indexOf(b1code) !== -1, 's1 must name b1 ' + b1code);
+        // Raw dump is gone.
+        assert(document.getElementById('account-detail').textContent.indexOf('Closed lots (FIFO)') === -1, 'raw dump must be gone');
+        // Ids survive re-render unchanged.
+        render();
+        assert(cardFor('lk-b1').querySelector('.trade-id').textContent === b1code, 'codes must be stable across renders');
+        navHome();
+      });
+
+      test('average mode links nothing but keeps id pills', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('lk-acct', 0, 4);
+        seedLk('average', baseTrades());
+        openLk();
+        assert(document.querySelectorAll('#account-detail .lot-links').length === 0, 'average must show no linkage');
+        assert(document.querySelectorAll('#account-detail .trade-head .trade-id').length === 4, 'id pills stay in average');
+        assert(document.getElementById('account-detail').textContent.indexOf('Closed lots (FIFO)') === -1, 'no dump in average');
+        navHome();
+      });
+
+      testAsync('linked-record tap jumps pages and flashes the card', function () {
+        L.tradePageSizeSet(15);
+        L.tradePageSetFor('lk-acct', 0, 16);
+        var trades = [lkTrade('gl-b1', 'buy', 1, 50000, '2026-01-01')];
+        for (var i = 2; i <= 15; i++) {
+          var d = (i < 10 ? '0' : '') + i;
+          trades.push(lkTrade('gl-f' + d, 'buy', 1, 50000 + i, '2026-01-' + d));
+        }
+        trades.push(lkTrade('gl-s1', 'sell', 0.5, 40000, '2026-02-01'));
+        seedLk('fifo', trades);
+        openLk();
+        function restore() {
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('lk-acct', 0, 16);
+          navHome();
+        }
+        try {
+          assert(document.querySelectorAll('#account-detail .trade-block[data-trade]').length === 15, 'page 1 must hold 15');
+          var s1 = cardFor('gl-s1');
+          assert(s1 !== null, 'newest sale must be on page 1');
+          var link = s1.querySelector('[data-lot-links="closed"] [data-goto="gl-b1"]');
+          assert(link !== null, 's1 must link the oldest buy');
+          assert(cardFor('gl-b1') === null, 'linked buy must start off-page');
+          link.click();
+        } catch (e) { restore(); throw e; }
+        return waitLk(function () {
+          var b1 = cardFor('gl-b1');
+          return (b1 !== null && b1.classList.contains('flash')) ? true : null;
+        }, 5000, 'cross-page jump + flash').then(function () {
+          assert(L.tradePageGet('lk-acct', 16) === 1, 'must land on page 2');
+          restore();
+        }, function (e) { restore(); throw e; });
+      });
+    })();
+
     // === Cross-device sync tests (hash-based reconcile, load-time pull) ===
     (function syncCrossDeviceTests() {
       var S = window.Inoculens || {};

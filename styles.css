@@ -1100,6 +1100,21 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .side-sell { color: var(--loss); background: var(--loss-bg); border-color: rgba(248,113,113,0.25); }
 
 .trade-what { font-weight: 600; letter-spacing: -0.01em; }
+/* Record id pill: same geometry as the action pills, deliberately quieter
+   (smaller, muted outline) so date + type stay primary. */
+.trade-id {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 /* Date pill speaks the same language as the other pills (Buy/Sell, fees,
    spent): translucent tint wash + bright text + matching border, never a
    solid fill. Neutral gray variant. */

@@ -3060,6 +3060,26 @@ function fmtEcbInText(s) {
   return out;
 }
 
+// Short human record code, derived deterministically from the stored trade
+// id (djb2 pair, hex, first 6) — stable across reloads and synced devices,
+// no migration, no renumbering on delete. Legacy trades without an id fall
+// back to stable content so they still get a (shared-looking) code.
+function tradeDisplayId(t) {
+  var id = (typeof t === 'string') ? t : (t && t.id);
+  var src;
+  if (typeof id === 'string' && id.length > 0) {
+    src = id;
+  } else {
+    src = [t && t.date, t && t.type, t && t.symbol, t && t.qty, t && t.total, t && t.accountId].join('|');
+  }
+  var h = '';
+  try {
+    h = syncStateHash(src).replace(/-/g, '').toUpperCase();
+  } catch (e) { h = ''; }
+  while (h.length < 6) h += '0';
+  return '#' + h.slice(0, 6);
+}
+
 function uid() {
   return 't' + Date.now().toString(36) + Math.floor(Math.random() * 0xffffff).toString(36);
 }
@@ -4660,6 +4680,11 @@ function tradeBlock(t, main, accountNameById, kind) {
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');
   head.appendChild(when);
+  var rid = document.createElement('span');
+  rid.className = 'trade-id';
+  rid.textContent = tradeDisplayId(t);
+  rid.title = 'Record ' + tradeDisplayId(t);
+  head.appendChild(rid);
   head.appendChild(side);
   var whatTxt = '';
   if (t.type === 'transfer' && t.toAccountId && accountNameById) {
@@ -7990,6 +8015,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.downloadLotsCsv = downloadLotsCsv;
   window.Inoculens.csvSafeText = csvSafeText;
   window.Inoculens.fmtDateDmy = fmtDateDmy;
+  window.Inoculens.tradeDisplayId = tradeDisplayId;
   window.Inoculens.parseDateInput = parseDateInput;
   window.Inoculens.todayDmy = todayDmy;
   window.Inoculens.fmtDateTimeDmy = fmtDateTimeDmy;

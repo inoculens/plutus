@@ -7907,6 +7907,7 @@ function init() {
   uiBooted = true;
   render();
   refreshPrices();
+  try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
 }
 
 
@@ -8067,6 +8068,10 @@ function syncEffectiveClientId(cfg) {
 
 var syncBusy = false;
 var syncMemSecrets = { password: '', secretKey: '' };
+// True once a drive check proves the two sides disagree (drive newer or a
+// real conflict) and nothing has resolved it since. Drives the header icon
+// and the panel hint so "up to date" is never claimed on local hashes alone.
+var syncPendingRemote = false;
 
 // --- Small pure codecs (no atob/TextEncoder dependency) ---
 
@@ -8234,6 +8239,27 @@ function syncCompareTimestamps(localIso, remoteIso) {
   if (ta > tb) return 'local-newer';
   if (tb > ta) return 'remote-newer';
   return 'equal';
+}
+
+// Three-way sync decision from content hashes — never wall clocks. A fresh
+// exportState() stamps exportedAt with "now", so comparing exportedAt values
+// always reads local-newer and a stale device silently overwrites the drive
+// (and every restore warns "drive copy is older", even for newer copies).
+// baseHash is the last agreed sync point (cfg.lastSyncedHash):
+//   in-sync     — both sides hold the same content
+//   remote-only — this device is untouched; the drive moved (safe to pull)
+//   local-only  — the drive is untouched; this device moved (safe to push)
+//   conflict    — both moved, or no agreed point to judge by (ask the user)
+//   unknown     — a hash is missing (fail closed: never guess)
+function syncDirection(curHash, remoteHash, baseHash) {
+  var c = String(curHash || '');
+  var r = String(remoteHash || '');
+  var b = String(baseHash || '');
+  if (!c || !r) return 'unknown';
+  if (c === r) return 'in-sync';
+  if (b && c === b) return 'remote-only';
+  if (b && r === b) return 'local-only';
+  return 'conflict';
 }
 
 function syncIsProvider(id) {
@@ -9409,6 +9435,10 @@ function syncRefreshHeaderIcon(st) {
     return;
   }
   btn.hidden = false;
+  if (syncPendingRemote) {
+    syncSetSyncIcon('stale', 'Sync: drive and this device disagree. Open sync settings to resolve.');
+    return;
+  }
   var cur = '';
   try { cur = syncCurrentHash(st); } catch (e) { cur = ''; }
   if (cur && cfg.lastSyncedHash && cur === cfg.lastSyncedHash) {
@@ -9496,6 +9526,7 @@ function syncAdoptRemote(cfg, remotePlain) {
   cfg.lastLocation = syncLocationKey(cfg);
   cfg.lastIdentity = syncTrustIdentity(cfg);
   cfg.locV = SYNC_LOC_V;
+  syncPendingRemote = false;
     syncSaveConfig(cfg);
   syncRefreshSyncPanel();
   try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
@@ -9537,14 +9568,7 @@ function syncPushFlow(opts) {  if (syncBusy) return;
   var plain = exportState(st);
   var localAt = syncLocalExportedAt(plain);
   var curHash = syncHashOfExport(plain);
-  // Already uploaded this exact content: skip all network, manual or auto.
-  if (curHash && cfg.lastSyncedHash && curHash === cfg.lastSyncedHash) {
-    syncSetBusy(false);
-    syncRefreshSyncPanel();
-    try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
-    syncSetStatus('Already up to date.');
-    return;
-  }
+  var baseHash = cfg.lastSyncedHash || '';
   syncEncryptEnvelope(plain, pass).then(function (env) {
     syncSetStatus('Uploading to ' + syncProviderLabel(cfg.provider) + '…');
     var locKey = syncLocationKey(cfg);
@@ -9607,35 +9631,113 @@ function syncPushFlow(opts) {  if (syncBusy) return;
         });
       });
     }
-    // Conflict check: if the drive holds a NEWER backup, ask before overwriting.
-    return syncRemoteDownload(cfg).then(function (remoteText) {
-      return syncDecryptEnvelope(remoteText, pass).then(function (remotePlain) {
-        var cmp = syncCompareTimestamps(localAt, syncLocalExportedAt(remotePlain));
-        if (cmp === 'remote-newer') {
-          syncSetBusy(false);
-          if (auto) {
-            // Auto-sync never ambushes with a prompt: leave the drive copy
-            // alone and let the user resolve it in the Sync tab.
+    // Trusted destination: reconcile against the drive copy using content
+    // hashes, never wall clocks. The fresh exportedAt above always reads
+    // "now", so a timestamp compare can never see a newer drive copy — a
+    // stale device would report success while overwriting it. A clean local
+    // tree still verifies the drive instead of assuming "up to date".
+    if (curHash && baseHash && curHash === baseHash) {
+      // Nothing local to upload — but prove the drive agrees first.
+      return syncRemoteDownload(cfg).then(function (remoteText) {
+        return syncDecryptEnvelope(remoteText, pass).then(function (remotePlain) {
+          var remoteHash = syncHashOfExport(remotePlain);
+          if (remoteHash && remoteHash === curHash) {
+            cfg.lastLocation = locKey;
+            cfg.lastIdentity = syncTrustIdentity(cfg);
+            cfg.locV = SYNC_LOC_V;
+            cfg.lastRemoteAt = syncLocalExportedAt(remotePlain);
+            cfg.lastSyncedHash = curHash;
+            syncSaveConfig(cfg);
+            syncPendingRemote = false;
+            syncSetBusy(false);
             syncRefreshSyncPanel();
             try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
-            syncSetStatus('Drive holds a newer copy — open Sync to resolve.');
-            return 'conflict-remote';
+            syncSetStatus('Already up to date.');
+            return 'adopted';
           }
-          return confirmAction(
-            'Drive copy is newer',
-            'The drive backup is newer than this device. Upload anyway and overwrite it, or restore the drive copy here instead?',
-            'Upload anyway',
-            false
-          ).then(function (uploadAnyway) {
-            if (!uploadAnyway) {
-              syncSetStatus('Upload cancelled — drive copy kept.');
-              return 'cancelled';
-            }
+          // The drive moved while this device stood still: pull it in.
+          // Nothing local to lose (local == last sync point).
+          var pulledAt = syncAdoptRemote(cfg, remotePlain);
+          syncSetStatus('Pulled newer changes from ' + syncProviderLabel(cfg.provider) + '.');
+          try { render(); } catch (e) { /* ignore */ }
+          return pulledAt;
+        }, function () {
+          // Drive file exists but this passphrase cannot open it: stop, do not overwrite blindly.
+          throw new Error('sync failed: the drive file uses a different passphrase. Enter that passphrase, or clear the drive file first.');
+        });
+      }, function (dlErr) {
+        // File gone (deleted remotely?) with nothing local to upload: stay
+        // quiet — the next real change recreates it.
+        if (dlErr && dlErr.message && dlErr.message.indexOf('no backup found') !== -1) {
+          syncPendingRemote = false;
+          syncSetBusy(false);
+          syncRefreshSyncPanel();
+          try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+          syncSetStatus('Already up to date.');
+          return 'verified';
+        }
+        throw dlErr;
+      });
+    }
+    // Dirty local tree: three-way decision against the last sync point.
+    // Only-local-changed uploads freely; only-remote-changed is never
+    // overwritten; both-changed asks the user (auto-sync stands down).
+    syncSetStatus('Checking drive for newer changes…');
+    return syncRemoteDownload(cfg).then(function (remoteText) {
+      return syncDecryptEnvelope(remoteText, pass).then(function (remotePlain) {
+        var remoteHash = syncHashOfExport(remotePlain);
+        var dir = syncDirection(curHash, remoteHash, baseHash);
+        if (dir === 'in-sync') {
+          cfg.lastLocation = locKey;
+          cfg.lastIdentity = syncTrustIdentity(cfg);
+          cfg.locV = SYNC_LOC_V;
+          cfg.lastRemoteAt = syncLocalExportedAt(remotePlain);
+          cfg.lastSyncedHash = curHash;
+          syncSaveConfig(cfg);
+          syncPendingRemote = false;
+          syncSetBusy(false);
+          syncRefreshSyncPanel();
+          try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+          syncSetStatus('Already up to date.');
+          return 'adopted';
+        }
+        if (dir === 'local-only') {
+          // Only this device changed: fast-forward upload, no prompt.
+          syncSetStatus('Uploading to ' + syncProviderLabel(cfg.provider) + '…');
+          return syncRemoteUpload(cfg, env).then(function () { return 'pushed'; });
+        }
+        // remote-only or a true conflict: never overwrite blindly.
+        // (Auto-sync never prompts: it stands down for the user.)
+        syncPendingRemote = true;
+        syncSetBusy(false);
+        if (auto) {
+          syncRefreshSyncPanel();
+          try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+          syncSetStatus(dir === 'remote-only'
+            ? 'Drive holds a newer copy — open Sync to resolve.'
+            : 'Devices disagree — open Sync to resolve.');
+          return 'conflict-remote';
+        }
+        return confirmAction3(
+          dir === 'remote-only' ? 'Drive copy is newer' : 'Sync conflict',
+          dir === 'remote-only'
+            ? 'The drive backup changed since this device last synced, and this device has no new changes. Download it (replaces this device) or upload yours (overwrites the drive file)?'
+            : 'Both this device and the drive changed since the last sync. Download the drive copy (replaces this device) or upload yours (overwrites the drive file)?',
+          'Download instead',
+          'Upload mine'
+        ).then(function (choice) {
+          if (choice === 'primary') {
+            var pulledAt = syncAdoptRemote(cfg, remotePlain);
+            try { render(); } catch (e) { /* ignore */ }
+            return pulledAt;
+          }
+          if (choice === 'secondary') {
             syncSetBusy(true, 'Uploading to ' + syncProviderLabel(cfg.provider) + '…');
             return syncRemoteUpload(cfg, env).then(function () { return 'pushed'; });
-          });
-        }
-        return syncRemoteUpload(cfg, env).then(function () { return 'pushed'; });
+          }
+          syncSetStatus('Upload cancelled — drive copy kept.');
+          return 'cancelled';
+        });
       }, function (decErr) {
         // Drive file exists but this passphrase cannot open it: stop, do not overwrite blindly.
         throw new Error('sync failed: the drive file uses a different passphrase. Enter that passphrase, or clear the drive file first.');
@@ -9651,7 +9753,8 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     });
   }).then(function (outcome) {
     syncSetBusy(false);
-    if (outcome === 'cancelled' || outcome === 'conflict-remote' || outcome === 'adopted' || outcome === 'pulled') {
+    if (outcome === 'pushed' || outcome === 'adopted' || outcome === 'pulled' || outcome === 'verified') syncPendingRemote = false;
+    if (outcome === 'cancelled' || outcome === 'conflict-remote' || outcome === 'adopted' || outcome === 'pulled' || outcome === 'verified') {
       // Dismissals and already-handled outcomes: re-lock the buttons to the
       // connection state but keep the specific status line that was set.
       syncRefreshSyncPanel({ keepStatus: true });
@@ -9709,7 +9812,6 @@ function syncPullFlow() {
   } catch (e) {
     beforeJson = null;
   }
-  var beforeAt = syncLocalExportedAt(beforeJson || '');
   syncRemoteDownload(cfg).then(function (remoteText) {
     return syncDecryptEnvelope(remoteText, pass);
   }).then(function (plain) {
@@ -9721,9 +9823,14 @@ function syncPullFlow() {
       throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
     }
     syncSetBusy(false);
-    // Stale-drive warning: restoring an older backup over newer local data
-    // is usually a mistake (or a rollback) — say so explicitly.
-    var stale = (syncCompareTimestamps(beforeAt, syncLocalExportedAt(plain)) === 'local-newer');
+    // Stale-drive warning, decided by content — not by a fresh exportedAt
+    // stamp (which always reads "now" and cried "older" even when the drive
+    // copy was newer). Only when the drive still holds our last sync point
+    // while this device moved on is the drive copy truly older.
+    var remoteHashP = syncHashOfExport(plain);
+    var curBeforeP = '';
+    try { curBeforeP = syncHashOfExport(beforeJson || ''); } catch (e) { curBeforeP = ''; }
+    var stale = (syncDirection(curBeforeP, remoteHashP, (cfg.lastSyncedHash || '')) === 'local-only');
     return confirmAction(
       stale ? 'Drive copy is older' : 'Replace this device?',
       stale
@@ -9738,6 +9845,14 @@ function syncPullFlow() {
             saveStateGuarded(JSON.parse(beforeJson));
           } catch (e2) { /* banner already shown by the guard on storage failure */ }
         }
+        // The drive still disagrees after a cancelled restore (unless the
+        // drive copy is simply older): keep the stale icon + panel hint.
+        try {
+          var curAfter = '';
+          try { curAfter = syncHashOfExport(beforeJson || ''); } catch (e5) { curAfter = ''; }
+          var dirAfter = syncDirection(curAfter, remoteHashP, (cfg.lastSyncedHash || ''));
+          syncPendingRemote = (dirAfter === 'remote-only' || dirAfter === 'conflict');
+        } catch (e6) { /* flag stays as-is */ }
         syncSetStatus('Restore cancelled.');
         syncRefreshSyncPanel({ keepStatus: true });
         try { syncRefreshHeaderIcon(); } catch (e3) { /* ignore */ }
@@ -9757,6 +9872,7 @@ function syncPullFlow() {
       cfg.lastLocation = syncLocationKey(cfg); // adopt: future pushes update this file
       cfg.locV = SYNC_LOC_V;
       cfg.lastIdentity = syncTrustIdentity(cfg);
+      syncPendingRemote = false;
             syncSaveConfig(cfg);
       syncRefreshSyncPanel();
       try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
@@ -9774,6 +9890,148 @@ function syncPullFlow() {
       lines: [String((err && err.message) || err)]
     });
   });
+}
+
+      showBanner('Restore failed — your data was left untouched.', 'error', {
+        title: 'Sync error',
+        lines: [String((err && err.message) || err)]
+      });
+    });
+}
+
+// One remote check, shared by the page-load hook below (and tests): download,
+// decrypt and reconcile against the last sync point. Never overwrites local
+// work blindly — remote-only changes are pulled, local-only changes are left
+// for the next push, conflicts only raise the stale flag + status.
+// Resolves 'in-sync' | 'pulled' | 'local-only' | 'conflict' | 'skipped' |
+// 'unavailable' | 'unreachable' | 'unknown' | 'invalid' | 'busy'. Never rejects.
+function syncCheckRemoteNow() {
+  if (syncBusy) return Promise.resolve('busy');
+  var rd = null;
+  try {
+    rd = syncReadForm();
+  } catch (e) {
+    return Promise.resolve('unavailable');
+  }
+  var cfg = rd.cfg;
+  var pass = rd.passphrase;
+  if (!syncIsConnected(cfg) || !pass) return Promise.resolve('skipped');
+  if (!syncCryptoAvailable()) return Promise.resolve('unavailable');
+  return syncRemoteDownload(cfg).then(function (remoteText) {
+    return syncDecryptEnvelope(remoteText, pass);
+  }).then(function (remotePlain) {
+    var remoteHash = syncHashOfExport(remotePlain);
+    var curHash = '';
+    try {
+      curHash = syncCurrentHash();
+    } catch (e) {
+      curHash = '';
+    }
+    if (!remoteHash || !curHash) return 'unknown';
+    var dir = syncDirection(curHash, remoteHash, cfg.lastSyncedHash || '');
+    if (dir === 'in-sync') {
+      if (cfg.lastSyncedHash !== curHash) {
+        cfg.lastSyncedHash = curHash;
+        try {
+          var d0 = JSON.parse(remotePlain);
+          if (d0 && typeof d0.exportedAt === 'string') cfg.lastRemoteAt = d0.exportedAt;
+        } catch (e0) { /* ignore */ }
+        syncSaveConfig(cfg);
+      }
+      syncPendingRemote = false;
+      syncRefreshSyncPanel();
+      try {
+        syncRefreshHeaderIcon();
+      } catch (e1) { /* ignore */ }
+      return 'in-sync';
+    }
+    if (dir === 'remote-only') {
+      // Safe: this device holds no unsynced work, so adopting loses nothing.
+      var pulled = null;
+      try {
+        pulled = syncAdoptRemote(cfg, remotePlain);
+      } catch (e6) {
+        return 'invalid';
+      }
+      if (pulled !== 'pulled') return pulled;
+      try {
+        render();
+      } catch (e2) { /* ignore */ }
+      syncSetStatus('Pulled newer changes from ' + syncProviderLabel(cfg.provider) + '.');
+      return 'pulled';
+    }
+    if (dir === 'local-only') {
+      syncPendingRemote = false;
+      if (cfg.autoSync) {
+        try {
+          syncScheduleAuto();
+        } catch (e3) { /* ignore */ }
+      }
+      syncRefreshSyncPanel();
+      try {
+        syncRefreshHeaderIcon();
+      } catch (e4) { /* ignore */ }
+      return 'local-only';
+    }
+    syncPendingRemote = true;
+    if (!cfg.lastSyncedHash) syncSetStatus('Drive holds a copy — open Sync to resolve.');
+    else syncSetStatus('Devices disagree — open Sync to resolve.');
+    syncRefreshSyncPanel({ keepStatus: true });
+    try {
+      syncRefreshHeaderIcon();
+    } catch (e5) { /* ignore */ }
+    return 'conflict';
+  }, function () {
+    // Silent on a background check: offline, missing file, or a passphrase
+    // the drive file does not accept. Manual sync still reports these.
+    return 'unreachable';
+  });
+}
+
+// Page-load hook: when this device wakes up behind another one, say so (or
+// catch up) instead of claiming "up to date" on local hashes alone. Runs
+// once per page load, never in the test harness, and never breaks boot.
+var syncLoadChecked = false;
+function syncCheckOnLoad() {
+  if (syncLoadChecked) return;
+  syncLoadChecked = true;
+  try {
+    if (typeof document !== 'undefined' && document.getElementById('ui-fixtures')) return; // tests.html: no network, no live state
+    if (syncBusy) return;
+    var cfg = null;
+    try {
+      cfg = syncLoadConfig();
+    } catch (e) {
+      return;
+    }
+    if (!syncIsConnected(cfg)) return;
+    var pass = '';
+    try {
+      pass = syncReadForm().passphrase;
+    } catch (e) {
+      pass = '';
+    }
+    if (!pass || !syncCryptoAvailable()) return;
+    syncCheckRemoteNow().then(function (outcome) {
+      if (outcome !== 'pulled') return;
+      var nAcc = 0;
+      var nTr = 0;
+      try {
+        var s = loadState();
+        nAcc = (s.accounts || []).length;
+        nTr = (s.trades || []).length;
+      } catch (e) { /* ignore */ }
+      try {
+        refreshPrices();
+      } catch (e2) { /* ignore */ }
+      try {
+        showBanner('Pulled newer changes from the drive — this device had no unsynced changes, so nothing was lost (' + nAcc + ' accounts, ' + nTr + ' trades).', 'info', {
+          title: 'Sync',
+          lines: ['Pulled the newer drive copy (' + nAcc + ' accounts, ' + nTr + ' trades). This device had no unsynced changes, so nothing was lost.']
+        });
+      } catch (e3) { /* ignore */ }
+    }, function () { /* silent: manual sync still reports */ });
+  } catch (e) { /* never break boot */ }
 }
 
 function syncDownloadEncrypted() {
@@ -10038,7 +10296,7 @@ function syncRefreshSyncPanel(opts) {
   // keepStatus: early exits (cancel/dismiss/conflict) already set a specific
   // status line — refresh buttons + indicator but leave their message alone.
   var keepStatus = !!(opts && opts.keepStatus);
-  if (!syncBusy && !keepStatus) syncSetStatus((connected ? ('Connected to ' + syncProviderLabel(cfg.provider) + '.') : 'Not connected.') + last);
+  if (!syncBusy && !keepStatus) syncSetStatus((connected ? ('Connected to ' + syncProviderLabel(cfg.provider) + '.') : 'Not connected.') + last + (syncPendingRemote ? ' Drive and this device disagree — open Sync to resolve.' : ''));
   // Connection state is unmistakable on every visit: Connect locks once
   // established, Disconnect unlocks, and the status line turns green.
   // (While busy, syncSetBusy owns the disabled flags — don't fight it.)
@@ -10511,6 +10769,11 @@ if (typeof window !== 'undefined') {
   window.Inoculens.syncEnvelopeParse = syncEnvelopeParse;
   window.Inoculens.syncIsEncryptedBackup = syncIsEncryptedBackup;
   window.Inoculens.syncCompareTimestamps = syncCompareTimestamps;
+  window.Inoculens.syncDirection = syncDirection;
+  window.Inoculens.syncCheckOnLoad = syncCheckOnLoad;
+  window.Inoculens.syncCheckRemoteNow = syncCheckRemoteNow;
+  window.Inoculens.syncRemotePending = function () { return syncPendingRemote; };
+  window.Inoculens.syncSetPendingRemote = function (v) { syncPendingRemote = !!v; return syncPendingRemote; };
   window.Inoculens.syncProviderById = syncProviderById;
   window.Inoculens.syncIsProvider = syncIsProvider;
   window.Inoculens.syncJoinUrl = syncJoinUrl;

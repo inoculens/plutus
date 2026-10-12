@@ -4451,6 +4451,374 @@
       });
     })();
 
+    // === Cross-device sync tests (hash-based reconcile, load-time pull) ===
+    (function syncCrossDeviceTests() {
+      var S = window.Inoculens || {};
+      var L = window.Inoculens || {};
+      function waitFor(fn, ms, what) {
+        return new Promise(function (resolve, reject) {
+          var t0 = Date.now();
+          (function poll() {
+            var v = null;
+            try { v = fn(); } catch (e) { reject(e); return; }
+            if (v) resolve(v);
+            else if (Date.now() - t0 > ms) reject(new Error('timed out waiting for ' + what));
+            else setTimeout(poll, 100);
+          })();
+        });
+      }
+      var FX = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+      function tradeWith(total, acct) {
+        return { id: 'xd-t', type: 'buy', symbol: 'BTC', qty: 1, total: total, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: acct || 'xd-acct', fxLock: FX, createdAt: '2026-01-01T00:00:00.000Z' };
+      }
+      function seedXd(total) {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: 'xd-acct', name: 'Xd BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: [tradeWith(total)],
+          priceOverrides: {}
+        });
+      }
+      function useForm() {
+        document.getElementById('sy-provider').value = 'webdav';
+        document.getElementById('sy-url').value = 'https://dav.test/r';
+        document.getElementById('sy-user').value = 'u';
+        document.getElementById('sy-passwd').value = 'p';
+        document.getElementById('sy-remember').checked = true;
+        document.getElementById('sy-filename').value = 'plutus.inoculens.com';
+        document.getElementById('sy-pass').value = 'pw';
+        document.getElementById('sy-auto').checked = false;
+        document.getElementById('sy-provider').dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      function remoteEnvFor(total) {
+        var s = L.loadState();
+        return S.syncEncryptEnvelope(JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: new Date().toISOString(), settings: s.settings, accounts: s.accounts, trades: [tradeWith(total)], priceOverrides: s.priceOverrides }), 'pw');
+      }
+      // Marks this destination trusted with `base` as the last agreed point.
+      function trustWith(base) {
+        var c = S.syncLoadConfig();
+        c.lastLocation = S.syncLocationKey(c);
+        c.locV = 2;
+        c.lastIdentity = S.syncTrustIdentity(c);
+        c.lastSyncedHash = base;
+        S.syncSaveConfig(c);
+      }
+
+      test('syncDirection three-way matrix', function () {
+        assert(S.syncDirection('a', 'a', 'a') === 'in-sync', 'equal hashes');
+        assert(S.syncDirection('a', 'a', '') === 'in-sync', 'equal without base');
+        assert(S.syncDirection('a', 'b', 'a') === 'remote-only', 'local untouched');
+        assert(S.syncDirection('b', 'a', 'a') === 'local-only', 'drive untouched');
+        assert(S.syncDirection('b', 'c', 'a') === 'conflict', 'both moved');
+        assert(S.syncDirection('b', 'c', '') === 'conflict', 'no base to judge by');
+        assert(S.syncDirection('', 'a', 'a') === 'unknown', 'missing local hash');
+        assert(S.syncDirection('a', '', 'a') === 'unknown', 'missing remote hash');
+      });
+
+      testAsync('push on stale device offers download, never overwrites', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var puts = 0;
+        var remoteText = '';
+        function restoreAll() {
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try { closeDialog('confirm-dialog'); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        seedXd(10);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'PUT') { puts++; return Promise.resolve({ ok: true, status: 200 }); }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+        };
+        return remoteEnvFor(999).then(function (env) {
+          remoteText = env;
+          S.syncPushFlow();
+          return waitFor(function () {
+            var t = document.getElementById('confirm-title').textContent;
+            return (t === 'Drive copy is newer' &&
+              document.getElementById('confirm-ok').textContent === 'Download instead' &&
+              document.getElementById('confirm-cancel').textContent === 'Upload mine') ? true : null;
+          }, 25000, 'newer-drive choice');
+        }).then(function () {
+          assert(puts === 0, 'stale push must not upload before asking, PUTs=' + puts);
+          document.getElementById('confirm-ok').click();
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Restored from') !== -1 ? true : null;
+          }, 25000, 'download adoption');
+        }).then(function () {
+          assert(puts === 0, 'download must not upload, PUTs=' + puts);
+          assert(L.loadState().trades[0].total === 999, 'drive copy must be adopted');
+          // Now only this device moves: the next push uploads silently.
+          var s2 = L.loadState();
+          s2.trades[0].total = 555;
+          L.saveState(s2);
+          S.syncPushFlow();
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Synced') !== -1 ? true : null;
+          }, 25000, 'local-only upload');
+        }).then(function () {
+          assert(puts === 1, 'local-only change must upload once, PUTs=' + puts);
+          assert(!document.getElementById('confirm-dialog').open, 'fast-forward upload must not prompt');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
+      testAsync('push on clean tree verifies the drive instead of assuming', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var puts = 0;
+        var remoteText = '';
+        function restoreAll() {
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        seedXd(10);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'PUT') { puts++; return Promise.resolve({ ok: true, status: 200 }); }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+        };
+        var s = L.loadState();
+        return S.syncEncryptEnvelope(JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: new Date().toISOString(), settings: s.settings, accounts: s.accounts, trades: s.trades, priceOverrides: s.priceOverrides }), 'pw').then(function (env) {
+          remoteText = env;
+          S.syncPushFlow();
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Already up to date') !== -1 ? true : null;
+          }, 25000, 'verified in sync');
+        }).then(function () {
+          assert(puts === 0, 'verified push must not re-upload, PUTs=' + puts);
+          assert(!document.getElementById('confirm-dialog').open, 'verified push must not prompt');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
+      testAsync('pull warns older only when the drive is truly older', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var remoteText = '';
+        function restoreAll() {
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try { closeDialog('confirm-dialog'); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        seedXd(10);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          if (m === 'PUT') return Promise.resolve({ ok: true, status: 200 });
+          return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+        };
+        // Case 1: the drive copy is NEWER — no "older" warning allowed.
+        return remoteEnvFor(999).then(function (env) {
+          remoteText = env;
+          S.syncPullFlow();
+          return waitFor(function () {
+            return document.getElementById('confirm-title').textContent !== 'Are you sure?' ? true : null;
+          }, 25000, 'restore prompt for newer copy');
+        }).then(function () {
+          assert(document.getElementById('confirm-title').textContent === 'Replace this device?', 'newer drive copy must not warn older, got ' + document.getElementById('confirm-title').textContent);
+          document.getElementById('confirm-cancel').click();
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Restore cancelled') !== -1 ? true : null;
+          }, 25000, 'restore cancel');
+        }).then(function () {
+          assert(L.loadState().trades[0].total === 10, 'cancelled restore must keep local data');
+          // Case 2: the drive copy is truly OLDER — the warning must appear.
+          var s2 = L.loadState();
+          s2.trades[0].total = 555;
+          L.saveState(s2);
+          var s3 = L.loadState();
+          return S.syncEncryptEnvelope(JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: new Date().toISOString(), settings: s3.settings, accounts: s3.accounts, trades: [tradeWith(10)], priceOverrides: s3.priceOverrides }), 'pw');
+        }).then(function (envOld) {
+          remoteText = envOld;
+          S.syncPullFlow();
+          return waitFor(function () {
+            return document.getElementById('confirm-title').textContent === 'Drive copy is older' ? true : null;
+          }, 25000, 'older-drive warning');
+        }).then(function () {
+          assert(document.getElementById('confirm-ok').textContent === 'Restore older copy', 'older warning needs the matching button');
+          document.getElementById('confirm-cancel').click();
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Restore cancelled') !== -1 ? true : null;
+          }, 25000, 'second restore cancel');
+        }).then(function () {
+          assert(L.loadState().trades[0].total === 555, 'cancelled restore must keep the newer local data');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
+      testAsync('load check pulls a newer drive copy automatically', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var puts = 0;
+        var remoteText = '';
+        function restoreAll() {
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        seedXd(10);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'PUT') { puts++; return Promise.resolve({ ok: true, status: 200 }); }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+        };
+        return remoteEnvFor(999).then(function (env) {
+          remoteText = env;
+          return S.syncCheckRemoteNow();
+        }).then(function (outcome) {
+          assert(outcome === 'pulled', 'remote-only check must pull, got ' + outcome);
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Pulled newer changes') !== -1 ? true : null;
+          }, 25000, 'pulled status');
+        }).then(function () {
+          assert(puts === 0, 'auto-pull must not upload, PUTs=' + puts);
+          assert(L.loadState().trades[0].total === 999, 'newer drive copy must be adopted');
+          assert(!document.getElementById('confirm-dialog').open, 'auto-pull must not prompt');
+          assert(S.syncRemotePending() === false, 'pending flag must clear after pull');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
+      testAsync('load check stands down on conflict instead of guessing', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var puts = 0;
+        var remoteText = '';
+        function restoreAll() {
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        seedXd(10);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        var s2 = L.loadState();
+        s2.trades[0].total = 555;
+        L.saveState(s2);
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'PUT') { puts++; return Promise.resolve({ ok: true, status: 200 }); }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+        };
+        return remoteEnvFor(999).then(function (env) {
+          remoteText = env;
+          return S.syncCheckRemoteNow();
+        }).then(function (outcome) {
+          assert(outcome === 'conflict', 'both-moved check must report conflict, got ' + outcome);
+          return waitFor(function () {
+            return document.getElementById('sy-status').textContent.indexOf('Devices disagree') !== -1 ? true : null;
+          }, 25000, 'conflict status');
+        }).then(function () {
+          assert(puts === 0, 'conflict must not upload, PUTs=' + puts);
+          assert(L.loadState().trades[0].total === 555, 'conflict must keep local data');
+          assert(!document.getElementById('confirm-dialog').open, 'background check must not prompt');
+          assert(S.syncRemotePending() === true, 'pending flag must mark the disagreement');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+    })();
+
     renderResults();
   </script>
 </body>

@@ -1101,15 +1101,24 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   letter-spacing: 0.07em;
   color: var(--muted);
 }
-/* Five visible lines max, then internal scroll — one record with dozens of
-   slices can never stretch the page. */
+/* Plain grid, no scroll surface: more than five lines collapse behind a
+   toggle (see lotToggle) instead of an overflow scroller. */
 .lot-link-list {
   display: grid;
   gap: 0.3rem;
-  max-height: 12rem;
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
+.lot-link[hidden] { display: none; }
+.lot-toggle {
+  justify-self: start;
+  min-height: 0;
+  padding: 0.3rem 0.1rem;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.lot-toggle:hover { color: var(--text); background: none; border: none; }
 .lot-link {
   min-width: 0;
   min-height: 0;

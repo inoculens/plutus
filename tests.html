@@ -4577,7 +4577,7 @@
         navHome();
       });
 
-      test('linkage lines cap at five with internal scroll', function () {
+      test('linkage lines collapse past five behind a toggle, no scroll surface', function () {
         L.tradePageSizeSet(25);
         L.tradePageSetFor('lk-acct', 0, 8);
         var trades = [lkTrade('sc-b1', 'buy', 1, 50000, '2026-01-01')];
@@ -4592,11 +4592,26 @@
         var sold = b1.querySelector('[data-lot-links="sold"]');
         assert(sold !== null && sold.textContent.indexOf('partially') !== -1, 'buy must read partially');
         var list = sold.querySelector('.lot-link-list');
-        assert(list !== null, 'lines must live in a scroll list');
-        assert(list.querySelectorAll('.lot-link').length === 7, 'all 7 slices must exist, got ' + list.querySelectorAll('.lot-link').length);
+        assert(list !== null, 'lines must live in a list');
+        var links = list.querySelectorAll('.lot-link');
+        assert(links.length === 7, 'all 7 slices must exist, got ' + links.length);
+        // No scroll surface (its rasterization glitched text): collapsed toggle.
         var cs = window.getComputedStyle(list);
-        assert(cs.overflowY === 'auto' || cs.overflowY === 'scroll', 'list must scroll, got ' + cs.overflowY);
-        assert(list.scrollHeight > list.clientHeight, 'scroll must kick in past five lines');
+        assert(cs.overflowY === 'visible', 'list must not scroll, got ' + cs.overflowY);
+        function visibleCount() {
+          var n = 0;
+          Array.prototype.forEach.call(links, function (el) { if (!el.hidden) n++; });
+          return n;
+        }
+        assert(visibleCount() === 5, 'only five lines visible collapsed, got ' + visibleCount());
+        var toggle = sold.querySelector('.lot-toggle');
+        assert(toggle !== null && toggle.textContent.indexOf('7') !== -1, 'toggle must offer all 7');
+        assert(toggle.getAttribute('aria-expanded') === 'false', 'toggle starts collapsed');
+        toggle.click();
+        assert(visibleCount() === 7, 'expanded must show all 7, got ' + visibleCount());
+        assert(toggle.textContent === 'Show less' && toggle.getAttribute('aria-expanded') === 'true', 'toggle must flip');
+        toggle.click();
+        assert(visibleCount() === 5, 'second click must fold back to 5');
         navHome();
       });
 

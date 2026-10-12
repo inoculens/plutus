@@ -4994,8 +4994,9 @@ function soldBlock(t, slices, ctx) {
     ? (full ? 'Sold · in full' : 'Sold · partially (' + scope + ')')
     : (full ? 'Consumed · in full' : 'Consumed · partially (' + scope + ')');
   wrap.appendChild(head);
-  // Cap visible lines at five: beyond that the list scrolls internally so
-  // one record can never stretch the page.
+  // More than five slices collapse behind an expander instead of a scroll
+  // container: in-card overflow scrollers misrasterize text (sliced glyphs)
+  // on some browsers/GPUs, while a toggle keeps the page compact reliably.
   var list = document.createElement('div');
   list.className = 'lot-link-list';
   wrap.appendChild(list);
@@ -5004,6 +5005,11 @@ function soldBlock(t, slices, ctx) {
     var verb = kind === 'sell' ? 'sold in' : (kind === 'expense' ? 'lost to expense in' : 'fee in');
     list.appendChild(lotLink(l, l.sellId, l.closeDate, ctx, sym, verb));
   });
+  if (slices.length > 5) {
+    var btns = list.querySelectorAll('.lot-link');
+    for (var b = 5; b < btns.length; b++) btns[b].hidden = true;
+    wrap.appendChild(lotToggle(list, slices.length));
+  }
   return wrap;
 }
 
@@ -5041,7 +5047,33 @@ function closedBlock(t, slices, ctx) {
     })(l.buyId);
     list.appendChild(b);
   });
+  if (slices.length > 5) {
+    var cbtns = list.querySelectorAll('.lot-link');
+    for (var c = 5; c < cbtns.length; c++) cbtns[c].hidden = true;
+    wrap.appendChild(lotToggle(list, slices.length));
+  }
   return wrap;
+}
+
+// Collapsed overflow toggle: "Show all N" reveals every line, "Show less"
+// folds back to five. Plain DOM hide/show — no scroll surface, so there is
+// nothing for a compositor to misrasterize.
+function lotToggle(list, total) {
+  var t = document.createElement('button');
+  t.type = 'button';
+  t.className = 'lot-toggle';
+  t.setAttribute('aria-expanded', 'false');
+  function paint(open) {
+    t.textContent = open ? 'Show less' : 'Show all ' + total;
+    t.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var btns = list.querySelectorAll('.lot-link');
+    for (var i = 0; i < btns.length; i++) btns[i].hidden = !open && i >= 5;
+  }
+  t.addEventListener('click', function () {
+    paint(t.getAttribute('aria-expanded') !== 'true');
+  });
+  paint(false);
+  return t;
 }
 
 function detailMetaRow(label, text, title) {

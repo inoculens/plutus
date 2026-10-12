@@ -4630,6 +4630,49 @@
       });
     })();
 
+    // === BTC quantity display tests (always 8 decimals) ===
+    (function btcQtyTests() {
+      var L = window.Inoculens || {};
+      function fracOf(s) {
+        return String(s).split(/[.,]/).pop().replace(/\D/g, '');
+      }
+      test('fmtQty shows 8 decimals for BTC, trimmed elsewhere', function () {
+        assert(fracOf(L.fmtQty(0.1, 'BTC')) === '10000000', 'btc 0.1 wrong: ' + L.fmtQty(0.1, 'BTC'));
+        assert(fracOf(L.fmtQty(1, 'BTC')) === '00000000', 'btc 1 wrong: ' + L.fmtQty(1, 'BTC'));
+        assert(fracOf(L.fmtQty(0.00039164, 'BTC')) === '00039164', 'btc dust wrong');
+        assert(fracOf(L.fmtQty(1, 'btc')) === '00000000', 'lowercase btc wrong');
+        assert(fracOf(L.fmtQty(0.1, 'ETH')) === '1', 'eth must stay trimmed: ' + L.fmtQty(0.1, 'ETH'));
+        assert(L.fmtQty(1, 'ETH').indexOf('00000000') === -1, 'eth 1 must stay short: ' + L.fmtQty(1, 'ETH'));
+        assert(L.fmtQty('nope') === '—', 'non-finite must stay —');
+      });
+      test('BTC record cards show full 8-decimal quantities', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('q-acct', 0, 2);
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: 'q-acct', name: 'Q BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: [
+            { id: 'q-a', type: 'buy', symbol: 'BTC', qty: 0.1, total: 5000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'q-acct', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'q-b', type: 'buy', symbol: 'BTC', qty: 1, total: 60000, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'q-acct', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-02-01T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('q-acct');
+        route();
+        render();
+        var det = document.getElementById('account-detail').textContent;
+        var m01 = det.match(/0[.,]10000000/);
+        assert(m01 !== null && fracOf(m01[0]) === '10000000', '0.1 must show 8 decimals');
+        assert(det.indexOf('00000000') !== -1, '1 must show 8 decimals');
+        var qty = document.querySelector('#account-detail [data-label="Quantity"] .card-value');
+        assert(qty !== null && fracOf(qty.textContent.split(' ').shift()) === '10000000', 'quantity card must show 1.10000000, got ' + (qty && qty.textContent));
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('q-acct', 0, 2);
+        navHome();
+      });
+    })();
+
     // === Cross-device sync tests (hash-based reconcile, load-time pull) ===
     (function syncCrossDeviceTests() {
       var S = window.Inoculens || {};

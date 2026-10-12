@@ -3125,9 +3125,21 @@ function roundHalfUp2(n) {
   return Math.round((v + Number.EPSILON) * 100) / 100;
 }
 
-function fmtQty(n) {
+var btcQtyFmt = null;
+
+function fmtQty(n, symbol) {
   var v = Number(n);
   if (!isFinite(v)) return '—';
+  // BTC always shows all 8 decimals (satoshis): 0.1 -> 0.10000000,
+  // 1 -> 1.00000000. Other assets keep trimmed display.
+  if (String(symbol || '').trim().toUpperCase() === 'BTC') {
+    try {
+      if (!btcQtyFmt) btcQtyFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
+      return btcQtyFmt.format(v);
+    } catch (e) {
+      return v.toFixed(8);
+    }
+  }
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 8 }).format(v);
 }
 
@@ -4489,10 +4501,10 @@ function fmtFeeAmount(t) {
   if (fiatCodes.indexOf(code) !== -1 || /^[A-Z]{3}$/.test(code)) {
     // fiat-like: money; crypto-like fee (BTC/ETH) would be caught below? Keep money for 3-letter fiat, qty otherwise.
     if (['EUR', 'USD', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'].indexOf(code) !== -1) {
-      try { return moneyFmt(code).format(f); } catch (e) { return fmtQty(f) + ' ' + code; }
+      try { return moneyFmt(code).format(f); } catch (e) { return fmtQty(f, code) + ' ' + code; }
     }
   }
-  return fmtQty(f) + ' ' + code;
+  return fmtQty(f, code) + ' ' + code;
 }
 
 function tradeTypeMeta(type) {
@@ -4737,9 +4749,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   if (t.type === 'transfer') {
     var tSym = String(t.symbol || '').toUpperCase();
     var netQ = Number(t.qty) - xferFee;
-    box.appendChild(statRow('Moved', fmtQty(t.qty) + ' ' + tSym, t.qty, false));
+    box.appendChild(statRow('Moved', fmtQty(t.qty, tSym) + ' ' + tSym, t.qty, false));
     if (xferFee > 0) {
-      var feeTxtT = fmtQty(t.networkFee) + ' ' + tSym;
+      var feeTxtT = fmtQty(t.networkFee, tSym) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
       var feeRowT = statRow('Transfer fees', feeTxtT, t.networkFee, false);
       // Tap explains the two numbers in plain language (market worth vs
@@ -4778,12 +4790,12 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       }
       box.appendChild(feeRateEl);
     }
-    box.appendChild(statRow('Received', fmtQty(netQ) + ' ' + tSym, netQ, false));
+    box.appendChild(statRow('Received', fmtQty(netQ, tSym) + ' ' + tSym, netQ, false));
     if ((Number(t.total) > 0 || Number(t.fee) > 0)) {
       box.appendChild(statRow('Fiat cost', fmtMoney(n.netMain, main), n.netMain, false));
     }
   } else if (t.type === 'income') {
-    box.appendChild(statRow('Received', fmtQty(t.qty) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
+    box.appendChild(statRow('Received', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
     if (Number(t.total) > 0) {
       box.appendChild(statRow('Value', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
       if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
@@ -4792,7 +4804,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     }
   } else if (t.type === 'expense') {
     if (t.qty !== undefined && t.qty !== null && String(t.qty).trim() !== '') {
-      box.appendChild(statRow('Lost', fmtQty(t.qty) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
+      box.appendChild(statRow('Lost', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
     }
     if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
       box.appendChild(statRow('Fiat lost', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
@@ -4881,7 +4893,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     box.appendChild(txRow);
   }
   if (t.type === 'buy' || t.type === 'sell') {
-    box.appendChild(statRow('Amount', fmtQty(t.qty) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
+    box.appendChild(statRow('Amount', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
   }
   // One true facts line: gather every fact row into a non-wrapping strip so
   // nothing ever spills to a second row — long values trim with … instead
@@ -4944,7 +4956,7 @@ function lotLink(l, targetId, fallbackDate, ctx, sym, verb) {
   var code = tradeDisplayId(ref && ref.id ? ref : targetId);
   b.setAttribute('aria-label', 'Show linked record ' + code);
   b.title = 'Show linked record ' + code;
-  b.textContent = fmtQty(l.qty) + ' ' + sym + ' ' + verb + ' ' + lotRefText(ref, targetId, fallbackDate) +
+  b.textContent = fmtQty(l.qty, sym) + ' ' + sym + ' ' + verb + ' ' + lotRefText(ref, targetId, fallbackDate) +
     ' (' + fmtMoney(l.gain, ctx.main) + ')';
   b.addEventListener('click', function () { ctx.go(targetId); });
   return b;
@@ -4965,8 +4977,8 @@ function soldBlock(t, slices, ctx) {
   }
   var full = isFinite(bought) && bought > 0 && closed >= bought - 1e-9;
   var scope = (isFinite(bought) && bought > 0)
-    ? fmtQty(closed) + ' of ' + fmtQty(bought) + ' ' + sym
-    : fmtQty(closed) + ' ' + sym;
+    ? fmtQty(closed, sym) + ' of ' + fmtQty(bought, sym) + ' ' + sym
+    : fmtQty(closed, sym) + ' ' + sym;
   var wrap = document.createElement('div');
   wrap.className = 'lot-links';
   wrap.setAttribute('data-lot-links', 'sold');
@@ -5012,7 +5024,7 @@ function closedBlock(t, slices, ctx) {
     var code = tradeDisplayId(ref && ref.id ? ref : l.buyId);
     b.setAttribute('aria-label', 'Show linked record ' + code);
     b.title = 'Show linked record ' + code;
-    b.textContent = fmtQty(l.qty) + ' ' + sym + ' ← ' + lotRefText(ref, l.buyId, l.openDate) +
+    b.textContent = fmtQty(l.qty, sym) + ' ' + sym + ' ← ' + lotRefText(ref, l.buyId, l.openDate) +
       ' (' + fmtMoney(l.gain, ctx.main) + ')';
     (function (id) {
       b.addEventListener('click', function () { ctx.go(id); });
@@ -5203,7 +5215,7 @@ function renderAccountDetail(st, id) {
       host.appendChild(closedFlag);
     }
   }
-  stats.appendChild(statCard('Quantity', pos ? (fmtQty(pos.qtyHeld) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
+  stats.appendChild(statCard('Quantity', pos ? (fmtQty(pos.qtyHeld, pos.symbol) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
   var liveShow = pos ? pos.livePrice : ((isFinite(lvNum) && lvNum > 0) ? lvNum : null);
@@ -8188,6 +8200,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.downloadLotsCsv = downloadLotsCsv;
   window.Inoculens.csvSafeText = csvSafeText;
   window.Inoculens.fmtDateDmy = fmtDateDmy;
+  window.Inoculens.fmtQty = fmtQty;
   window.Inoculens.tradeDisplayId = tradeDisplayId;
   window.Inoculens.fifoLinksFor = fifoLinksFor;
   window.Inoculens.parseDateInput = parseDateInput;

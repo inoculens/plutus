@@ -1674,7 +1674,7 @@ function validateTrade(t, heldQty) {
     if (hasToV && t.accountId && t.toAccountId && t.accountId === t.toAccountId) return 'transfer needs two different accounts';
   }
   if (typeof t.date === 'string' && t.date.length > 0) {
-    if (!isValidDateStr(t.date)) return 'date must be YYYY-MM-DD';
+    if (!isValidDateStr(t.date)) return 'date must be dd/mm/yyyy';
     if (isFutureDateStr(t.date)) return 'date cannot be in the future';
   }
   return null;
@@ -2987,6 +2987,61 @@ function todayStr() {
   var m = n.getMonth() + 1;
   var d = n.getDate();
   return n.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+}
+
+// All user-visible dates are dd/mm/yyyy, built manually from parts — never
+// via toLocaleDateString / Intl (device locale must not change the format).
+// Storage stays ISO YYYY-MM-DD; these helpers only format for display and
+// parse user input back to ISO.
+function fmtDateDmy(d) {
+  if (d === undefined || d === null) return '';
+  var s = String(d).trim();
+  if (!s) return '';
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return m[3] + '/' + m[2] + '/' + m[1];
+  var m2 = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (m2) {
+    var dd = m2[1].length < 2 ? '0' + m2[1] : m2[1];
+    var mm = m2[2].length < 2 ? '0' + m2[2] : m2[2];
+    return dd + '/' + mm + '/' + m2[3];
+  }
+  return s;
+}
+
+function parseDateInput(s) {
+  if (typeof s !== 'string') return null;
+  var v = s.trim();
+  if (!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return isValidDateStr(v) ? v : null;
+  var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);
+  if (m) {
+    var dd = m[1].length < 2 ? '0' + m[1] : m[1];
+    var mm = m[2].length < 2 ? '0' + m[2] : m[2];
+    var iso = m[3] + '-' + mm + '-' + dd;
+    return isValidDateStr(iso) ? iso : null;
+  }
+  return null;
+}
+
+function todayDmy() {
+  return fmtDateDmy(todayStr());
+}
+
+function fmtDateTimeDmy(iso) {
+  try {
+    var d = new Date(iso);
+    if (!isFinite(d.getTime())) return String(iso);
+    function p(x) { return (x < 10 ? '0' : '') + x; }
+    return p(d.getUTCDate()) + '/' + p(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear() +
+      ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds()) + ' UTC';
+  } catch (e) { return String(iso); }
+}
+
+function fmtEcbInText(s) {
+  if (typeof s !== 'string') return s;
+  var out = s.replace(/ECB-(\d{4})-(\d{2})-(\d{2})/g, function (_, y, m, d) { return 'ECB-' + d + '/' + m + '/' + y; });
+  out = out.replace(/Stooq-(\d{4})(\d{2})(\d{2})/g, function (_, y, m, d) { return 'Stooq-' + d + '/' + m + '/' + y; });
+  return out;
 }
 
 function uid() {
@@ -4551,14 +4606,14 @@ function tradeBlock(t, main, accountNameById, kind) {
   }
   var when = document.createElement('span');
   when.className = 'trade-when muted';
-  when.textContent = t.date || '';
+  when.textContent = fmtDateDmy(t.date || '');
   head.appendChild(when);
   var edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'quiet trade-edit';
   edit.textContent = '✎';
   edit.setAttribute('data-edit', t.id || '');
-  edit.setAttribute('aria-label', 'Edit record ' + String(t.symbol || '') + ' ' + String(t.date || ''));
+  edit.setAttribute('aria-label', 'Edit record ' + String(t.symbol || '') + ' ' + fmtDateDmy(t.date || ''));
   edit.addEventListener('click', function () { openEditTrade(edit.getAttribute('data-edit')); });
   head.appendChild(edit);
   var del = document.createElement('button');
@@ -4566,7 +4621,7 @@ function tradeBlock(t, main, accountNameById, kind) {
   del.className = 'quiet danger trade-del';
   del.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
   del.setAttribute('data-del', t.id || '');
-  del.setAttribute('aria-label', 'Delete trade ' + String(t.symbol || '') + ' ' + String(t.date || ''));
+  del.setAttribute('aria-label', 'Delete trade ' + String(t.symbol || '') + ' ' + fmtDateDmy(t.date || ''));
   del.addEventListener('click', function () { deleteTrade(del.getAttribute('data-del')); });
   head.appendChild(del);
   box.appendChild(head);
@@ -5026,7 +5081,7 @@ function renderAccountDetail(st, id) {
       allLots.forEach(function (l) {
         var sym = String(l.symbol || (rows.length ? rows[0].symbol : '') || '').toUpperCase();
         lotBox.appendChild(statRow(
-          String(l.openDate || '') + ' → ' + String(l.closeDate || ''),
+          fmtDateDmy(l.openDate || '') + ' → ' + fmtDateDmy(l.closeDate || ''),
           fmtQty(l.qty) + ' ' + sym + ' · ' + fmtMoney(l.gain, main) + ' (' + l.holdingDays + 'd)',
           l.gain, true
         ));
@@ -5127,7 +5182,7 @@ function fxBadgeText(t) {
   var lock = t ? t.fxLock : null;
   if (!lock) return 'legacy rate';
   var r = Number(lock.rate);
-  var bits = String(lock.source || 'rate');
+  var bits = fmtEcbInText(String(lock.source || 'rate'));
   if (isFinite(r)) {
     var rounded = Math.round(r * 10000) / 10000;
     bits += ' @ ' + rounded;
@@ -5217,7 +5272,7 @@ function deleteTrade(id) {
     });
   }
   var desc = (doomed.type === 'sell' ? 'Sell ' : 'Buy ') + doomed.qty + ' ' +
-    String(doomed.symbol || '') + ' (' + (doomed.date || 'no date') + ')';
+    String(doomed.symbol || '') + ' (' + (doomed.date ? fmtDateDmy(doomed.date) : 'no date') + ')';
   var msg = pair.length
     ? 'Delete swap (' + desc + ' + its linked leg)? This cannot be undone.'
     : 'Delete trade ' + desc + '? This cannot be undone.';
@@ -5785,7 +5840,8 @@ function buildTradeForm() {
     '<label for="t-custom-ccy" id="t-custom-ccy-label" hidden>Custom currency code</label>' +
     '<input id="t-custom-ccy" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY" hidden>' +
     '<label for="t-date">Date</label>' +
-    '<input id="t-date" type="date">' +
+    '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" maxlength="10">' +
+    '<p class="fld-hint">Format dd/mm/yyyy.</p>' +
     '<details class="adv"><summary>Details</summary>' +
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
@@ -6043,7 +6099,7 @@ function resetTradeForm() {
   var titleEl0 = document.getElementById('trade-dialog-title');
   if (titleEl0) titleEl0.textContent = 'Add record';
   var dd = document.getElementById('t-date');
-  if (dd) dd.value = todayStr();
+  if (dd) dd.value = todayDmy();
   tradeFormError(null);
 }
 
@@ -6129,7 +6185,7 @@ function openEditTrade(tradeId) {
       else { cSel.value = 'CUSTOM'; cSel.dispatchEvent(new Event('change', { bubbles: true })); uiSetVal('t-custom-ccy', cu); }
     }
   } catch (e) { /* ignore */ }
-  uiSetVal('t-date', tr.date || todayStr());
+  uiSetVal('t-date', fmtDateDmy(tr.date || todayStr()));
   uiSetVal('t-fee', tr.fee !== undefined && tr.fee !== null ? String(tr.fee) : '');
   uiSetVal('t-note', tr.note || '');
   uiSetVal('t-txid', tr.txid !== undefined && tr.txid !== null ? String(tr.txid) : '');
@@ -6220,9 +6276,10 @@ function onTradeSubmit(ev) {
     submitBtn.disabled = !!locked;
     if (label) submitBtn.textContent = label;
   }
-  var date = uiVal('t-date', '') || todayStr();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { tradeFormError('Date must be YYYY-MM-DD.'); return; }
-  if (!isValidDateStr(date)) { tradeFormError('Date must be YYYY-MM-DD.'); return; }
+  var dateRaw = uiVal('t-date', '').trim();
+  var date = dateRaw ? parseDateInput(dateRaw) : todayStr();
+  if (!date) { tradeFormError('Date must be dd/mm/yyyy.'); return; }
+  if (!isValidDateStr(date)) { tradeFormError('Date must be dd/mm/yyyy.'); return; }
   if (isFutureDateStr(date)) { tradeFormError('date cannot be in the future'); return; }
   var note = uiVal('t-note', '').trim();
   var txid = uiVal('t-txid', '').trim();
@@ -6279,7 +6336,7 @@ function onTradeSubmit(ev) {
       try { freezeExecLock(sellLeg.id, fromSym, date, String(main).toUpperCase(), (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }
       try { freezeExecLock(buyLeg.id, toSym, date, String(main).toUpperCase(), (toAccSwap && toAccSwap.kind) || undefined); } catch (e) { /* ignore */ }
       uiSetVal('t-qty', ''); uiSetVal('t-toqty', ''); uiSetVal('t-total', ''); uiSetVal('t-note', ''); uiSetVal('t-txid', ''); uiSetVal('t-manual-rate', ''); uiSetVal('t-manual-price', '');
-      var dd = document.getElementById('t-date'); if (dd) dd.value = todayStr();
+      var dd = document.getElementById('t-date'); if (dd) dd.value = todayDmy();
       tradeFormError(null);
       lockSubmit(false, 'Add record');
       refreshPrices();
@@ -6297,7 +6354,7 @@ function onTradeSubmit(ev) {
           title: 'FX error',
           lines: [
             'Pair: ' + pairs.join(', '),
-            'Trade date: ' + date,
+            'Trade date: ' + fmtDateDmy(date),
             'Cause: no ECB fixing cached and the rate request failed (weekend gap or network).',
             'Tip: nothing was saved yet — enter the rate manually to proceed.'
           ]
@@ -6560,7 +6617,7 @@ function onTradeSubmit(ev) {
     uiSetVal('t-manual-rate', '');
     uiSetVal('t-manual-price', '');
     var d = document.getElementById('t-date');
-    if (d) d.value = todayStr();
+    if (d) d.value = todayDmy();
     tradeFormError(null);
     lockSubmit(false, 'Add record');
     refreshPrices(); // recompute + render when fresh prices land (renders sync too)
@@ -6581,7 +6638,7 @@ function onTradeSubmit(ev) {
       title: 'FX error',
       lines: [
         'Pair: ' + pairs.join(', '),
-        'Trade date: ' + date,
+        'Trade date: ' + fmtDateDmy(date),
         'Cause: no ECB fixing cached and the rate request failed (weekend gap or network).',
         'Tip: nothing was saved yet — enter the rate manually to proceed.'
       ]
@@ -7294,7 +7351,7 @@ function downloadTradesCsv() {
   var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'txid', 'fxRate', 'fxSource']];
   ledgerSortByDate(st.trades || []).forEach(function (t) {
     rows.push([
-      t.id || '', t.date || '', t.type || '', String(t.symbol || '').toUpperCase(),
+      t.id || '', fmtDateDmy(t.date || ''), t.type || '', String(t.symbol || '').toUpperCase(),
       t.qty !== undefined && t.qty !== null ? t.qty : '',
       t.total !== undefined && t.total !== null ? t.total : '',
       t.currency || '', t.fee !== undefined && t.fee !== null ? t.fee : '',
@@ -7304,7 +7361,7 @@ function downloadTradesCsv() {
       { text: t.note || '' },
       { text: t.txid || '' },
       (t.fxLock && t.fxLock.rate) || '',
-      (t.fxLock && t.fxLock.source) || ''
+      fmtEcbInText((t.fxLock && t.fxLock.source) || '')
     ]);
   });
   downloadTextFile('plutus.inoculens.com-trades-' + backupStamp() + '.csv', rows.map(function (r) {
@@ -7332,14 +7389,14 @@ function downloadLotsCsv() {
       var syms = pf.states[accId];
       Object.keys(syms).forEach(function (sym) {
         (syms[sym].lots || []).forEach(function (l) {
-          rows.push([sym, l.openDate || '', l.closeDate || '', l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, { text: accName[accId] || accId }]);
+          rows.push([sym, fmtDateDmy(l.openDate || ''), fmtDateDmy(l.closeDate || ''), l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, { text: accName[accId] || accId }]);
         });
       });
     });
   } catch (e) {
     fifo.forEach(function (v, sym) {
       (v.lots || []).forEach(function (l) {
-        rows.push([sym, l.openDate || '', l.closeDate || '', l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, '']);
+        rows.push([sym, fmtDateDmy(l.openDate || ''), fmtDateDmy(l.closeDate || ''), l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, '']);
       });
     });
   }
@@ -7688,7 +7745,7 @@ function init() {
     });
   }
   var d = document.getElementById('t-date');
-  if (d && !d.value) d.value = todayStr();
+  if (d && !d.value) d.value = todayDmy();
   uiBooted = true;
   render();
   refreshPrices();
@@ -7757,6 +7814,11 @@ if (typeof window !== 'undefined') {
   window.Inoculens.downloadTradesCsv = downloadTradesCsv;
   window.Inoculens.downloadLotsCsv = downloadLotsCsv;
   window.Inoculens.csvSafeText = csvSafeText;
+  window.Inoculens.fmtDateDmy = fmtDateDmy;
+  window.Inoculens.parseDateInput = parseDateInput;
+  window.Inoculens.todayDmy = todayDmy;
+  window.Inoculens.fmtDateTimeDmy = fmtDateTimeDmy;
+  window.Inoculens.todayStr = todayStr;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', init);
   }
@@ -9442,7 +9504,7 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     syncRefreshSyncPanel();
     try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
     clearBanner();
-    syncSetStatus('Synced ' + now.slice(0, 19).replace('T', ' ') + ' UTC.');
+    syncSetStatus('Synced ' + fmtDateTimeDmy(now) + '.');
   }, function (err) {
     syncSetBusy(false);
     syncRefreshSyncPanel();
@@ -9807,7 +9869,7 @@ function syncRefreshSyncPanel(opts) {
   if (cfg.passphrase) syncSetVal('sy-pass', cfg.passphrase);
   var rememberPassBox = document.getElementById('sy-remember-pass');
   if (rememberPassBox) rememberPassBox.checked = !!cfg.rememberPassphrase;
-  var last = cfg.lastSyncAt ? (' Last sync ' + String(cfg.lastSyncAt).slice(0, 19).replace('T', ' ') + ' UTC.') : '';
+  var last = cfg.lastSyncAt ? (' Last sync ' + fmtDateTimeDmy(cfg.lastSyncAt) + '.') : '';
   // keepStatus: early exits (cancel/dismiss/conflict) already set a specific
   // status line — refresh buttons + indicator but leave their message alone.
   var keepStatus = !!(opts && opts.keepStatus);

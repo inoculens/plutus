@@ -1111,6 +1111,49 @@
         assert(H.parseStooqDaily(csv, '20260103') === null, 'shut market must be null');
       });
 
+      test('dates always display dd/mm/yyyy regardless of locale', function () {
+        var L = window.Inoculens;
+        assert(typeof L.fmtDateDmy === 'function', 'fmtDateDmy missing');
+        assert(typeof L.parseDateInput === 'function', 'parseDateInput missing');
+        assert(L.fmtDateDmy('2026-01-15') === '15/01/2026', 'iso to dmy wrong: ' + L.fmtDateDmy('2026-01-15'));
+        assert(L.fmtDateDmy('2026-10-05T00:00:00.000Z') === '05/10/2026', 'iso datetime to dmy wrong');
+        assert(L.fmtDateDmy('05/10/2026') === '05/10/2026', 'dmy passthrough wrong');
+        assert(L.fmtDateDmy('') === '', 'empty must stay empty');
+        assert(L.parseDateInput('15/01/2026') === '2026-01-15', 'dmy parse wrong');
+        assert(L.parseDateInput('5/1/2026') === '2026-01-05', 'short dmy parse wrong');
+        assert(L.parseDateInput('2026-01-15') === '2026-01-15', 'iso parse must stay compatible');
+        assert(L.parseDateInput('2026-13-99') === null, 'bad date must be null');
+        assert(L.parseDateInput('31/02/2026') === null, 'impossible dmy must be null');
+        assert(L.fmtDateTimeDmy('2026-10-05T14:03:07.000Z') === '05/10/2026 14:03:07 UTC', 'datetime dmy wrong: ' + L.fmtDateTimeDmy('2026-10-05T14:03:07.000Z'));
+        var badge = L.fxBadgeText({ currency: 'EUR', fxLock: { rate: 0.9, source: 'ECB-2026-10-05', interpolated: false } });
+        assert(badge.indexOf('05/10/2026') !== -1 && badge.indexOf('2026-10-05') === -1, 'badge must show dmy: ' + badge);
+        // Trade cards render dmy, never raw ISO.
+        L.saveState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [{ id: 'dmy-acct', name: 'Dmy', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }], trades: [{ id: 'dmy-t', type: 'buy', symbol: 'BTC', qty: 1, total: 10, currency: 'EUR', date: '2026-01-15', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'dmy-acct', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-15T00:00:00.000Z' }], priceOverrides: {} });
+        if (typeof init === 'function') init();
+        navTo('dmy-acct');
+        route();
+        render();
+        var when = document.querySelector('#account-detail .trade-when');
+        assert(when && when.textContent === '15/01/2026', 'trade date must be dmy, got ' + (when && when.textContent));
+        // Date field itself shows dmy, not the browser locale picker's format.
+        var fld = document.getElementById('t-date');
+        assert(fld && fld.getAttribute('type') === 'text', 'date field must be text (locale-proof), got ' + (fld && fld.getAttribute('type')));
+        assert(fld && fld.getAttribute('placeholder') === 'dd/mm/yyyy', 'date placeholder must be dd/mm/yyyy');
+        openPrefillTrade('dmy-acct');
+        assert(document.getElementById('t-date').value.indexOf('/') !== -1, 'date default must be dmy, got ' + document.getElementById('t-date').value);
+        document.getElementById('t-date').value = '16/01/2026';
+        document.getElementById('t-side').value = 'buy';
+        document.getElementById('t-qty').value = '1';
+        document.getElementById('t-total').value = '11';
+        onTradeSubmit({ preventDefault: function () {} });
+        var st = L.loadState();
+        var saved = null;
+        (st.trades || []).forEach(function (t) { if (t && t.total === 11) saved = t; });
+        assert(saved && saved.date === '2026-01-16', 'dmy input must save as ISO, got ' + JSON.stringify(saved && saved.date));
+        navHome();
+        restoreState();
+      });
+
       testAsync('historical override short-circuits network', function () {
         var origFetch = window.fetch;
         var called = 0;
@@ -1594,7 +1637,7 @@
       test('stable badge shows USDC→USD path before ECB bits', function () {
         var txt = L.fxBadgeText({ currency: 'USDC', fxLock: { rate: 0.92, source: 'ECB-2026-10-01', interpolated: false } });
         assert(txt.indexOf('USDC→USD 1.0') !== -1, 'missing stable path prefix: ' + txt);
-        assert(txt.indexOf('ECB-2026-10-01') !== -1 && txt.indexOf('0.92') !== -1, 'missing ECB bits: ' + txt);
+        assert(txt.indexOf('ECB-01/10/2026') !== -1 && txt.indexOf('0.92') !== -1, 'missing ECB bits: ' + txt);
         var plain = L.fxBadgeText({ currency: 'USD', fxLock: { rate: 0.92, source: 'ECB-2026-10-01', interpolated: false } });
         assert(plain.indexOf('→USD') === -1, 'non-stable should not show stable prefix: ' + plain);
       });
@@ -2184,7 +2227,7 @@
           rateVal.click();
           var dlg = document.getElementById('note-dialog');
           assert(dlg && dlg.open === true, 'rate click must open the full-text popup');
-          assert(document.getElementById('note-dialog-text').textContent.indexOf('ECB-2026-10-01') !== -1, 'popup must show the full rate');
+          assert(document.getElementById('note-dialog-text').textContent.indexOf('ECB-01/10/2026') !== -1, 'popup must show the full rate');
           var x = dlg.querySelector('[data-close]');
           if (x) x.click();
           noteVal.click();

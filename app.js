@@ -9892,13 +9892,6 @@ function syncPullFlow() {
   });
 }
 
-      showBanner('Restore failed — your data was left untouched.', 'error', {
-        title: 'Sync error',
-        lines: [String((err && err.message) || err)]
-      });
-    });
-}
-
 // One remote check, shared by the page-load hook below (and tests): download,
 // decrypt and reconcile against the last sync point. Never overwrites local
 // work blindly — remote-only changes are pulled, local-only changes are left

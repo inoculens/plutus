@@ -1754,7 +1754,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     dialog { max-height: 92dvh; }
   }
   dialog[open] { display: flex; flex-direction: column; }
-  .dialog-head { position: sticky; top: 0; z-index: 2; background: linear-gradient(180deg, var(--surface-2) 78%, transparent); padding-bottom: 0.6rem; }
   .dialog-head [data-close] { min-height: 2.75rem; min-width: 2.75rem; }
   #trade-dialog[open], #account-dialog[open], #settings-dialog[open],
   #confirm-dialog[open], #note-dialog[open], #error-dialog[open], #color-dialog[open] {

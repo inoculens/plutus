@@ -1652,27 +1652,142 @@ th, td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(
 th { color: var(--muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.07em; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-display); }
 
-/* ————— Responsive ————— */
+/* ————— Responsive: mobile is a full redesign, desktop rules above never change ————— */
+/* Single structural switch at 720px: everything below stacks and fills the
+   phone width. Components are fluid (wrap / auto-fit / minmax) so any
+   in-between width degrades gracefully — there is no half-desktop state. */
 @media (max-width: 720px) {
-  .topbar { flex-wrap: wrap; row-gap: 0.8rem; }
+  /* No sideways scroll from long money values; boxes keep their size. */
+  html, body { overflow-x: clip; }
+  body { font-size: 16px; }
+
+  /* — Topbar: brand row, then one compact control row, then a big Record. —
+     Currency + method + icons share row 1; the primary action owns row 2
+     at full thumb width so first-time setup is one obvious tap. */
+  .topbar { flex-wrap: wrap; row-gap: 0.6rem; }
   .brand-id { flex: 1 1 100%; }
-  .topbar-controls { flex-wrap: wrap; width: 100%; gap: 0.65rem; row-gap: 0.7rem; }
-  .tb-field select { width: 5rem; }
+  .brand h1 { font-size: 0.85rem; }
+  .topbar-controls { flex-wrap: wrap; width: 100%; gap: 0.55rem; row-gap: 0.6rem; align-items: center; }
+  .tb-field { order: 1; flex: 0 0 auto; }
+  .tb-field select { width: 5.2rem; min-height: 2.75rem; font-size: 16px; }
+  .segmented { order: 2; flex: 1 1 auto; min-width: 0; }
+  .segmented button { flex: 1 1 0; min-height: 2.75rem; padding: 0.45rem 0.5rem; font-size: 0.85rem; white-space: nowrap; }
+  #tb-sync { order: 3; flex: 0 0 auto; min-height: 2.75rem; }
+  #tb-settings { order: 4; flex: 0 0 auto; min-height: 2.75rem; }
+  #tb-add { order: 5; flex: 1 1 100%; min-height: 3.1rem; font-size: 1rem; font-weight: 650; }
   #tb-account { display: none; }
   #fab-trade { display: inline-flex; }
-  .cards { grid-template-columns: repeat(2, 1fr); }
+  /* A modal owns the screen: the floating + must never cover its fields. */
+  body.modal-open #fab-trade { display: none !important; }
+
+  /* — Page frame — */
+  main { padding: 1rem 0.9rem 7rem; gap: 1.1rem; }
+  #view-home, #view-account { gap: 1.1rem; }
+  #banner { margin: 0.7rem 0.9rem 0; font-size: 0.88rem; flex-wrap: wrap; }
+
+  /* — Hero: total on top, allocation as a compact row below — */
+  #hero { padding: 1.35rem 1.2rem 1.1rem; gap: 1rem; }
+  .hero-value { font-size: clamp(1.9rem, 9vw, 2.4rem); }
+  .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
+  .hero-sub { white-space: normal; overflow: visible; text-overflow: clip; }
+  .hero-alloc { gap: 0.8rem; }
+  .hero-alloc-legend { gap: 0.3rem; font-size: 0.82rem; }
+
+  /* — Summary: fixed 2×2 grid, values always truncate inside their cell — */
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card { padding: 0.7rem 0.85rem 0.6rem; min-width: 0; }
   .card:nth-child(3) { border-left: none; }
   .card:nth-child(n+3) { border-top: 1px solid var(--border); }
-  .hero-value { font-size: 2.4rem; }
-  #hero { padding: 1.4rem 1.25rem 1.1rem; }
-  .account-card { flex-wrap: wrap; }
-  .acct-figs { flex-direction: row; gap: 0.75rem; align-items: baseline; }
-  /* Phones: facts wrap into label-above-value columns instead of one grid. */
-  .trade-block { display: flex; flex-wrap: wrap; column-gap: 1.25rem; }
-  .trade-facts { flex-wrap: wrap; overflow: visible; }
-  .trade-head { flex: 1 1 100%; }
-  .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.12rem 0; }
-  main { padding-bottom: 7rem; }
+  .card-value { font-size: 1.05rem; }
+
+  /* — Accounts: one row (grip + avatar + name + figures), figures stack
+       under the name only on very narrow cards; pager scrolls, never clips. */
+  #accounts { gap: 0.55rem; }
+  .section-head { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  .section-actions { flex-wrap: wrap; }
+  .section-actions button { flex: 1 1 auto; min-height: 2.75rem; }
+  .account-card { flex-wrap: nowrap; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; min-height: 4.2rem; }
+  .drag-handle { width: 1.9rem; height: 2.75rem; flex-shrink: 0; opacity: 0.75; }
+  .acct-avatar { width: 2.6rem; height: 2.6rem; }
+  .acct-mid { gap: 0.05rem; }
+  .account-name { font-size: 0.95rem; }
+  .acct-figs { align-items: flex-end; text-align: right; flex-shrink: 0; max-width: 42%; }
+  .acct-value { font-size: 0.95rem; }
+  .acct-pl { font-size: 0.78rem; }
+  .pager { gap: 0.45rem; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; padding-bottom: 0.25rem; scrollbar-width: thin; }
+  .page-btn { flex: 0 0 auto; min-width: 2.75rem; min-height: 2.75rem; }
+  .trade-bottom-bar { flex-wrap: wrap; }
+  .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: flex-start; }
+  .filter-panel { position: fixed; left: 0.9rem; right: 0.9rem; top: auto; bottom: calc(0.9rem + env(safe-area-inset-bottom)); max-height: 50vh; max-height: 50dvh; }
+  .account-create-row { flex-direction: column; align-items: stretch; }
+  .account-create-row .fld { min-width: 0; }
+
+  /* — Detail header + trade facts: two even columns that wrap by content — */
+  .detail-head { padding: 1.1rem 1rem 0.95rem; gap: 0.6rem; }
+  .detail-name { font-size: 1.3rem; overflow-wrap: anywhere; min-width: 0; }
+  .menu { margin-left: auto; }
+  .menu summary { min-height: 2.75rem; }
+  .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; }
+  .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
+  .trade-head { flex: 1 1 100%; flex-wrap: wrap; row-gap: 0.4rem; }
+  .trade-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+  .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }
+  .trade-block .stat-row[data-label="Note"] { flex-basis: 100%; max-width: none; }
+  .trade-block .stat-row.rate-line { flex-basis: 100%; max-width: none; }
+  .trade-foot { flex: 1 1 100%; padding-bottom: 0.3rem; }
+  .trade-edit, .trade-del { min-height: 2.75rem; min-width: 2.75rem; }
+
+  /* — Dialogs: bottom sheets that survive the on-screen keyboard. —
+     dvh/svh track the shrunken viewport (with vh fallback); the sheet is
+     anchored to the bottom, scrolls internally, and reserves the safe area
+     so the last field + primary button clear the keyboard. */
+  dialog {
+    width: 100vw; max-width: 100vw;
+    margin: auto 0 0 0; margin-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom));
+    max-height: 92vh; max-height: 92svh; max-height: 92dvh;
+    overflow-y: auto; overscroll-behavior: contain;
+    scroll-padding-bottom: 3rem;
+  }
+  @supports (height: 1dvh) {
+    dialog { max-height: 92dvh; }
+  }
+  dialog[open] { display: flex; flex-direction: column; }
+  .dialog-head { position: sticky; top: 0; z-index: 2; background: linear-gradient(180deg, var(--surface-2) 78%, transparent); padding-bottom: 0.6rem; }
+  .dialog-head [data-close] { min-height: 2.75rem; min-width: 2.75rem; }
+  #trade-dialog[open], #account-dialog[open], #settings-dialog[open],
+  #confirm-dialog[open], #note-dialog[open], #error-dialog[open], #color-dialog[open] {
+    width: 100vw; max-width: 100vw;
+    margin: auto 0 0 0;
+    border-radius: 20px 20px 0 0;
+  }
+  #trade-dialog-body, #account-dialog-body { overflow-y: visible; min-height: 0; }
+  #settings-dialog { height: auto; min-height: 0; }
+  #error-dialog[open] { width: 100vw; height: auto; min-height: 0; }
+
+  /* — Forms: 48px targets, 16px type (no iOS zoom), sticky primary action — */
+  #trade-form, #account-dialog-body, #settings-dialog-body { gap: 0.2rem; }
+  label { margin-top: 1.1rem; font-size: 0.78rem; }
+  input, select, textarea { min-height: 3rem; padding: 0.65rem 0.8rem; font-size: 16px; }
+  select { padding-right: 2.4rem; }
+  #trade-form button.primary, #account-dialog-body button.primary {
+    position: sticky; bottom: 0;
+    min-height: 3.25rem; font-size: 1.02rem; z-index: 1;
+  }
+  details.adv summary, details.opt summary { min-height: 2.75rem; line-height: 2.75rem; font-size: 0.92rem; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions button { flex: 1 1 8rem; min-height: 3rem; }
+  .swatches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .swatches button { min-height: 3rem; }
+  .color-custom { flex-wrap: wrap; }
+  #c-apply { flex: 1 1 auto; min-height: 3rem; }
+
+  /* — Landing / guide: single column, full-width actions — */
+  #landing { margin-top: 0.5rem; }
+  .guide-panel { padding: 1.6rem 1.25rem 1.3rem; }
+  .guide-ctas button { flex: 1 1 100%; }
+
   table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   table, table tbody, table tr, table td { display: block; width: 100%; }
   table tr { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: var(--surface); }
@@ -1681,14 +1796,26 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   td.num, th.num { text-align: left; }
 }
 
+/* Small phones (≤560px): refinements only — no new layout, so the 561–720px
+   band renders identically to phones, just roomier. */
 @media (max-width: 560px) {
-  #settings-dialog { height: min(640px, 92vh); }
+  #settings-dialog { height: auto; min-height: 0; }
   .set-layout { flex-direction: column; overflow: hidden; }
-  .set-tabs { flex-direction: row; flex: none; overflow-x: auto; overflow-y: hidden; }
-  .set-panels { overflow-y: auto; }
+  .set-tabs { flex-direction: row; flex: none; overflow-x: auto; overflow-y: hidden; padding-bottom: 0.4rem; scroll-snap-type: x proximity; }
+  .set-tabs button { scroll-snap-align: start; flex: 0 0 auto; min-height: 2.75rem; }
+  .set-panels { overflow-y: auto; min-height: 0; }
   dialog { width: 100vw; max-width: 100vw; margin-bottom: 0; border-radius: 20px 20px 0 0; }
-  .segmented button { padding: 0.45rem 0.7rem; }
-  .topbar-controls button { padding-left: 0.85rem; padding-right: 0.85rem; }
+  .hero-value { font-size: clamp(1.75rem, 10vw, 2.2rem); }
+  .acct-figs { max-width: 46%; }
+  .sync-btns button { flex: 1 1 100%; min-height: 3rem; }
+}
+
+/* Very small phones (≤380px): type + spacing tighten, structure unchanged. */
+@media (max-width: 380px) {
+  main { padding-left: 0.7rem; padding-right: 0.7rem; }
+  .card-value { font-size: 0.98rem; }
+  .trade-block .stat-row { flex-basis: 100%; }
+  .swatches { grid-template-columns: 1fr; }
 }
 
 @media (min-width: 721px) {

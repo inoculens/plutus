@@ -7116,10 +7116,97 @@ function openDialog(id) {
     try { refreshSettingsAlert(); } catch (e) { /* ignore */ }
   }
   var first = dlg.querySelector('input, select, button:not([data-close])');
-  if (first && typeof first.focus === 'function') {
+  // Mobile: long forms (trade / account / settings) must not pop the
+  // keyboard on open — it would cover the very fields being configured.
+  // The user taps a field when ready; the kb-avoidance handler below then
+  // scrolls it clear. Desktop keeps the old autofocus; confirms keep it
+  // everywhere (keyboard choice is the point there).
+  var isLongForm = (id === 'trade-dialog' || id === 'account-dialog' || id === 'settings-dialog');
+  var skipAutoFocus = false;
+  try { skipAutoFocus = isLongForm && isMobileView(); } catch (e) { skipAutoFocus = false; }
+  if (!skipAutoFocus && first && typeof first.focus === 'function') {
     try { first.focus(); } catch (e) { /* ignore */ }
   }
 }
+
+// Mobile-only viewport check: phones + small tablets. Desktop always false,
+// so every branch guarded by it leaves desktop behavior byte-identical.
+function isMobileView() {
+  try {
+    if (typeof window === 'undefined' || !window.matchMedia) return false;
+    return window.matchMedia('(max-width: 720px)').matches;
+  } catch (e) { return false; }
+}
+
+// Mobile-only keyboard avoidance: when the on-screen keyboard opens inside
+// an open bottom-sheet dialog, the focused field is scrolled to the visible
+// middle of the sheet. Purely additive — no dialog geometry, focus order or
+// ledger/price logic changes; every handler early-returns off-mobile.
+(function mobileKbAvoid() {
+  try {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    if (!document.addEventListener) return;
+    function scrollFieldIntoSheet(field) {
+      try {
+        if (!field || !isMobileView()) return;
+        var dlg = field.closest ? field.closest('dialog') : null;
+        if (!dlg || !dlg.open) return;
+        var scroller = dlg.querySelector('.set-panels') || dlg;
+        // Let the keyboard finish animating before measuring.
+        setTimeout(function () {
+          try {
+            if (document.activeElement !== field) return;
+            if (field.scrollIntoView) {
+              try { field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' }); } catch (e2) {
+                try { field.scrollIntoView(); } catch (e3) { /* ignore */ }
+              }
+            }
+            // Keep the sheet itself settled: nudge its scroll so a tall
+            // scroller (settings panels) follows the field, never the page.
+            if (scroller && scroller !== document.body && typeof scroller.scrollTop === 'number') {
+              var r = null;
+              try { r = field.getBoundingClientRect(); } catch (e4) { r = null; }
+              var sr = null;
+              try { sr = scroller.getBoundingClientRect(); } catch (e5) { sr = null; }
+              if (r && sr && r.bottom > sr.bottom - 16) {
+                try { scroller.scrollTop += (r.bottom - sr.bottom) + 24; } catch (e6) { /* ignore */ }
+              }
+            }
+          } catch (e) { /* never break typing */ }
+        }, 320);
+      } catch (e) { /* ignore */ }
+    }
+    document.addEventListener('focusin', function (e) {
+      try {
+        var t = e && e.target;
+        if (!t || !t.tagName) return;
+        var tag = String(t.tagName).toUpperCase();
+        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') return;
+        scrollFieldIntoSheet(t);
+      } catch (err) { /* ignore */ }
+    });
+    // Folding/rotating phones and split keyboards change the visual viewport
+    // without a new focus event: re-seat the focused field if one is typing.
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      var lastH = 0;
+      try { lastH = window.visualViewport.height || 0; } catch (e) { lastH = 0; }
+      window.visualViewport.addEventListener('resize', function () {
+        try {
+          if (!isMobileView()) return;
+          var h = 0;
+          try { h = window.visualViewport.height || 0; } catch (e) { h = 0; }
+          var shrank = (lastH && h && h < lastH - 60);
+          lastH = h;
+          if (!shrank) return;
+          var ae = document.activeElement;
+          if (ae && ae.tagName && /^(INPUT|SELECT|TEXTAREA)$/.test(String(ae.tagName).toUpperCase())) {
+            scrollFieldIntoSheet(ae);
+          }
+        } catch (e) { /* ignore */ }
+      });
+    }
+  } catch (e) { /* never break boot */ }
+})();
 
 function closeDialog(id) {
   var dlg = typeof id === 'string' ? document.getElementById(id) : id;

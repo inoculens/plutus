@@ -4956,8 +4956,14 @@ function lotLink(l, targetId, fallbackDate, ctx, sym, verb) {
   var code = tradeDisplayId(ref && ref.id ? ref : targetId);
   b.setAttribute('aria-label', 'Show linked record ' + code);
   b.title = 'Show linked record ' + code;
-  b.textContent = fmtQty(l.qty, sym) + ' ' + sym + ' ' + verb + ' ' + lotRefText(ref, targetId, fallbackDate) +
+  // Ellipsis lives on an inner block span: text-overflow directly on a
+  // <button> paints the ellipsis over the text (sliced/duplicated glyphs)
+  // instead of clipping it in some browsers.
+  var span = document.createElement('span');
+  span.className = 'lot-link-text';
+  span.textContent = fmtQty(l.qty, sym) + ' ' + sym + ' ' + verb + ' ' + lotRefText(ref, targetId, fallbackDate) +
     ' (' + fmtMoney(l.gain, ctx.main) + ')';
+  b.appendChild(span);
   b.addEventListener('click', function () { ctx.go(targetId); });
   return b;
 }
@@ -5024,8 +5030,12 @@ function closedBlock(t, slices, ctx) {
     var code = tradeDisplayId(ref && ref.id ? ref : l.buyId);
     b.setAttribute('aria-label', 'Show linked record ' + code);
     b.title = 'Show linked record ' + code;
-    b.textContent = fmtQty(l.qty, sym) + ' ' + sym + ' ← ' + lotRefText(ref, l.buyId, l.openDate) +
+    // Inner span carries the ellipsis (see lotLink).
+    var span = document.createElement('span');
+    span.className = 'lot-link-text';
+    span.textContent = fmtQty(l.qty, sym) + ' ' + sym + ' ← ' + lotRefText(ref, l.buyId, l.openDate) +
       ' (' + fmtMoney(l.gain, ctx.main) + ')';
+    b.appendChild(span);
     (function (id) {
       b.addEventListener('click', function () { ctx.go(id); });
     })(l.buyId);

@@ -4553,6 +4553,11 @@
         // Linked references carry the target code.
         var b1code = b1.querySelector('.trade-id').textContent;
         assert(closed1.textContent.indexOf(b1code) !== -1, 's1 must name b1 ' + b1code);
+        // Truncation lives on an inner span: ellipsis directly on <button>
+        // paints over the text instead of clipping it in some browsers.
+        var linkSpans = closed1.querySelectorAll('.lot-link .lot-link-text');
+        assert(linkSpans.length === 2, 'each line needs an inner truncation span');
+        assert(linkSpans[0].textContent.indexOf(b1code) !== -1, 'span must carry the full line text');
         // Raw dump is gone.
         assert(document.getElementById('account-detail').textContent.indexOf('Closed lots (FIFO)') === -1, 'raw dump must be gone');
         // Ids survive re-render unchanged.

@@ -1101,24 +1101,25 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   letter-spacing: 0.07em;
   color: var(--muted);
 }
-/* Plain grid, no scroll surface: more than five lines collapse behind a
-   toggle (see lotToggle) instead of an overflow scroller. */
+/* Plain block scroller, capped so one record can never stretch the page.
+   Deliberately boring: whole-pixel spacing, own layer, stable scrollbar
+   gutter — exotic containers tore glyphs on some setups. */
 .lot-link-list {
-  display: grid;
-  gap: 0.3rem;
+  display: block;
+  max-height: 190px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  isolation: isolate;
 }
+.lot-link {
+  display: block;
+  width: 100%;
+  margin: 5px 0 0;
+}
+.lot-link:first-child { margin-top: 0; }
 .lot-link[hidden] { display: none; }
-.lot-toggle {
-  justify-self: start;
-  min-height: 0;
-  padding: 0.3rem 0.1rem;
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-.lot-toggle:hover { color: var(--text); background: none; border: none; }
 .lot-link {
   min-width: 0;
   min-height: 0;

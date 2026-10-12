@@ -1108,9 +1108,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #c3cad4;
-  background: rgba(154, 163, 178, 0.1);
-  border: 1px solid rgba(154, 163, 178, 0.28);
+  color: #e8ecf1;
+  background: rgba(232, 236, 241, 0.12);
+  border: 1px solid rgba(232, 236, 241, 0.35);
   border-radius: 999px;
   padding: 0.22rem 0.65rem;
   flex-shrink: 0;

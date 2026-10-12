@@ -4384,6 +4384,38 @@
         L.tradePageSetFor('pg-acct', 0, 1);
         navHome();
       });
+      test('bottom bar sits after the records on one line', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('pg-acct', 0, 30);
+        seedPg(30);
+        openPg('pg-acct');
+        var bar = document.querySelector('#account-detail .trade-bottom-bar');
+        assert(bar !== null, 'bottom bar must render');
+        assert(window.getComputedStyle(bar).flexWrap === 'nowrap', 'bottom bar must stay on one line, got ' + window.getComputedStyle(bar).flexWrap);
+        var range = bar.querySelector('[data-trade-range]');
+        var sel = bar.querySelector('[data-trade-per-page]');
+        var pager = bar.querySelector('.trade-pager');
+        assert(range !== null && sel !== null, 'range + per-page must live in the bottom bar');
+        assert(pager !== null, 'pager must live in the bottom bar when more than one page');
+        // Bottom means after every record card in DOM order.
+        var blocks = document.querySelectorAll('#account-detail .trade-block[data-trade]');
+        assert(blocks.length === 25, 'expected 25 records above the bar, got ' + blocks.length);
+        assert(blocks[blocks.length - 1].compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING, 'bar must follow the last record');
+        // One line: range, pager and per-page share the same row.
+        var tops = [range, pager, sel.closest('.per-page')].map(function (el) { return el.offsetTop; });
+        assert(tops[0] === tops[1] && tops[1] === tops[2], 'bar must not wrap to two lines, tops ' + tops.join(','));
+        // Single-page shape: selector still at the bottom, pager gone.
+        seedPg(1);
+        L.tradePageSetFor('pg-acct', 0, 1);
+        openPg('pg-acct');
+        var bar1 = document.querySelector('#account-detail .trade-bottom-bar');
+        assert(bar1 !== null && bar1.querySelector('[data-trade-per-page]') !== null, 'selector must stay at the bottom with 1 record');
+        assert(bar1.querySelector('.trade-pager') === null, 'pager must hide with 1 record');
+        assert(window.getComputedStyle(bar1).flexWrap === 'nowrap', 'single-page bar must stay on one line');
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('pg-acct', 0, 1);
+        navHome();
+      });
     })();
 
     renderResults();

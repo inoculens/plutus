@@ -4225,7 +4225,7 @@ function buildTradePager(accountId, total, pageCount, page) {
     tradePageSetFor(accountId, p, total);
     render();
     try {
-      var bar = document.querySelector('#account-detail .trade-list-bar');
+      var bar = document.querySelector('#account-detail .trade-bottom-bar');
       if (bar && bar.scrollIntoView) bar.scrollIntoView({ block: 'nearest' });
     } catch (e) { /* ignore */ }
   }
@@ -5101,14 +5101,18 @@ function renderAccountDetail(st, id) {
     var tradePage = tradePageGet(acc.id, tradeTotal);
     var tradeStart = tradePage * tradePageSize;
     var tradeEnd = Math.min(tradeStart + tradePageSize, tradeTotal);
-    // Per-page selector: always visible with >= 1 record (even 1 page).
-    var listBar = document.createElement('div');
-    listBar.className = 'trade-list-bar';
+    // Bottom bar, always on one line: range + pager + per-page selector.
+    // The bar renders after the records (always at the bottom, even with a
+    // single page); only the pager numbers hide when everything fits.
+    var bottomBar = document.createElement('div');
+    bottomBar.className = 'trade-bottom-bar';
+    bottomBar.setAttribute('data-trade-bottom', '1');
     var rangeEl = document.createElement('span');
     rangeEl.className = 'muted trade-range';
     rangeEl.setAttribute('data-trade-range', '1');
     rangeEl.textContent = 'Showing ' + (tradeStart + 1) + '–' + tradeEnd + ' of ' + tradeTotal;
-    listBar.appendChild(rangeEl);
+    bottomBar.appendChild(rangeEl);
+    if (tradePageCount > 1) bottomBar.appendChild(buildTradePager(acc.id, tradeTotal, tradePageCount, tradePage));
     var perWrap = document.createElement('label');
     perWrap.className = 'per-page';
     var perTxt = document.createElement('span');
@@ -5131,8 +5135,7 @@ function renderAccountDetail(st, id) {
       render();
     });
     perWrap.appendChild(perSel);
-    listBar.appendChild(perWrap);
-    host.appendChild(listBar);
+    bottomBar.appendChild(perWrap);
     var frag = (typeof document.createDocumentFragment === 'function')
       ? document.createDocumentFragment()
       : null;
@@ -5142,7 +5145,7 @@ function renderAccountDetail(st, id) {
       else host.appendChild(tb);
     }
     if (frag) host.appendChild(frag);
-    if (tradePageCount > 1) host.appendChild(buildTradePager(acc.id, tradeTotal, tradePageCount, tradePage));
+    host.appendChild(bottomBar);
   } else {
     host.appendChild(tHead);
     var emptyTrades = document.createElement('div');

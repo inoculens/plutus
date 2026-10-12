@@ -3868,6 +3868,7 @@ function buildAccountAction() {
       selectedAccounts = {};
       selectionMode = false;
       if (!saveStateGuarded(s2)) return;
+      try { Object.keys(inSet).forEach(function (id) { delete tradePageByAccount[id]; }); } catch (e) { /* ignore */ }
       clearBanner();
       render();
     });
@@ -4199,6 +4200,57 @@ function buildAccountPager(pageCount) {
   }
   pager.appendChild(pgBtn('Next ›', { 'data-page-next': '1', 'aria-label': 'Next account page' }, accountPage >= pageCount - 1, function () {
     if (accountPage < pageCount - 1) { accountPage++; render(); }
+  }));
+  return pager;
+}
+
+function buildTradePager(accountId, total, pageCount, page) {
+  var pager = document.createElement('div');
+  pager.className = 'pager trade-pager';
+  pager.setAttribute('role', 'navigation');
+  pager.setAttribute('aria-label', 'Trade pages');
+  function pgBtn(label, attrs, disabled, fn) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ghost page-btn';
+    b.textContent = label;
+    for (var k in attrs) {
+      if (Object.prototype.hasOwnProperty.call(attrs, k)) b.setAttribute(k, attrs[k]);
+    }
+    if (disabled) b.disabled = true;
+    b.addEventListener('click', fn);
+    return b;
+  }
+  function go(p) {
+    tradePageSetFor(accountId, p, total);
+    render();
+    try {
+      var bar = document.querySelector('#account-detail .trade-list-bar');
+      if (bar && bar.scrollIntoView) bar.scrollIntoView({ block: 'nearest' });
+    } catch (e) { /* ignore */ }
+  }
+  pager.appendChild(pgBtn('‹ Prev', { 'data-tpage-prev': '1', 'aria-label': 'Previous trade page' }, page <= 0, function () {
+    if (page > 0) go(page - 1);
+  }));
+  // Sliding window like the account pager: at most 6 numbers at once.
+  var PAGER_WINDOW = 6;
+  var winStart = 0;
+  if (pageCount > PAGER_WINDOW) {
+    winStart = page - 4;
+    if (winStart < 0) winStart = 0;
+    if (winStart > pageCount - PAGER_WINDOW) winStart = pageCount - PAGER_WINDOW;
+  }
+  for (var i = winStart; i < Math.min(winStart + PAGER_WINDOW, pageCount); i++) {
+    (function (p) {
+      var nb = pgBtn(String(p + 1), { 'data-tpage-goto': String(p), 'aria-label': 'Go to trade page ' + (p + 1) }, false, function () {
+        if (tradePageGet(accountId, total) !== p) go(p);
+      });
+      if (p === page) nb.setAttribute('aria-current', 'page');
+      pager.appendChild(nb);
+    })(i);
+  }
+  pager.appendChild(pgBtn('Next ›', { 'data-tpage-next': '1', 'aria-label': 'Next trade page' }, page >= pageCount - 1, function () {
+    if (page < pageCount - 1) go(page + 1);
   }));
   return pager;
 }
@@ -5040,9 +5092,57 @@ function renderAccountDetail(st, id) {
     host.appendChild(tHead);
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
     var accKind = (acc && typeof acc.kind === 'string') ? acc.kind : undefined;
-    ledgerSortByDate(atrades).reverse().forEach(function (t) {
-      host.appendChild(tradeBlock(t, main, nameById, accKind));
+    // Paged records: sort once, then build DOM only for the visible slice.
+    // Off-page records cost nothing per paint (no tradeBlock, no exec-rate
+    // resolution, single fragment insert) while totals above still use all.
+    var sortedTrades = ledgerSortByDate(atrades).reverse();
+    var tradeTotal = sortedTrades.length;
+    var tradePageCount = tradePageCountFor(tradeTotal);
+    var tradePage = tradePageGet(acc.id, tradeTotal);
+    var tradeStart = tradePage * tradePageSize;
+    var tradeEnd = Math.min(tradeStart + tradePageSize, tradeTotal);
+    // Per-page selector: always visible with >= 1 record (even 1 page).
+    var listBar = document.createElement('div');
+    listBar.className = 'trade-list-bar';
+    var rangeEl = document.createElement('span');
+    rangeEl.className = 'muted trade-range';
+    rangeEl.setAttribute('data-trade-range', '1');
+    rangeEl.textContent = 'Showing ' + (tradeStart + 1) + '–' + tradeEnd + ' of ' + tradeTotal;
+    listBar.appendChild(rangeEl);
+    var perWrap = document.createElement('label');
+    perWrap.className = 'per-page';
+    var perTxt = document.createElement('span');
+    perTxt.className = 'muted';
+    perTxt.textContent = 'Per page';
+    perWrap.appendChild(perTxt);
+    var perSel = document.createElement('select');
+    perSel.setAttribute('data-trade-per-page', '1');
+    perSel.setAttribute('aria-label', 'Records per page');
+    TRADE_PAGE_SIZES.forEach(function (n) {
+      var o = document.createElement('option');
+      o.value = String(n);
+      o.textContent = String(n);
+      if (n === tradePageSize) o.selected = true;
+      perSel.appendChild(o);
     });
+    perSel.addEventListener('change', function () {
+      tradePageSizeSet(perSel.value);
+      tradePageSetFor(acc.id, 0, tradeTotal);
+      render();
+    });
+    perWrap.appendChild(perSel);
+    listBar.appendChild(perWrap);
+    host.appendChild(listBar);
+    var frag = (typeof document.createDocumentFragment === 'function')
+      ? document.createDocumentFragment()
+      : null;
+    for (var ti = tradeStart; ti < tradeEnd; ti++) {
+      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind);
+      if (frag) frag.appendChild(tb);
+      else host.appendChild(tb);
+    }
+    if (frag) host.appendChild(frag);
+    if (tradePageCount > 1) host.appendChild(buildTradePager(acc.id, tradeTotal, tradePageCount, tradePage));
   } else {
     host.appendChild(tHead);
     var emptyTrades = document.createElement('div');
@@ -5251,6 +5351,7 @@ function deleteAccount(id) {
     s2.trades = (s2.trades || []).filter(function (t) { return !t || (t.accountId !== id && t.toAccountId !== id); });
     s2.accounts = (s2.accounts || []).filter(function (a) { return !a || a.id !== id; });
     if (!saveStateGuarded(s2)) return;
+    try { delete tradePageByAccount[id]; } catch (e) { /* ignore */ }
     clearBanner();
     render();
   });
@@ -5484,6 +5585,56 @@ function buildAccounts() {
 
 var ACCOUNT_PAGE_SIZE = 6;
 var accountPage = 0;
+// --- Trade pagination (per-account record list) ---
+// Only the current page is ever built into DOM (DocumentFragment of at most
+// pageSize tradeBlocks). Totals/P&L above still cover every trade; this only
+// bounds the expensive per-record DOM + resolveExecPrice work per paint.
+var TRADE_PAGE_SIZES = [15, 25, 50, 100];
+var TRADE_PAGE_DEFAULT = 25;
+var TRADE_PAGE_KEY = 'inoculens.tradepagesize.v1';
+var tradePageSize = TRADE_PAGE_DEFAULT;
+var tradePageByAccount = {}; // accountId -> 0-based page index
+try {
+  if (typeof localStorage !== 'undefined') {
+    var _tps = Number(localStorage.getItem(TRADE_PAGE_KEY));
+    if (TRADE_PAGE_SIZES.indexOf(_tps) !== -1) tradePageSize = _tps;
+  }
+} catch (e) { /* ignore: default stands */ }
+
+function tradePageSizeGet() { return tradePageSize; }
+
+function tradePageSizeSet(n) {
+  var v = Number(n);
+  if (TRADE_PAGE_SIZES.indexOf(v) === -1) return tradePageSize;
+  tradePageSize = v;
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(TRADE_PAGE_KEY, String(v));
+  } catch (e) { /* ignore */ }
+  return tradePageSize;
+}
+
+function tradePageCountFor(total) {
+  var t = Number(total) || 0;
+  if (t <= 0) return 1;
+  return Math.max(1, Math.ceil(t / tradePageSize));
+}
+
+function tradePageGet(accountId, total) {
+  var pc = tradePageCountFor(total);
+  var p = tradePageByAccount[accountId];
+  if (!isFinite(p) || p < 0) p = 0;
+  if (p > pc - 1) p = pc - 1;
+  tradePageByAccount[accountId] = p;
+  return p;
+}
+
+function tradePageSetFor(accountId, p, total) {
+  var pc = tradePageCountFor(total);
+  if (!isFinite(p) || p < 0) p = 0;
+  if (p > pc - 1) p = pc - 1;
+  tradePageByAccount[accountId] = p;
+  return p;
+}
 var acctDrag = null; // {id,startX,startY,started,ghost,overId,after,flipTimer,flipCoolUntil,armedBtn}
 var suppressCardClick = false;
 
@@ -6340,6 +6491,8 @@ function onTradeSubmit(ev) {
       tradeFormError(null);
       lockSubmit(false, 'Add record');
       refreshPrices();
+      try { tradePageByAccount[accountId] = 0; } catch (e) { /* ignore */ }
+      try { tradePageByAccount[toAccSwap.id] = 0; } catch (e) { /* ignore */ }
       navTo(accountId);
       render();
       closeDialog('trade-dialog');
@@ -6621,6 +6774,8 @@ function onTradeSubmit(ev) {
     tradeFormError(null);
     lockSubmit(false, 'Add record');
     refreshPrices(); // recompute + render when fresh prices land (renders sync too)
+    try { tradePageByAccount[accountId] = 0; } catch (e) { /* ignore */ }
+    try { if (toAccId) tradePageByAccount[toAccId] = 0; } catch (e) { /* ignore */ }
     navTo(side === 'transfer' ? accountId : accountId);
     render(); // route() picks up the URL: the trade's account page shows the new rows
     closeDialog('trade-dialog');
@@ -7819,6 +7974,13 @@ if (typeof window !== 'undefined') {
   window.Inoculens.todayDmy = todayDmy;
   window.Inoculens.fmtDateTimeDmy = fmtDateTimeDmy;
   window.Inoculens.todayStr = todayStr;
+  window.Inoculens.TRADE_PAGE_SIZES = TRADE_PAGE_SIZES;
+  window.Inoculens.tradePageSizeGet = tradePageSizeGet;
+  window.Inoculens.tradePageSizeSet = tradePageSizeSet;
+  window.Inoculens.tradePageCountFor = tradePageCountFor;
+  window.Inoculens.tradePageGet = tradePageGet;
+  window.Inoculens.tradePageSetFor = tradePageSetFor;
+  window.Inoculens.buildTradePager = buildTradePager;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', init);
   }

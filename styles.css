@@ -816,6 +816,31 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   padding: 0.35rem 0.5rem 0;
 }
 
+.trade-list-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.trade-list-bar .trade-range { font-size: 0.85rem; }
+
+.per-page {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.per-page select {
+  min-height: 2.4rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.trade-pager { margin: 0.9rem 0 0.4rem; }
+
 .drag-ghost {
   position: fixed;
   z-index: 60;

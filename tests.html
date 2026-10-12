@@ -4286,6 +4286,106 @@
       });
     })();
 
+    // === Trade pagination tests (25 default; 15/25/50/100; pager at bottom) ===
+    (function tradePaginationTests() {
+      var L = window.Inoculens || {};
+      function pgDate(i) {
+        var m = 1 + Math.floor(i / 28);
+        var d = (i % 28) + 1;
+        function p(x) { return (x < 10 ? '0' : '') + x; }
+        return '2026-' + p(m) + '-' + p(d);
+      }
+      function pgTrade(i, acct) {
+        var dt = pgDate(i);
+        return { id: 'pg-' + i, type: 'buy', symbol: 'BTC', qty: 1, total: 100, currency: 'EUR', date: dt, fee: 0, feeCurrency: 'EUR', note: '', accountId: acct, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: dt + 'T00:00:00.000Z' };
+      }
+      function seedPg(n, acct) {
+        acct = acct || 'pg-acct';
+        var trades = [];
+        for (var i = 0; i < n; i++) trades.push(pgTrade(i, acct));
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: acct, name: 'Paged', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: trades,
+          priceOverrides: {}
+        });
+      }
+      function openPg(acct) {
+        if (typeof init === 'function') init();
+        navTo(acct);
+        route();
+        render();
+      }
+      test('trade list shows 25 by default with per-page options in order', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('pg-acct', 0, 30);
+        seedPg(30);
+        openPg('pg-acct');
+        var sel = document.querySelector('[data-trade-per-page]');
+        assert(sel !== null, 'per-page selector must show with >= 1 record');
+        var opts = Array.prototype.map.call(sel.options, function (o) { return o.value; });
+        assert(opts.join(',') === '15,25,50,100', 'options must be 15,25,50,100 in order, got ' + opts.join(','));
+        assert(sel.value === '25', 'default per-page must be 25, got ' + sel.value);
+        var blocks = document.querySelectorAll('#account-detail .trade-block[data-trade]');
+        assert(blocks.length === 25, 'default page must build only 25 records, got ' + blocks.length);
+        var range = document.querySelector('[data-trade-range]');
+        assert(range !== null && range.textContent.indexOf('25') !== -1 && range.textContent.indexOf('30') !== -1, 'range must read 1-25 of 30, got ' + (range && range.textContent));
+        var pager = document.querySelector('#account-detail .trade-pager');
+        assert(pager !== null, 'pager must appear when more than one page');
+        var qty = document.querySelector('#account-detail [data-label="Quantity"]');
+        assert(qty !== null && Number(qty.getAttribute('data-value')) === 30, 'totals must cover all 30 trades, got ' + (qty && qty.getAttribute('data-value')));
+        navHome();
+      });
+      test('trade pager navigates pages, totals stay global', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('pg-acct', 0, 30);
+        seedPg(30);
+        openPg('pg-acct');
+        var qty1 = document.querySelector('#account-detail [data-label="Quantity"]');
+        var v1 = qty1 && qty1.getAttribute('data-value');
+        var next = document.querySelector('[data-tpage-next]');
+        assert(next !== null && !next.disabled, 'next must be enabled on page 1');
+        next.click();
+        var blocks = document.querySelectorAll('#account-detail .trade-block[data-trade]');
+        assert(blocks.length === 5, 'page 2 must show the remaining 5, got ' + blocks.length);
+        var range = document.querySelector('[data-trade-range]');
+        assert(range !== null && range.textContent.indexOf('26') !== -1 && range.textContent.indexOf('30') !== -1, 'page 2 range must read 26-30 of 30, got ' + (range && range.textContent));
+        var qty2 = document.querySelector('#account-detail [data-label="Quantity"]');
+        assert(qty2 !== null && qty2.getAttribute('data-value') === v1 && Number(v1) === 30, 'totals must stay global across pages, got ' + (qty2 && qty2.getAttribute('data-value')));
+        var prev = document.querySelector('[data-tpage-prev]');
+        assert(prev !== null && !prev.disabled, 'prev must be enabled on page 2');
+        prev.click();
+        assert(document.querySelectorAll('#account-detail .trade-block[data-trade]').length === 25, 'back on page 1 must show 25 again');
+        navHome();
+      });
+      test('per-page 15/50/100 change the visible count; selector shows with 1 record', function () {
+        L.tradePageSizeSet(15);
+        L.tradePageSetFor('pg-acct', 0, 30);
+        seedPg(30);
+        openPg('pg-acct');
+        assert(document.querySelectorAll('#account-detail .trade-block[data-trade]').length === 15, 'per-page 15 must show 15');
+        assert(document.querySelector('#account-detail .trade-pager') !== null, 'pager must show for 30 @ 15');
+        L.tradePageSizeSet(50);
+        L.tradePageSetFor('pg-acct', 0, 30);
+        render();
+        assert(document.querySelectorAll('#account-detail .trade-block[data-trade]').length === 30, 'per-page 50 must show all 30');
+        assert(document.querySelector('#account-detail .trade-pager') === null, 'pager must hide when everything fits');
+        L.tradePageSizeSet(100);
+        L.tradePageSetFor('pg-acct', 0, 30);
+        render();
+        assert(document.querySelectorAll('#account-detail .trade-block[data-trade]').length === 30, 'per-page 100 must show all 30');
+        seedPg(1);
+        L.tradePageSetFor('pg-acct', 0, 1);
+        openPg('pg-acct');
+        assert(document.querySelector('[data-trade-per-page]') !== null, 'selector must show even with 1 record');
+        assert(document.querySelectorAll('#account-detail .trade-block[data-trade]').length === 1, 'single record must render');
+        assert(document.querySelector('#account-detail .trade-pager') === null, 'pager must hide with 1 record');
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('pg-acct', 0, 1);
+        navHome();
+      });
+    })();
+
     renderResults();
   </script>
 </body>

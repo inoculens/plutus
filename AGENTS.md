@@ -55,3 +55,10 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Layout is fixed, content is fluid: boxes never resize with values —
   truncate, fit, or reserve space instead (hero panel is the reference).
 - Commit each change separately with a clear message and push to `main`.
+
+## Push replies — mandatory for every agent, no prompting needed
+- Every reply that reports a push must START with the confirmation line
+  `Pushed to <branch> #<short-hash>`, e.g. `Pushed to main #f993f82`.
+  Nothing before it: no greeting, no preamble.
+- The owner must never have to ask for this format again; AGENTS.md carries
+  it, and coding agents load this file automatically.

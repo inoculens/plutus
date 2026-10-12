@@ -1101,6 +1101,15 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   letter-spacing: 0.07em;
   color: var(--muted);
 }
+/* Five visible lines max, then internal scroll — one record with dozens of
+   slices can never stretch the page. */
+.lot-link-list {
+  display: grid;
+  gap: 0.3rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
 .lot-link {
   min-height: 0;
   padding: 0.45rem 0.6rem;

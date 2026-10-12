@@ -4680,11 +4680,15 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');
   head.appendChild(when);
-  var rid = document.createElement('span');
-  rid.className = 'trade-id';
-  rid.textContent = tradeDisplayId(t);
-  rid.title = 'Record ' + tradeDisplayId(t);
-  head.appendChild(rid);
+  // Record ids matter for FIFO lot linkage, so the pill only shows in FIFO
+  // mode — Average cards stay clean.
+  if (fifoCtx) {
+    var rid = document.createElement('span');
+    rid.className = 'trade-id';
+    rid.textContent = tradeDisplayId(t);
+    rid.title = 'Record ' + tradeDisplayId(t);
+    head.appendChild(rid);
+  }
   head.appendChild(side);
   var whatTxt = '';
   if (t.type === 'transfer' && t.toAccountId && accountNameById) {
@@ -4972,10 +4976,15 @@ function soldBlock(t, slices, ctx) {
     ? (full ? 'Sold · in full' : 'Sold · partially (' + scope + ')')
     : (full ? 'Consumed · in full' : 'Consumed · partially (' + scope + ')');
   wrap.appendChild(head);
+  // Cap visible lines at five: beyond that the list scrolls internally so
+  // one record can never stretch the page.
+  var list = document.createElement('div');
+  list.className = 'lot-link-list';
+  wrap.appendChild(list);
   slices.forEach(function (l) {
     var kind = lotKindOf(l);
     var verb = kind === 'sell' ? 'sold in' : (kind === 'expense' ? 'lost to expense in' : 'fee in');
-    wrap.appendChild(lotLink(l, l.sellId, l.closeDate, ctx, sym, verb));
+    list.appendChild(lotLink(l, l.sellId, l.closeDate, ctx, sym, verb));
   });
   return wrap;
 }
@@ -4990,6 +4999,10 @@ function closedBlock(t, slices, ctx) {
   head.className = 'lot-links-head';
   head.textContent = 'Closed from';
   wrap.appendChild(head);
+  // Same five-line cap as the Sold block (see soldBlock).
+  var list = document.createElement('div');
+  list.className = 'lot-link-list';
+  wrap.appendChild(list);
   slices.forEach(function (l) {
     var ref = (l.buyId && ctx.byId[l.buyId]) || null;
     var b = document.createElement('button');
@@ -5004,7 +5017,7 @@ function closedBlock(t, slices, ctx) {
     (function (id) {
       b.addEventListener('click', function () { ctx.go(id); });
     })(l.buyId);
-    wrap.appendChild(b);
+    list.appendChild(b);
   });
   return wrap;
 }

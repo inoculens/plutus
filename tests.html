@@ -4561,14 +4561,37 @@
         navHome();
       });
 
-      test('average mode links nothing but keeps id pills', function () {
+      test('average mode links nothing and hides id pills', function () {
         L.tradePageSizeSet(25);
         L.tradePageSetFor('lk-acct', 0, 4);
         seedLk('average', baseTrades());
         openLk();
         assert(document.querySelectorAll('#account-detail .lot-links').length === 0, 'average must show no linkage');
-        assert(document.querySelectorAll('#account-detail .trade-head .trade-id').length === 4, 'id pills stay in average');
+        assert(document.querySelectorAll('#account-detail .trade-head .trade-id').length === 0, 'id pills must hide in average');
         assert(document.getElementById('account-detail').textContent.indexOf('Closed lots (FIFO)') === -1, 'no dump in average');
+        navHome();
+      });
+
+      test('linkage lines cap at five with internal scroll', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('lk-acct', 0, 8);
+        var trades = [lkTrade('sc-b1', 'buy', 1, 50000, '2026-01-01')];
+        for (var i = 1; i <= 7; i++) {
+          var d = (i < 10 ? '0' : '') + i;
+          trades.push(lkTrade('sc-s' + d, 'sell', 0.1, 8000, '2026-02-' + d));
+        }
+        seedLk('fifo', trades);
+        openLk();
+        var b1 = cardFor('sc-b1');
+        assert(b1 !== null, 'buy card must render');
+        var sold = b1.querySelector('[data-lot-links="sold"]');
+        assert(sold !== null && sold.textContent.indexOf('partially') !== -1, 'buy must read partially');
+        var list = sold.querySelector('.lot-link-list');
+        assert(list !== null, 'lines must live in a scroll list');
+        assert(list.querySelectorAll('.lot-link').length === 7, 'all 7 slices must exist, got ' + list.querySelectorAll('.lot-link').length);
+        var cs = window.getComputedStyle(list);
+        assert(cs.overflowY === 'auto' || cs.overflowY === 'scroll', 'list must scroll, got ' + cs.overflowY);
+        assert(list.scrollHeight > list.clientHeight, 'scroll must kick in past five lines');
         navHome();
       });
 

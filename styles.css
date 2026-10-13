@@ -2042,7 +2042,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
   .hero-pl.pill { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
   .hero-sub { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hero-alloc { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex: 0 0 9.25rem; width: 9.25rem; margin-left: auto; align-self: flex-start; }
+  .hero-alloc { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex: 0 0 9.5rem; width: 9.5rem; margin-left: auto; align-self: flex-start; }
   /* DOM order is legend-then-ring; order pulls the ring on top. */
   .hero-alloc .donut-sm { order: -1; width: 7.25rem; height: 7.25rem; }
   /* Shrink-wrap + center: the block sits centered under the ring and only
@@ -2050,8 +2050,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .hero-alloc-legend { width: auto; max-width: 100%; gap: 0.3rem; }
   /* Size must sit on the li — it carries its own font-size that beats
      anything inherited from the ul. */
-  .hero-alloc-legend li { gap: 0.4rem; font-size: 0.62rem; }
-  .hero-alloc-dot { width: 0.5rem; height: 0.5rem; }
+  .hero-alloc-legend li { gap: 0.35rem; font-size: 0.6rem; }
+  .hero-alloc-dot { width: 0.45rem; height: 0.45rem; }
 }
 
 @media (max-width: 560px) {
@@ -2060,9 +2060,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 }
 
 @media (max-width: 380px) {
-  #hero { gap: 0.35rem 0.7rem; padding: 1rem 0.8rem 0.9rem; }
+  #hero { gap: 0.35rem 0.6rem; padding: 1rem 0.7rem 0.9rem; }
   .hero-invested, .hero-spent { font-size: 0.66rem; }
-  .hero-alloc { flex-basis: 9rem; width: 9rem; }
+  .hero-alloc { flex-basis: 9.25rem; width: 9.25rem; }
   .hero-alloc .donut-sm { width: 6.5rem; height: 6.5rem; }
   .hero-alloc-legend li { font-size: 0.6rem; }
 }

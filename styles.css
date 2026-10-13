@@ -1191,6 +1191,31 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* "Now worth" fun-fact pill: same outline language as the date/type pills
+   (translucent tint wash + bright text + matching border, never a solid
+   fill). Gain green, loss red, flat muted. No text-transform so the
+   "increase"/"decrease" word stays lowercase. Truncates with … so the box
+   never resizes with values; the full text lives in the title tooltip. */
+.trade-now {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trade-now-gain { color: var(--gain); background: var(--gain-bg); border-color: rgba(52,211,153,0.25); }
+.trade-now-gain::before { content: "▲"; margin-right: 0.45em; font-size: 0.72em; }
+.trade-now-loss { color: var(--loss); background: var(--loss-bg); border-color: rgba(248,113,113,0.25); }
+.trade-now-loss::before { content: "▼"; margin-right: 0.45em; font-size: 0.72em; }
+.trade-now-flat { color: var(--muted); background: rgba(255,255,255,0.02); border-color: var(--border-strong); }
 .trade-block .stat-label { flex: 0 0 7rem; }
 .trade-block .stat-val { flex: 1; }
 .trade-block .stat-row { padding: 0.5rem 0.1rem; }

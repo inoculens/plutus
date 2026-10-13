@@ -4515,6 +4515,64 @@ function tradeTypeMeta(type) {
   return { label: 'Buy', cls: 'side-buy' };
 }
 
+// "Now worth" fun-fact pill (display-only): what this record's qty would be
+// worth today at the live price in the current main fiat. Pure math, never
+// stored, never read by the ledger — P&L/tax cannot see it. Unknown live
+// prices stay null (never 0: that would fabricate a -100% loss).
+function tradeNowValue(qty, livePrice) {
+  var q = Number(qty);
+  var p = Number(livePrice);
+  if (!isFinite(q) || q <= 0 || !isFinite(p) || p <= 0) return null;
+  return q * p;
+}
+
+// Standard P&L percent: (now - then) / then * 100. Null when there is no
+// cost basis to compare against (then <= 0) — the pill then shows money only.
+function tradeNowPct(thenMain, nowMain) {
+  var a = Number(thenMain);
+  var b = Number(nowMain);
+  if (!isFinite(a) || a <= 0 || !isFinite(b) || b < 0) return null;
+  return ((b - a) / a) * 100;
+}
+
+// Resolve the pill model for one buy/sell record, or null when no pill
+// should render (other types, bad qty, unknown live price). `t` is the
+// display (converted) trade so `then` already sits in the current main.
+function tradeNowMeta(t, main, livePrice) {
+  if (!t || (t.type !== 'buy' && t.type !== 'sell')) return null;
+  var q = Number(t.qty);
+  if (!isFinite(q) || q <= 0) return null;
+  var now = tradeNowValue(q, livePrice);
+  if (now === null) return null;
+  var then = null;
+  try { then = normalizeTrade(t).netMain; } catch (e) { then = null; }
+  then = Number(then);
+  if (!isFinite(then) || then < 0) return null;
+  var pct = tradeNowPct(then, now);
+  var cls = 'trade-now-flat';
+  // Cent-level epsilon: sub-cent drift (FX rounding) reads as flat.
+  if (then <= 0) {
+    cls = now > 0 ? 'trade-now-gain' : 'trade-now-flat';
+  } else if (now - then > 0.005) {
+    cls = 'trade-now-gain';
+  } else if (then - now > 0.005) {
+    cls = 'trade-now-loss';
+  }
+  return { now: now, then: then, pct: pct, cls: cls };
+}
+
+// Pill text: money in the current main + signed percent with a plain word,
+// e.g. "€6.00 · +200% increase". The ▲/▼ arrow rides CSS ::before (like
+// .pill.gain/.pill.loss), so the text itself carries no arrow character.
+function tradeNowText(now, main, pct) {
+  var money = fmtMoney(now, main);
+  var p = Number(pct);
+  if (pct === null || pct === undefined || !isFinite(p)) return money;
+  if (Math.abs(p) < 0.005) return money;
+  var signed = (p > 0 ? '+' : '') + fmtPct(p);
+  return money + ' · ' + signed + (p > 0 ? ' increase' : ' decrease');
+}
+
 function openNoteDialog(text, title) {
   var p = document.getElementById('note-dialog-text');
   if (p) p.textContent = String(text === undefined || text === null ? '' : text);
@@ -4710,6 +4768,29 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     head.appendChild(rid);
   }
   head.appendChild(side);
+  // "Now worth" fun-fact pill: qty × live price in the current main, with the
+  // P&L percent vs the record's own historic cost. Buys and sells only;
+  // display-only (never stored, never booked). Hidden while the live price
+  // is unknown instead of printing a fictitious loss.
+  if (t.type === 'buy' || t.type === 'sell') {
+    var nowMeta = null;
+    try {
+      var nwSym = String(t.symbol || '').toUpperCase();
+      var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePrices[nwSym] : null;
+      nowMeta = tradeNowMeta(t, main, lvRaw);
+    } catch (e) { nowMeta = null; }
+    if (nowMeta) {
+      var nowPill = document.createElement('span');
+      nowPill.className = 'trade-now ' + nowMeta.cls;
+      var nowTxt = '';
+      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct); } catch (e) { nowTxt = ''; }
+      nowPill.textContent = nowTxt;
+      var nowFull = nowTxt + ' — now worth at the live price (info only, not booked)';
+      nowPill.title = nowFull;
+      nowPill.setAttribute('aria-label', nowFull);
+      head.appendChild(nowPill);
+    }
+  }
   var whatTxt = '';
   if (t.type === 'transfer' && t.toAccountId && accountNameById) {
     try {
@@ -8319,6 +8400,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.csvSafeText = csvSafeText;
   window.Inoculens.fmtDateDmy = fmtDateDmy;
   window.Inoculens.fmtQty = fmtQty;
+  window.Inoculens.tradeNowValue = tradeNowValue;
+  window.Inoculens.tradeNowPct = tradeNowPct;
+  window.Inoculens.tradeNowMeta = tradeNowMeta;
+  window.Inoculens.tradeNowText = tradeNowText;
   window.Inoculens.tradeDisplayId = tradeDisplayId;
   window.Inoculens.fifoLinksFor = fifoLinksFor;
   window.Inoculens.parseDateInput = parseDateInput;

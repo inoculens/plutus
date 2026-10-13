@@ -1685,25 +1685,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   #view-home, #view-account { gap: 1.1rem; }
   #banner { margin: 0.7rem 0.9rem 0; font-size: 0.88rem; flex-wrap: wrap; }
 
-  /* — Hero (mobile): totals left + big ring right on row 1, legend on a
-       full-width row 2 — every line fits without truncation. The alloc
-       wrapper goes display:contents so ring + legend place as hero grid
-       items; desktop flex layout is untouched. — */
-  #hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 1.1rem 1rem 0.95rem; gap: 0.7rem 0.9rem; }
-  .hero-main { grid-column: 1; grid-row: 1; min-width: 0; }
-  .hero-label { font-size: 0.68rem; }
-  .hero-value { font-size: clamp(1.35rem, 6.4vw, 1.7rem); }
-  .hero-invested, .hero-spent { font-size: 0.7rem; }
-  .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
-  .hero-pl.pill { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
-  .hero-sub { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hero-alloc { display: contents; }
-  .hero-alloc .donut-sm { grid-column: 2; grid-row: 1; width: 7rem; height: 7rem; }
-  .hero-alloc-legend { grid-column: 1 / -1; grid-row: 2; width: 100%; gap: 0.3rem; }
-  /* Note: the size must sit on the li — it carries its own font-size that
-     beats anything inherited from the ul. */
-  .hero-alloc-legend li { gap: 0.4rem; font-size: 0.78rem; }
-  .hero-alloc-dot { width: 0.55rem; height: 0.55rem; }
+  /* Mobile hero rules live after the desktop hero section near the end of
+     the file — same-specificity later rules win, so that placement is
+     load-bearing. Nothing hero-related may sit here. */
 
   /* — Summary: fixed 2×2 grid, values always truncate inside their cell — */
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1821,8 +1805,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .set-tabs button { scroll-snap-align: start; flex: 0 0 auto; min-height: 2.75rem; }
   .set-panels { overflow-y: auto; min-height: 0; }
   dialog { width: 100vw; max-width: 100vw; margin-bottom: 0; border-radius: 20px 20px 0 0; }
-  .hero-value { font-size: clamp(1.3rem, 7vw, 1.55rem); }
-  .hero-alloc .donut-sm { width: 6.5rem; height: 6.5rem; }
   .acct-figs { max-width: 46%; }
   .sync-btns button { flex: 1 1 100%; min-height: 3rem; }
 }
@@ -1830,8 +1812,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 /* Very small phones (≤380px): type + spacing tighten, structure unchanged. */
 @media (max-width: 380px) {
   main { padding-left: 0.7rem; padding-right: 0.7rem; }
-  #hero { gap: 0.7rem; padding: 1rem 0.85rem 0.9rem; }
-  .hero-alloc .donut-sm { width: 6rem; height: 6rem; }
   .card-value { font-size: 0.98rem; }
   .trade-block .stat-row { flex-basis: 100%; }
   .swatches { grid-template-columns: 1fr; }
@@ -2045,6 +2025,39 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 @media print {
   .hero-alloc { break-inside: avoid; }
   .donut-sm { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ————— Mobile hero: MUST stay after every desktop hero rule in this file.
+   Same-specificity later rules win the cascade, so these overrides only
+   take effect from down here. Layout: totals left + big ring right on row 1,
+   legend on a full-width row 2 — every line fits without truncation. — */
+@media (max-width: 720px) {
+  #hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 1.1rem 1rem 0.95rem; gap: 0.7rem 0.9rem; }
+  .hero-main { grid-column: 1; grid-row: 1; min-width: 0; }
+  .hero-label { font-size: 0.68rem; }
+  .hero-value { font-size: clamp(1.35rem, 6.4vw, 1.7rem); }
+  .hero-invested, .hero-spent { font-size: 0.7rem; }
+  .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
+  .hero-pl.pill { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
+  .hero-sub { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* display:contents turns ring + legend into direct hero grid items. */
+  .hero-alloc { display: contents; }
+  .hero-alloc .donut-sm { grid-column: 2; grid-row: 1; width: 7rem; height: 7rem; }
+  .hero-alloc-legend { grid-column: 1 / -1; grid-row: 2; width: 100%; gap: 0.3rem; }
+  /* Size must sit on the li — it carries its own font-size that beats
+     anything inherited from the ul. */
+  .hero-alloc-legend li { gap: 0.4rem; font-size: 0.78rem; }
+  .hero-alloc-dot { width: 0.55rem; height: 0.55rem; }
+}
+
+@media (max-width: 560px) {
+  .hero-value { font-size: clamp(1.3rem, 7vw, 1.55rem); }
+  .hero-alloc .donut-sm { width: 6.5rem; height: 6.5rem; }
+}
+
+@media (max-width: 380px) {
+  #hero { gap: 0.7rem; padding: 1rem 0.85rem 0.9rem; }
+  .hero-alloc .donut-sm { width: 6rem; height: 6rem; }
 }
 
 /* ————— Encrypted sync (Settings → Sync tab) ————— */

@@ -4642,8 +4642,9 @@ function tradeNowMeta(t, main, livePrice) {
 
 // Pill text: the signed change first (delta vs the record's own cost),
 // then the labelled current value with its percent, e.g.
-// "+€5.49 | Current €7.49 · +200%". The sign carries the direction, so no
-// increase/decrease word. The ▲/▼ arrow rides CSS ::before (like
+// "+€5.49 | Current €7.49 +200%". The sign carries the direction, so no
+// increase/decrease word, and the current value meets the percent with a
+// plain space (no · in this pill). The ▲/▼ arrow rides CSS ::before (like
 // .pill.gain/.pill.loss), so the text carries no arrow.
 // Flat or basis-free records read "Current €N" only.
 function tradeNowText(now, main, pct, then) {
@@ -4654,7 +4655,7 @@ function tradeNowText(now, main, pct, then) {
   var delta = Number(now) - Number(then);
   var signedDelta = (delta > 0 ? '+' : '') + fmtMoney(delta, main);
   var signedPct = (p > 0 ? '+' : '') + fmtPct(p);
-  return signedDelta + ' | ' + cur + ' · ' + signedPct;
+  return signedDelta + ' | ' + cur + ' ' + signedPct;
 }
 
 function openNoteDialog(text, title) {

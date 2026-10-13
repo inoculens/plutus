@@ -58,7 +58,6 @@
     code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86em; color: #e3c57c; }
     .back { display: inline-block; margin-bottom: 1.5rem; font-size: 0.93rem; }
     footer { border-top: 1px solid rgba(255,255,255,0.07); padding: 1.4rem 1.25rem 2.5rem; text-align: center; }
-    .cookie-link { background: none; border: none; padding: 0; font: inherit; color: #e3c57c; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
     #cookie-banner {
       position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 90;
       max-width: 44rem; margin: 0 auto; display: flex; align-items: center;
@@ -115,7 +114,7 @@
     <ul>
       <li><strong>What Google receives:</strong> visited pages, approximate location (derived from IP, which Google truncates/anonymizes), device and browser type, referrer. Your portfolio, trades and passphrase are never sent.</li>
       <li><strong>Settings on our side:</strong> 2-month event-data retention (the minimum GA offers), Google signals off, ads personalization off, no data sharing with Google for its own purposes.</li>
-      <li><strong>Withdraw anytime:</strong> press <strong>Cookies</strong> in the page footer and choose Decline, or clear site data in your browser. Withdrawing stops future collection (data already sent follows Google's retention above).</li>
+      <li><strong>Withdraw anytime:</strong> clear cookies and site data for plutus.inoculens.com in your browser settings — the banner will ask again on your next visit and no further analytics will load. Data already sent follows Google's 2-month retention above.</li>
       <li><strong>Learn more:</strong> Google's GA privacy overview and the <a href="https://tools.google.com/dlpage/gaoptout">Google Analytics opt-out add-on</a>.</li>
     </ul>
 
@@ -133,7 +132,7 @@
     <ul>
       <li><strong>Access / portability:</strong> use Download backup and the CSV exports inside the app at any time.</li>
       <li><strong>Erasure:</strong> use Clear all data in Settings (Danger zone), delete any drive copies, and revoke the app's access in your Google/Dropbox account settings. To delete the local cookie choice too, clear site data — the banner will simply ask again.</li>
-      <li><strong>Objection / restriction:</strong> stop using sync (Disconnect), press Decline on analytics (Cookies in the footer), or stop using the app; without local data there is nothing to process.</li>
+      <li><strong>Objection / restriction:</strong> stop using sync (Disconnect), clear site data to withdraw analytics consent, or stop using the app; without local data there is nothing to process.</li>
       <li>To exercise any right against us directly, contact us at the address above — though in practice there is nothing for us to hand over or delete.</li>
     </ul>
 
@@ -151,7 +150,6 @@
   </main>
   <footer>
     <span class="muted">INOCULENS <strong>PLUTUS</strong> · Private · Local-first · No account</span>
-    <span class="muted"> · </span><button type="button" id="cookie-settings" class="cookie-link">Cookies</button>
   </footer>
   <div id="cookie-banner" hidden>
     <p><strong>Cookies, your call.</strong> <span>Portfolio data stays in this browser either way. Optional anonymous analytics only if you accept.</span></p>
@@ -203,8 +201,6 @@
     if (a) a.addEventListener('click', function () { apply('accepted'); });
     var d = document.getElementById('cookie-decline');
     if (d) d.addEventListener('click', function () { apply('declined'); });
-    var s2 = document.getElementById('cookie-settings');
-    if (s2) s2.addEventListener('click', function () { if (banner) banner.hidden = false; });
   })();
   </script>
 </body>

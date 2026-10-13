@@ -11590,11 +11590,6 @@ function consentInitBanner() {
       dec.setAttribute('data-wired', '1');
       dec.addEventListener('click', function () { consentApply('declined'); });
     }
-    var set = document.getElementById('cookie-settings');
-    if (set && !set.getAttribute('data-wired')) {
-      set.setAttribute('data-wired', '1');
-      set.addEventListener('click', function () { banner.hidden = false; });
-    }
   } catch (e) { /* banner never breaks boot */ }
 }
 

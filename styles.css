@@ -2191,4 +2191,3 @@ label.sync-check input {
 #cookie-banner a { color: var(--gold); }
 .cookie-actions { display: flex; gap: 0.6rem; margin-left: auto; }
 .cookie-actions button { min-height: 2.5rem; padding: 0.5rem 1.1rem; border-radius: 10px; }
-.cookie-link { background: none; border: none; padding: 0; font: inherit; cursor: pointer; }

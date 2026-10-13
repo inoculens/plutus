@@ -57,7 +57,6 @@
     li { margin: 0.5rem 0; }
     .back { display: inline-block; margin-bottom: 1.5rem; font-size: 0.93rem; }
     footer { border-top: 1px solid rgba(255,255,255,0.07); padding: 1.4rem 1.25rem 2.5rem; text-align: center; }
-    .cookie-link { background: none; border: none; padding: 0; font: inherit; color: #e3c57c; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
     #cookie-banner {
       position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 90;
       max-width: 44rem; margin: 0 auto; display: flex; align-items: center;
@@ -92,7 +91,6 @@
   </main>
   <footer>
     <span class="muted">INOCULENS <strong>PLUTUS</strong> · Private · Local-first · No account</span>
-    <span class="muted"> · </span><button type="button" id="cookie-settings" class="cookie-link">Cookies</button>
   </footer>
   <div id="cookie-banner" hidden>
     <p><strong>Cookies, your call.</strong> <span>Portfolio data stays in this browser either way. Optional anonymous analytics only if you accept.</span> <a href="/privacy.html">More details</a></p>
@@ -144,8 +142,6 @@
     if (a) a.addEventListener('click', function () { apply('accepted'); });
     var d = document.getElementById('cookie-decline');
     if (d) d.addEventListener('click', function () { apply('declined'); });
-    var s2 = document.getElementById('cookie-settings');
-    if (s2) s2.addEventListener('click', function () { if (banner) banner.hidden = false; });
   })();
   </script>
 </body>

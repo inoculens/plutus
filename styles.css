@@ -1739,7 +1739,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .pager { gap: 0.45rem; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; padding-bottom: 0.25rem; scrollbar-width: thin; }
   .page-btn { flex: 0 0 auto; min-width: 2.75rem; min-height: 2.75rem; }
   .trade-bottom-bar { flex-wrap: wrap; }
-  .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: flex-start; }
+  .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: center; }
   .filter-panel { position: fixed; left: 0.9rem; right: 0.9rem; top: auto; bottom: calc(0.9rem + env(safe-area-inset-bottom)); max-height: 50vh; max-height: 50dvh; }
   .account-create-row { flex-direction: column; align-items: stretch; }
   .account-create-row .fld { min-width: 0; }

@@ -1696,9 +1696,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
   .hero-pl.pill { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
   .hero-sub { font-size: 0.78rem; white-space: normal; overflow: visible; text-overflow: clip; }
-  .hero-alloc { flex: 0 0 8.5rem; width: 8.5rem; flex-direction: column; align-items: center; justify-content: flex-start; gap: 0.55rem; margin-left: auto; align-self: stretch; }
-  .hero-alloc .donut-sm { order: -1; width: 5rem; height: 5rem; }
-  .hero-alloc-legend { width: 100%; gap: 0.3rem; font-size: 0.75rem; }
+  .hero-alloc { flex: 0 0 9.5rem; width: 9.5rem; flex-direction: column; align-items: center; justify-content: flex-start; gap: 0.6rem; margin-left: auto; align-self: stretch; }
+  .hero-alloc .donut-sm { order: -1; width: 5.75rem; height: 5.75rem; }
+  .hero-alloc-legend { width: 100%; gap: 0.3rem; font-size: 0.68rem; }
+  .hero-alloc-legend li { gap: 0.4rem; }
+  .hero-alloc-dot { width: 0.5rem; height: 0.5rem; }
 
   /* — Summary: fixed 2×2 grid, values always truncate inside their cell — */
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1817,8 +1819,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .set-panels { overflow-y: auto; min-height: 0; }
   dialog { width: 100vw; max-width: 100vw; margin-bottom: 0; border-radius: 20px 20px 0 0; }
   .hero-value { font-size: clamp(1.3rem, 7vw, 1.55rem); }
-  .hero-alloc { flex-basis: 8rem; width: 8rem; }
-  .hero-alloc .donut-sm { width: 4.5rem; height: 4.5rem; }
+  .hero-alloc { flex-basis: 9rem; width: 9rem; }
+  .hero-alloc .donut-sm { width: 5.25rem; height: 5.25rem; }
   .acct-figs { max-width: 46%; }
   .sync-btns button { flex: 1 1 100%; min-height: 3rem; }
 }
@@ -1827,8 +1829,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 @media (max-width: 380px) {
   main { padding-left: 0.7rem; padding-right: 0.7rem; }
   #hero { gap: 0.7rem; padding: 1rem 0.85rem 0.9rem; }
-  .hero-alloc { flex-basis: 7.25rem; width: 7.25rem; }
-  .hero-alloc .donut-sm { width: 4rem; height: 4rem; }
+  .hero-alloc { flex-basis: 8.25rem; width: 8.25rem; }
+  .hero-alloc .donut-sm { width: 4.5rem; height: 4.5rem; }
   .card-value { font-size: 0.98rem; }
   .trade-block .stat-row { flex-basis: 100%; }
   .swatches { grid-template-columns: 1fr; }

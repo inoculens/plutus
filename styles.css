@@ -2033,15 +2033,16 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
    right column with the ring on top and the legend tucked directly under
    it (never stranded at the box bottom). — */
 @media (max-width: 720px) {
-  #hero { display: flex; align-items: flex-start; padding: 1.1rem 1rem 0.95rem; gap: 0.9rem; }
+  #hero { display: flex; align-items: flex-start; padding: 1.1rem 0.8rem 0.95rem; gap: 0.7rem; }
   .hero-main { flex: 1 1 auto; min-width: 0; }
   .hero-label { font-size: 0.68rem; }
   .hero-value { font-size: clamp(1.35rem, 6.4vw, 1.7rem); }
-  .hero-invested, .hero-spent { font-size: 0.7rem; }
+  /* Tight letter-spacing reclaims ~24px per line so long amounts fit. */
+  .hero-invested, .hero-spent { font-size: 0.68rem; letter-spacing: 0.02em; }
   .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
   .hero-pl.pill { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
   .hero-sub { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hero-alloc { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex: 0 0 9.5rem; width: 9.5rem; margin-left: auto; align-self: flex-start; }
+  .hero-alloc { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex: 0 0 9.25rem; width: 9.25rem; margin-left: auto; align-self: flex-start; }
   /* DOM order is legend-then-ring; order pulls the ring on top. */
   .hero-alloc .donut-sm { order: -1; width: 7.25rem; height: 7.25rem; }
   /* Shrink-wrap + center: the block sits centered under the ring and only
@@ -2049,22 +2050,21 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .hero-alloc-legend { width: auto; max-width: 100%; gap: 0.3rem; }
   /* Size must sit on the li — it carries its own font-size that beats
      anything inherited from the ul. */
-  .hero-alloc-legend li { gap: 0.4rem; font-size: 0.64rem; }
+  .hero-alloc-legend li { gap: 0.4rem; font-size: 0.62rem; }
   .hero-alloc-dot { width: 0.5rem; height: 0.5rem; }
 }
 
 @media (max-width: 560px) {
   .hero-value { font-size: clamp(1.3rem, 7vw, 1.55rem); }
-  .hero-alloc { flex-basis: 9.25rem; width: 9.25rem; }
-  .hero-alloc .donut-sm { width: 6.75rem; height: 6.75rem; }
+  .hero-alloc .donut-sm { width: 7rem; height: 7rem; }
 }
 
 @media (max-width: 380px) {
-  #hero { gap: 0.35rem 0.7rem; padding: 1rem 0.85rem 0.9rem; }
-  .hero-invested, .hero-spent { font-size: 0.68rem; }
+  #hero { gap: 0.35rem 0.7rem; padding: 1rem 0.8rem 0.9rem; }
+  .hero-invested, .hero-spent { font-size: 0.66rem; }
   .hero-alloc { flex-basis: 9rem; width: 9rem; }
   .hero-alloc .donut-sm { width: 6.5rem; height: 6.5rem; }
-  .hero-alloc-legend li { font-size: 0.62rem; }
+  .hero-alloc-legend li { font-size: 0.6rem; }
 }
 
 /* ————— Encrypted sync (Settings → Sync tab) ————— */

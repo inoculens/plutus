@@ -2032,7 +2032,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
    take effect from down here. Layout: totals left, ring + legend stacked
    in a fixed right column underneath it. — */
 @media (max-width: 720px) {
-  #hero { display: grid; grid-template-columns: minmax(0, 1fr) 9.5rem; align-items: start; padding: 1.1rem 1rem 0.95rem; gap: 0.7rem 0.9rem; }
+  #hero { display: grid; grid-template-columns: minmax(0, 1fr) 9.5rem; align-items: start; padding: 1.1rem 1rem 0.95rem; gap: 0.35rem 0.9rem; }
   .hero-main { grid-column: 1; grid-row: 1; min-width: 0; }
   .hero-label { font-size: 0.68rem; }
   .hero-value { font-size: clamp(1.35rem, 6.4vw, 1.7rem); }
@@ -2043,7 +2043,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* display:contents turns ring + legend into direct hero grid items. */
   .hero-alloc { display: contents; }
   .hero-alloc .donut-sm { grid-column: 2; grid-row: 1; justify-self: center; width: 7rem; height: 7rem; }
-  .hero-alloc-legend { grid-column: 2; grid-row: 2; width: 100%; max-width: 100%; gap: 0.3rem; }
+  .hero-alloc-legend { grid-column: 2; grid-row: 2; align-self: start; width: 100%; max-width: 100%; gap: 0.3rem; }
   /* Size must sit on the li — it carries its own font-size that beats
      anything inherited from the ul. */
   .hero-alloc-legend li { gap: 0.4rem; font-size: 0.68rem; }
@@ -2057,7 +2057,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 }
 
 @media (max-width: 380px) {
-  #hero { gap: 0.7rem; padding: 1rem 0.85rem 0.9rem; grid-template-columns: minmax(0, 1fr) 8.25rem; }
+  #hero { gap: 0.35rem 0.7rem; padding: 1rem 0.85rem 0.9rem; grid-template-columns: minmax(0, 1fr) 8.25rem; }
   .hero-alloc .donut-sm { width: 6rem; height: 6rem; }
 }
 

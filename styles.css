@@ -1642,8 +1642,11 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
 .foot-link:hover { color: var(--text); }
 .foot-ver { margin: 0 0 0 auto; font-size: 0.79rem; color: var(--muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 720px) {
-  .foot-inner { align-items: flex-start; flex-direction: column; gap: 0.5rem; }
-  .foot-ver { margin-left: 0; }
+  /* Brand, tagline and version each take a full row; Privacy + Credits
+     share one row side by side. */
+  .foot-inner { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; }
+  .foot-brand, .foot-tag { flex: 1 1 100%; }
+  .foot-ver { flex: 1 1 100%; margin-left: 0; }
 }
 
 /* Tables (legacy safety) */

@@ -5312,7 +5312,7 @@ function renderAccountDetail(st, id) {
   if (atrades.length) {
     var tAdd = document.createElement('button');
     tAdd.type = 'button';
-    tAdd.className = 'ghost';
+    tAdd.className = 'ghost t-add';
     tAdd.textContent = '+ Record';
     tAdd.setAttribute('aria-label', 'Add record to ' + acc.name);
     tAdd.addEventListener('click', function () { openPrefillTrade(acc.id, true); });

@@ -5,8 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Privacy Policy — INOCULENS PLUTUS</title>
-  <meta name="description" content="Privacy policy for INOCULENS PLUTUS, a local-first portfolio tracker. No account, no server, no tracking: your data stays in your browser.">
+  <meta name="description" content="Privacy policy for INOCULENS PLUTUS, a private local-first portfolio tracker by INOCULENS. Portfolio data stays in your browser; optional analytics only with consent.">
   <link rel="canonical" href="https://plutus.inoculens.com/privacy.html">
+  <link rel="author" href="https://inoculens.com">
+  <meta name="robots" content="index, follow">
+  <meta name="author" content="INOCULENS">
+  <meta name="theme-color" content="#07080b">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="INOCULENS PLUTUS">
+  <meta property="og:title" content="Privacy Policy — INOCULENS PLUTUS">
+  <meta property="og:description" content="Local-first portfolio tracker: portfolio data stays in your browser. Optional analytics only with consent.">
+  <meta property="og:url" content="https://plutus.inoculens.com/privacy.html">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Privacy Policy — INOCULENS PLUTUS">
+  <meta name="twitter:description" content="Portfolio data stays in your browser. Optional analytics only with consent.">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <style>
     :root { color-scheme: dark; }
@@ -37,18 +49,19 @@
   <main>
     <a class="back" href="/">‹ Back to Plutus</a>
     <h1>Privacy Policy</h1>
-    <p class="muted">INOCULENS PLUTUS — effective 9 October 2026.</p>
+    <p class="muted">INOCULENS PLUTUS — effective 13 October 2026.</p>
 
     <h2>The short version</h2>
-    <p>Plutus is a <strong>local-first</strong> portfolio tracker. There is no Plutus server, no account, no analytics and no tracking. Your portfolio lives only in your browser's local storage. Market prices come from public price services. If you enable sync, an <strong>encrypted</strong> copy is stored on a cloud drive <strong>you</strong> choose — and only you hold the passphrase that can decrypt it.</p>
+    <p>Plutus is a <strong>local-first</strong> portfolio tracker. There is no Plutus account and no portfolio server: your portfolio lives only in your browser's local storage. Market prices come from public price services. If you enable sync, an <strong>encrypted</strong> copy is stored on a cloud drive <strong>you</strong> choose — and only you hold the passphrase that can decrypt it. Optional anonymous analytics (Google Analytics 4) loads <strong>only if you press Accept</strong> on the cookie banner — Decline or ignoring it means no analytics request is ever made.</p>
 
     <h2>Who we are</h2>
     <p>Data controller: INOCULENS PLUTUS. Contact: <a href="mailto:create@inoculens.com">create@inoculens.com</a>.</p>
 
-    <h2>Data we store about you: none</h2>
-    <p>We operate no database and receive no data from the app. Everything below stays on your device unless you actively send it somewhere yourself:</p>
+    <h2>Data we store about you: almost none</h2>
+    <p>We operate no portfolio database and receive no portfolio data from the app. Everything below stays on your device unless you actively send it somewhere yourself:</p>
     <ul>
       <li><strong>Portfolio data</strong> — accounts, trades, settings and price overrides, kept in your browser's local storage so the app works offline and privately.</li>
+      <li><strong>Cookie choice</strong> — your Accept / Decline decision for analytics, kept in the same browser storage so the banner does not nag you on every visit.</li>
       <li><strong>Sync configuration</strong> — only if you use sync: which provider you chose, filenames, and sign-in tokens. Your sync <strong>passphrase stays in the form unless you explicitly tick “Remember passphrase in this browser”</strong>, in which case it is kept in the same browser storage — and it is never transmitted anywhere either way.</li>
       <li><strong>Price cache</strong> — recent market prices and currency rates, to limit network requests.</li>
       <li><strong>Backup files</strong> — only where you choose to download or upload them.</li>
@@ -61,6 +74,16 @@
       <li><strong>Fonts.</strong> The app loads its typefaces from Google Fonts.</li>
       <li><strong>Sync destinations — only if you enable sync.</strong> Google Drive, Dropbox, MEGA object storage or your own WebDAV server receive a single file encrypted with AES-256-GCM. The provider <strong>cannot read it</strong>: decryption happens only in your browser with your passphrase, which is never transmitted. Google's sign-in helper script loads only at the moment you press Connect.</li>
       <li><strong>Sign-in providers.</strong> When you connect a drive, Google or Dropbox verify your identity for <em>your</em> drive. Plutus receives only access tokens, which stay in your browser.</li>
+      <li><strong>Analytics — only if you press Accept (Google Analytics 4).</strong> Page views and approximate device data go to Google. Nothing loads when you Decline or ignore the banner. Details in the next section.</li>
+    </ul>
+
+    <h2>Analytics (Google Analytics 4, only with your consent)</h2>
+    <p>Legal basis: your consent (GDPR Art. 6(1)(a)), given by pressing <strong>Accept</strong> in the cookie banner. The banner uses blocking mode: <code>gtag.js</code> (ID <code>G-0JEDV505S7</code>) is not requested at all until you accept.</p>
+    <ul>
+      <li><strong>What Google receives:</strong> visited pages, approximate location (derived from IP, which Google truncates/anonymizes), device and browser type, referrer. Your portfolio, trades and passphrase are never sent.</li>
+      <li><strong>Settings on our side:</strong> 2-month event-data retention (the minimum GA offers), Google signals off, ads personalization off, no data sharing with Google for its own purposes.</li>
+      <li><strong>Withdraw anytime:</strong> press <strong>Cookies</strong> in the page footer and choose Decline, or clear site data in your browser. Withdrawing stops future collection (data already sent follows Google's retention above).</li>
+      <li><strong>Learn more:</strong> Google's GA privacy overview and the <a href="https://tools.google.com/dlpage/gaoptout">Google Analytics opt-out add-on</a>.</li>
     </ul>
 
     <h2>Why each drive permission is needed</h2>
@@ -73,11 +96,11 @@
     <p>Before anything leaves your browser, your portfolio is encrypted with AES-256-GCM, with the key derived from your passphrase via PBKDF2-SHA256 (600,000 rounds) and a fresh random salt and nonce on every upload. A wrong passphrase or a tampered file fails closed — nothing is decrypted, nothing is overwritten. There is no recovery: if you lose the passphrase, the encrypted copy cannot be opened by anyone, including us.</p>
 
     <h2>Your rights (including GDPR)</h2>
-    <p>Legal bases: your consent for optional features such as sync, and our legitimate interest in serving a secure static site. Because we hold no data about you server-side:</p>
+    <p>Legal bases: your consent for optional features such as analytics and sync, and our legitimate interest in serving a secure static site. Because we hold no portfolio data about you server-side:</p>
     <ul>
       <li><strong>Access / portability:</strong> use Download backup and the CSV exports inside the app at any time.</li>
-      <li><strong>Erasure:</strong> use Clear all data in Settings (Danger zone), delete any drive copies, and revoke the app's access in your Google/Dropbox account settings.</li>
-      <li><strong>Objection / restriction:</strong> stop using sync (Disconnect) or stop using the app; without local data there is nothing to process.</li>
+      <li><strong>Erasure:</strong> use Clear all data in Settings (Danger zone), delete any drive copies, and revoke the app's access in your Google/Dropbox account settings. To delete the local cookie choice too, clear site data — the banner will simply ask again.</li>
+      <li><strong>Objection / restriction:</strong> stop using sync (Disconnect), press Decline on analytics (Cookies in the footer), or stop using the app; without local data there is nothing to process.</li>
       <li>To exercise any right against us directly, contact us at the address above — though in practice there is nothing for us to hand over or delete.</li>
     </ul>
 
@@ -94,7 +117,7 @@
     <p>If this policy changes materially, the updated version will be posted here with a new effective date.</p>
   </main>
   <footer>
-    <span class="muted">INOCULENS <strong>PLUTUS</strong> · Private · Local-first · No account, no server</span>
+    <span class="muted">INOCULENS <strong>PLUTUS</strong> · Private · Local-first · No account</span>
   </footer>
 </body>
 </html>

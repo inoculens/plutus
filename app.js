@@ -5298,12 +5298,6 @@ function renderAccountDetail(st, id) {
   nameEl.className = 'account-name detail-name';
   nameEl.textContent = acc.name;
   head.appendChild(nameEl);
-  var chip = document.createElement('span');
-  chip.className = 'ticker-chip';
-  var lv = livePrices[String(acc.ticker || '').toUpperCase()];
-  var lvNum = Number(lv);
-  chip.textContent = String(acc.ticker).toUpperCase() + ((isFinite(lvNum) && lvNum > 0) ? ' · ' + fmtMoney(lvNum, main) : '');
-  head.appendChild(chip);
   var menu = document.createElement('details');
   menu.className = 'menu';
   var sum = document.createElement('summary');

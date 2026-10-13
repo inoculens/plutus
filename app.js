@@ -4868,9 +4868,8 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       var nowTxt = '';
       try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then); } catch (e) { nowTxt = ''; }
       nowPill.textContent = nowTxt;
-      var nowFull = nowTxt + ' — now worth at the live price (info only, not booked)';
-      nowPill.title = nowFull;
-      nowPill.setAttribute('aria-label', nowFull);
+      nowPill.title = nowTxt;
+      nowPill.setAttribute('aria-label', nowTxt);
       head.appendChild(nowPill);
     }
   }

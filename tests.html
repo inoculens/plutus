@@ -5178,6 +5178,7 @@
             assert(side !== null && (side.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING), 'now pill must sit after the type pill');
             assert(pill.classList.contains('trade-now-gain'), '2->6 must be green, got ' + pill.className);
             assert(pill.textContent.indexOf('Current') !== -1 && pill.textContent.indexOf('|') !== -1 && pill.textContent.indexOf('+200%') !== -1 && pill.textContent.indexOf('increase') !== -1, 'buy pill text wrong: ' + pill.textContent);
+            assert(pill.scrollWidth <= pill.clientWidth + 1, 'now pill must fit its full text, got ' + pill.textContent);
             var cs = window.getComputedStyle(pill);
             var bg = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor || '');
             assert(bg !== null, 'now pill must have a background, got ' + cs.backgroundColor);

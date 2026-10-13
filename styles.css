@@ -1188,8 +1188,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 /* "Now worth" fun-fact pill: same outline language as the date/type pills
    (translucent tint wash + bright text + matching border, never a solid
    fill). Gain green, loss red, flat muted. No text-transform so the
-   "increase"/"decrease" word stays lowercase. Truncates with … so the box
-   never resizes with values; the full text lives in the title tooltip. */
+   "increase"/"decrease" word stays lowercase. Sizes to its content — the
+   full text must always fit; ellipsis/overflow are only a last-resort guard
+   so pathological values can never break the box. */
 .trade-now {
   font-size: 0.7rem;
   font-weight: 700;
@@ -1201,7 +1202,6 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   font-variant-numeric: tabular-nums;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 16rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }

@@ -5344,6 +5344,44 @@
           render();
         }
       });
+
+      test('filter interaction never yanks the scroll; navigation still resets it', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        var scrolls = 0;
+        var origScroll = window.scrollTo;
+        window.scrollTo = function () { scrolls++; };
+        try {
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('ft-acct', 0, 5);
+          seedFt();
+          openFt();
+          route();
+          var settled = scrolls;
+          document.querySelector('#account-detail .section-head [data-filter-btn]').click();
+          assert(scrolls === settled, 'opening the filter must keep the scroll position');
+          L.setTradeTypeFilter('ft-acct', ['sell']);
+          assert(scrolls === settled, 'changing the filter must keep the scroll position');
+          L.setTradeTypeFilter('ft-acct', null);
+          assert(scrolls === settled, 'clearing the filter must keep the scroll position');
+          try { navHome(); } catch (e) { /* ignore */ }
+          route();
+          navTo('ft-acct');
+          route();
+          assert(scrolls > settled, 'entering an account must still reset the scroll');
+        } finally {
+          window.scrollTo = origScroll;
+          try { L.setTradeTypeFilter('ft-acct', null); } catch (e) { /* ignore */ }
+          try {
+            if (backup === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', backup);
+          } catch (e) { /* ignore */ }
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('ft-acct', 0, 5);
+          try { navHome(); } catch (e) { /* ignore */ }
+          render();
+        }
+      });
     })();
 
     renderResults();

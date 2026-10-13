@@ -5635,6 +5635,10 @@ function renderAccountDetail(st, id) {
   }
 }
 
+// Account id route() last painted. Scroll resets only when this changes
+// (real navigation); re-renders of the same page keep the scroll position.
+var lastRouteId = null;
+
 function route() {
   var home = document.getElementById('view-home');
   var det = document.getElementById('view-account');
@@ -5659,11 +5663,19 @@ function route() {
         if (document.activeElement && document.activeElement.closest && document.activeElement.closest('.account-card')) back.focus({ preventScroll: true });
       } catch (e) { /* ignore */ }
     }
-    try { if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+    // Scroll reset belongs to navigation only: every in-page interaction
+    // (filter, pager, per-page, checkboxes) re-renders through here, and
+    // yanking to top each time is the snap. Home never scrolls on
+    // interaction — same rule here: reset only when the page changed.
+    if (lastRouteId !== id) {
+      try { if (typeof window !== 'undefined' && window.scrollTo) window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+    }
+    lastRouteId = id;
   } else {
     det.hidden = true;
     home.hidden = false;
     try { document.title = 'INOCULENS PLUTUS — Local-First Portfolio Tracker'; } catch (e) { /* ignore */ }
+    lastRouteId = null;
   }
   // Views just toggled: hidden-while-rendered content (e.g. the hero after
   // deleting the open account) measures zero until now — sync sizes now that

@@ -5396,6 +5396,9 @@ function renderAccountDetail(st, id) {
   stats.appendChild(statCard('Quantity', pos ? (fmtQty(pos.qtyHeld, pos.symbol) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
+  var tickSym = acc && acc.ticker ? String(acc.ticker).toUpperCase() : '';
+  var lvRaw = (tickSym && typeof livePrices !== 'undefined' && livePrices) ? livePrices[tickSym] : null;
+  var lvNum = Number(lvRaw);
   var liveShow = pos ? pos.livePrice : ((isFinite(lvNum) && lvNum > 0) ? lvNum : null);
   stats.appendChild(statCard('Value', mvKnown ? fmtMoney(mv, main) : '—', mvKnown ? mv : null));
   stats.appendChild(statCard('Live price', liveShow !== null ? fmtMoney(liveShow, main) : '—', liveShow));

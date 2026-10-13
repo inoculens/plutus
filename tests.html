@@ -5127,12 +5127,13 @@
         var gp = g.split('|');
         assert(gp.length === 2, 'delta and current must split on |, got ' + g);
         assert(gp[0].indexOf('+') !== -1 && gp[0].indexOf('4') !== -1, 'gain must lead with +delta, got ' + g);
-        assert(gp[1].indexOf('Current') !== -1 && gp[1].indexOf('·') !== -1 && gp[1].indexOf('+200%') !== -1 && gp[1].indexOf('increase') !== -1, 'gain must end with Current + pct, got ' + g);
-        assert(g.indexOf('▲') === -1, 'arrow must ride CSS, not text: ' + g);
+        assert(gp[1].indexOf('Current') !== -1 && gp[1].indexOf('·') !== -1 && gp[1].indexOf('+200%') !== -1, 'gain must end with Current + pct, got ' + g);
+        assert(g.indexOf('▲') === -1 && g.indexOf('increase') === -1 && g.indexOf('decrease') === -1, 'text must stop at the percentage: ' + g);
         var l = L.tradeNowText(1, 'EUR', -50, 2);
         var lp = l.split('|');
         assert(lp.length === 2 && lp[0].indexOf('1') !== -1, 'loss must lead with the delta, got ' + l);
-        assert(lp[1].indexOf('Current') !== -1 && lp[1].indexOf('-50%') !== -1 && lp[1].indexOf('decrease') !== -1, 'loss must end with Current + pct, got ' + l);
+        assert(lp[1].indexOf('Current') !== -1 && lp[1].indexOf('-50%') !== -1, 'loss must end with Current + pct, got ' + l);
+        assert(l.indexOf('increase') === -1 && l.indexOf('decrease') === -1, 'text must stop at the percentage: ' + l);
         var m = L.tradeNowText(2, 'EUR', 0, 2);
         assert(m.indexOf('%') === -1 && m.indexOf('Current') !== -1, 'flat must be Current only, got ' + m);
         var z = L.tradeNowText(6, 'EUR', null, 2);
@@ -5177,7 +5178,7 @@
             var side = buy.querySelector('.side');
             assert(side !== null && (side.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING), 'now pill must sit after the type pill');
             assert(pill.classList.contains('trade-now-gain'), '2->6 must be green, got ' + pill.className);
-            assert(pill.textContent.indexOf('Current') !== -1 && pill.textContent.indexOf('|') !== -1 && pill.textContent.indexOf('+200%') !== -1 && pill.textContent.indexOf('increase') !== -1, 'buy pill text wrong: ' + pill.textContent);
+            assert(pill.textContent.indexOf('Current') !== -1 && pill.textContent.indexOf('|') !== -1 && pill.textContent.indexOf('+200%') !== -1 && pill.textContent.indexOf('increase') === -1, 'buy pill text wrong: ' + pill.textContent);
             assert(pill.scrollWidth <= pill.clientWidth + 1, 'now pill must fit its full text, got ' + pill.textContent);
             var cs = window.getComputedStyle(pill);
             var bg = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor || '');

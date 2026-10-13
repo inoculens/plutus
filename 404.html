@@ -9,6 +9,21 @@
   <meta name="description" content="This page does not exist. Open INOCULENS PLUTUS, a private local-first portfolio tracker by INOCULENS.">
   <link rel="canonical" href="https://plutus.inoculens.com/">
   <link rel="icon" href="/favicon.ico" sizes="any">
+  <script>
+    // Consent Mode v2 default (same as app): analytics denied until Accept.
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){window.dataLayer.push(arguments);}
+    window.gtag = window.gtag || gtag;
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      functionality_storage: 'denied',
+      personalization_storage: 'denied',
+      security_storage: 'granted'
+    });
+  </script>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -27,6 +42,24 @@
     p { color: #d8d4c8; }
     .muted { color: #9aa3b2; }
     footer { border-top: 1px solid rgba(255,255,255,0.07); padding: 1.4rem 1.25rem 2.5rem; text-align: center; }
+    .cookie-link { background: none; border: none; padding: 0; font: inherit; color: #e3c57c; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+    #cookie-banner {
+      position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 90;
+      max-width: 44rem; margin: 0 auto; display: flex; align-items: center;
+      gap: 1rem; flex-wrap: wrap; background: #0e1218;
+      border: 1px solid rgba(255,255,255,0.13); border-radius: 18px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.42); padding: 1rem 1.25rem; text-align: left;
+    }
+    #cookie-banner[hidden] { display: none; }
+    #cookie-banner p { margin: 0; flex: 1 1 16rem; font-size: 0.88rem; }
+    #cookie-banner p strong { color: #f4f1e8; }
+    .cookie-actions { display: flex; gap: 0.6rem; margin-left: auto; }
+    .cookie-actions button {
+      min-height: 2.5rem; padding: 0.5rem 1.1rem; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.13); background: #1a2230; color: #f4f1e8;
+      font: inherit; font-size: 0.9rem; cursor: pointer;
+    }
+    .cookie-actions button.primary { background: #e3c57c; border-color: #e3c57c; color: #1a1408; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -37,6 +70,61 @@
   </main>
   <footer>
     <span class="muted">INOCULENS <strong>PLUTUS</strong> · Private · Local-first · No account</span>
+    <span class="muted"> · </span><button type="button" id="cookie-settings" class="cookie-link">Cookies</button>
   </footer>
+  <div id="cookie-banner" hidden>
+    <p><strong>Cookies, your call.</strong> <span>Portfolio data stays in this browser either way. Optional anonymous analytics only if you accept.</span> <a href="/privacy.html">More details</a></p>
+    <div class="cookie-actions">
+      <button type="button" id="cookie-decline">Decline</button>
+      <button type="button" id="cookie-accept" class="primary">Accept</button>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var GA = 'G-0JEDV505S7', KEY = 'inoculens.consent.v1';
+    function read() {
+      try {
+        var r = localStorage.getItem(KEY);
+        if (!r) return null;
+        var v = JSON.parse(r);
+        return (v && (v.choice === 'accepted' || v.choice === 'declined')) ? v.choice : null;
+      } catch (e) { return null; }
+    }
+    function stub() {
+      window.dataLayer = window.dataLayer || [];
+      if (typeof window.gtag !== 'function') { window.gtag = function () { window.dataLayer.push(arguments); }; }
+    }
+    function load() {
+      if (window.__gaLoaded) return;
+      stub();
+      window.gtag('js', new Date());
+      window.gtag('config', GA, { anonymize_ip: true });
+      var s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA;
+      document.head.appendChild(s);
+      window.__gaLoaded = true;
+    }
+    function apply(c) {
+      try { localStorage.setItem(KEY, JSON.stringify({ choice: c, at: new Date().toISOString() })); } catch (e) { /* ignore */ }
+      stub();
+      try { window.gtag('consent', 'update', { analytics_storage: c === 'accepted' ? 'granted' : 'denied', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' }); } catch (e) { /* ignore */ }
+      if (c === 'accepted') load();
+      var b = document.getElementById('cookie-banner');
+      if (b) b.hidden = true;
+    }
+    var banner = document.getElementById('cookie-banner');
+    var cur = read();
+    if (cur === 'accepted') { if (banner) banner.hidden = true; load(); }
+    else if (cur === 'declined') { if (banner) banner.hidden = true; }
+    else if (banner) { banner.hidden = false; }
+    var a = document.getElementById('cookie-accept');
+    if (a) a.addEventListener('click', function () { apply('accepted'); });
+    var d = document.getElementById('cookie-decline');
+    if (d) d.addEventListener('click', function () { apply('declined'); });
+    var s2 = document.getElementById('cookie-settings');
+    if (s2) s2.addEventListener('click', function () { if (banner) banner.hidden = false; });
+  })();
+  </script>
 </body>
 </html>

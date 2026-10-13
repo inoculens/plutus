@@ -4640,16 +4640,20 @@ function tradeNowMeta(t, main, livePrice) {
   return { now: now, then: then, pct: pct, cls: cls };
 }
 
-// Pill text: money in the current main + signed percent with a plain word,
-// e.g. "€6.00 · +200% increase". The ▲/▼ arrow rides CSS ::before (like
-// .pill.gain/.pill.loss), so the text itself carries no arrow character.
-function tradeNowText(now, main, pct) {
-  var money = fmtMoney(now, main);
+// Pill text: the signed change first (delta vs the record's own cost),
+// then the labelled current value with its percent, e.g.
+// "+€5.49 | Current €7.49 · +200% increase". The ▲/▼ arrow rides CSS
+// ::before (like .pill.gain/.pill.loss), so the text carries no arrow.
+// Flat or basis-free records read "Current €N" only.
+function tradeNowText(now, main, pct, then) {
+  var cur = 'Current ' + fmtMoney(now, main);
   var p = Number(pct);
-  if (pct === null || pct === undefined || !isFinite(p)) return money;
-  if (Math.abs(p) < 0.005) return money;
-  var signed = (p > 0 ? '+' : '') + fmtPct(p);
-  return money + ' · ' + signed + (p > 0 ? ' increase' : ' decrease');
+  if (pct === null || pct === undefined || !isFinite(p)) return cur;
+  if (Math.abs(p) < 0.005) return cur;
+  var delta = Number(now) - Number(then);
+  var signedDelta = (delta > 0 ? '+' : '') + fmtMoney(delta, main);
+  var signedPct = (p > 0 ? '+' : '') + fmtPct(p);
+  return signedDelta + ' | ' + cur + ' · ' + signedPct + (p > 0 ? ' increase' : ' decrease');
 }
 
 function openNoteDialog(text, title) {
@@ -4862,7 +4866,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       var nowPill = document.createElement('span');
       nowPill.className = 'trade-now ' + nowMeta.cls;
       var nowTxt = '';
-      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct); } catch (e) { nowTxt = ''; }
+      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then); } catch (e) { nowTxt = ''; }
       nowPill.textContent = nowTxt;
       var nowFull = nowTxt + ' — now worth at the live price (info only, not booked)';
       nowPill.title = nowFull;

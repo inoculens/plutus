@@ -5122,16 +5122,21 @@
         assert(flat !== null && flat.cls === 'trade-now-flat' && flat.pct === 0, 'flat meta wrong: ' + JSON.stringify(flat));
       });
 
-      test('tradeNowText formats money + signed pct + word', function () {
-        var g = L.tradeNowText(6, 'EUR', 200);
-        assert(g.indexOf('·') !== -1 && g.indexOf('+200%') !== -1 && g.indexOf('increase') !== -1, 'gain text wrong: ' + g);
+      test('tradeNowText leads with the delta, then the labelled current value', function () {
+        var g = L.tradeNowText(6, 'EUR', 200, 2);
+        var gp = g.split('|');
+        assert(gp.length === 2, 'delta and current must split on |, got ' + g);
+        assert(gp[0].indexOf('+') !== -1 && gp[0].indexOf('4') !== -1, 'gain must lead with +delta, got ' + g);
+        assert(gp[1].indexOf('Current') !== -1 && gp[1].indexOf('·') !== -1 && gp[1].indexOf('+200%') !== -1 && gp[1].indexOf('increase') !== -1, 'gain must end with Current + pct, got ' + g);
         assert(g.indexOf('▲') === -1, 'arrow must ride CSS, not text: ' + g);
-        var l = L.tradeNowText(1, 'EUR', -50);
-        assert(l.indexOf('-50%') !== -1 && l.indexOf('decrease') !== -1, 'loss text wrong: ' + l);
-        var m = L.tradeNowText(2, 'EUR', 0);
-        assert(m.indexOf('%') === -1, 'flat must be money only, got ' + m);
-        var z = L.tradeNowText(6, 'EUR', null);
-        assert(z.indexOf('%') === -1, 'null pct must be money only, got ' + z);
+        var l = L.tradeNowText(1, 'EUR', -50, 2);
+        var lp = l.split('|');
+        assert(lp.length === 2 && lp[0].indexOf('1') !== -1, 'loss must lead with the delta, got ' + l);
+        assert(lp[1].indexOf('Current') !== -1 && lp[1].indexOf('-50%') !== -1 && lp[1].indexOf('decrease') !== -1, 'loss must end with Current + pct, got ' + l);
+        var m = L.tradeNowText(2, 'EUR', 0, 2);
+        assert(m.indexOf('%') === -1 && m.indexOf('Current') !== -1, 'flat must be Current only, got ' + m);
+        var z = L.tradeNowText(6, 'EUR', null, 2);
+        assert(z.indexOf('%') === -1 && z.indexOf('Current') !== -1, 'null pct must be Current only, got ' + z);
       });
 
       testAsync('buy/sell cards render the now pill after the type pill; transfers do not', function () {
@@ -5172,7 +5177,7 @@
             var side = buy.querySelector('.side');
             assert(side !== null && (side.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING), 'now pill must sit after the type pill');
             assert(pill.classList.contains('trade-now-gain'), '2->6 must be green, got ' + pill.className);
-            assert(pill.textContent.indexOf('+200%') !== -1 && pill.textContent.indexOf('increase') !== -1, 'buy pill text wrong: ' + pill.textContent);
+            assert(pill.textContent.indexOf('Current') !== -1 && pill.textContent.indexOf('|') !== -1 && pill.textContent.indexOf('+200%') !== -1 && pill.textContent.indexOf('increase') !== -1, 'buy pill text wrong: ' + pill.textContent);
             var cs = window.getComputedStyle(pill);
             var bg = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor || '');
             assert(bg !== null, 'now pill must have a background, got ' + cs.backgroundColor);

@@ -7998,10 +7998,11 @@ function renderHeroAlloc(st) {
   syncHeroAllocHeight();
 }
 
-// The legend never stretches its box: capped at six rows (the 7th asset
-// scrolls) and never taller than the left amount block, so the hero cannot
-// expand no matter how many assets exist. Re-synced on render + viewport
-// and font changes because the amount scales with the viewport.
+// The legend never stretches its box: capped at six rows on desktop / three
+// rows on phones (the next asset scrolls) and never taller than the left
+// amount block, so the hero cannot expand no matter how many assets exist.
+// Re-synced on render + viewport and font changes because the amount scales
+// with the viewport.
 function syncHeroAllocHeight() {
   try {
     var host = document.getElementById('hero-alloc');
@@ -8015,8 +8016,19 @@ function syncHeroAllocHeight() {
     var cap = h;
     try {
       var root = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-      var sixRows = 6 * (0.85 * 1.55 * root) + 5 * (0.35 * root);
-      if (sixRows > 0 && sixRows < cap) cap = sixRows;
+      var narrow = false;
+      try {
+        if (typeof window !== 'undefined' && window.matchMedia) {
+          narrow = window.matchMedia('(max-width: 720px)').matches;
+        }
+      } catch (eN) {}
+      // Row budget mirrors the legend metrics: desktop li 0.85rem / 0.35rem
+      // gap, mobile li 0.6rem / 0.3rem gap (shared by all phone breakpoints).
+      var rows = narrow ? 3 : 6;
+      var rfs = narrow ? 0.6 : 0.85;
+      var rlg = narrow ? 0.3 : 0.35;
+      var budget = rows * (rfs * 1.55 * root) + (rows - 1) * (rlg * root);
+      if (budget > 0 && budget < cap) cap = budget;
     } catch (e2) { /* fall back to the measured block height */ }
     leg.style.maxHeight = cap + 'px';
     // Pin the ring to exact pixels as well: percentage heights resolve

@@ -3916,7 +3916,7 @@ function buildAccountAction() {
       selectedAccounts = {};
       selectionMode = false;
       if (!saveStateGuarded(s2)) return;
-      try { Object.keys(inSet).forEach(function (id) { delete tradePageByAccount[id]; }); } catch (e) { /* ignore */ }
+      try { Object.keys(inSet).forEach(function (id) { delete tradePageByAccount[id]; clearTradeTypeFilterState(id); }); } catch (e) { /* ignore */ }
       clearBanner();
       render();
     });
@@ -3986,6 +3986,85 @@ function buildAccountFilter(st, tickers, effective) {
   tickers.forEach(function (t) {
     var n = counts[t] || 0;
     panel.appendChild(optRow(t + (n ? ' · ' + n : ''), effective.indexOf(t) !== -1, t));
+  });
+  wrap.appendChild(panel);
+  return wrap;
+}
+
+function tradeTypeLabel(t) {
+  if (t === 'sell') return 'Sell';
+  if (t === 'transfer') return 'Transfer';
+  if (t === 'income') return 'Income';
+  if (t === 'expense') return 'Expense';
+  return 'Buy';
+}
+
+// Record-type filter button for the account detail Trades header. Same look
+// and checkbox language as the home asset filter (ghost button, Filter · N
+// count, All + per-type rows with counts); only the dimension differs.
+function buildTradeTypeFilter(acc, atrades) {
+  var id = (acc && acc.id) || '';
+  var wrap = document.createElement('div');
+  wrap.className = 'filter-wrap';
+  var cur = tradeTypeFilterFor(id); // null = all
+  var open = !!tradeTypeFilterOpenByAccount[id];
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost';
+  btn.setAttribute('data-filter-btn', '1');
+  btn.textContent = (cur === null) ? 'Filter' : ('Filter · ' + cur.length);
+  btn.setAttribute('aria-label', 'Filter records by type');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  btn.addEventListener('click', function () {
+    tradeTypeFilterOpenByAccount[id] = !tradeTypeFilterOpenByAccount[id];
+    tradeTypeFilterFocus = null;
+    render();
+  });
+  wrap.appendChild(btn);
+  var panel = document.createElement('div');
+  panel.className = 'filter-panel';
+  panel.setAttribute('data-filter-panel', '1');
+  panel.hidden = !open;
+  var title = document.createElement('p');
+  title.className = 'filter-title';
+  title.textContent = 'Show records';
+  panel.appendChild(title);
+  var counts = {};
+  (atrades || []).forEach(function (t) {
+    var k = String((t && t.type) || '').toLowerCase();
+    if (TRADE_TYPES.indexOf(k) !== -1) counts[k] = (counts[k] || 0) + 1;
+  });
+  function optRow(labelText, checked, type) {
+    var lab = document.createElement('label');
+    lab.className = 'filter-opt';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!checked;
+    if (type === null) cb.setAttribute('data-ttfilter-all', '1');
+    else cb.setAttribute('data-ttype', type);
+    var sp = document.createElement('span');
+    sp.textContent = labelText;
+    lab.appendChild(cb);
+    lab.appendChild(sp);
+    cb.addEventListener('change', function () {
+      if (type === null) {
+        setTradeTypeFilter(id, cb.checked ? null : [], null);
+        return;
+      }
+      var base = tradeTypeFilterFor(id);
+      var list = (base === null) ? TRADE_TYPES.slice() : base.slice();
+      var ix = list.indexOf(type);
+      if (cb.checked && ix === -1) list.push(type);
+      if (!cb.checked && ix !== -1) list.splice(ix, 1);
+      var coversAll = TRADE_TYPES.every(function (x) { return list.indexOf(x) !== -1; });
+      setTradeTypeFilter(id, coversAll ? null : list.sort(), type);
+    });
+    return lab;
+  }
+  panel.appendChild(optRow('All', cur === null, null));
+  TRADE_TYPES.forEach(function (x) {
+    var n = counts[x] || 0;
+    panel.appendChild(optRow(tradeTypeLabel(x) + (n ? ' · ' + n : ''), cur === null || cur.indexOf(x) !== -1, x));
   });
   wrap.appendChild(panel);
   return wrap;
@@ -5397,6 +5476,7 @@ function renderAccountDetail(st, id) {
     tAdd.textContent = '+ Record';
     tAdd.setAttribute('aria-label', 'Add record to ' + acc.name);
     tAdd.addEventListener('click', function () { openPrefillTrade(acc.id, true); });
+    tHead.appendChild(buildTradeTypeFilter(acc, atrades));
     tHead.appendChild(tAdd);
     host.appendChild(tHead);
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
@@ -5404,7 +5484,12 @@ function renderAccountDetail(st, id) {
     // Paged records: sort once, then build DOM only for the visible slice.
     // Off-page records cost nothing per paint (no tradeBlock, no exec-rate
     // resolution, single fragment insert) while totals above still use all.
-    var sortedTrades = ledgerSortByDate(atrades).reverse();
+    // Record-type filter: view-only multi-select (null = every type). Stats,
+    // totals and P&L above always cover every trade; only this list + its
+    // pager follow the filter.
+    var typeFilter = tradeTypeFilterFor(acc.id);
+    var fullSorted = ledgerSortByDate(atrades).reverse();
+    var sortedTrades = filterTradesByType(fullSorted, typeFilter);
     var tradeTotal = sortedTrades.length;
     var tradePageCount = tradePageCountFor(tradeTotal);
     var tradePage = tradePageGet(acc.id, tradeTotal);
@@ -5419,7 +5504,9 @@ function renderAccountDetail(st, id) {
     var rangeEl = document.createElement('span');
     rangeEl.className = 'muted trade-range';
     rangeEl.setAttribute('data-trade-range', '1');
-    rangeEl.textContent = 'Showing ' + (tradeStart + 1) + '–' + tradeEnd + ' of ' + tradeTotal;
+    rangeEl.textContent = tradeTotal
+      ? 'Showing ' + (tradeStart + 1) + '–' + tradeEnd + ' of ' + tradeTotal
+      : 'No records match this filter';
     bottomBar.appendChild(rangeEl);
     if (tradePageCount > 1) bottomBar.appendChild(buildTradePager(acc.id, tradeTotal, tradePageCount, tradePage));
     var perWrap = document.createElement('label');
@@ -5473,7 +5560,34 @@ function renderAccountDetail(st, id) {
       for (var k = 0; k < sortedTrades.length; k++) {
         if (sortedTrades[k] && sortedTrades[k].id === id) { idx = k; break; }
       }
-      if (idx < 0) return;
+      if (idx < 0) {
+        // Not in the filtered view: search the full list. A filtered-out
+        // target clears the type filter so lot-link jumps still land.
+        var fullIdx = -1;
+        for (var k2 = 0; k2 < fullSorted.length; k2++) {
+          if (fullSorted[k2] && fullSorted[k2].id === id) { fullIdx = k2; break; }
+        }
+        if (fullIdx < 0) return;
+        setTradeTypeFilter(acc.id, null);
+        var fullPage = Math.floor(fullIdx / tradePageSize);
+        if (fullPage !== 0) {
+          tradePageSetFor(acc.id, fullPage, fullSorted.length);
+          render();
+        }
+        try {
+          setTimeout(function () {
+            var el = null;
+            try {
+              var cs = document.querySelectorAll('#account-detail [data-trade]');
+              for (var j = 0; j < cs.length; j++) {
+                if (cs[j].getAttribute('data-trade') === id) { el = cs[j]; break; }
+              }
+            } catch (e2b) { el = null; }
+            if (el) flashTradeCard(el);
+          }, 60);
+        } catch (e3b) { /* ignore */ }
+        return;
+      }
       var pg = Math.floor(idx / tradePageSize);
       if (pg === tradePage) return;
       tradePageSetFor(acc.id, pg, tradeTotal);
@@ -5501,6 +5615,7 @@ function renderAccountDetail(st, id) {
     }
     if (frag) host.appendChild(frag);
     host.appendChild(bottomBar);
+    restoreTradeTypeFilterFocus();
   } else {
     host.appendChild(tHead);
     var emptyTrades = document.createElement('div');
@@ -5680,7 +5795,7 @@ function deleteAccount(id) {
     s2.trades = (s2.trades || []).filter(function (t) { return !t || (t.accountId !== id && t.toAccountId !== id); });
     s2.accounts = (s2.accounts || []).filter(function (a) { return !a || a.id !== id; });
     if (!saveStateGuarded(s2)) return;
-    try { delete tradePageByAccount[id]; } catch (e) { /* ignore */ }
+    try { delete tradePageByAccount[id]; clearTradeTypeFilterState(id); } catch (e) { /* ignore */ }
     clearBanner();
     render();
   });
@@ -5899,10 +6014,11 @@ function buildAccounts() {
       var inF = t && t.closest && (t.closest('[data-filter-panel]') || t.closest('[data-filter-btn]'));
       var inA = t && t.closest && (t.closest('[data-action-panel]') || t.closest('[data-action-btn]'));
       if (!inF) closeAccountFilter(false);
+      if (!inF) closeTradeTypeFilter(false);
       if (!inA) closeAccountAction();
     });
     document.addEventListener('keydown', function (e) {
-      if (e && (e.key === 'Escape' || e.key === 'Esc')) { closeAccountFilter(true); closeAccountAction(); }
+      if (e && (e.key === 'Escape' || e.key === 'Esc')) { closeAccountFilter(true); closeTradeTypeFilter(true); closeAccountAction(); }
     });
   }
 }
@@ -5963,6 +6079,98 @@ function tradePageSetFor(accountId, p, total) {
   if (p > pc - 1) p = pc - 1;
   tradePageByAccount[accountId] = p;
   return p;
+}
+
+// --- Trade-type filter (per-account record list) ---
+// View-only multi-select over TRADE_TYPES, mirroring the home asset filter:
+// null/absent = show every record, otherwise exactly these types. In-memory
+// per account (like the page index, and unlike the home asset filter it is
+// deliberately NOT persisted: no settings/export shape change). Totals and
+// P&L above always cover every trade; only the visible list + pager follow.
+var tradeTypeFilterByAccount = {}; // accountId -> normalized array of types
+var tradeTypeFilterOpenByAccount = {}; // accountId -> bool (panel stays open across renders)
+var tradeTypeFilterFocus = null; // type to refocus after render, then cleared
+
+function normalizeTradeTypeFilter(v) {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) return null;
+  var seen = {};
+  var out = [];
+  v.forEach(function (t) {
+    var s = String(t === undefined || t === null ? '' : t).trim().toLowerCase();
+    if (TRADE_TYPES.indexOf(s) === -1 || seen[s]) return;
+    seen[s] = true;
+    out.push(s);
+  });
+  return out; // [] = none selected (valid: the list shows the no-match note)
+}
+
+function tradeTypeFilterFor(accountId) {
+  if (typeof accountId !== 'string' || accountId === '') return null;
+  if (!Object.prototype.hasOwnProperty.call(tradeTypeFilterByAccount, accountId)) return null;
+  return normalizeTradeTypeFilter(tradeTypeFilterByAccount[accountId]);
+}
+
+function setTradeTypeFilter(accountId, next, focusType) {
+  if (typeof accountId !== 'string' || accountId === '') return;
+  var n = normalizeTradeTypeFilter(next);
+  if (n === null) {
+    try { delete tradeTypeFilterByAccount[accountId]; } catch (e) { /* ignore */ }
+  } else {
+    tradeTypeFilterByAccount[accountId] = n;
+  }
+  tradeTypeFilterFocus = focusType || null;
+  try { tradePageByAccount[accountId] = 0; } catch (e) { /* page resets on next paint anyway */ }
+  render();
+}
+
+function filterTradesByType(trades, filter) {
+  if (!filter) return (trades || []).slice();
+  return (trades || []).filter(function (t) {
+    return !!t && filter.indexOf(String(t.type || '').toLowerCase()) !== -1;
+  });
+}
+
+function clearTradeTypeFilterState(accountId) {
+  try { delete tradeTypeFilterByAccount[accountId]; } catch (e) { /* ignore */ }
+  try { delete tradeTypeFilterOpenByAccount[accountId]; } catch (e) { /* ignore */ }
+}
+
+function closeTradeTypeFilter(moveFocus) {
+  var anyOpen = Object.keys(tradeTypeFilterOpenByAccount).some(function (id) {
+    return !!tradeTypeFilterOpenByAccount[id];
+  });
+  tradeTypeFilterFocus = null;
+  if (!anyOpen) return;
+  Object.keys(tradeTypeFilterOpenByAccount).forEach(function (id) {
+    tradeTypeFilterOpenByAccount[id] = false;
+  });
+  try {
+    var host = document.getElementById('account-detail');
+    var panel = host && host.querySelector ? host.querySelector('[data-filter-panel]') : null;
+    if (panel) panel.hidden = true;
+    var btn = host && host.querySelector ? host.querySelector('[data-filter-btn]') : null;
+    if (btn) {
+      btn.setAttribute('aria-expanded', 'false');
+      if (moveFocus && btn.focus) {
+        try { btn.focus(); } catch (e) { /* ignore */ }
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function restoreTradeTypeFilterFocus() {
+  if (!tradeTypeFilterFocus) return;
+  var anyOpen = Object.keys(tradeTypeFilterOpenByAccount).some(function (id) {
+    return !!tradeTypeFilterOpenByAccount[id];
+  });
+  if (!anyOpen) { tradeTypeFilterFocus = null; return; }
+  try {
+    var host = document.getElementById('account-detail');
+    var el = host && host.querySelector ? host.querySelector('[data-ttype="' + tradeTypeFilterFocus + '"]') : null;
+    if (el && el.focus) el.focus();
+  } catch (e) { /* ignore */ }
+  tradeTypeFilterFocus = null;
 }
 var acctDrag = null; // {id,startX,startY,started,ghost,overId,after,flipTimer,flipCoolUntil,armedBtn}
 var suppressCardClick = false;
@@ -8417,6 +8625,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.tradePageGet = tradePageGet;
   window.Inoculens.tradePageSetFor = tradePageSetFor;
   window.Inoculens.buildTradePager = buildTradePager;
+  window.Inoculens.normalizeTradeTypeFilter = normalizeTradeTypeFilter;
+  window.Inoculens.tradeTypeFilterFor = tradeTypeFilterFor;
+  window.Inoculens.setTradeTypeFilter = setTradeTypeFilter;
+  window.Inoculens.filterTradesByType = filterTradesByType;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', init);
   }

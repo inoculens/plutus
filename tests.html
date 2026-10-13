@@ -5191,6 +5191,160 @@
       });
     })();
 
+    // === Trade-type filter tests (per-account record list, view-only) ===
+    (function tradeTypeFilterTests() {
+      var L = window.Inoculens || {};
+      var FXT = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+      function ftTrade(id, type, date) {
+        var t = { id: id, type: type, symbol: 'BTC', qty: 1, total: 100, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', note: '', accountId: 'ft-acct', fxLock: FXT, createdAt: date + 'T00:00:00.000Z' };
+        if (type === 'transfer') { t.qty = 0.5; t.total = 0; t.networkFee = 0.0001; }
+        if (type === 'income') { t.qty = 2; t.total = 50; }
+        if (type === 'expense') { t.qty = 0.1; t.total = 5; }
+        return t;
+      }
+      function ftTrades() {
+        return [
+          ftTrade('ft-buy', 'buy', '2026-01-01'),
+          ftTrade('ft-sell', 'sell', '2026-01-02'),
+          ftTrade('ft-xfer', 'transfer', '2026-01-03'),
+          ftTrade('ft-inc', 'income', '2026-01-04'),
+          ftTrade('ft-exp', 'expense', '2026-01-05')
+        ];
+      }
+      function seedFt() {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: 'ft-acct', name: 'Filtered', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: ftTrades(),
+          priceOverrides: {}
+        });
+      }
+      function openFt() {
+        if (typeof init === 'function') init();
+        navTo('ft-acct');
+        route();
+        render();
+      }
+      function blocks() {
+        return document.querySelectorAll('#account-detail .trade-block[data-trade]').length;
+      }
+
+      test('trade type filter helpers exposed', function () {
+        assert(typeof L.normalizeTradeTypeFilter === 'function', 'normalizeTradeTypeFilter missing');
+        assert(typeof L.tradeTypeFilterFor === 'function', 'tradeTypeFilterFor missing');
+        assert(typeof L.setTradeTypeFilter === 'function', 'setTradeTypeFilter missing');
+        assert(typeof L.filterTradesByType === 'function', 'filterTradesByType missing');
+      });
+
+      test('normalizeTradeTypeFilter cleans input, null means all', function () {
+        assert(L.normalizeTradeTypeFilter(null) === null, 'null must stay null');
+        assert(L.normalizeTradeTypeFilter(undefined) === null, 'undefined must stay null');
+        assert(L.normalizeTradeTypeFilter('buy') === null, 'non-array must be null');
+        assert(JSON.stringify(L.normalizeTradeTypeFilter(['buy', 'SELL', 'buy', 'nope', null, ''])) === '["buy","sell"]', 'must lowercase, dedupe and drop junk');
+        assert(JSON.stringify(L.normalizeTradeTypeFilter([])) === '[]', 'empty selection must survive (shows the no-match note)');
+      });
+
+      test('filterTradesByType picks exactly the selected types', function () {
+        var all = ftTrades();
+        assert(L.filterTradesByType(all, null).length === 5, 'null must pass everything through');
+        var buys = L.filterTradesByType(all, ['buy']);
+        assert(buys.length === 1 && buys[0].type === 'buy', 'buy-only wrong: ' + JSON.stringify(buys));
+        var both = L.filterTradesByType(all, ['buy', 'sell']);
+        assert(both.length === 2, 'buy+sell must pick two, got ' + both.length);
+        assert(L.filterTradesByType(all, []).length === 0, 'empty selection must match nothing');
+        assert(all.length === 5, 'filter must not mutate the input list');
+      });
+
+      test('record filter button sits next to + Record and filters the list only', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        try {
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('ft-acct', 0, 5);
+          seedFt();
+          openFt();
+          var head = document.querySelector('#account-detail .section-head');
+          assert(head !== null, 'trades header must render');
+          var fbtn = head.querySelector('[data-filter-btn]');
+          var add = head.querySelector('.t-add');
+          assert(fbtn !== null && add !== null, 'Filter must sit next to + Record');
+          assert(fbtn.textContent === 'Filter', 'unfiltered button must read Filter, got ' + fbtn.textContent);
+          assert(blocks() === 5, 'unfiltered list must show all 5, got ' + blocks());
+          var qty = document.querySelector('#account-detail [data-label="Quantity"]');
+          var qtyAll = qty && qty.getAttribute('data-value');
+          assert(qtyAll !== null, 'quantity total must render');
+          L.setTradeTypeFilter('ft-acct', ['sell']);
+          assert(blocks() === 1, 'sell-only must show 1, got ' + blocks());
+          assert(document.querySelector('#account-detail .trade-block[data-trade="ft-sell"]') !== null, 'the visible card must be the sell');
+          var range = document.querySelector('[data-trade-range]');
+          assert(range !== null && range.textContent.indexOf('of 1') !== -1, 'range must read of 1, got ' + (range && range.textContent));
+          var fbtn1 = document.querySelector('#account-detail .section-head [data-filter-btn]');
+          assert(fbtn1 !== null && fbtn1.textContent === 'Filter · 1', 'button must count the selection, got ' + (fbtn1 && fbtn1.textContent));
+          var qty1 = document.querySelector('#account-detail [data-label="Quantity"]');
+          assert(qty1 !== null && qty1.getAttribute('data-value') === qtyAll, 'totals must stay global while filtering');
+          L.setTradeTypeFilter('ft-acct', ['buy', 'sell']);
+          assert(blocks() === 2, 'buy+sell must show 2, got ' + blocks());
+          L.setTradeTypeFilter('ft-acct', []);
+          assert(blocks() === 0, 'empty selection must show no cards');
+          assert(document.querySelector('[data-trade-range]').textContent.indexOf('No records match') !== -1, 'empty selection needs the no-match note');
+          L.setTradeTypeFilter('ft-acct', null);
+          assert(blocks() === 5, 'clearing must restore all 5');
+        } finally {
+          try { L.setTradeTypeFilter('ft-acct', null); } catch (e) { /* ignore */ }
+          try {
+            if (backup === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', backup);
+          } catch (e) { /* ignore */ }
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('ft-acct', 0, 5);
+          try { navHome(); } catch (e) { /* ignore */ }
+          render();
+        }
+      });
+
+      test('filter panel checkboxes drive the list like the home filter', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        function fireChange(el) {
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        try {
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('ft-acct', 0, 5);
+          seedFt();
+          openFt();
+          document.querySelector('#account-detail .section-head [data-filter-btn]').click();
+          var panel = document.querySelector('#account-detail [data-filter-panel]');
+          assert(panel !== null && panel.hidden === false, 'Filter click must open the panel');
+          var boxes = panel.querySelectorAll('input[type="checkbox"]');
+          assert(boxes.length === 6, 'panel must offer All + 5 types, got ' + boxes.length);
+          ['sell', 'transfer', 'income', 'expense'].forEach(function (tp) {
+            var cb = document.querySelector('#account-detail [data-ttype="' + tp + '"]');
+            assert(cb !== null && cb.checked === true, tp + ' must start checked');
+            cb.checked = false;
+            fireChange(cb);
+          });
+          assert(blocks() === 1, 'only buys must remain, got ' + blocks());
+          assert(document.querySelector('#account-detail .trade-block[data-trade="ft-buy"]') !== null, 'the remaining card must be the buy');
+          var all = document.querySelector('#account-detail [data-ttfilter-all]');
+          assert(all !== null && all.checked === false, 'All must be unchecked for a partial selection');
+          all.checked = true;
+          fireChange(all);
+          assert(blocks() === 5, 'All must restore every record');
+        } finally {
+          try { L.setTradeTypeFilter('ft-acct', null); } catch (e) { /* ignore */ }
+          try {
+            if (backup === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', backup);
+          } catch (e) { /* ignore */ }
+          L.tradePageSizeSet(25);
+          L.tradePageSetFor('ft-acct', 0, 5);
+          try { navHome(); } catch (e) { /* ignore */ }
+          render();
+        }
+      });
+    })();
+
     renderResults();
   </script>
 </body>

@@ -559,6 +559,12 @@ section h2, aside h2 {
 
 .section-head .section-title { margin: 0; }
 
+/* Trades header carries three children (title + type filter + Record), so
+   the filter would strand mid-row under space-between: pull it (and the
+   Record button after it) to the right edge instead. Scoped to the account
+   detail header — the home header has two children and stays as-is. */
+#account-detail .section-head .filter-wrap { margin-left: auto; }
+
 .section-actions { display: flex; align-items: center; gap: 0.6rem; }
 
 .ghost.select-on {
@@ -1728,6 +1734,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
        under the name only on very narrow cards; pager scrolls, never clips. */
   #accounts { gap: 0.55rem; }
   .section-head { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  /* Trades header stays a title-left / actions-right row on phones too, so
+     the type filter sits right next to + Record instead of stacking left. */
+  #account-detail .section-head { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  #account-detail .section-head .section-title { flex: 1 1 auto; }
   .section-actions { flex-wrap: wrap; }
   .section-actions button { flex: 1 1 auto; min-height: 2.75rem; }
   .account-card { flex-wrap: nowrap; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; min-height: 4.2rem; }

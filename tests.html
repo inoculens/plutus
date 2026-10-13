@@ -5268,6 +5268,7 @@
           var fbtn = head.querySelector('[data-filter-btn]');
           var add = head.querySelector('.t-add');
           assert(fbtn !== null && add !== null, 'Filter must sit next to + Record');
+          assert(add.previousElementSibling === fbtn.closest('.filter-wrap'), 'Filter must sit directly left of + Record');
           assert(fbtn.textContent === 'Filter', 'unfiltered button must read Filter, got ' + fbtn.textContent);
           assert(blocks() === 5, 'unfiltered list must show all 5, got ' + blocks());
           var qty = document.querySelector('#account-detail [data-label="Quantity"]');

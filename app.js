@@ -2073,6 +2073,12 @@ function fetchLivePrice(symbol, vs, kind) {
   }
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   if (kd === 'stock') return fetchStockPrice(sym, cur);
+  // Cash in the display fiat is worth 1 by definition — no network, no
+  // override needed (a manual override above still wins when set).
+  if (kd === 'cash' && sym === cur) {
+    priceCache[key] = { price: 1, at: Date.now() };
+    return Promise.resolve(1);
+  }
   if (kd === 'custom' || kd === 'cash') return Promise.resolve(null);
   // (3a) Unknown ticker: null immediately, never throws, no network.
   var id = SYMBOL_MAP[sym];
@@ -2169,6 +2175,9 @@ function refreshAllPrices(symbols, vs, kinds) {
     }
     var kd = (typeof kindFor(sym) === 'string') ? kindFor(sym).trim().toLowerCase() : '';
     if (kd === 'stock') { stocks.push(sym); return; }
+    // Cash in the display fiat is worth 1 by definition — no network, no
+    // override needed (an override above already won when set).
+    if (kd === 'cash' && sym === String(cur).toUpperCase()) { out[sym] = 1; return; }
     if (kd === 'custom' || kd === 'cash') {
       out[sym] = null;
       errors[sym] = 'manual price only — add an override in Settings';
@@ -8414,17 +8423,42 @@ function refreshPrices() {
       var v = out[k];
       if (isFinite(Number(v)) && Number(v) > 0) livePrices[k] = Number(v);
     });
+    // Only symbols with a real live source can be "unreachable". Cash /
+    // custom kinds and unmapped tickers are manual-by-design: they stay
+    // unknown (—) without ever raising the price banner. An override that
+    // is set yet still missing failed conversion, so it stays actionable.
+    function isActionable(s) {
+      var up = String(s || '').toUpperCase();
+      try { if (priceOverrideEntry(up) !== null) return true; } catch (e) { /* fall through */ }
+      var kd = null;
+      try {
+        if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
+        else if (kinds) {
+          var ks = Object.keys(kinds);
+          for (var i = 0; i < ks.length; i++) {
+            if (String(ks[i]).toUpperCase() === up) { kd = kinds[ks[i]]; break; }
+          }
+        }
+      } catch (e) { kd = null; }
+      var kdl = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
+      if (kdl === 'cash' || kdl === 'custom') return false;
+      if (kdl === 'stock') return true;
+      try { if (SYMBOL_MAP && SYMBOL_MAP[up]) return true; } catch (e) { /* fall through */ }
+      return false;
+    }
     var missing = syms.filter(function (s) { return !(isFinite(Number(livePrices[s])) && Number(livePrices[s]) > 0); });
-    if (!missing.length) {
+    var actionable = missing.filter(isActionable);
+    if (!actionable.length) {
       clearPriceBanner();
       render();
       return out;
     }
     // One gentle retry for transient failures (e.g. CoinGecko 429) before
     // telling the user anything — most hiccups heal within seconds.
+    // Manual-by-design symbols are not retried: they would fail forever.
     return new Promise(function (res) { setTimeout(res, 2500); }).then(function () {
       if (!isCurrent()) return out; // main moved on during the wait: stay quiet
-      return refreshAllPrices(missing, mainNow, kinds);
+      return refreshAllPrices(actionable, mainNow, kinds);
     }).then(function (out2) {
       if (!isCurrent()) return out; // stale retry: discard, no paint, no banner
       Object.keys(out2).forEach(function (k) {
@@ -8432,8 +8466,9 @@ function refreshPrices() {
         if (isFinite(Number(v)) && Number(v) > 0) livePrices[k] = Number(v);
       });
       var stillMissing = syms.filter(function (s) { return !(isFinite(Number(livePrices[s])) && Number(livePrices[s]) > 0); });
-      if (stillMissing.length) {
-        var detailLines = stillMissing.map(function (s) {
+      var actionableStill = stillMissing.filter(isActionable);
+      if (actionableStill.length) {
+        var detailLines = actionableStill.map(function (s) {
           return s + ' — ' + (lastPriceErrors[s] || 'price unavailable');
         });
         showBanner('Live prices are unreachable right now — your data is safe and numbers will fill in automatically.', 'info', {

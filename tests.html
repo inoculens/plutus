@@ -713,6 +713,9 @@
             var unr = unl.getBoundingClientRect();
             var una = unl.querySelector('.ledger-amount').getBoundingClientRect();
             assert(unr.right - una.right < 8, 'Unlabeled amount must hug the row end');
+            assert(!unl.querySelector('.ledger-toggle-sp'), 'Unlabeled row reserves no arrow slot');
+            var unt = unl.querySelector('.ledger-label-text').getBoundingClientRect();
+            assert(unt.left - unr.left < 16, 'Unlabeled label must start at the row beginning');
             var row1000 = document.querySelector('.ledger-row[data-ledger="1000"]');
             assert(row1000 && row1000.querySelector('.ledger-amount.ledger-box-inc'), 'parent overview needs the boxed income total');
             var warn = document.querySelector('.ledger-warn');

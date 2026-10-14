@@ -5824,6 +5824,8 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   // Parents collapse to the top ledger only: the arrow hides the whole subtree.
   // Every row reserves the arrow slot (spacer when childless) so labels sit
   // on one x per depth and never jump when a ledger gains children later.
+  // Virtual Unlabeled rows can never have children: no slot, label starts
+  // at the very beginning of the row.
   if (o.hasKids) {
     var tog = document.createElement('button');
     tog.type = 'button';
@@ -5833,7 +5835,7 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
     tog.setAttribute('aria-expanded', o.collapsed ? 'false' : 'true');
     tog.setAttribute('aria-label', (o.collapsed ? 'Expand ledger ' : 'Collapse ledger ') + code);
     d.appendChild(tog);
-  } else {
+  } else if (!unlabeled) {
     var sp = document.createElement('span');
     sp.className = 'ledger-toggle-sp';
     sp.setAttribute('aria-hidden', 'true');

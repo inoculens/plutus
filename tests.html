@@ -699,6 +699,13 @@
             assert(row1100.querySelector('.ledger-label-text[data-info-cond]'), 'label needs overflow info wiring');
             var leaf = document.querySelector('.ledger-row[data-ledger="1110"]');
             assert(leaf && !leaf.querySelector('[data-ledger-toggle]'), 'leaf row needs no toggle');
+            assert(leaf && leaf.querySelector('.ledger-toggle-sp'), 'leaf row must reserve the arrow slot');
+            var rTop = row1100.getBoundingClientRect();
+            var rLeaf = leaf.getBoundingClientRect();
+            assert(rLeaf.left > rTop.left + 1, 'child row must start right of its parent: ' + rLeaf.left + ' vs ' + rTop.left);
+            var tTop = row1100.querySelector('.ledger-label-text').getBoundingClientRect();
+            var tLeaf = leaf.querySelector('.ledger-label-text').getBoundingClientRect();
+            assert(tLeaf.left > tTop.left + 1, 'child label must start right of the parent label: ' + tLeaf.left + ' vs ' + tTop.left);
             var unl = document.querySelector('.ledger-row[data-ledger="—"]');
             assert(unl && !unl.querySelector('[data-ledger-edit]') && !unl.querySelector('[data-ledger-del]'), 'Unlabeled row needs no actions');
             var row1000 = document.querySelector('.ledger-row[data-ledger="1000"]');

@@ -5821,6 +5821,8 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   if (isFinite(Number(total))) d.setAttribute('data-value', String(Number(total)));
   try { d.style.paddingLeft = 'calc(0.6rem + ' + (depth * 1.9) + 'rem)'; } catch (e) { /* ignore */ }
   // Parents collapse to the top ledger only: the arrow hides the whole subtree.
+  // Every row reserves the arrow slot (spacer when childless) so labels sit
+  // on one x per depth and never jump when a ledger gains children later.
   if (o.hasKids) {
     var tog = document.createElement('button');
     tog.type = 'button';
@@ -5830,6 +5832,11 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
     tog.setAttribute('aria-expanded', o.collapsed ? 'false' : 'true');
     tog.setAttribute('aria-label', (o.collapsed ? 'Expand ledger ' : 'Collapse ledger ') + code);
     d.appendChild(tog);
+  } else {
+    var sp = document.createElement('span');
+    sp.className = 'ledger-toggle-sp';
+    sp.setAttribute('aria-hidden', 'true');
+    d.appendChild(sp);
   }
   // Fixed slots keep every amount at the same x: long names truncate with
   // ellipsis and an ⓘ popup (same pattern as record notes), never pushing.

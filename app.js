@@ -4540,41 +4540,40 @@ function toggleAccountSelect(id) {
   syncSelectionUI();
 }
 
-// Paint-only sync (no re-render): cards, count and Action follow the set,
-// so rapid multi-select keeps focus and the filter panel stays open.
+// Paint-only sync (no re-render): every rendered card, count and Action
+// follow the set — home list and group sub-lists alike — so rapid
+// multi-select keeps focus and panels stay open.
 function syncSelectionUI() {
   var n = selectedCount();
   try {
-    var host = document.getElementById('accounts');
-    if (host && host.querySelectorAll) {
-      Array.prototype.forEach.call(host.querySelectorAll('.account-card'), function (card) {
-        var id = card.getAttribute ? card.getAttribute('data-account') : null;
-        var on = !!id && !!selectedAccounts[id];
-        if (card.classList) card.classList.toggle('selected', on);
-        var cb = card.querySelector ? card.querySelector('[data-select-check]') : null;
-        if (cb) cb.checked = on;
-      });
-    }
-    if (host && host.querySelector) {
-      var count = host.querySelector('[data-select-count]');
-      if (count) {
-        count.textContent = n + ' selected';
-        count.hidden = !(selectionMode && n > 0);
-      }
-      var awrap = host.querySelector('[data-action-wrap]');
-      if (awrap) awrap.hidden = !(selectionMode && n > 0);
-    }
+    Array.prototype.forEach.call(document.querySelectorAll('.account-card'), function (card) {
+      var id = card.getAttribute ? card.getAttribute('data-account') : null;
+      var on = !!id && !!selectedAccounts[id];
+      if (card.classList) card.classList.toggle('selected', on);
+      var cb = card.querySelector ? card.querySelector('[data-select-check]') : null;
+      if (cb) cb.checked = on;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-select-count]'), function (count) {
+      count.textContent = n + ' selected';
+      count.hidden = !(selectionMode && n > 0);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-action-wrap]'), function (awrap) {
+      awrap.hidden = !(selectionMode && n > 0);
+    });
   } catch (e) { /* ignore */ }
 }
 
 function closeAccountAction() {
   if (!accountActionOpen) return;
   accountActionOpen = false;
-  var host = document.getElementById('accounts');
-  var panel = host && host.querySelector ? host.querySelector('[data-action-panel]') : null;
-  var btn = host && host.querySelector ? host.querySelector('[data-action-btn]') : null;
-  if (panel) panel.hidden = true;
-  if (btn) btn.setAttribute('aria-expanded', 'false');
+  try {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-action-panel]'), function (panel) {
+      panel.hidden = true;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-action-btn]'), function (btn) {
+      btn.setAttribute('aria-expanded', 'false');
+    });
+  } catch (e) { /* ignore */ }
 }
 
 function applyColorToSelection(hex) {
@@ -6425,6 +6424,31 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
   count.className = 'muted';
   count.textContent = String(members.length);
   sec.appendChild(count);
+  var actions = document.createElement('div');
+  actions.className = 'section-actions';
+  var nSel = 0;
+  try { nSel = selectedCount(); } catch (e) { nSel = 0; }
+  if (selectionMode) {
+    var countEl = document.createElement('span');
+    countEl.className = 'muted select-count';
+    countEl.setAttribute('data-select-count', '1');
+    countEl.textContent = nSel + ' selected';
+    countEl.hidden = nSel === 0;
+    actions.appendChild(countEl);
+    actions.appendChild(buildAccountAction());
+  }
+  var selectBtn = document.createElement('button');
+  selectBtn.type = 'button';
+  selectBtn.className = 'ghost' + (selectionMode ? ' select-on' : '');
+  selectBtn.textContent = 'Select';
+  selectBtn.setAttribute('aria-label', 'Select sub-accounts');
+  selectBtn.setAttribute('aria-pressed', selectionMode ? 'true' : 'false');
+  selectBtn.addEventListener('click', function () {
+    if (selectionMode) cancelSelection();
+    else { selectionMode = true; render(); }
+  });
+  actions.appendChild(selectBtn);
+  sec.appendChild(actions);
   host.appendChild(sec);
   var wrap = document.createElement('div');
   wrap.className = 'group-subs';
@@ -6445,10 +6469,17 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
     members.forEach(function (m) { perRows[m.id] = []; });
   }
   members.forEach(function (m) {
-    wrap.appendChild(accountCardEl(st, m, perRows[m.id] || [], dtrades, main, false, [m.id]));
+    wrap.appendChild(accountCardEl(st, m, perRows[m.id] || [], dtrades, main, true, [m.id]));
   });
   wrap.addEventListener('click', function (e) {
     if (!e || !e.target || !e.target.closest) return;
+    if (selectionMode) {
+      var scard = e.target.closest('.account-card');
+      if (scard && scard.getAttribute('data-account')) {
+        toggleAccountSelect(scard.getAttribute('data-account'));
+        return;
+      }
+    }
     if (e.target.closest('button')) return;
     var nav = e.target.closest('[data-account-nav]');
     if (nav && nav.getAttribute('data-account-nav')) navTo(nav.getAttribute('data-account-nav'));
@@ -6998,7 +7029,7 @@ function renderAccountDetail(st, id) {
   rows.forEach(function (r) { feesSum += Number(r.fees) || 0; incomeSum += Number(r.income) || 0; });
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
   if (isCashAccD) {
-    buildCashDetailStats(st, acc, dtrades, main, stats, host, mainOf ? { skipLedgers: true } : null);
+    buildCashDetailStats(st, acc, dtrades, main, stats, host, (mainOf || members.length) ? { skipLedgers: true } : null);
   } else {
     host.appendChild(stats);
     // Standalone asset accounts show Ledgers while the global switch is on

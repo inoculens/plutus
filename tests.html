@@ -832,7 +832,58 @@
             assert(subTitle && subTitle.textContent === 'A', 'sub card must open its account, got ' + (subTitle && subTitle.textContent));
             assert(!document.querySelector('#account-detail .ledger-list'), 'member must hide Ledgers');
             assert(document.querySelector('#account-detail .trade-block'), 'member must show its trades');
+            navTo('m');
+            route();
+            render();
+            var ledgerBtns = Array.prototype.filter.call(
+              document.querySelectorAll('#account-detail button'),
+              function (b) { return b.textContent === '+ Ledger'; }
+            );
+            assert(ledgerBtns.length === 1, 'exactly one + Ledger on a main, got ' + ledgerBtns.length);
+            assert(document.querySelectorAll('#account-detail select').length === 1, 'exactly one currency select on a main');
           } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('sub-accounts support home-style selection', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [
+                { id: 'g2', type: 'income', symbol: 'EUR', qty: 200, total: 200, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var selBtn = document.querySelector('#account-detail [aria-label="Select sub-accounts"]');
+            assert(selBtn, 'sub Select button must render');
+            selBtn.click();
+            var checks = document.querySelectorAll('#account-detail .group-subs .card-check');
+            assert(checks.length === 2, 'both sub cards need checkboxes, got ' + checks.length);
+            checks[0].click();
+            var cnt = document.querySelector('#account-detail [data-select-count]');
+            assert(cnt && !cnt.hidden && cnt.textContent.indexOf('1 selected') !== -1, 'count must follow taps, got ' + (cnt && cnt.textContent));
+            document.querySelector('#account-detail [data-action-btn]').click();
+            assert(document.querySelector('#account-detail [data-action-panel]') &&
+              document.querySelector('#account-detail [data-action-panel]').textContent.indexOf('Group') !== -1,
+              'Action panel must offer Group');
+          } finally {
+            try { if (typeof cancelSelection === 'function') cancelSelection(); } catch (e) { /* ignore */ }
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');
               else localStorage.setItem('inoculens.v2', backup);

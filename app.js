@@ -102,6 +102,26 @@ function normalizeAccount(a) {
   return out;
 }
 
+// Flat groups, guaranteed: an account that is both a member (live main)
+// and a main (has members) loses its member link and stays a main — one
+// main, one round of subs, never nested. In-memory only (load + import
+// repair pattern): accounts and records are never deleted, dangling links
+// stay (they match no main and render standalone).
+function sanitizeGroups(accounts) {
+  var list = accounts || [];
+  var byId = {};
+  list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
+  list.filter(function (a) {
+    if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
+    var main = byId[a.groupId];
+    if (!main || main === a) return false;
+    return list.some(function (m) { return m && m.groupId === a.id; });
+  }).forEach(function (a) {
+    try { delete a.groupId; } catch (e) { a.groupId = undefined; }
+  });
+  return list;
+}
+
 function normalizeAccountFilter(v) {
   if (v === undefined || v === null) return null; // null = show all assets
   if (!Array.isArray(v)) return null;
@@ -156,7 +176,7 @@ function loadState() {
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
   var accounts = Array.isArray(parsed.accounts)
-    ? parsed.accounts.filter(isValidAccount).map(normalizeAccount)
+    ? sanitizeGroups(parsed.accounts.filter(isValidAccount).map(normalizeAccount))
     : [];
   var accountIds = accounts.map(function (a) { return a.id; });
   var trades = Array.isArray(parsed.trades)
@@ -360,8 +380,8 @@ function ensureGroupCurrency(st, mainId) {
   return g;
 }
 
-// Link members under a main (mutates, no save): mains can't nest, unknown
-// ids and self-links fail, re-pointing a member between mains is allowed.
+// Link members under a main (mutates, no save): flat only — mains can't
+// nest and members can't regroup. Unknown ids and self-links fail.
 function assignGroup(st, memberIds, mainId) {
   var main = accountById(st, mainId);
   if (!main) return 'Main account not found.';
@@ -377,6 +397,7 @@ function assignGroup(st, memberIds, mainId) {
     var a = accountById(st, ids[i]);
     if (!a) return 'Account not found.';
     if (isGroupMain(st, ids[i])) return '"' + a.name + '" is already a main account — ungroup it first.';
+    if (groupMainOf(st, ids[i])) return '"' + a.name + '" is a sub-account — ungroup it first to regroup.';
   }
   ids.forEach(function (id) { accountById(st, id).groupId = mainId; });
   ensureGroupCurrency(st, mainId);
@@ -715,7 +736,7 @@ function importState(json) {
   try { repairCashTradeAmounts(mappedTrades, data.accounts); } catch (e) { /* repair never breaks import */ }
   var next = {
     settings: normalizedSettings,
-    accounts: data.accounts.map(normalizeAccount),
+    accounts: sanitizeGroups(data.accounts.map(normalizeAccount)),
     trades: mappedTrades,
     priceOverrides: priceOverrides
   };
@@ -2521,6 +2542,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.ensureGroupCurrency = ensureGroupCurrency;
   window.Inoculens.assignGroup = assignGroup;
   window.Inoculens.ungroupAll = ungroupAll;
+  window.Inoculens.sanitizeGroups = sanitizeGroups;
   window.Inoculens.expandDeleteIds = expandDeleteIds;
   window.Inoculens.uniqueSubName = uniqueSubName;
   window.Inoculens.assetLedgersOn = assetLedgersOn;
@@ -4774,6 +4796,7 @@ function buildAccountAction() {
     if (!ids.length) return;
     for (var i = 0; i < ids.length; i++) {
       if (isGroupMain(st, ids[i])) { showBanner('"' + accountById(st, ids[i]).name + '" is already a main account — ungroup it first.'); return; }
+      if (groupMainOf(st, ids[i])) { showBanner('"' + accountById(st, ids[i]).name + '" is a sub-account — ungroup it first to regroup.'); return; }
     }
     openGroupDialog(ids);
   });

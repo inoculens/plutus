@@ -738,6 +738,74 @@
           assert(L.uniqueSubName(st, 'Org') === 'sub-Org 2', 'collision must number up');
         });
 
+        test('flat groups: sanitize demotes hybrids, regrouping members fails', function () {
+          function acc(id, groupId) {
+            var a = { id: id, name: id, ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' };
+            if (groupId) a.groupId = groupId;
+            return a;
+          }
+          var mutual = L.sanitizeGroups([acc('a', 'b'), acc('b', 'a')]);
+          assert(mutual.every(function (a) { return !a.groupId; }), 'mutual links must both drop: ' + JSON.stringify(mutual));
+          var chain = L.sanitizeGroups([acc('a', 'b'), acc('b', 'c'), acc('c')]);
+          var byId = {};
+          chain.forEach(function (a) { byId[a.id] = a; });
+          assert(!byId.b.groupId && byId.a.groupId === 'b' && !byId.c.groupId, 'chain must flatten to b with member a: ' + JSON.stringify(chain));
+          var dangling = L.sanitizeGroups([acc('a', 'ghost')]);
+          assert(dangling[0].groupId === 'ghost', 'dangling links stay (render standalone)');
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+            accounts: [acc('m'), acc('a', 'm'), acc('z')],
+            trades: [],
+            priceOverrides: {}
+          };
+          assert(L.assignGroup(st, ['a'], 'z') !== null, 'regrouping a member must fail');
+          assert(L.groupMainOf(st, 'a').id === 'm', 'failed regroup must not move');
+          var env = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [acc('a', 'b'), acc('b', 'a')], trades: [], priceOverrides: {} });
+          var back = L.importState(env);
+          assert(back.accounts.every(function (a) { return !a.groupId; }), 'import must persist the flattened group');
+        });
+
+        test('bulk Group refuses sub-accounts', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            document.querySelector('#account-detail [aria-label="Select sub-accounts"]').click();
+            document.querySelector('#account-detail .group-subs .card-check').click();
+            document.querySelector('#account-detail [data-action-btn]').click();
+            var panel = document.querySelector('#account-detail [data-action-panel]');
+            var grpBtn = null;
+            Array.prototype.forEach.call(panel.querySelectorAll('button'), function (b) {
+              if (b.textContent.indexOf('Group') !== -1) grpBtn = b;
+            });
+            assert(grpBtn, 'Group option must exist');
+            grpBtn.click();
+            var banner = document.getElementById('banner');
+            assert(banner && banner.hidden === false && banner.textContent.indexOf('sub-account') !== -1, 'refusal banner must show, got ' + (banner && banner.textContent));
+          } finally {
+            try { if (typeof cancelSelection === 'function') cancelSelection(); } catch (e) { /* ignore */ }
+            try { if (typeof clearBanner === 'function') clearBanner(); } catch (e) { /* ignore */ }
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('group fields + assetLedgers survive normalize and import', function () {
           var acc = { id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm1', groupCurrency: 'usd', ledgers: { '1000': 'Mine' } };
           var env = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: false }, accounts: [{ id: 'm1', name: 'M', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }, acc], trades: [], priceOverrides: {} });

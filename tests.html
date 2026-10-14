@@ -1163,6 +1163,29 @@
           }
         });
 
+        test('groupFillFiats lists foreign group currencies only', function () {
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+            accounts: [
+              { id: 'm1', name: 'G1', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupCurrency: 'USD' },
+              { id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm1' },
+              { id: 'm2', name: 'G2', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'a2', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm2' },
+              { id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
+            ],
+            trades: [],
+            priceOverrides: {}
+          };
+          assert(L.groupFillFiats(st).join(',') === 'USD', 'only the foreign group fiat is listed, got ' + JSON.stringify(L.groupFillFiats(st)));
+          var st2 = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+            accounts: [{ id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+            trades: [],
+            priceOverrides: {}
+          };
+          assert(L.groupFillFiats(st2).length === 0, 'no mains means no extra fills');
+        });
+
         test('cash main cards aggregate the group in group currency', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
@@ -1195,6 +1218,38 @@
             render();
             var cards2 = document.querySelector('#account-detail .cards.detail-stats');
             assert(cards2 && cards2.textContent.indexOf('3 accounts') !== -1, 'multi-fiat Balance must count accounts, got ' + (cards2 && cards2.textContent));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('cross-fiat group cards convert through cached rates', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'r', name: 'Lei', ticker: 'RON', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [
+                { id: 'j1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-05', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'r', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            L.cacheRate('2026-01-05', 'RON', 'EUR', 0.2, 'ECB-2026-01-05');
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var cards = document.querySelector('#account-detail .cards.detail-stats');
+            assert(cards && cards.textContent.indexOf('100 RON') !== -1, 'native Balance must show 100 RON, got ' + (cards && cards.textContent));
+            assert(cards && cards.textContent.indexOf('€20.00') !== -1, 'Value must convert 100 lei to €20.00, got ' + (cards && cards.textContent));
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

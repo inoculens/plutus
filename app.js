@@ -2007,6 +2007,28 @@ function ledgerScopeOf(st, accountId) {
   return ids;
 }
 
+// Extra display fiats beyond the header main: every group currency in play,
+// so their historical pairs get prefetched exactly like header pairs.
+// Without this, group figures in a foreign fiat sit on fallback locks.
+function groupFillFiats(st) {
+  var out = [];
+  var seen = {};
+  var m = '';
+  try { m = String(st.settings.mainCurrency || '').toUpperCase(); } catch (e) { m = ''; }
+  ((st && st.accounts) || []).forEach(function (a) {
+    if (!a || !a.id) return;
+    var isMain = false;
+    try { isMain = isGroupMain(st, a.id); } catch (e) { isMain = false; }
+    if (!isMain) return;
+    var g = '';
+    try { g = groupLedgerCurrency(st, a); } catch (e) { g = ''; }
+    if (!g || g === m || seen[g]) return;
+    seen[g] = true;
+    out.push(g);
+  });
+  return out;
+}
+
 // Every ledger code known to an account: chart keys plus codes posted on
 // its records (posted-only codes nest like charted ones).
 function ledgerAccountCodes(st, accountId) {
@@ -2397,6 +2419,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.ledgerTree = ledgerTree;
   window.Inoculens.ledgerTreeMulti = ledgerTreeMulti;
   window.Inoculens.ledgerScopeOf = ledgerScopeOf;
+  window.Inoculens.groupFillFiats = groupFillFiats;
   window.Inoculens.ledgerChartFor = ledgerChartFor;
   window.Inoculens.ensureAccountChart = ensureAccountChart;
   window.Inoculens.groupMembers = groupMembers;
@@ -7083,21 +7106,17 @@ function renderAccountDetail(st, id) {
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
   if (isCashAccD) {
     if (members.length) {
-      // Main aggregates the group in the group currency: one balance for
-      // every sub-account, never the (often empty) main alone.
+      // Main aggregates the group in the header display fiat — like every
+      // other card; the Ledgers table below keeps the group currency.
       stats.innerHTML = '';
-      var gCcyM = main;
-      try { gCcyM = groupLedgerCurrency(st, acc); } catch (e) { gCcyM = main; }
       var gIds = [acc.id];
       members.forEach(function (m) { gIds.push(m.id); });
-      var gConv = null;
-      try { gConv = convertTrades(st.trades, gCcyM); } catch (e) { gConv = []; }
       var gNative = 0, gValue = 0, gTick = {}, gHas = false;
       gIds.forEach(function (cid) {
-        var at = accountTrades({ trades: gConv }, cid);
+        var at = accountTrades({ trades: dtrades }, cid);
         if (!at.length) return;
         var cb = null;
-        try { cb = cashBalance(gConv, cid, gCcyM); } catch (e) { cb = null; }
+        try { cb = cashBalance(dtrades, cid, main); } catch (e) { cb = null; }
         if (!cb) return;
         if (isFinite(Number(cb.main))) { gValue += Number(cb.main); gHas = true; }
         gNative += Number(cb.native) || 0;
@@ -7107,7 +7126,7 @@ function renderAccountDetail(st, id) {
       });
       var gTickList = Object.keys(gTick);
       stats.appendChild(statCard('Balance', gHas ? (gTickList.length === 1 ? (fmtQty(gNative, gTickList[0]) + ' ' + gTickList[0]) : (gIds.length + ' accounts')) : 'New', gHas ? gNative : null));
-      stats.appendChild(statCard('Value', gHas ? fmtMoney(gValue, gCcyM) : 'New', gHas ? gValue : null));
+      stats.appendChild(statCard('Value', gHas ? fmtMoney(gValue, main) : 'New', gHas ? gValue : null));
       stats.classList.add('cards-duo');
       host.appendChild(stats);
     } else {
@@ -10772,11 +10791,15 @@ function refreshDisplayRates(st) {
     });
   } catch (e) { kinds = {}; }
   try {
-    Promise.all([
-      ensureDisplayRates(trades, main).catch(function () { return false; }),
-      ensureHistoricalExec(trades, main, kinds).catch(function () { return false; })
-    ]).then(function (flags) {
-      if (!flags[0] && !flags[1]) return;
+    var fills = [ensureDisplayRates(trades, main).catch(function () { return false; })];
+    var gf = [];
+    try { gf = groupFillFiats(st); } catch (e) { gf = []; }
+    gf.forEach(function (f) { fills.push(ensureDisplayRates(trades, f).catch(function () { return false; })); });
+    fills.push(ensureHistoricalExec(trades, main, kinds).catch(function () { return false; }));
+    Promise.all(fills).then(function (flags) {
+      var changed = false;
+      (flags || []).forEach(function (f) { if (f) changed = true; });
+      if (!changed) return;
       var s2;
       try {
         s2 = loadState();

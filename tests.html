@@ -1154,6 +1154,89 @@
           }
         });
 
+        testAsync('cash submits derive total/currency from the account fiat', function () {
+          var realFetch = window.fetch;
+          var stateBackup = null, fxBackup = null;
+          try { stateBackup = localStorage.getItem('inoculens.v2'); } catch (e) { stateBackup = null; }
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreAll() {
+            window.fetch = realFetch;
+            try {
+              if (stateBackup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', stateBackup);
+            } catch (e) { /* ignore */ }
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+            try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+          window.fetch = function (url) {
+            var u = String(url || '');
+            if (u.indexOf('frankfurter') !== -1) {
+              var m = /\/(\d{4}-\d{2}-\d{2})\?/.exec(u);
+              var dd = m ? m[1] : '2026-01-05';
+              return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ date: dd, rates: { EUR: 0.2 } }); } });
+            }
+            return realFetch(url);
+          };
+          L.saveState({
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+            accounts: [{ id: 'c1', name: 'Lei', ticker: 'RON', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+            trades: [{ id: 'seed', type: 'income', symbol: 'RON', qty: 500, total: 500, currency: 'RON', date: '2026-01-04', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.2, source: 'manual' }, accountId: 'c1', createdAt: '2026-01-04T00:00:00.000Z' }],
+            priceOverrides: {}
+          });
+          if (typeof init === 'function') init();
+          function waitFor(fn) {
+            return new Promise(function (res, rej) {
+              (function tick(n) {
+                var v = null;
+                try { v = fn(); } catch (e) { restoreAll(); rej(e); return; }
+                if (v) { res(v); return; }
+                if (n <= 0) {
+                  restoreAll();
+                  var why = '';
+                  try { why = (document.getElementById('t-error') || {}).textContent || ''; } catch (e) { /* ignore */ }
+                  rej(new Error('timeout waiting for submit; form says: ' + why));
+                  return;
+                }
+                setTimeout(function () { tick(n - 1); }, 50);
+              })(80);
+            });
+          }
+          function submitCash(side, qty) {
+            openPrefillTrade('c1');
+            document.getElementById('t-side').value = side;
+            syncTradeTypeUI();
+            document.getElementById('t-qty').value = String(qty);
+            document.getElementById('t-date').value = '05/01/2026';
+            document.getElementById('t-total').value = '9999';
+            document.getElementById('t-currency').value = 'USD';
+            document.getElementById('t-ledger').value = '';
+            document.getElementById('t-ledger-label').value = '';
+            document.getElementById('t-fee').value = '';
+            onTradeSubmit({ preventDefault: function () {} });
+            return waitFor(function () {
+              var found = null;
+              L.loadState().trades.forEach(function (t) {
+                if (t && t.accountId === 'c1' && t.type === side && Number(t.qty) === qty && t.id !== 'seed') found = t;
+              });
+              return found;
+            });
+          }
+          return submitCash('income', 101).then(function (inc) {
+            assert(inc.total === 101 && inc.currency === 'RON', 'income must derive 101/RON despite stale inputs, got ' + inc.total + '/' + inc.currency);
+            assert(inc.fxLock && Number(inc.fxLock.rate) === 0.2, 'income lock must freeze the fetched rate: ' + JSON.stringify(inc.fxLock));
+            return submitCash('expense', 102);
+          }).then(function (exp) {
+            assert(exp.total === 102 && exp.currency === 'RON', 'expense must derive 102/RON despite stale inputs, got ' + exp.total + '/' + exp.currency);
+            assert(exp.fxLock && Number(exp.fxLock.rate) === 0.2, 'expense lock must freeze the fetched rate: ' + JSON.stringify(exp.fxLock));
+            restoreAll();
+          }, function (e) { restoreAll(); throw e; });
+        });
+
         test('clearing a cash record ledger saves it unlabeled', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

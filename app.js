@@ -9419,18 +9419,22 @@ function onTradeSubmit(ev) {
     }
   } else if (side === 'income') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
-    if (String(totalRaw).trim() !== '' && (!isFinite(total) || total < 0)) { tradeFormError('Total must be >= 0.'); return; }
-    if (String(totalRaw).trim() !== '') {
+    // Cash derives from the account fiat alone (total/currency rows hide):
+    // hidden-field leftovers must never override the derivation below.
+    if (isCashAcc) { total = qty; currency = symbol; }
+    else if (String(totalRaw).trim() !== '' && (!isFinite(total) || total < 0)) { tradeFormError('Total must be >= 0.'); return; }
+    else if (String(totalRaw).trim() !== '') {
       if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid.'); return; }
     } else { total = 0; currency = String(main).toUpperCase(); }
   } else if (side === 'expense') {
     var hasQ = !(String(qtyRaw).trim() === '');
-    var hasT = !(String(totalRaw).trim() === '');
+    var hasT = !isCashAcc && !(String(totalRaw).trim() === '');
     if (!hasQ && !hasT) { tradeFormError('Expense needs a quantity or a cash amount.'); return; }
     if (hasQ && (!isFinite(qty) || qty <= 0)) { tradeFormError('Quantity must be > 0.'); return; }
     if (hasT && (!isFinite(total) || total <= 0)) { tradeFormError('Fiat amount must be > 0.'); return; }
     if (!hasQ) qty = null;
-    if (!hasT) { total = 0; currency = String(main).toUpperCase(); }
+    if (isCashAcc) { total = qty; currency = symbol; }
+    else if (!hasT) { total = 0; currency = String(main).toUpperCase(); }
     else if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid.'); return; }
   }
   var from = currency;

@@ -1508,7 +1508,7 @@
             L.saveState(st);
             render();
             var cards2 = document.querySelector('#account-detail .cards.detail-stats');
-            assert(cards2 && cards2.textContent.indexOf('3 accounts') !== -1, 'multi-fiat Balance must count accounts, got ' + (cards2 && cards2.textContent));
+            assert(cards2 && cards2.textContent.indexOf('2 accounts') !== -1, 'multi-fiat Balance must count contributing accounts, got ' + (cards2 && cards2.textContent));
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

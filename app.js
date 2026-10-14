@@ -5051,6 +5051,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var cashKnown = false;
   var cashNative = 0;
   var cashTickers = {};
+  var cashContrib = 0;
   var seenTrade = {};
   (dtrades || []).forEach(function (t) {
     if (!t) return;
@@ -5067,6 +5068,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     if (!sa || !isCashKind(sa.kind)) return;
     var at = accountTrades({ trades: dtrades }, sid);
     if (!at.length) return;
+    cashContrib++;
     var b = cashBalance(dtrades, sid, main);
     if (isFinite(Number(b.main))) { cashMain += Number(b.main); cashKnown = true; }
     cashNative += Number(b.native) || 0;
@@ -5104,7 +5106,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     } else if (tickList.length === 1) {
       plv.textContent = fmtQty(cashNative, tickList[0]) + ' ' + tickList[0];
     } else {
-      plv.textContent = scope.length + ' accounts';
+      plv.textContent = cashContrib + (cashContrib === 1 ? ' account' : ' accounts');
     }
   } else {
     plv.className = 'acct-pl';
@@ -7232,10 +7234,11 @@ function renderAccountDetail(st, id) {
       stats.innerHTML = '';
       var gIds = [acc.id];
       members.forEach(function (m) { gIds.push(m.id); });
-      var gNative = 0, gValue = 0, gTick = {}, gHas = false;
+      var gNative = 0, gValue = 0, gTick = {}, gHas = false, gContrib = 0;
       gIds.forEach(function (cid) {
         var at = accountTrades({ trades: dtrades }, cid);
         if (!at.length) return;
+        gContrib++;
         var cb = null;
         var ckind = '';
         try {
@@ -7251,7 +7254,7 @@ function renderAccountDetail(st, id) {
         if (ca && ca.ticker) gTick[String(ca.ticker).toUpperCase()] = true;
       });
       var gTickList = Object.keys(gTick);
-      stats.appendChild(statCard('Balance', gHas ? (gTickList.length === 1 ? (fmtQty(gNative, gTickList[0]) + ' ' + gTickList[0]) : (gIds.length + ' accounts')) : 'New', gHas ? gNative : null));
+      stats.appendChild(statCard('Balance', gHas ? (gTickList.length === 1 ? (fmtQty(gNative, gTickList[0]) + ' ' + gTickList[0]) : (gContrib + (gContrib === 1 ? ' account' : ' accounts'))) : 'New', gHas ? gNative : null));
       stats.appendChild(statCard('Value', gHas ? fmtMoney(gValue, main) : 'New', gHas ? gValue : null));
       stats.classList.add('cards-duo');
       host.appendChild(stats);

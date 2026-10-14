@@ -601,6 +601,74 @@
           assert(L.renameAccountLedger(st2, 'a1', '1000', '1110', 'Taken') !== null, 'rename onto a posted-only code must fail');
         });
 
+        test('ledgerRecordConflict blocks parents and stranded records', function () {
+          function st3() {
+            function tr(id, ledger, qty, type) {
+              return { id: id, type: type || 'income', symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };
+            }
+            return {
+              settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '1000': 'Income' } },
+              accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [tr('c1', '1100', 100), tr('c2', '3000', 200)],
+              priceOverrides: {}
+            };
+          }
+          var st = st3();
+          assert(L.ledgerRecordConflict(st, 'a1', '3000', null, null) === null, 'leaf posting must be clean');
+          assert(L.ledgerRecordConflict(st, 'a1', '1200', null, null) === null, 'fresh code must be clean');
+          var p = L.ledgerRecordConflict(st, 'a1', '1000', null, null);
+          assert(p && p.kind === 'parent' && p.kids.join(',') === '1100', 'chart parent must block: ' + JSON.stringify(p));
+          var o = L.ledgerRecordConflict(st, 'a1', '1110', null, null);
+          assert(o && o.kind === 'orphans' && o.parents.join(',') === '1100', '1110 nests under posted 1100: ' + JSON.stringify(o));
+          st.trades.push({ id: 'c3', type: 'income', symbol: 'EUR', qty: 10, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1100', createdAt: '2026-01-05T00:00:00.000Z' });
+          var o2 = L.ledgerRecordConflict(st, 'a1', '1110', null, null);
+          assert(o2 && o2.kind === 'orphans' && o2.parents.join(',') === '1100', 'posting under a posted ledger must flag it: ' + JSON.stringify(o2));
+          assert(L.ledgerRecordConflict(st, 'a1', '1110', 'c1', null) !== null, 'excluding one record must not hide the other');
+          var stSolo = st3();
+          stSolo.trades = [stSolo.trades[0]];
+          assert(L.ledgerRecordConflict(stSolo, 'a1', '1110', 'c1', null) === null, 'excluding the only record must clear the flag');
+          assert(L.ledgerConflictMessage(p).indexOf('1000') !== -1, 'parent message must name the code');
+          assert(L.ledgerConflictMessage(o2).indexOf('1100') !== -1, 'orphans message must name the parent');
+          var stV = st3();
+          stV.trades.push({ id: 'c4', type: 'income', symbol: 'EUR', qty: 5, total: 5, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1110', createdAt: '2026-01-05T00:00:00.000Z' });
+          assert(L.ledgerViolations(stV, 'a1').join(',') === '1100', 'violations must list posted parents: ' + JSON.stringify(L.ledgerViolations(stV, 'a1')));
+          assert(L.ledgerViolations(st3(), 'a1').length === 0, 'clean chart must report no violations');
+        });
+
+        test('rename onto a parent code or under posted records fails', function () {
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { 'E': 'Parent' } },
+            accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+            trades: [
+              { id: 'x1', type: 'income', symbol: 'EUR', qty: 10, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'X', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'e1', type: 'income', symbol: 'EUR', qty: 20, total: 20, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'E1', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'a1r', type: 'income', symbol: 'EUR', qty: 30, total: 30, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'A', createdAt: '2026-01-05T00:00:00.000Z' }
+            ],
+            priceOverrides: {}
+          };
+          assert(L.renameAccountLedger(st, 'a1', 'X', 'ZZ', 'New') === null, 'clean rename must succeed');
+          var stB = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: {} },
+            accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+            trades: [
+              { id: 'x1', type: 'income', symbol: 'EUR', qty: 10, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'X', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'e1', type: 'income', symbol: 'EUR', qty: 20, total: 20, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'E1', createdAt: '2026-01-05T00:00:00.000Z' }
+            ],
+            priceOverrides: {}
+          };
+          assert(L.renameAccountLedger(stB, 'a1', 'X', 'E', 'New') !== null, 'rename onto a code with posted children must fail');
+          var stC = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: {} },
+            accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+            trades: [
+              { id: 'x1', type: 'income', symbol: 'EUR', qty: 10, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'X', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'a1r', type: 'income', symbol: 'EUR', qty: 30, total: 30, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: 'A', createdAt: '2026-01-05T00:00:00.000Z' }
+            ],
+            priceOverrides: {}
+          };
+          assert(L.renameAccountLedger(stC, 'a1', 'X', 'AB', 'New') !== null, 'rename under a posted ledger must fail');
+        });
+
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
@@ -633,6 +701,10 @@
             assert(leaf && !leaf.querySelector('[data-ledger-toggle]'), 'leaf row needs no toggle');
             var unl = document.querySelector('.ledger-row[data-ledger="—"]');
             assert(unl && !unl.querySelector('[data-ledger-edit]') && !unl.querySelector('[data-ledger-del]'), 'Unlabeled row needs no actions');
+            var row1000 = document.querySelector('.ledger-row[data-ledger="1000"]');
+            assert(row1000 && row1000.querySelector('.ledger-amount.ledger-box-inc'), 'parent overview needs the boxed income total');
+            var warn = document.querySelector('.ledger-warn');
+            assert(warn && warn.textContent.indexOf('1100') !== -1, 'posted parent must raise the cleanup hint');
             row1100.querySelector('[data-ledger-toggle]').click();
             assert(!document.querySelector('.ledger-row[data-ledger="1110"]'), 'collapsed child must hide');
             assert(document.querySelector('.ledger-row[data-ledger="1100"]'), 'collapsed parent must stay');

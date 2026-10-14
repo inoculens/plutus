@@ -1877,6 +1877,87 @@ function ledgerDescendantsOf(target, allCodes) {
   return out;
 }
 
+// Every ledger code known to an account: chart keys plus codes posted on
+// its records (posted-only codes nest like charted ones).
+function ledgerAccountCodes(st, accountId) {
+  var set = {};
+  try {
+    var eff = ledgerChartFor(st, accountId);
+    Object.keys(eff).forEach(function (k) { var ck = String(k).trim(); if (ck) set[ck] = true; });
+  } catch (e) { /* ignore */ }
+  ((st && st.trades) || []).forEach(function (t) {
+    if (!t || t.accountId !== accountId) return;
+    var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (c) set[c] = true;
+  });
+  return Object.keys(set);
+}
+
+function ledgerPostedOn(st, accountId, code, excludeId, excludeCode) {
+  var n = 0;
+  ((st && st.trades) || []).forEach(function (t) {
+    if (!t || t.accountId !== accountId) return;
+    if (excludeId && t.id === excludeId) return;
+    var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (excludeCode && c === excludeCode) return;
+    if (c === code) n++;
+  });
+  return n;
+}
+
+// Parent-overview rule: a ledger with sub-ledgers is a pure roll-up and
+// can't hold its own records. Returns null when posting `code` is clean,
+// else {kind:'parent',code,kids} (code already has children) or
+// {kind:'orphans',code,parents} (posting here would strand records on a
+// new parent). excludeId skips one record (trade edits), excludeCode skips
+// records carrying that code (ledger renames move them away).
+function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode) {
+  code = (code === undefined || code === null) ? '' : String(code).trim();
+  if (!code) return null;
+  var all = ledgerAccountCodes(st, accountId);
+  if (all.indexOf(code) === -1) all.push(code);
+  var kids = ledgerDescendantsOf(code, all);
+  if (kids.length) return { kind: 'parent', code: code, kids: kids.slice().sort() };
+  var parents = [];
+  var cur = code;
+  var seen = {};
+  while (cur && !seen[cur]) {
+    seen[cur] = true;
+    var p = ledgerParentOf(cur, all);
+    if (!p) break;
+    if (ledgerPostedOn(st, accountId, p, excludeId, excludeCode) > 0 && parents.indexOf(p) === -1) parents.push(p);
+    cur = p;
+  }
+  if (parents.length) return { kind: 'orphans', code: code, parents: parents };
+  return null;
+}
+
+// Existing rule-breakers for the cleanup hint: ledgers that hold records
+// AND sub-ledgers. Sorted for stable messages.
+function ledgerViolations(st, accountId) {
+  var all = [];
+  try { all = ledgerAccountCodes(st, accountId); } catch (e) { all = []; }
+  var out = [];
+  all.forEach(function (c) {
+    try {
+      if (ledgerPostedOn(st, accountId, c, null, null) > 0 && ledgerDescendantsOf(c, all).length > 0) out.push(c);
+    } catch (e) { /* ignore */ }
+  });
+  return out.sort();
+}
+
+function ledgerConflictMessage(conf) {
+  if (!conf) return '';
+  function short(list) {
+    var a = (list || []).slice().sort();
+    return a.slice(0, 4).join(', ') + (a.length > 4 ? ', …' : '');
+  }
+  if (conf.kind === 'parent') {
+    return '"' + conf.code + '" is an overview ledger — it holds sub-ledgers (' + short(conf.kids) + ') and can\'t take records. Post to a child ledger instead.';
+  }
+  return '"' + conf.code + '" would turn "' + conf.parents[0] + '" into an overview that still holds records. Move the "' + conf.parents[0] + '" record(s) to a child ledger, keep "' + conf.parents[0] + '" as an empty overview (add it with + Ledger), then post here.';
+}
+
 // Repair pass for cash bookkeeping records saved before the cash form
 // locked amounts to the account fiat: a cash income/expense with a real
 // quantity but a blank/zero total gains total=qty (exactly what the form
@@ -2103,6 +2184,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cashBalance = cashBalance;
   window.Inoculens.ledgerParentOf = ledgerParentOf;
   window.Inoculens.ledgerDescendantsOf = ledgerDescendantsOf;
+  window.Inoculens.ledgerAccountCodes = ledgerAccountCodes;
+  window.Inoculens.ledgerRecordConflict = ledgerRecordConflict;
+  window.Inoculens.ledgerViolations = ledgerViolations;
+  window.Inoculens.ledgerConflictMessage = ledgerConflictMessage;
   window.Inoculens.ledgerTree = ledgerTree;
   window.Inoculens.ledgerChartFor = ledgerChartFor;
   window.Inoculens.ensureAccountChart = ensureAccountChart;
@@ -5730,11 +5815,11 @@ function detailMetaRow(label, text, title) {
 function ledgerRowEl(code, label, total, main, depth, opts) {
   var o = opts || {};
   var d = document.createElement('div');
-  d.className = 'stat-row ledger-row';
+  d.className = 'stat-row ledger-row' + (o.isParent ? ' is-parent' : '');
   d.setAttribute('data-label', 'ledger');
   d.setAttribute('data-ledger', code);
   if (isFinite(Number(total))) d.setAttribute('data-value', String(Number(total)));
-  try { d.style.paddingLeft = 'calc(0.6rem + ' + (depth * 1.1) + 'rem)'; } catch (e) { /* ignore */ }
+  try { d.style.paddingLeft = 'calc(0.6rem + ' + (depth * 1.9) + 'rem)'; } catch (e) { /* ignore */ }
   // Parents collapse to the top ledger only: the arrow hides the whole subtree.
   if (o.hasKids) {
     var tog = document.createElement('button');
@@ -5771,7 +5856,15 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   var side = document.createElement('span');
   side.className = 'ledger-side';
   var v = document.createElement('span');
-  v.className = 'stat-val num ledger-amount ' + (plClass(total) || '');
+  // Parent overviews carry a boxed total: income-tinted when the rolled sum
+  // is positive, expense-tinted when negative (pill colors, not a pill).
+  var boxCls = '';
+  if (o.isParent) {
+    var tv = Number(total);
+    if (isFinite(tv) && tv > 0) boxCls = ' ledger-box-inc';
+    else if (isFinite(tv) && tv < 0) boxCls = ' ledger-box-exp';
+  }
+  v.className = 'stat-val num ledger-amount' + boxCls + ' ' + (plClass(total) || '');
   v.textContent = fmtMoney(total, main);
   side.appendChild(v);
   // Structural rows can be removed from this account's chart (materializes
@@ -5836,7 +5929,7 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
     nodes.forEach(function (n) {
       var kids = (n.kids && n.kids.length) ? n.kids : [];
       var isCol = !!collapsed[n.code];
-      list.appendChild(ledgerRowEl(n.code, n.label, n.total, main, depth, { hasKids: kids.length > 0, collapsed: isCol }));
+      list.appendChild(ledgerRowEl(n.code, n.label, n.total, main, depth, { hasKids: kids.length > 0, collapsed: isCol, isParent: kids.length > 0 }));
       if (kids.length && !isCol) walk(kids, depth + 1);
     });
   })(tree.roots, 0);
@@ -5859,6 +5952,21 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
     deleteAccountLedger(acc.id, btn.getAttribute('data-ledger-del'));
   });
   host.appendChild(list);
+  // Legacy cleanup hint: a parent that still holds records breaks the
+  // overview rule — point at it once so it can be moved to a child.
+  try {
+    var viol = ledgerViolations(st, acc.id);
+    if (viol.length) {
+      var shown = viol.slice(0, 3).map(function (c) { return '"' + c + '"'; }).join(', ');
+      var wn = document.createElement('p');
+      wn.className = 'muted ledger-warn';
+      wn.textContent = 'Heads-up: ' + shown + (viol.length > 3 ? ', …' : '') +
+        (viol.length === 1 ? ' holds' : ' hold') + ' records and sub-ledgers — move ' +
+        (viol.length === 1 ? 'its' : 'their') + ' records to a child so ' +
+        (viol.length === 1 ? 'it stays' : 'they stay') + ' a pure total.';
+      host.appendChild(wn);
+    }
+  } catch (e) { /* hint never breaks render */ }
 }
 
 // Per-account ledger management: add/rename writes the account's own
@@ -5976,6 +6084,11 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel) {
     });
     if (posted) return 'Ledger code already exists — pick a new code or edit it.';
     if (Object.keys(map).length >= 500) return 'This account already holds 500 codes.';
+    // Parent-overview rule on the destination: its incoming records must not
+    // land on a parent, nor strand records on a new parent. Records carrying
+    // oldCode move away, so they are excluded from the scan.
+    var conf = ledgerRecordConflict(st, accountId, newCode, null, oldCode);
+    if (conf) return ledgerConflictMessage(conf);
     if (Object.prototype.hasOwnProperty.call(map, oldCode)) delete map[oldCode];
     map[newCode] = newLabel;
   } else {
@@ -5997,12 +6110,7 @@ function deleteAccountLedger(accountId, code) {
   if (!acc) return;
   var effective = ledgerChartFor(st, accountId);
   var allSet = {};
-  Object.keys(effective).forEach(function (k) { var ck = String(k).trim(); if (ck) allSet[ck] = true; });
-  (st.trades || []).forEach(function (t) {
-    if (!t || t.accountId !== accountId) return;
-    var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
-    if (c) allSet[c] = true;
-  });
+  ledgerAccountCodes(st, accountId).forEach(function (k) { allSet[k] = true; });
   var subs = ledgerDescendantsOf(code, Object.keys(allSet));
   var doomedSet = {};
   doomedSet[code] = true;
@@ -7980,6 +8088,13 @@ function onTradeSubmit(ev) {
   if (isCashAcc && (side === 'income' || side === 'expense') && ledgerCode === '') {
     tradeFormError('Ledger code is required on cash records (e.g. 1100).');
     return;
+  }
+  // Parent-overview rule: ledgers with sub-ledgers are pure totals and take
+  // no records; posting under a record-holding ledger is blocked with the
+  // fix (move those records to a child, keep the parent record-free).
+  if ((side === 'income' || side === 'expense') && ledgerCode !== '') {
+    var lconf = ledgerRecordConflict(st0, accountId, ledgerCode, isEditing ? editingTradeId : null, null);
+    if (lconf) { tradeFormError(ledgerConflictMessage(lconf)); return; }
   }
   // --- Swap: creates a linked sell+buy pair ---
   if (side === 'swap' && !isEditing) {

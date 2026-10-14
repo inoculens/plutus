@@ -436,6 +436,8 @@
           assert(L.isValidImportTrade(good, ['cash1', 'cash2']), 'cross-fiat transfer rejected');
           assert(!L.isValidImportTrade({ type: 'transfer', symbol: 'EUR', qty: 100, networkFee: 0, toQty: -5, toSymbol: 'USD', date: '2026-01-08', accountId: 'cash1', toAccountId: 'cash2' }, ['cash1', 'cash2']), 'negative toQty accepted');
           assert(!L.isValidImportTrade({ type: 'transfer', symbol: 'EUR', qty: 100, networkFee: 0, toQty: 110, toSymbol: '!!!', date: '2026-01-08', accountId: 'cash1', toAccountId: 'cash2' }, ['cash1', 'cash2']), 'bad toSymbol accepted');
+          var noArrival = { type: 'transfer', symbol: 'EUR', qty: 100, networkFee: 0, toSymbol: 'USD', date: '2026-01-08', accountId: 'cash1', toAccountId: 'cash2' };
+          assert(!L.isValidImportTrade(noArrival, ['cash1', 'cash2']), 'cross-fiat arrival without toQty accepted');
         });
 
         test('cashBalance signs flows; destination leg uses arrival-fiat rate', function () {
@@ -481,6 +483,39 @@
           var al = L.allocationData(st, st.trades, null);
           assert(al.total === 100, 'ring total must be 100, got ' + al.total);
           assert(al.items.length === 1 && al.items[0].symbol === 'EUR' && al.items[0].value === 100, 'EUR slice must be 100 once: ' + JSON.stringify(al.items));
+        });
+
+        test('cash transfer legs convert in their own fiat (fromFxLock)', function () {
+          var trades = [
+            { id: 'f1', type: 'income', symbol: 'USD', qty: 100, total: 100, currency: 'USD', date: '2026-01-05', fee: 0, feeCurrency: 'USD', fxLock: { pair: 'USD/EUR', rate: 0.9, source: 'manual' }, accountId: 'cash2', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' },
+            { id: 'f2', type: 'transfer', symbol: 'USD', qty: 40, total: 0, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', networkFee: 0, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, fromFxLock: { pair: 'USD/EUR', rate: 0.9, source: 'manual' }, toQty: 36, toSymbol: 'EUR', toFxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash2', toAccountId: 'cash1', createdAt: '2026-01-06T00:00:00.000Z' }
+          ];
+          var src = L.cashBalance(trades, 'cash2', 'EUR');
+          // 100 − 40 native; main 90 − 36 (source fiat rate, not the zeroed 1:1 lock)
+          assert(src.native === 60 && src.main === 54, 'source leg must use fromFxLock: ' + JSON.stringify(src));
+          var dst = L.cashBalance(trades, 'cash1', 'EUR');
+          assert(dst.native === 36 && dst.main === 36, 'arrival leg wrong: ' + JSON.stringify(dst));
+        });
+
+        test('ledger learning caps at 500 codes, relabels freely below', function () {
+          var st = { settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: {} }, accounts: [], trades: [], priceOverrides: {} };
+          for (var i = 0; i < 500; i++) st.settings.ledgerLabels['c' + i] = 'Label ' + i;
+          L.learnLedgerLabel(st, { ledger: 'newcode', ledgerLabel: 'New' });
+          assert(!st.settings.ledgerLabels['newcode'], '501st code must not be learned');
+          L.learnLedgerLabel(st, { ledger: 'c0', ledgerLabel: 'Renamed' });
+          assert(st.settings.ledgerLabels['c0'] === 'Renamed', 'existing code must relabel');
+          L.learnLedgerLabel({ settings: {} }, { ledger: 'x', ledgerLabel: 'X' });
+        });
+
+        test('ledger tree includes ledger-carrying buy/sell, ignores plain ones', function () {
+          function buy(id, ledger) {
+            var t = { id: id, type: 'buy', symbol: 'EUR', qty: 10, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' };
+            if (ledger) t.ledger = ledger;
+            return t;
+          }
+          var tree = L.ledgerTree([buy('k1', '1000'), buy('k2', null)], 'cash1', 'EUR', {});
+          assert(tree.roots.length === 1 && tree.roots[0].code === '1000' && tree.roots[0].total === 10, 'ledger buy must aggregate: ' + JSON.stringify(tree.roots));
+          assert(tree.unassignedCount === 0, 'plain buy must not pollute unassigned');
         });
       } finally {
         restore();

@@ -347,6 +347,12 @@ function isValidImportTrade(t, accountIds) {
     if (t.toSymbol !== undefined && t.toSymbol !== null && String(t.toSymbol).trim() !== '') {
       if (!isValidSymbolCode(t.toSymbol)) return false;
     }
+    // A cross-fiat arrival names its destination fiat: the converted amount
+    // is then required (a missing toQty would credit zero silently).
+    var hasToSym = t.toSymbol !== undefined && t.toSymbol !== null && String(t.toSymbol).trim() !== '';
+    if (hasToSym && String(t.toSymbol).trim().toUpperCase() !== String(t.symbol).trim().toUpperCase()) {
+      if (t.toQty === undefined || t.toQty === null || String(t.toQty).trim() === '') return false;
+    }
     var hasTo = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
     if (accountIds !== undefined) {
       if (!Array.isArray(accountIds)) return false;
@@ -1761,6 +1767,11 @@ function cashBalance(allTrades, accountId, main) {
         : String(t.toSymbol).trim().toUpperCase();
       if (toSym === mainU) return 1;
       if (t.toFxLock) return ledgerFxRate(t.toFxLock);
+    } else if (t.fromFxLock) {
+      // Source leg of a cash transfer: transfers zero their own currency,
+      // so the frozen source-fiat rate rides separately (else a non-main
+      // source would convert 1:1 by mistake).
+      return ledgerFxRate(t.fromFxLock);
     }
     return ledgerFxRate(t.fxLock);
   }
@@ -1780,8 +1791,8 @@ function cashBalance(allTrades, accountId, main) {
   return { native: tidy(native), main: tidy(inMain), ticker: ticker };
 }
 
-// Ledger tree: income/expense trades carrying a ledger code aggregate by
-// code (signed main amounts), then roll up into parents. Parent = longest
+// Ledger tree: income/expense (and legacy ledger-carrying buy/sell) trades
+// aggregate by code (signed main amounts), then roll up into parents. Parent = longest
 // other known code that is a strict leading prefix, or — for numeric
 // Twinfield-style schemes — the digit-level parent (1110 → 1100 → 1000).
 // Trades without a code land in the unassigned bucket. Labels resolve
@@ -1816,11 +1827,17 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
   var unassignedCount = 0;
   (allTrades || []).forEach(function (t) {
     if (!t || t.accountId !== accountId) return;
-    if (t.type !== 'income' && t.type !== 'expense') return;
+    if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell') return;
     var n = normalizeTrade(t);
-    var signed = (t.type === 'income' ? 1 : -1) * (isFinite(n.netMain) ? n.netMain : 0);
+    var dir = (t.type === 'income' || t.type === 'buy') ? 1 : -1;
+    var signed = dir * (isFinite(n.netMain) ? n.netMain : 0);
     var code = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
-    if (!code) { unassigned += signed; unassignedCount++; return; }
+    if (!code) {
+      // Only bookkeeping types can be uncategorized; plain asset
+      // buy/sell records without a code stay out of the tree entirely.
+      if (t.type === 'income' || t.type === 'expense') { unassigned += signed; unassignedCount++; }
+      return;
+    }
     if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
     own[code].amount += signed;
     own[code].count++;
@@ -1965,6 +1982,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cashBalance = cashBalance;
   window.Inoculens.ledgerParentOf = ledgerParentOf;
   window.Inoculens.ledgerTree = ledgerTree;
+  window.Inoculens.learnLedgerLabel = learnLedgerLabel;
   window.Inoculens.refreshLedgerList = refreshLedgerList;
   window.Inoculens.TRADE_TYPES = TRADE_TYPES;
 }
@@ -7510,7 +7528,11 @@ function learnLedgerLabel(st, trade) {
       map = {};
       st.settings.ledgerLabels = map;
     }
-    if (map[code] !== label) map[code] = label;
+    // Capped like the validator: beyond 500 codes nothing is learned, so a
+    // large chart can never be wiped by normalization on reload.
+    if (map[code] === label) return;
+    if (!Object.prototype.hasOwnProperty.call(map, code) && Object.keys(map).length >= 500) return;
+    map[code] = label;
   } catch (e) { /* ignore */ }
 }
 
@@ -7845,6 +7867,12 @@ function onTradeSubmit(ev) {
         trade.toSymbol = String(toAccCash.ticker).toUpperCase();
         if (destLockForTrade) trade.toFxLock = destLockForTrade;
       }
+      // Cash transfers freeze both fiat legs (source + arrival); the
+      // trade's own lock stays 1:1 main (total is 0, engine-neutral).
+      if (isCashAcc && side === 'transfer' && srcFiatLockForTrade) {
+        trade.fromFxLock = srcFiatLockForTrade;
+        if (!isCrossFiat) trade.toFxLock = srcFiatLockForTrade;
+      }
       if (prev.swapId) trade.swapId = prev.swapId;
       var errE = validateTrade(trade, 1e18); // structural only; held already checked directionally above
       if (errE && String(errE).indexOf('oversell') === -1) { tradeFormError(errE); lockSubmit(false, 'Save changes'); return; }
@@ -7903,6 +7931,12 @@ function onTradeSubmit(ev) {
       trade.toSymbol = String(toAccCash.ticker).toUpperCase();
       if (destLockForTrade) trade.toFxLock = destLockForTrade;
     }
+    // Cash transfers freeze both fiat legs (source + arrival); the
+    // trade's own lock stays 1:1 main (total is 0, engine-neutral).
+    if (isCashAcc && side === 'transfer' && srcFiatLockForTrade) {
+      trade.fromFxLock = srcFiatLockForTrade;
+      if (!isCrossFiat) trade.toFxLock = srcFiatLockForTrade;
+    }
     if (side === 'buy' || side === 'sell' || side === 'transfer') {
       if (manualPrice !== null) {
         // Same rule as the edit path: the manual quote follows the trade's
@@ -7958,6 +7992,11 @@ function onTradeSubmit(ev) {
   var destSym = isCrossFiat ? String(toAccCash.ticker).toUpperCase() : null;
   var needDest = !!(isCrossFiat && destSym && destSym !== mainU);
   var destLockForTrade = null;
+  // Cash transfers zero their own currency (engine-neutral: total stays 0),
+  // so the source fiat needs its own frozen rate for balance math.
+  var srcSymTx = (isCashAcc && side === 'transfer') ? symbol : null;
+  var needSrcFiat = !!(srcSymTx && srcSymTx !== mainU);
+  var srcFiatLockForTrade = null;
   function lock11(pairFrom) {
     return { pair: pairFrom + '/' + mainU, rate: 1, source: '1:1', interpolated: false };
   }
@@ -7976,11 +8015,13 @@ function onTradeSubmit(ev) {
   }
   if (!needTotal && !needDest) {
     if (isCrossFiat) destLockForTrade = lock11(destSym);
+    if (isCashAcc && side === 'transfer') srcFiatLockForTrade = lock11(srcSymTx);
     proceed(lock11(from));
     return;
   }
   if (manualRate !== null && !needDest) {
     if (isCrossFiat) destLockForTrade = lock11(destSym);
+    if (isCashAcc && side === 'transfer') srcFiatLockForTrade = lock11(srcSymTx);
     proceed((from === mainU) ? lock11(from)
       : { pair: from + '/' + mainU, rate: manualRate, source: 'manual', interpolated: false });
     return;
@@ -8003,11 +8044,22 @@ function onTradeSubmit(ev) {
       try { cacheRate(date, destSym, mainU, destRes.rate, destRes.source); saveFxCache(); } catch (e) { /* ignore */ }
       return dLock;
     });
-  Promise.all([srcP, destP]).then(function (locks) {
+  var srcFiatP = !needSrcFiat
+    ? Promise.resolve(srcSymTx ? lock11(srcSymTx) : null)
+    : fetchEcbRate(date, srcSymTx, mainU).then(function (srcRes) {
+      var sLock = { pair: srcSymTx + '/' + mainU, rate: srcRes.rate, source: srcRes.source, interpolated: !!srcRes.interpolated };
+      try { cacheRate(date, srcSymTx, mainU, srcRes.rate, srcRes.source); saveFxCache(); } catch (e) { /* ignore */ }
+      return sLock;
+    });
+  Promise.all([srcP, destP, srcFiatP]).then(function (locks) {
     destLockForTrade = locks[1];
+    srcFiatLockForTrade = locks[2];
     proceed(locks[0]);
   }, function () {
-    fxError(isCrossFiat ? [from + ' → ' + mainU, destSym + ' → ' + mainU] : [from + ' → ' + mainU]);
+    var pairs = (isCashAcc && side === 'transfer')
+      ? [srcSymTx + ' → ' + mainU].concat(isCrossFiat ? [destSym + ' → ' + mainU] : [])
+      : [from + ' → ' + mainU];
+    fxError(pairs);
   });
 }
 

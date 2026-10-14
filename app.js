@@ -9304,10 +9304,15 @@ function attUiSync() {
     var rm = document.getElementById('t-attach-remove');
     var inp = document.getElementById('t-attach');
     var label = '';
+    var removed = !pendingAttachFile && pendingAttachRemove;
     if (pendingAttachFile) label = 'New file: ' + pendingAttachFile.name;
-    else if (pendingAttachRemove) label = (currentAttachMeta ? 'Will remove ' + currentAttachMeta.name : 'Attachment will be removed.');
+    else if (removed) label = '✓ Removed — press Save changes to confirm.';
     else if (currentAttachMeta) label = 'Attached: ' + currentAttachMeta.name;
-    if (cur) { cur.textContent = label; cur.hidden = !label; }
+    if (cur) {
+      cur.textContent = label;
+      cur.hidden = !label;
+      try { cur.style.color = removed ? 'var(--gain)' : ''; } catch (e) { /* ignore */ }
+    }
     if (rm) rm.hidden = !(pendingAttachFile || currentAttachMeta);
   } catch (e) { /* never block the form */ }
 }

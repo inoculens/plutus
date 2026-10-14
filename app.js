@@ -8785,10 +8785,10 @@ function buildAccountDialog() {
   wrap.innerHTML =
     '<label for="na-name">Account name</label>' +
     '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cold wallet">' +
-    '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
-    '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<label for="na-kind">Asset type</label>' +
     '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
+    '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
+    '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<div id="na-fiat-row" hidden><label for="na-fiat">Currency</label>' +
     '<select id="na-fiat"><option value="EUR">EUR</option><option value="USD">USD</option><option value="GBP">GBP</option><option value="CHF">CHF</option><option value="RON">RON</option><option value="CUSTOM">Other…</option></select></div>' +
     '<div id="na-fiatcode-row" hidden><label for="na-fiatcode">Currency code</label>' +

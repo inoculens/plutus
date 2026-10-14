@@ -567,6 +567,11 @@ section h2, aside h2 {
 /* Group Ledgers header (title + currency select + Ledger button): the
    select hugs the button at the right edge, like the trades filter. */
 #account-detail .section-head select { margin-left: auto; }
+/* Ledgers headers never wrap: title left, currency + button packed right on
+   one line at every width (the title truncates instead of dropping). */
+#account-detail .section-head.ledgers-head { flex-wrap: nowrap; }
+#account-detail .section-head.ledgers-head .section-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#account-detail .section-head.ledgers-head select, #account-detail .section-head.ledgers-head button { flex: 0 0 auto; }
 
 .section-actions { display: flex; align-items: center; gap: 0.6rem; }
 

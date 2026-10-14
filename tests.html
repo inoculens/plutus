@@ -841,6 +841,10 @@
             );
             assert(ledgerBtns.length === 1, 'exactly one + Ledger on a main, got ' + ledgerBtns.length);
             assert(document.querySelectorAll('#account-detail select').length === 1, 'exactly one currency select on a main');
+            var lhead = document.querySelector('#account-detail .section-head.ledgers-head');
+            assert(lhead, 'Ledgers head must carry its one-line class');
+            var ltops = Array.prototype.map.call(lhead.children, function (c) { return c.getBoundingClientRect().top; });
+            assert(Math.max.apply(null, ltops) - Math.min.apply(null, ltops) < 2, 'Ledgers head must stay one line, tops ' + JSON.stringify(ltops));
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

@@ -6297,7 +6297,7 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host, opts) {
   var labels = ledgerChartFor(st, acc.id);
   var tree = ledgerTree(dtrades, acc.id, main, labels);
   var sec = document.createElement('div');
-  sec.className = 'section-head';
+  sec.className = 'section-head ledgers-head';
   var h = document.createElement('h2');
   h.className = 'section-title';
   h.textContent = 'Ledgers';
@@ -6348,7 +6348,7 @@ function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
   members.forEach(function (m) { ids.push(m.id); });
   var gCcy = groupLedgerCurrency(st, mainAcc);
   var sec = document.createElement('div');
-  sec.className = 'section-head';
+  sec.className = 'section-head ledgers-head';
   var h = document.createElement('h2');
   h.className = 'section-title';
   h.textContent = 'Ledgers';
@@ -6510,7 +6510,7 @@ function buildAssetLedgers(st, acc, dtrades, main, host) {
   kinds[acc.id] = (acc && typeof acc.kind === 'string') ? acc.kind : '';
   var tree = ledgerTreeMulti(dtrades, ids, main, ledgerChartFor(st, acc.id), kinds);
   var sec = document.createElement('div');
-  sec.className = 'section-head';
+  sec.className = 'section-head ledgers-head';
   var h = document.createElement('h2');
   h.className = 'section-title';
   h.textContent = 'Ledgers';

@@ -721,17 +721,18 @@
           var main = null;
           st.accounts.forEach(function (x) { if (x.id === 'm') main = x; });
           assert(main.groupCurrency === 'EUR', 'cash main keeps its fiat, got ' + main.groupCurrency);
+          assert(L.assignGroup(st, ['c'], 'b') !== null, 'a grouped member cannot be a target');
+          assert(L.assignGroup(st, ['m'], 'b') !== null, 'nesting a main must fail');
+          assert(L.assignGroup(st, ['b'], 'b') === null, 'self link is skipped, not fatal');
+          assert(L.groupMainOf(st, 'b').id === 'm', 'b still under m (self skipped)');
+          assert(L.assignGroup(st, ['a'], 'nope') !== null, 'missing main must fail');
+          assert(L.ungroupAll(st, 'm') === 2, 'two members released');
+          assert(!L.isGroupMain(st, 'm') && L.groupMainOf(st, 'a') === null, 'group dissolved');
           assert(L.assignGroup(st, ['c'], 'b') === null, 're-point must succeed');
           assert(L.groupMainOf(st, 'c').id === 'b', 'c moved to b');
           var bAcc = null;
           st.accounts.forEach(function (x) { if (x.id === 'b') bAcc = x; });
           assert(bAcc.groupCurrency === 'USD', 'crypto main falls back to header fiat, got ' + bAcc.groupCurrency);
-          assert(L.assignGroup(st, ['a'], 'nope') !== null, 'missing main must fail');
-          assert(L.assignGroup(st, ['m'], 'b') !== null, 'nesting a main must fail');
-          assert(L.assignGroup(st, ['b'], 'b') === null, 'self link is skipped, not fatal');
-          assert(L.groupMainOf(st, 'b').id === 'm', 'b still under m (self skipped)');
-          assert(L.ungroupAll(st, 'm') === 2, 'two members released');
-          assert(!L.isGroupMain(st, 'm') && L.groupMainOf(st, 'a') === null, 'group dissolved');
           assert(L.uniqueSubName(st, 'Org') === 'sub-Org', 'first sub name wrong');
           st.accounts.push({ id: 's', name: 'sub-Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' });
           assert(L.uniqueSubName(st, 'Org') === 'sub-Org 2', 'collision must number up');
@@ -754,6 +755,124 @@
           var env3 = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [bad], trades: [], priceOverrides: {} });
           var back3 = L.importState(env3);
           assert(!back3.accounts[0].groupId && !back3.accounts[0].groupCurrency, 'self link + bad fiat must drop: ' + JSON.stringify(back3.accounts[0]));
+        });
+
+        test('ledger scope + multi tree merge groups', function () {
+          function tr(id, acc, type, ledger, qty, sym) {
+            return { id: id, type: type, symbol: sym || 'EUR', qty: qty, total: qty, currency: sym || 'EUR', date: '2026-01-05', fee: 0, feeCurrency: sym || 'EUR', fxLock: { pair: (sym || 'EUR') + '/EUR', rate: 1, source: '1:1' }, accountId: acc, ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+            accounts: [
+              { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+              { id: 'b', name: 'B', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+              { id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
+            ],
+            trades: [
+              tr('t1', 'm', 'income', '1000', 100),
+              tr('t2', 'a', 'income', '1000', 200),
+              tr('t3', 'a', 'expense', '', 40),
+              tr('t4', 'b', 'income', '', 5, 'BTC'),
+              tr('t5', 'b', 'income', '5000', 7, 'BTC'),
+              { id: 't6', type: 'buy', symbol: 'BTC', qty: 1, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', createdAt: '2026-01-05T00:00:00.000Z' },
+              tr('t7', 'z', 'income', '1000', 999)
+            ],
+            priceOverrides: {}
+          };
+          assert(L.ledgerScopeOf(st, 'z').join(',') === 'z', 'standalone scope wrong');
+          assert(L.ledgerScopeOf(st, 'a').join(',') === 'm,a,b', 'member scope must lead with main');
+          assert(L.ledgerScopeOf(st, 'm').join(',') === 'm,a,b', 'main scope wrong');
+          var kinds = { m: 'cash', a: 'cash', b: 'crypto' };
+          var tree = L.ledgerTreeMulti(st.trades, ['m', 'a', 'b'], 'EUR', { '1000': 'Income' }, kinds);
+          var n1000 = null;
+          tree.roots.forEach(function (r) { if (r.code === '1000') n1000 = r; });
+          assert(n1000 && n1000.total === 300, '1000 must merge m+a, got ' + JSON.stringify(n1000 && n1000.total));
+          var stray = tree.roots.filter(function (r) { return r.code !== '1000' && r.code !== '5000'; });
+          assert(stray.length === 0, 'only posted codes expected, got ' + JSON.stringify(stray.map(function (r) { return r.code; })));
+          assert(tree.unassignedIncome === 0 && tree.unassignedIncomeCount === 0, 'cash unlabeled income missing');
+          assert(tree.unassignedExpense === -40 && tree.unassignedExpenseCount === 1, 'cash unlabeled expense wrong: ' + JSON.stringify(tree.unassignedExpense));
+          assert(tree.unassignedAssets === 5 && tree.unassignedAssetsCount === 1, 'asset unlabeled pool wrong: ' + JSON.stringify(tree.unassignedAssets));
+          // Wrapper equivalence: single cash account behaves exactly as before.
+          var single = L.ledgerTree([tr('s1', 'a', 'income', '1000', 100), tr('s2', 'a', 'expense', '', 40)], 'a', 'EUR', {});
+          assert(single.roots.length === 1 && single.roots[0].total === 100, 'wrapper roots wrong');
+          assert(single.unassignedExpense === -40 && single.unassignedAssets === 0 && single.unassignedAssetsCount === 0, 'wrapper buckets wrong');
+        });
+
+        test('main view merges ledgers + lists subs, member hides ledgers', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [
+                { id: 'g1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'm', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'g2', type: 'income', symbol: 'EUR', qty: 200, total: 200, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'g3', type: 'income', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', ledger: '1100', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var cards = document.querySelectorAll('#account-detail .group-subs .account-card');
+            assert(cards.length === 2, 'main must list two sub cards, got ' + cards.length);
+            var row = document.querySelector('#account-detail .ledger-row[data-ledger="1000"] .ledger-amount');
+            assert(row && row.textContent.indexOf('300') !== -1, '1000 must merge m+a to 300, got ' + (row && row.textContent));
+            assert(!document.querySelector('#account-detail .trade-block'), 'main must show no trade history');
+            assert(document.querySelector('#account-detail select[aria-label="Group ledger currency"]'), 'currency select missing');
+            cards[0].click();
+            var subTitle = document.querySelector('#account-detail .detail-name');
+            assert(subTitle && subTitle.textContent === 'A', 'sub card must open its account, got ' + (subTitle && subTitle.textContent));
+            assert(!document.querySelector('#account-detail .ledger-list'), 'member must hide Ledgers');
+            assert(document.querySelector('#account-detail .trade-block'), 'member must show its trades');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('createSubAccount moves records into sub-<name>', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 's1', name: 'Solo', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [{ id: 'r1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 's1', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            L.createSubAccount('s1');
+            var st = L.loadState();
+            var sub = null, main = null;
+            st.accounts.forEach(function (a) {
+              if (a.id === 's1') main = a;
+              if (a.name === 'sub-Solo') sub = a;
+            });
+            assert(sub && sub.groupId === 's1', 'sub must link under s1: ' + JSON.stringify(sub));
+            assert(sub && sub.ticker === 'EUR' && sub.kind === 'cash', 'sub must copy kind/ticker');
+            var moved = null;
+            st.trades.forEach(function (t) { if (t.id === 'r1') moved = t; });
+            assert(moved && moved.accountId === sub.id, 'record must move into the sub');
+            assert(L.isGroupMain(st, 's1'), 's1 is a main now');
+            assert(main && main.groupCurrency === 'EUR', 'group currency must default');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
         });
 
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {

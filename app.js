@@ -365,6 +365,7 @@ function ensureGroupCurrency(st, mainId) {
 function assignGroup(st, memberIds, mainId) {
   var main = accountById(st, mainId);
   if (!main) return 'Main account not found.';
+  if (groupMainOf(st, mainId)) return '"' + main.name + '" is already grouped — ungroup it first or pick another main.';
   var seen = {};
   var ids = [];
   (memberIds || []).forEach(function (id) {
@@ -1981,6 +1982,18 @@ function ledgerDescendantsOf(target, allCodes) {
   return out;
 }
 
+// Full ledger scope for an account: itself, or the whole group (main
+// first) when grouped. Ledger reads/writes across the scope share the
+// main's chart; records keep their own account.
+function ledgerScopeOf(st, accountId) {
+  if (!st || !accountId) return [accountId];
+  var mainOf = groupMainOf(st, accountId);
+  var mainId = mainOf ? mainOf.id : accountId;
+  var ids = [mainId];
+  groupMembers(st, mainId).forEach(function (a) { ids.push(a.id); });
+  return ids;
+}
+
 // Every ledger code known to an account: chart keys plus codes posted on
 // its records (posted-only codes nest like charted ones).
 function ledgerAccountCodes(st, accountId) {
@@ -2014,12 +2027,33 @@ function ledgerPostedOn(st, accountId, code, excludeId, excludeCode) {
 // else {kind:'parent',code,kids} (code already has children) or
 // {kind:'orphans',code,parents} (posting here would strand records on a
 // new parent). excludeId skips one record (trade edits), excludeCode skips
-// records carrying that code (ledger renames move them away).
-function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode) {
+// records carrying that code (ledger renames move them away). scopeIds
+// widens charts + postings to the whole group (main first); omitted means
+// the single account.
+function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode, scopeIds) {
   code = (code === undefined || code === null) ? '' : String(code).trim();
   if (!code) return null;
-  var all = ledgerAccountCodes(st, accountId);
+  var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  var chartAcc = scope[0];
+  var set = {};
+  try {
+    var eff = ledgerChartFor(st, chartAcc);
+    Object.keys(eff).forEach(function (k) { var ck = String(k).trim(); if (ck) set[ck] = true; });
+  } catch (e) { /* ignore */ }
+  scope.forEach(function (sid) {
+    ((st && st.trades) || []).forEach(function (t) {
+      if (!t || t.accountId !== sid) return;
+      var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+      if (c) set[c] = true;
+    });
+  });
+  var all = Object.keys(set);
   if (all.indexOf(code) === -1) all.push(code);
+  function postedInScope(cd) {
+    var n = 0;
+    scope.forEach(function (sid) { n += ledgerPostedOn(st, sid, cd, excludeId, excludeCode); });
+    return n;
+  }
   var kids = ledgerDescendantsOf(code, all);
   if (kids.length) return { kind: 'parent', code: code, kids: kids.slice().sort() };
   var parents = [];
@@ -2029,7 +2063,7 @@ function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode) {
     seen[cur] = true;
     var p = ledgerParentOf(cur, all);
     if (!p) break;
-    if (ledgerPostedOn(st, accountId, p, excludeId, excludeCode) > 0 && parents.indexOf(p) === -1) parents.push(p);
+    if (postedInScope(p) > 0 && parents.indexOf(p) === -1) parents.push(p);
     cur = p;
   }
   if (parents.length) return { kind: 'orphans', code: code, parents: parents };
@@ -2109,16 +2143,33 @@ function ledgerSignedMain(t) {
 }
 
 function ledgerTree(allTrades, accountId, main, labelMap) {
+  return ledgerTreeMulti(allTrades, [accountId], main, labelMap, null);
+}
+
+// Multi-account tree for group mains (and asset views): the same roll-up
+// over every id in scope. kinds maps id -> account kind; null means all
+// cash (the legacy single-account behavior). Asset income/expense without
+// a code pool into Unlabeled assets; buy/sell without a code stay out of
+// the tree entirely, on every kind.
+function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
   var labels = labelMap || {};
+  var inScope = {};
+  (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') inScope[id] = true; });
+  function cashScope(id) {
+    if (!kinds || typeof kinds[id] !== 'string') return true;
+    return isCashKind(kinds[id]);
+  }
   var own = {}; // code -> {code, amount}
   var unassignedIncome = 0;
   var unassignedIncomeCount = 0;
   var unassignedExpense = 0;
   var unassignedExpenseCount = 0;
+  var unassignedAssets = 0;
+  var unassignedAssetsCount = 0;
   // Signed zero is still zero: -0 would print as "-€0.00".
   function z(v) { return (v === 0) ? 0 : Math.round(v * 100) / 100; }
   (allTrades || []).forEach(function (t) {
-    if (!t || t.accountId !== accountId) return;
+    if (!t || !inScope[t.accountId]) return;
     if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell') return;
     var signed = z(ledgerSignedMain(t));
     var code = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
@@ -2126,9 +2177,16 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.
       // Unlabeled records (e.g. freed by a ledger delete) surface under two
-      // virtual defaults so totals never lose money: income vs expenses.
-      if (t.type === 'income') { unassignedIncome = z(unassignedIncome + signed); unassignedIncomeCount++; }
-      else if (t.type === 'expense') { unassignedExpense = z(unassignedExpense + signed); unassignedExpenseCount++; }
+      // virtual defaults so totals never lose money: income vs expenses on
+      // cash, one Unlabeled assets pool everywhere else.
+      if (t.type === 'income' || t.type === 'expense') {
+        if (cashScope(t.accountId)) {
+          if (t.type === 'income') { unassignedIncome = z(unassignedIncome + signed); unassignedIncomeCount++; }
+          else { unassignedExpense = z(unassignedExpense + signed); unassignedExpenseCount++; }
+        } else {
+          unassignedAssets = z(unassignedAssets + signed); unassignedAssetsCount++;
+        }
+      }
       return;
     }
     if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
@@ -2152,7 +2210,7 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
     var tradeLabel = '';
     (allTrades || []).forEach(function (t) {
       if (tradeLabel) return;
-      if (t && t.accountId === accountId && String(t.ledger || '').trim() === c && t.ledgerLabel && String(t.ledgerLabel).trim() !== '') {
+      if (t && inScope[t.accountId] && String(t.ledger || '').trim() === c && t.ledgerLabel && String(t.ledgerLabel).trim() !== '') {
         tradeLabel = String(t.ledgerLabel).trim();
       }
     });
@@ -2182,7 +2240,7 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
   roots.sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
   var unassigned = z(unassignedIncome + unassignedExpense);
   var unassignedCount = unassignedIncomeCount + unassignedExpenseCount;
-  return { roots: roots, unassigned: unassigned, unassignedCount: unassignedCount, unassignedIncome: z(unassignedIncome), unassignedIncomeCount: unassignedIncomeCount, unassignedExpense: z(unassignedExpense), unassignedExpenseCount: unassignedExpenseCount };
+  return { roots: roots, unassigned: unassigned, unassignedCount: unassignedCount, unassignedIncome: z(unassignedIncome), unassignedIncomeCount: unassignedIncomeCount, unassignedExpense: z(unassignedExpense), unassignedExpenseCount: unassignedExpenseCount, unassignedAssets: z(unassignedAssets), unassignedAssetsCount: unassignedAssetsCount };
 }
 
 function validateTrade(t, heldQty) {
@@ -2293,6 +2351,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.ledgerViolations = ledgerViolations;
   window.Inoculens.ledgerConflictMessage = ledgerConflictMessage;
   window.Inoculens.ledgerTree = ledgerTree;
+  window.Inoculens.ledgerTreeMulti = ledgerTreeMulti;
+  window.Inoculens.ledgerScopeOf = ledgerScopeOf;
   window.Inoculens.ledgerChartFor = ledgerChartFor;
   window.Inoculens.ensureAccountChart = ensureAccountChart;
   window.Inoculens.groupMembers = groupMembers;
@@ -2305,6 +2365,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.uniqueSubName = uniqueSubName;
   window.Inoculens.assetLedgersOn = assetLedgersOn;
   window.Inoculens.openLedgerDialog = openLedgerDialog;
+  window.Inoculens.openGroupDialog = openGroupDialog;
+  window.Inoculens.createSubAccount = createSubAccount;
   window.Inoculens.renameAccountLedger = renameAccountLedger;
   window.Inoculens.deleteAccountLedger = deleteAccountLedger;
   window.Inoculens.ledgerSignedMain = ledgerSignedMain;
@@ -4536,6 +4598,26 @@ function buildAccountAction() {
     openDialog('color-dialog');
   });
   panel.appendChild(col);
+  var grp = document.createElement('button');
+  grp.type = 'button';
+  grp.className = 'action-opt';
+  grp.textContent = 'Group…';
+  grp.setAttribute('aria-label', 'Group selected accounts under one main');
+  grp.addEventListener('click', function () {
+    accountActionOpen = false;
+    panel.hidden = true;
+    var host = document.getElementById('accounts');
+    var tgl = host && host.querySelector ? host.querySelector('[data-action-btn]') : null;
+    if (tgl) tgl.setAttribute('aria-expanded', 'false');
+    var st = loadState();
+    var ids = Object.keys(selectedAccounts).filter(function (id) { return !!accountById(st, id); });
+    if (!ids.length) return;
+    for (var i = 0; i < ids.length; i++) {
+      if (isGroupMain(st, ids[i])) { showBanner('"' + accountById(st, ids[i]).name + '" is already a main account — ungroup it first.'); return; }
+    }
+    openGroupDialog(ids);
+  });
+  panel.appendChild(grp);
   var del = document.createElement('button');
   del.type = 'button';
   del.className = 'action-del';
@@ -4720,6 +4802,109 @@ function buildTradeTypeFilter(acc, atrades) {
   return wrap;
 }
 
+// Home-style account card, shared by the home list and group mains.
+// rows come from the joint engine run (same data as the totals).
+function accountCardEl(acc, rows, dtrades, main, withSelect) {
+  rows = rows || [];
+  var card = document.createElement('article');
+  card.className = 'account-card';
+  card.setAttribute('data-account', acc.id);
+  card.setAttribute('data-account-nav', acc.id);
+  card.setAttribute('tabindex', '0');
+  card.setAttribute('role', 'link');
+  card.setAttribute('aria-label', 'Open ' + acc.name + ', ' + String(acc.ticker).toUpperCase());
+  var grip = document.createElement('span');
+  grip.className = 'drag-handle';
+  grip.title = 'Drag to reorder';
+  grip.setAttribute('aria-hidden', 'true');
+  card.appendChild(grip);
+  var avatar = document.createElement('span');
+  avatar.className = 'acct-avatar';
+  avatar.setAttribute('aria-hidden', 'true');
+  avatar.textContent = String(acc.ticker || '?').substring(0, 4).toUpperCase();
+  if (acc.color && isValidHexColor(acc.color)) {
+    card.setAttribute('data-colored', '1');
+    try {
+      card.style.setProperty('--acct-color', String(acc.color).trim().toUpperCase());
+      avatar.style.color = contrastText(acc.color);
+    } catch (e) { /* ignore */ }
+  }
+  card.appendChild(avatar);
+  var mid = document.createElement('span');
+  mid.className = 'acct-mid';
+  var nameEl = document.createElement('span');
+  nameEl.className = 'account-name';
+  nameEl.textContent = acc.name;
+  mid.appendChild(nameEl);
+  var tickEl = document.createElement('span');
+  tickEl.className = 'account-ticker';
+  tickEl.textContent = String(acc.ticker).toUpperCase();
+  mid.appendChild(tickEl);
+  card.appendChild(mid);
+  var atrades = accountTrades({ trades: dtrades }, acc.id);
+  var pl = 0;
+  var mv = 0;
+  var mvKnown = false;
+  rows.forEach(function (r) {
+    pl += r.totalPL;
+    if (r.marketValue !== null) { mv += r.marketValue; mvKnown = true; }
+  });
+  var figs = document.createElement('span');
+  figs.className = 'acct-figs';
+  var valv = document.createElement('span');
+  valv.className = 'acct-value';
+  var plv = document.createElement('span');
+  if (isCashKind(acc.kind)) {
+    // Balance ledger card: value = balance in main fiat, second line =
+    // balance in the account fiat. Never P&L.
+    var cbal = cashBalance(dtrades, acc.id, main);
+    valv.textContent = atrades.length ? fmtMoney(cbal.main, main) : 'New';
+    if (atrades.length && isFinite(Number(cbal.main))) valv.setAttribute('data-value', String(Number(cbal.main)));
+    plv.className = 'acct-pl';
+    plv.textContent = atrades.length ? (fmtQty(cbal.native, cbal.ticker || acc.ticker) + ' ' + String(cbal.ticker || acc.ticker || '').toUpperCase()) : 'New';
+  } else {
+    valv.textContent = mvKnown ? fmtMoney(mv, main) : (atrades.length ? '—' : 'New');
+    var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
+    plv.className = 'acct-pl ' + plClass(pl);
+    plv.textContent = hasKnownPl ? fmtMoney(pl, main) : (atrades.length ? '—' : 'New');
+    if (isFinite(Number(pl)) && hasKnownPl) plv.setAttribute('data-value', String(Number(pl)));
+  }
+  figs.appendChild(valv);
+  figs.appendChild(plv);
+  card.appendChild(figs);
+  if (withSelect && selectionMode) {
+    var cbx = document.createElement('input');
+    cbx.type = 'checkbox';
+    cbx.className = 'card-check';
+    cbx.setAttribute('data-select-check', acc.id);
+    cbx.checked = !!selectedAccounts[acc.id];
+    cbx.setAttribute('aria-label', 'Select ' + acc.name);
+    cbx.addEventListener('click', function (e) { if (e && e.stopPropagation) e.stopPropagation(); });
+    cbx.addEventListener('change', function () { toggleAccountSelect(acc.id); });
+    if (cbx.checked) card.classList.add('selected');
+    card.appendChild(cbx);
+  }
+  // Cards open on click (see nav wiring); the per-card buttons stay in the
+  // DOM hidden for programmatic/test use so they never clutter the card.
+  var tradeBtn = document.createElement('button');
+  tradeBtn.type = 'button';
+  tradeBtn.className = 'quiet';
+  tradeBtn.textContent = '+ Record';
+  tradeBtn.setAttribute('data-account-trade', acc.id);
+  tradeBtn.setAttribute('aria-label', 'Add record to ' + acc.name);
+  tradeBtn.hidden = true;
+  card.appendChild(tradeBtn);
+  var openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'quiet acct-open';
+  openBtn.textContent = 'Open ›';
+  openBtn.setAttribute('data-account-open', acc.id);
+  openBtn.setAttribute('aria-label', 'Open ' + acc.name);
+  openBtn.hidden = true;
+  card.appendChild(openBtn);
+  return card;
+}
+
 function renderAccounts(st) {
   var host = document.getElementById('accounts');
   if (!host) return;
@@ -4853,104 +5038,7 @@ function renderAccounts(st) {
     return;
   }
   pageAccounts.forEach(function (acc) {
-    var card = document.createElement('article');
-    card.className = 'account-card';
-    card.setAttribute('data-account', acc.id);
-    card.setAttribute('data-account-nav', acc.id);
-    card.setAttribute('tabindex', '0');
-    card.setAttribute('role', 'link');
-    card.setAttribute('aria-label', 'Open ' + acc.name + ', ' + String(acc.ticker).toUpperCase());
-    var grip = document.createElement('span');
-    grip.className = 'drag-handle';
-    grip.title = 'Drag to reorder';
-    grip.setAttribute('aria-hidden', 'true');
-    card.appendChild(grip);
-    var avatar = document.createElement('span');
-    avatar.className = 'acct-avatar';
-    avatar.setAttribute('aria-hidden', 'true');
-    avatar.textContent = String(acc.ticker || '?').substring(0, 4).toUpperCase();
-    if (acc.color && isValidHexColor(acc.color)) {
-      card.setAttribute('data-colored', '1');
-      try {
-        card.style.setProperty('--acct-color', String(acc.color).trim().toUpperCase());
-        avatar.style.color = contrastText(acc.color);
-      } catch (e) { /* ignore */ }
-    }
-    card.appendChild(avatar);
-    var mid = document.createElement('span');
-    mid.className = 'acct-mid';
-    var nameEl = document.createElement('span');
-    nameEl.className = 'account-name';
-    nameEl.textContent = acc.name;
-    mid.appendChild(nameEl);
-    var tickEl = document.createElement('span');
-    tickEl.className = 'account-ticker';
-    tickEl.textContent = String(acc.ticker).toUpperCase();
-    mid.appendChild(tickEl);
-    card.appendChild(mid);
-    var atrades = accountTrades({ trades: dtrades }, acc.id);
-    var rows = rowsById[acc.id] || []; // joint run above, same data as the totals
-    var pl = 0;
-    var mv = 0;
-    var mvKnown = false;
-    rows.forEach(function (r) {
-      pl += r.totalPL;
-      if (r.marketValue !== null) { mv += r.marketValue; mvKnown = true; }
-    });
-    var figs = document.createElement('span');
-    figs.className = 'acct-figs';
-    var valv = document.createElement('span');
-    valv.className = 'acct-value';
-    var plv = document.createElement('span');
-    if (isCashKind(acc.kind)) {
-      // Balance ledger card: value = balance in main fiat, second line =
-      // balance in the account fiat. Never P&L.
-      var cbal = cashBalance(dtrades, acc.id, main);
-      valv.textContent = atrades.length ? fmtMoney(cbal.main, main) : 'New';
-      if (atrades.length && isFinite(Number(cbal.main))) valv.setAttribute('data-value', String(Number(cbal.main)));
-      plv.className = 'acct-pl';
-      plv.textContent = atrades.length ? (fmtQty(cbal.native, cbal.ticker || acc.ticker) + ' ' + String(cbal.ticker || acc.ticker || '').toUpperCase()) : 'New';
-    } else {
-      valv.textContent = mvKnown ? fmtMoney(mv, main) : (atrades.length ? '—' : 'New');
-      var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
-      plv.className = 'acct-pl ' + plClass(pl);
-      plv.textContent = hasKnownPl ? fmtMoney(pl, main) : (atrades.length ? '—' : 'New');
-      if (isFinite(Number(pl)) && hasKnownPl) plv.setAttribute('data-value', String(Number(pl)));
-    }
-    figs.appendChild(valv);
-    figs.appendChild(plv);
-    card.appendChild(figs);
-    if (selectionMode) {
-      var cbx = document.createElement('input');
-      cbx.type = 'checkbox';
-      cbx.className = 'card-check';
-      cbx.setAttribute('data-select-check', acc.id);
-      cbx.checked = !!selectedAccounts[acc.id];
-      cbx.setAttribute('aria-label', 'Select ' + acc.name);
-      cbx.addEventListener('click', function (e) { if (e && e.stopPropagation) e.stopPropagation(); });
-      cbx.addEventListener('change', function () { toggleAccountSelect(acc.id); });
-      if (cbx.checked) card.classList.add('selected');
-      card.appendChild(cbx);
-    }
-    // Cards open on click (see nav wiring); the per-card buttons stay in the
-    // DOM hidden for programmatic/test use so they never clutter the card.
-    var tradeBtn = document.createElement('button');
-    tradeBtn.type = 'button';
-    tradeBtn.className = 'quiet';
-    tradeBtn.textContent = '+ Record';
-    tradeBtn.setAttribute('data-account-trade', acc.id);
-    tradeBtn.setAttribute('aria-label', 'Add record to ' + acc.name);
-    tradeBtn.hidden = true;
-    card.appendChild(tradeBtn);
-    var openBtn = document.createElement('button');
-    openBtn.type = 'button';
-    openBtn.className = 'quiet acct-open';
-    openBtn.textContent = 'Open ›';
-    openBtn.setAttribute('data-account-open', acc.id);
-    openBtn.setAttribute('aria-label', 'Open ' + acc.name);
-    openBtn.hidden = true;
-    card.appendChild(openBtn);
-    host.appendChild(card);
+    host.appendChild(accountCardEl(acc, rowsById[acc.id] || [], dtrades, main, true));
   });
   if (pageCount > 1) host.appendChild(buildAccountPager(pageCount));
   restoreAccountFilterFocus();
@@ -6018,15 +6106,75 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   return d;
 }
 
+// One-line cleanup hint for overview-rule breakers. Never throws.
+function appendLedgerWarn(host, viol) {
+  try {
+    if (!viol || !viol.length) return;
+    var shown = viol.slice(0, 3).map(function (c) { return '"' + c + '"'; }).join(', ');
+    var wn = document.createElement('p');
+    wn.className = 'muted ledger-warn';
+    wn.textContent = 'Heads-up: ' + shown + (viol.length > 3 ? ', …' : '') +
+      (viol.length === 1 ? ' holds' : ' hold') + ' records and sub-ledgers — move ' +
+      (viol.length === 1 ? 'its' : 'their') + ' records to a child so ' +
+      (viol.length === 1 ? 'it stays' : 'they stay') + ' a pure total.';
+    host.appendChild(wn);
+  } catch (e) { /* hint never breaks render */ }
+}
+
+// Shared ledger list: tree rows (collapse per key) plus the Unlabeled
+// buckets that exist. Edit/delete run on chartId across the whole scope
+// (the main's chart for groups); toggles are view-only collapse state.
+function appendLedgerList(host, tree, ccy, opts) {
+  var o = opts || {};
+  var key = o.key;
+  var chartId = o.chartId;
+  var scope = (o.scope && o.scope.length) ? o.scope : [chartId];
+  var list = document.createElement('div');
+  list.className = 'ledger-list';
+  list.setAttribute('data-ledger-account', chartId);
+  var collapsed = (key && ledgerCollapsed[key]) || {};
+  (function walk(nodes, depth) {
+    nodes.forEach(function (n) {
+      var kids = (n.kids && n.kids.length) ? n.kids : [];
+      var isCol = !!collapsed[n.code];
+      list.appendChild(ledgerRowEl(n.code, n.label, n.total, ccy, depth, { hasKids: kids.length > 0, collapsed: isCol, isParent: kids.length > 0 }));
+      if (kids.length && !isCol) walk(kids, depth + 1);
+    });
+  })(tree.roots, 0);
+  if (tree.unassignedIncomeCount) list.appendChild(ledgerRowEl('—', 'Unlabeled income', tree.unassignedIncome, ccy, 0));
+  if (tree.unassignedExpenseCount) list.appendChild(ledgerRowEl('—', 'Unlabeled expenses', tree.unassignedExpense, ccy, 0));
+  if (tree.unassignedAssetsCount) list.appendChild(ledgerRowEl('—', 'Unlabeled assets', tree.unassignedAssets, ccy, 0));
+  list.addEventListener('click', function (e) {
+    if (!e || !e.target || !e.target.closest) return;
+    var tog = e.target.closest('[data-ledger-toggle]');
+    if (tog) {
+      var tc = tog.getAttribute('data-ledger-toggle');
+      var set = (key && ledgerCollapsed[key]) || (ledgerCollapsed[key] = {});
+      if (set[tc]) delete set[tc]; else set[tc] = true;
+      render();
+      return;
+    }
+    var be = e.target.closest('[data-ledger-edit]');
+    if (be) { openLedgerDialog(chartId, be.getAttribute('data-ledger-edit'), scope); return; }
+    var btn = e.target.closest('[data-ledger-del]');
+    if (!btn) return;
+    deleteAccountLedger(chartId, btn.getAttribute('data-ledger-del'), scope);
+  });
+  host.appendChild(list);
+  return list;
+}
+
 // Cash account detail: balance cards plus the bookkeeping ledger tree
 // (prefix roll-up). No cost-basis cards, no spent/fees lines — the flows
-// below plus the tree are the accounting view.
-function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
+// below plus the tree are the accounting view. opts.skipLedgers hides the
+// Ledgers section (grouped members show it on their main instead).
+function buildCashDetailStats(st, acc, dtrades, main, stats, host, opts) {
   stats.innerHTML = ''; // drop the cost-basis grid (built for assets above)
   var bal = cashBalance(dtrades, acc.id, main);
   stats.appendChild(statCard('Balance', fmtQty(bal.native, bal.ticker || acc.ticker) + ' ' + String(bal.ticker || acc.ticker || '').toUpperCase(), bal.native));
   stats.appendChild(statCard('Value', fmtMoney(bal.main, main), bal.main));
   host.appendChild(stats);
+  if (opts && opts.skipLedgers) return;
   var labels = ledgerChartFor(st, acc.id);
   var tree = ledgerTree(dtrades, acc.id, main, labels);
   var sec = document.createElement('div');
@@ -6050,52 +6198,146 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
     host.appendChild(noneNote);
     return;
   }
-  var list = document.createElement('div');
-  list.className = 'ledger-list';
-  list.setAttribute('data-ledger-account', acc.id);
-  var collapsed = ledgerCollapsed[acc.id] || {};
-  (function walk(nodes, depth) {
-    nodes.forEach(function (n) {
-      var kids = (n.kids && n.kids.length) ? n.kids : [];
-      var isCol = !!collapsed[n.code];
-      list.appendChild(ledgerRowEl(n.code, n.label, n.total, main, depth, { hasKids: kids.length > 0, collapsed: isCol, isParent: kids.length > 0 }));
-      if (kids.length && !isCol) walk(kids, depth + 1);
-    });
-  })(tree.roots, 0);
-  if (tree.unassignedIncomeCount) list.appendChild(ledgerRowEl('—', 'Unlabeled income', tree.unassignedIncome, main, 0));
-  if (tree.unassignedExpenseCount) list.appendChild(ledgerRowEl('—', 'Unlabeled expenses', tree.unassignedExpense, main, 0));
-  list.addEventListener('click', function (e) {
-    if (!e || !e.target || !e.target.closest) return;
-    var tog = e.target.closest('[data-ledger-toggle]');
-    if (tog) {
-      var tc = tog.getAttribute('data-ledger-toggle');
-      var set = ledgerCollapsed[acc.id] || (ledgerCollapsed[acc.id] = {});
-      if (set[tc]) delete set[tc]; else set[tc] = true;
-      render();
-      return;
-    }
-    var be = e.target.closest('[data-ledger-edit]');
-    if (be) { openLedgerDialog(acc.id, be.getAttribute('data-ledger-edit')); return; }
-    var btn = e.target.closest('[data-ledger-del]');
-    if (!btn) return;
-    deleteAccountLedger(acc.id, btn.getAttribute('data-ledger-del'));
-  });
-  host.appendChild(list);
+  appendLedgerList(host, tree, main, { key: acc.id, chartId: acc.id, scope: [acc.id] });
   // Legacy cleanup hint: a parent that still holds records breaks the
   // overview rule — point at it once so it can be moved to a child.
+  try { appendLedgerWarn(host, ledgerViolations(st, acc.id)); } catch (e) { /* ignore */ }
+}
+
+// Group mains: merged ledgers across the main + members, then home-style
+// sub-account cards instead of the trade history.
+function groupLedgerCurrency(st, mainAcc) {
+  var g = mainAcc && typeof mainAcc.groupCurrency === 'string' ? mainAcc.groupCurrency.trim().toUpperCase() : '';
+  if (MAIN_CURRENCIES.indexOf(g) !== -1) return g;
+  return defaultGroupCurrency(st, mainAcc);
+}
+
+// Visibility gate: the Ledgers panel (and every Unlabeled bucket) shows
+// only when at least one in-scope record actually carries a ledger code.
+function groupHasLabels(allTrades, ids) {
+  var set = {};
+  (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') set[id] = true; });
+  return (allTrades || []).some(function (t) {
+    if (!t || !set[t.accountId]) return false;
+    if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell') return false;
+    return String(t.ledger || '').trim() !== '';
+  });
+}
+
+function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
+  var ids = [mainAcc.id];
+  members.forEach(function (m) { ids.push(m.id); });
+  if (!groupHasLabels(st.trades, ids)) return;
+  var gCcy = groupLedgerCurrency(st, mainAcc);
+  var gdtrades = (gCcy === headerMain) ? dtrades : convertTrades(st.trades, gCcy);
+  var kinds = {};
+  ids.forEach(function (id) {
+    var a = accountById(st, id);
+    kinds[id] = (a && typeof a.kind === 'string') ? a.kind : '';
+  });
+  var tree = ledgerTreeMulti(gdtrades, ids, gCcy, ledgerChartFor(st, mainAcc.id), kinds);
+  var sec = document.createElement('div');
+  sec.className = 'section-head';
+  var h = document.createElement('h2');
+  h.className = 'section-title';
+  h.textContent = 'Ledgers';
+  sec.appendChild(h);
+  var cur = document.createElement('select');
+  cur.setAttribute('aria-label', 'Group ledger currency');
+  MAIN_CURRENCIES.forEach(function (c) {
+    var op = document.createElement('option');
+    op.value = c;
+    op.textContent = c;
+    if (c === gCcy) op.selected = true;
+    cur.appendChild(op);
+  });
+  cur.addEventListener('change', function () {
+    var v = String(cur.value || '').toUpperCase();
+    if (MAIN_CURRENCIES.indexOf(v) === -1) return;
+    var s2 = loadState();
+    var m2 = accountById(s2, mainAcc.id);
+    if (!m2) return;
+    m2.groupCurrency = v;
+    if (!saveStateGuarded(s2)) return;
+    clearBanner();
+    render();
+  });
+  sec.appendChild(cur);
+  var ladd = document.createElement('button');
+  ladd.type = 'button';
+  ladd.className = 'ghost';
+  ladd.textContent = '+ Ledger';
+  ladd.setAttribute('aria-label', 'Add ledger to ' + mainAcc.name);
+  ladd.addEventListener('click', function () { openLedgerDialog(mainAcc.id, null, ids); });
+  sec.appendChild(ladd);
+  host.appendChild(sec);
+  if (!tree.roots.length && !tree.unassignedCount && !(tree.unassignedAssetsCount || 0)) {
+    var noneNote = document.createElement('p');
+    noneNote.className = 'muted';
+    noneNote.textContent = 'No labeled records yet — post records with ledger codes in the sub-accounts.';
+    host.appendChild(noneNote);
+    return;
+  }
+  appendLedgerList(host, tree, gCcy, { key: mainAcc.id, chartId: mainAcc.id, scope: ids });
   try {
-    var viol = ledgerViolations(st, acc.id);
-    if (viol.length) {
-      var shown = viol.slice(0, 3).map(function (c) { return '"' + c + '"'; }).join(', ');
-      var wn = document.createElement('p');
-      wn.className = 'muted ledger-warn';
-      wn.textContent = 'Heads-up: ' + shown + (viol.length > 3 ? ', …' : '') +
-        (viol.length === 1 ? ' holds' : ' hold') + ' records and sub-ledgers — move ' +
-        (viol.length === 1 ? 'its' : 'their') + ' records to a child so ' +
-        (viol.length === 1 ? 'it stays' : 'they stay') + ' a pure total.';
-      host.appendChild(wn);
+    var vset = {};
+    ids.forEach(function (sid) {
+      ledgerViolations(st, sid).forEach(function (c) { vset[c] = true; });
+    });
+    appendLedgerWarn(host, Object.keys(vset).sort());
+  } catch (e) { /* ignore */ }
+}
+
+function buildGroupSubs(st, members, host, dtrades, main, method) {
+  var sec = document.createElement('div');
+  sec.className = 'section-head';
+  var h = document.createElement('h2');
+  h.className = 'section-title';
+  h.textContent = 'Sub-accounts';
+  sec.appendChild(h);
+  var count = document.createElement('span');
+  count.className = 'muted';
+  count.textContent = String(members.length);
+  sec.appendChild(count);
+  host.appendChild(sec);
+  var wrap = document.createElement('div');
+  wrap.className = 'group-subs';
+  var cashIds = {};
+  try { cashIds = cashAccountIds(st); } catch (e) { cashIds = {}; }
+  var perRows = {};
+  try {
+    var pf = computePortfolio(dtrades, livePrices, method);
+    members.forEach(function (m) {
+      if (cashIds[m.id]) { perRows[m.id] = []; return; }
+      var mm = (pf && pf.byAccount) ? pf.byAccount[m.id] : null;
+      var arr = [];
+      if (mm) mm.forEach(function (r) { arr.push(r); });
+      arr.sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
+      perRows[m.id] = arr;
+    });
+  } catch (e) {
+    members.forEach(function (m) { perRows[m.id] = []; });
+  }
+  members.forEach(function (m) {
+    wrap.appendChild(accountCardEl(m, perRows[m.id] || [], dtrades, main, false));
+  });
+  wrap.addEventListener('click', function (e) {
+    if (!e || !e.target || !e.target.closest) return;
+    if (e.target.closest('button')) return;
+    var nav = e.target.closest('[data-account-nav]');
+    if (nav && nav.getAttribute('data-account-nav')) navTo(nav.getAttribute('data-account-nav'));
+  });
+  wrap.addEventListener('keydown', function (e) {
+    if (!e || (e.key !== 'Enter' && e.key !== ' ')) return;
+    if (!e.target || !e.target.closest) return;
+    if (e.target.closest('button')) return;
+    var nav = e.target.closest('[data-account-nav]');
+    if (nav && nav.getAttribute('data-account-nav')) {
+      e.preventDefault();
+      navTo(nav.getAttribute('data-account-nav'));
     }
-  } catch (e) { /* hint never breaks render */ }
+  });
+  host.appendChild(wrap);
 }
 
 // Per-account ledger management: add/rename writes the account's own
@@ -6107,6 +6349,7 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
 var ledgerCollapsed = {};
 var ledgerDialogAccountId = null;
 var ledgerDialogEditingCode = null;
+var ledgerDialogScope = null;
 
 function buildLedgerDialog() {
   var host = document.getElementById('ledger-dialog-body');
@@ -6135,7 +6378,7 @@ function buildLedgerDialog() {
     var st = loadState();
     if (!accountById(st, accId)) { fail('Account not found.'); return; }
     if (editing) {
-      var rerr = renameAccountLedger(st, accId, editing, code, label);
+      var rerr = renameAccountLedger(st, accId, editing, code, label, ledgerDialogScope);
       if (rerr) { fail(rerr); return; }
       if (code !== editing && ledgerCollapsed[accId] && ledgerCollapsed[accId][editing]) {
         ledgerCollapsed[accId][code] = true;
@@ -6149,6 +6392,7 @@ function buildLedgerDialog() {
     }
     if (!saveStateGuarded(st)) { fail('Storage unavailable — ledger was not saved.'); return; }
     ledgerDialogEditingCode = null;
+    ledgerDialogScope = null;
     uiSetVal('ld-code', '');
     uiSetVal('ld-label', '');
     closeDialog('ledger-dialog');
@@ -6157,9 +6401,10 @@ function buildLedgerDialog() {
   });
 }
 
-function openLedgerDialog(accountId, editCode) {
+function openLedgerDialog(accountId, editCode, scopeIds) {
   ledgerDialogAccountId = accountId;
   ledgerDialogEditingCode = (editCode === undefined || editCode === null) ? null : String(editCode).trim();
+  ledgerDialogScope = (scopeIds && scopeIds.length) ? scopeIds.slice() : null;
   buildLedgerDialog();
   var title = document.getElementById('ledger-dialog-title');
   var save = document.getElementById('ld-save');
@@ -6191,6 +6436,80 @@ function openLedgerDialog(accountId, editCode) {
   openDialog('ledger-dialog');
 }
 
+// Group dialog: pick the main account for the selected accounts, or create
+// a new one (full account creation, grouped on success via pendingGroupIds).
+var groupDialogIds = null;
+var pendingGroupIds = null;
+
+function buildGroupDialog() {
+  var host = document.getElementById('group-dialog-body');
+  if (!host || document.getElementById('g-save')) return;
+  wireDialog('group-dialog');
+  var wrap = document.createElement('div');
+  wrap.innerHTML =
+    '<p class="muted" id="g-count"></p>' +
+    '<label for="g-target">Main account</label>' +
+    '<select id="g-target"></select>' +
+    '<p id="g-error" class="banner-error" role="alert" hidden></p>' +
+    '<button id="g-save" class="primary" type="button">Group</button>';
+  host.appendChild(wrap);
+  document.getElementById('g-save').addEventListener('click', function () {
+    var err = document.getElementById('g-error');
+    function fail(msg) { if (err) { err.textContent = String(msg); err.hidden = false; } }
+    if (err) { err.textContent = ''; err.hidden = true; }
+    var target = uiVal('g-target', '');
+    if (!target) { fail('Pick a main account.'); return; }
+    if (target === '__new') {
+      pendingGroupIds = (groupDialogIds || []).slice();
+      groupDialogIds = null;
+      closeDialog('group-dialog');
+      openAccountDialog();
+      return;
+    }
+    var st = loadState();
+    var gerr = assignGroup(st, groupDialogIds || [], target);
+    if (gerr) { fail(gerr); return; }
+    if (!saveStateGuarded(st)) { fail('Storage unavailable — accounts were not grouped.'); return; }
+    groupDialogIds = null;
+    selectedAccounts = {};
+    selectionMode = false;
+    closeDialog('group-dialog');
+    clearBanner();
+    navTo(target);
+    render();
+  });
+}
+
+function openGroupDialog(ids) {
+  groupDialogIds = (ids || []).slice();
+  buildGroupDialog();
+  var st = loadState();
+  var inSel = {};
+  groupDialogIds.forEach(function (id) { inSel[id] = true; });
+  var sel = document.getElementById('g-target');
+  if (sel) {
+    sel.innerHTML = '';
+    (st.accounts || []).forEach(function (a) {
+      if (!a || !a.id || inSel[a.id]) return;
+      if (groupMainOf(st, a.id)) return; // grouped members can't be mains
+      var op = document.createElement('option');
+      op.value = a.id;
+      op.textContent = a.name + ' (' + String(a.ticker).toUpperCase() + ')';
+      sel.appendChild(op);
+    });
+    var nw = document.createElement('option');
+    nw.value = '__new';
+    nw.textContent = '＋ Create new main account';
+    sel.appendChild(nw);
+    sel.value = sel.options.length > 1 ? sel.options[0].value : '__new';
+  }
+  var count = document.getElementById('g-count');
+  if (count) count.textContent = 'Group ' + groupDialogIds.length + ' account' + (groupDialogIds.length === 1 ? '' : 's') + ' under:';
+  var gerr = document.getElementById('g-error');
+  if (gerr) { gerr.textContent = ''; gerr.hidden = true; }
+  openDialog('group-dialog');
+}
+
 // Clone just enough state to simulate a ledger rename: account charts +
 // record ledgers. The source state is never touched.
 function cloneLedgerState(st) {
@@ -6215,8 +6534,10 @@ function cloneLedgerState(st) {
 // Rename (or relabel) one ledger inside an account's own chart: the chart
 // entry moves and every record carrying the old code follows it, so the
 // tree + totals never lose money. Pure against the passed state (no DOM,
-// no save): returns an error string, or null on success.
-function renameAccountLedger(st, accountId, oldCode, newCode, newLabel) {
+// no save): returns an error string, or null on success. scopeIds widens
+// record migration + violation checks to the whole group (main first);
+// omitted means the single account.
+function renameAccountLedger(st, accountId, oldCode, newCode, newLabel, scopeIds) {
   oldCode = (oldCode === undefined || oldCode === null) ? '' : String(oldCode).trim();
   newCode = (newCode === undefined || newCode === null) ? '' : String(newCode).trim();
   newLabel = (newLabel === undefined || newLabel === null) ? '' : String(newLabel).trim();
@@ -6225,31 +6546,45 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel) {
   if (!newCode || !isValidLedgerCode(newCode)) return 'Ledger needs a code (e.g. 1100).';
   if (!newLabel) return 'Ledger needs a label (e.g. Projects).';
   if (!isValidLedgerLabel(newLabel)) return 'Ledger label is too long — up to 80 characters.';
+  var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  function inScope(t) {
+    if (!t) return false;
+    for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) return true;
+    return false;
+  }
+  function violationsUnion(s) {
+    var set = {};
+    scope.forEach(function (sid) {
+      var v = [];
+      try { v = ledgerViolations(s, sid); } catch (e) { v = []; }
+      v.forEach(function (c) { set[c] = true; });
+    });
+    return Object.keys(set).sort();
+  }
   var map = ensureAccountChart(st, accountId);
   if (newCode !== oldCode) {
     if (Object.prototype.hasOwnProperty.call(map, newCode)) return 'Ledger code already exists — pick a new code or edit it.';
     var posted = false;
     (st.trades || []).forEach(function (t) {
-      if (t && t.accountId === accountId && String(t.ledger || '').trim() === newCode) posted = true;
+      if (inScope(t) && String(t.ledger || '').trim() === newCode) posted = true;
     });
     if (posted) return 'Ledger code already exists — pick a new code or edit it.';
     if (Object.keys(map).length >= 500) return 'This account already holds 500 codes.';
     // Parent-overview rule, judged on the AFTER state: simulate the rename
     // on a clone and block only when it would newly strand records on a
     // parent (a record-free parent renamed under other codes just works).
-    var before = [];
-    try { before = ledgerViolations(st, accountId); } catch (e) { before = []; }
+    var before = violationsUnion(st);
     var sim = cloneLedgerState(st);
     var smap = ensureAccountChart(sim, accountId);
     if (Object.prototype.hasOwnProperty.call(smap, oldCode)) delete smap[oldCode];
     smap[newCode] = newLabel;
     (sim.trades || []).forEach(function (t) {
-      if (!t || t.accountId !== accountId) return;
+      if (!t || !inScope(t)) return;
       if (String(t.ledger || '').trim() === oldCode) { t.ledger = newCode; t.ledgerLabel = newLabel; }
     });
     var added = [];
     try {
-      added = ledgerViolations(sim, accountId).filter(function (c) { return before.indexOf(c) === -1; });
+      added = violationsUnion(sim).filter(function (c) { return before.indexOf(c) === -1; });
     } catch (e) { added = []; }
     if (added.length) return '"' + added[0] + '" would hold records and sub-ledgers after this change — move its records to a child ledger first, keeping parents record-free.';
     if (Object.prototype.hasOwnProperty.call(map, oldCode)) delete map[oldCode];
@@ -6258,35 +6593,47 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel) {
     map[oldCode] = newLabel;
   }
   (st.trades || []).forEach(function (t) {
-    if (!t || t.accountId !== accountId) return;
+    if (!inScope(t)) return;
     if (String(t.ledger || '').trim() === oldCode) { t.ledger = newCode; t.ledgerLabel = newLabel; }
   });
   return null;
 }
 
-function deleteAccountLedger(accountId, code) {
+function deleteAccountLedger(accountId, code, scopeIds) {
   if (!accountId || !code) return;
   code = String(code).trim();
   if (!code || code === '—') return;
+  var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  function inScope(t) {
+    if (!t) return false;
+    for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) return true;
+    return false;
+  }
   var st = loadState();
   var acc = accountById(st, accountId);
   if (!acc) return;
   var effective = ledgerChartFor(st, accountId);
   var allSet = {};
-  ledgerAccountCodes(st, accountId).forEach(function (k) { allSet[k] = true; });
+  Object.keys(effective).forEach(function (k) { var ck = String(k).trim(); if (ck) allSet[ck] = true; });
+  (st.trades || []).forEach(function (t) {
+    if (!inScope(t)) return;
+    var kc = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (kc) allSet[kc] = true;
+  });
   var subs = ledgerDescendantsOf(code, Object.keys(allSet));
   var doomedSet = {};
   doomedSet[code] = true;
   subs.forEach(function (c) { doomedSet[c] = true; });
   var recCount = 0;
   (st.trades || []).forEach(function (t) {
-    if (!t || t.accountId !== accountId) return;
+    if (!inScope(t)) return;
     var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
     if (c && doomedSet[c]) recCount++;
   });
   var label = effective[code] ? code + ' · ' + effective[code] : code;
   var subTxt = subs.length ? ' Also deletes ' + subs.length + ' sub-ledger' + (subs.length === 1 ? '' : 's') + ' underneath (' + subs.slice().sort().join(', ') + ').' : '';
-  var recTxt = recCount ? ' ' + recCount + ' record' + (recCount === 1 ? '' : 's') + ' lose' + (recCount === 1 ? 's' : '') + ' their ledger and move under Unlabeled income/expenses (totals unchanged).' : ' No records use it.';
+  var unlabeledNoun = scope.length > 1 ? 'the Unlabeled buckets' : 'Unlabeled income/expenses';
+  var recTxt = recCount ? ' ' + recCount + ' record' + (recCount === 1 ? '' : 's') + ' lose' + (recCount === 1 ? 's' : '') + ' their ledger and move under ' + unlabeledNoun + ' (totals unchanged).' : ' No records use it.';
   confirmAction('Delete ledger', 'Delete "' + label + '" from ' + acc.name + '?' + subTxt + recTxt, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();
@@ -6296,7 +6643,7 @@ function deleteAccountLedger(accountId, code) {
       if (Object.prototype.hasOwnProperty.call(map, c)) delete map[c];
     });
     (s2.trades || []).forEach(function (t) {
-      if (!t || t.accountId !== accountId) return;
+      if (!inScope(t)) return;
       var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
       if (c && doomedSet[c]) {
         try { delete t.ledger; } catch (e) { t.ledger = undefined; }
@@ -6331,6 +6678,10 @@ function renderAccountDetail(st, id) {
     rows = isCashAccD ? [] : computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
   }
   var atrades = accountTrades({ trades: dtrades }, acc.id);
+  // Group role: mains aggregate (merged ledgers + sub cards, no trade
+  // history), members show transactions without their Ledgers section.
+  var members = groupMembers(st, acc.id);
+  var mainOf = groupMainOf(st, acc.id);
   // FIFO lot linkage, resolved once for every visible card: every trade by
   // id (all accounts, so cross-account transfer closes still resolve) and
   // every closed lot grouped by opening / closing trade. Average pools cost
@@ -6383,6 +6734,8 @@ function renderAccountDetail(st, id) {
   }
   menuBtn('Rename', 'Rename', function () { startInlineRename(acc.id, head, nameEl); });
   menuBtn('Edit label', 'Edit label for', function () { startInlineLabelEdit(acc.id); });
+  menuBtn('Create sub-account', 'Create sub-account in', function () { createSubAccount(acc.id); });
+  if (members.length) menuBtn('Ungroup', 'Ungroup', function () { ungroupMain(acc.id); });
   menuBtn('Delete', 'Delete', function () { deleteAccount(acc.id); });
   menu.appendChild(mbox);
   head.appendChild(menu);
@@ -6482,9 +6835,16 @@ function renderAccountDetail(st, id) {
   rows.forEach(function (r) { feesSum += Number(r.fees) || 0; incomeSum += Number(r.income) || 0; });
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
   if (isCashAccD) {
-    buildCashDetailStats(st, acc, dtrades, main, stats, host);
+    buildCashDetailStats(st, acc, dtrades, main, stats, host, mainOf ? { skipLedgers: true } : null);
   } else {
     host.appendChild(stats);
+  }
+  // Group mains: merged ledgers in the group currency plus sub-account
+  // cards instead of the spent/fees lines and the trade history below.
+  if (members.length) {
+    buildGroupLedgers(st, acc, members, host, dtrades, main);
+    buildGroupSubs(st, members, host, dtrades, main, method);
+    return;
   }
   // Per-account spent (this account only): lifetime sell proceeds, cash legs
   // and crypto fees at the frozen tx-date rate — same definition as the home
@@ -6864,13 +7224,16 @@ function deleteAccount(id) {
   var acc = accountById(st, id);
   if (!acc) return; // unknown id: no write, no dialog
   var n = accountTrades(st, id).length;
+  var nSub = groupMembers(st, id).length;
   var msg = 'Delete account "' + acc.name + '" (' + acc.ticker + ')' +
     (n ? ' and its ' + n + ' trade' + (n === 1 ? '' : 's') : '') +
+    (nSub ? ' and release ' + nSub + ' sub-account' + (nSub === 1 ? '' : 's') : '') +
     '? This cannot be undone.';
   confirmAction('Delete account', msg, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();
     if (!accountById(s2, id)) return;
+    ungroupAll(s2, id); // members survive as standalone accounts
     s2.trades = (s2.trades || []).filter(function (t) { return !t || (t.accountId !== id && t.toAccountId !== id); });
     s2.accounts = (s2.accounts || []).filter(function (a) { return !a || a.id !== id; });
     if (!saveStateGuarded(s2)) return;
@@ -6878,6 +7241,53 @@ function deleteAccount(id) {
     clearBanner();
     render();
   });
+}
+
+function ungroupMain(mainId) {
+  if (!mainId) return;
+  var st = loadState();
+  var acc = accountById(st, mainId);
+  if (!acc) return;
+  var n = groupMembers(st, mainId).length;
+  if (!n) return;
+  confirmAction('Ungroup', 'Release ' + n + ' sub-account' + (n === 1 ? '' : 's') + ' from "' + acc.name + '"? Records stay where they are.', 'Ungroup', false).then(function (ok) {
+    if (!ok) return;
+    var s2 = loadState();
+    if (!accountById(s2, mainId)) return;
+    ungroupAll(s2, mainId);
+    if (!saveStateGuarded(s2)) return;
+    clearBanner();
+    render();
+  });
+}
+
+// Direct sub-accounts, no home roundtrip: grouping target is this account
+// (or its main when already grouped). A standalone account holding records
+// moves them into sub-<name> and becomes the main; otherwise the sub starts
+// empty with the same kind/ticker. Transfers pointing at the old account
+// keep arriving there.
+function createSubAccount(currentId) {
+  if (!currentId) return;
+  var st = loadState();
+  var acc = accountById(st, currentId);
+  if (!acc) return;
+  var mainOf = groupMainOf(st, currentId);
+  var parentMainId = mainOf ? mainOf.id : currentId;
+  var nm = uniqueSubName(st, acc.name);
+  var sub = { id: uid(), name: nm, ticker: acc.ticker, kind: acc.kind, createdAt: new Date().toISOString() };
+  st.accounts.push(sub);
+  sub.groupId = parentMainId;
+  if (!mainOf && accountTrades(st, currentId).length > 0) {
+    (st.trades || []).forEach(function (t) {
+      if (t && t.accountId === currentId) t.accountId = sub.id;
+    });
+  }
+  ensureGroupCurrency(st, parentMainId);
+  if (!saveStateGuarded(st)) return;
+  try { delete tradePageByAccount[currentId]; delete tradePageByAccount[sub.id]; clearTradeTypeFilterState(currentId); } catch (e) { /* ignore */ }
+  clearBanner();
+  navTo(parentMainId);
+  render();
 }
 
 function deleteTrade(id) {
@@ -7539,6 +7949,15 @@ function buildAccountDialog() {
   var host = document.getElementById('account-dialog-body');
   if (!host || document.getElementById('na-create')) return;
   wireDialog('account-dialog');
+  // Aborting a group-flow creation must not leak the pending selection
+  // into a later, unrelated account creation.
+  try {
+    var adlg = document.getElementById('account-dialog');
+    if (adlg && !adlg.getAttribute('data-group-wired')) {
+      adlg.setAttribute('data-group-wired', '1');
+      adlg.addEventListener('close', function () { pendingGroupIds = null; });
+    }
+  } catch (e) { /* ignore */ }
   var wrap = document.createElement('div');
   wrap.innerHTML =
     '<label for="na-name">Account name</label>' +
@@ -7584,6 +8003,30 @@ function buildAccountDialog() {
     var hadTrades = (loadState().trades || []).length > 0;
     var acc = createAccount(uiVal('na-name', ''), tk, kind, { address: uiVal('na-address', '') });
     if (!acc) { naError('Could not create the account — storage unavailable.'); return; }
+    // Group flow: the new account becomes the main for the pending selection.
+    if (pendingGroupIds && pendingGroupIds.length) {
+      var pg = pendingGroupIds;
+      pendingGroupIds = null;
+      try {
+        var st2 = loadState();
+        var gerr = assignGroup(st2, pg, acc.id);
+        if (gerr) { naError(gerr); }
+        else if (!saveStateGuarded(st2)) { naError('Storage unavailable — accounts were not grouped.'); }
+        else {
+          uiSetVal('na-name', '');
+          uiSetVal('na-ticker', '');
+          uiSetVal('na-address', '');
+          uiSetVal('na-fiatcode', '');
+          closeDialog('account-dialog');
+          clearBanner();
+          selectedAccounts = {};
+          selectionMode = false;
+          navTo(acc.id);
+          render();
+          return;
+        }
+      } catch (e) { /* fall through to the normal close below */ }
+    }
     uiSetVal('na-name', '');
     uiSetVal('na-ticker', '');
     uiSetVal('na-address', '');
@@ -7799,10 +8242,21 @@ function syncTradeTypeUI() {
       var known = {};
       try {
         var stL = loadState();
+        var dlScope = null;
+        try { dlScope = ledgerScopeOf(stL, cashAcc.id); } catch (e) { dlScope = null; }
+        if (!dlScope || !dlScope.length) dlScope = [cashAcc.id];
+        var inDl = {};
+        dlScope.forEach(function (sid) { inDl[sid] = true; });
         ((stL && stL.trades) || []).forEach(function (t) {
-          if (t && t.accountId === cashAcc.id && t.ledger && String(t.ledger).trim() !== '') known[String(t.ledger).trim()] = true;
+          if (t && inDl[t.accountId] && t.ledger && String(t.ledger).trim() !== '') known[String(t.ledger).trim()] = true;
         });
-        var mapL = ledgerChartFor(stL, cashAcc.id);
+        var mapL = null;
+        try {
+          var chartAcc = cashAcc.id;
+          var gmChart = groupMainOf(stL, cashAcc.id);
+          if (gmChart) chartAcc = gmChart.id;
+          mapL = ledgerChartFor(stL, chartAcc);
+        } catch (e) { mapL = ledgerChartFor(stL, cashAcc.id); }
         Object.keys(mapL).forEach(function (k) { known[String(k).trim()] = true; });
       } catch (e) { /* ignore */ }
       dl.innerHTML = '';
@@ -8258,8 +8712,11 @@ function onTradeSubmit(ev) {
   // Parent-overview rule: ledgers with sub-ledgers are pure totals and take
   // no records; posting under a record-holding ledger is blocked with the
   // fix (move those records to a child, keep the parent record-free).
+  // Grouped accounts judge against the whole group (main chart + members).
   if ((side === 'income' || side === 'expense') && ledgerCode !== '') {
-    var lconf = ledgerRecordConflict(st0, accountId, ledgerCode, isEditing ? editingTradeId : null, null);
+    var lscope = null;
+    try { lscope = ledgerScopeOf(st0, accountId); } catch (e) { lscope = null; }
+    var lconf = ledgerRecordConflict(st0, accountId, ledgerCode, isEditing ? editingTradeId : null, null, lscope);
     if (lconf) { tradeFormError(ledgerConflictMessage(lconf)); return; }
   }
   // --- Swap: creates a linked sell+buy pair ---
@@ -8755,7 +9212,7 @@ var dialogOpener = null;
 // dialogs (e.g. Settings + confirm) count, so closing one never unlocks
 // while another is still open. Ancient browsers without showModal fall
 // back to the [open] attribute: scroll still locks, clicks do not.
-var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog'];
+var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'group-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog'];
 
 function updateModalLock() {
   try {

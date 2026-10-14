@@ -3084,11 +3084,14 @@
             accounts: [
               { id: 'h1', name: 'Cold', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' },
               { id: 'h2', name: 'Stake', ticker: 'ETH', createdAt: '2026-01-01T00:00:00.000Z' },
-              { id: 'h3', name: 'Empty', ticker: 'SOL', createdAt: '2026-01-01T00:00:00.000Z' }
+              { id: 'h3', name: 'Empty', ticker: 'SOL', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'h4', name: 'Spent', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
             ],
             trades: [
               { id: 'h-t1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'h1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' },
-              { id: 'h-t2', type: 'buy', symbol: 'ETH', qty: 10, total: 20000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'h2', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' }
+              { id: 'h-t2', type: 'buy', symbol: 'ETH', qty: 10, total: 20000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'h2', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'h-t3', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', accountId: 'h4', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'h-t4', type: 'expense', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-02', fee: 0, feeCurrency: 'EUR', accountId: 'h4', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-02T00:00:00.000Z' }
             ],
             priceOverrides: {}
           });
@@ -3098,7 +3101,7 @@
           render();
           var texts = document.querySelectorAll('#hero-alloc text');
           assert(texts.length === 2, 'donut should carry number + label, got ' + texts.length);
-          // h3 (SOL) is empty: the count grows only at the first record.
+          // h3 (SOL) is empty, h4 spent everything: neither reaches the hole.
           assert(texts[0].textContent === '2', 'donut number should be 2, got ' + texts[0].textContent);
           assert(texts[1].textContent === 'ASSETS', 'donut label should read ASSETS, got ' + texts[1].textContent);
           navHome();

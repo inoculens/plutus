@@ -10760,17 +10760,9 @@ function renderHeroAlloc(st) {
     svg.appendChild(c);
     off += frac;
   });
-  // Total distinct visible assets in the hole: an asset counts from its
-  // first record — an empty account never grows the number.
-  var holePool = vIds === null
-    ? (st.accounts || [])
-    : (st.accounts || []).filter(function (a) { return vIds.indexOf(a.id) !== -1; });
-  var holeTickers = accountTickers(holePool.filter(function (a) {
-    return ((st && st.trades) || []).some(function (t) {
-      return !!t && (t.accountId === a.id || t.toAccountId === a.id);
-    });
-  }));
-  var nAssets = holeTickers.length;
+  // Hole number matches the legend rows: every displayed asset counts,
+  // empty ones never do.
+  var nAssets = al.items.length;
   svg.setAttribute('aria-label', 'Allocation: ' + nAssets + (nAssets === 1 ? ' asset' : ' assets'));
   var num = document.createElementNS(svgNS, 'text');
   num.setAttribute('x', cx);

@@ -1338,6 +1338,10 @@
             var unr = unl.getBoundingClientRect();
             var una = unl.querySelector('.ledger-amount').getBoundingClientRect();
             assert(unr.right - una.right < 8, 'Unlabeled amount must hug the row end');
+            var unActs = unl.querySelectorAll('.ledger-act-sp');
+            assert(unActs.length === 2, 'Unlabeled row must reserve both action slots, got ' + unActs.length);
+            var leafH = leaf.getBoundingClientRect().height;
+            assert(Math.abs(unr.height - leafH) < 1.5, 'Unlabeled row must stand as tall, ' + unr.height + ' vs ' + leafH);
             assert(!unl.querySelector('.ledger-toggle-sp'), 'Unlabeled row reserves no arrow slot');
             var unt = unl.querySelector('.ledger-label-text').getBoundingClientRect();
             assert(unt.left - unr.left < 16, 'Unlabeled label must start at the row beginning');

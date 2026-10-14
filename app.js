@@ -6218,6 +6218,19 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
     del.setAttribute('data-ledger-del', code);
     del.setAttribute('aria-label', 'Delete ledger ' + code + ' from this account');
     side.appendChild(del);
+  } else {
+    // Unlabeled rows carry no actions, but they must stand exactly as tall:
+    // invisible same-box placeholders reserve the Edit/Delete height.
+    ['Edit', 'Delete'].forEach(function (t) {
+      var ph = document.createElement('button');
+      ph.type = 'button';
+      ph.className = 'quiet ledger-act-sp';
+      ph.textContent = t;
+      ph.disabled = true;
+      ph.tabIndex = -1;
+      ph.setAttribute('aria-hidden', 'true');
+      side.appendChild(ph);
+    });
   }
   d.appendChild(side);
   return d;

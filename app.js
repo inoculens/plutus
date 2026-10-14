@@ -5910,7 +5910,7 @@ function buildGuidePanel() {
   box.appendChild(title);
   var sub = document.createElement('p');
   sub.className = 'guide-sub';
-  sub.textContent = 'Tell Plutus what you bought — how much, what you paid, and when. Prices and currency math are automatic.';
+  sub.textContent = 'Tell INOCULENS PLUTUS what you bought — how much, what you paid, and when. Prices and currency math are automatic.';
   box.appendChild(sub);
   var ctas = document.createElement('div');
   ctas.className = 'guide-ctas';
@@ -7868,7 +7868,7 @@ function buildSettings() {
     '<p class="muted set-blurb" id="sy-hint"></p>' +
     '<div id="sy-g-webdav">' +
     '<label for="sy-url">Server URL</label>' +
-    '<input id="sy-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/Plutus">' +
+    '<input id="sy-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="sy-user">Username</label>' +
     '<input id="sy-user" autocomplete="username" spellcheck="false">' +
     '<label for="sy-passwd">App password</label>' +
@@ -7884,7 +7884,7 @@ function buildSettings() {
     '<input id="sy-filename2" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
     '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name.</p>' +
     '<label for="sy-folder2">Folder (optional)</label>' +
-    '<input id="sy-folder2" autocomplete="off" spellcheck="false" placeholder="e.g. Plutus/Work">' +
+    '<input id="sy-folder2" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Work">' +
     '<p class="muted set-blurb">Keep profiles apart with folders — a name already taken in the folder is refused, never overwritten. Leave empty for the top level; subfolders are created if missing.</p>' +
     '<details class="adv" id="sy-adv">' +
     '<summary>Bring your own OAuth app (advanced)</summary>' +
@@ -8031,7 +8031,7 @@ function buildSettings() {
     reader.onerror = function () {
       showBanner('Import failed — could not read the file.', 'error', {
         title: 'Import error',
-        lines: ['The file could not be read. Pick a Plutus backup (.json) and retry.']
+        lines: ['The file could not be read. Pick an INOCULENS PLUTUS backup (.json) and retry.']
       });
       input.value = '';
     };
@@ -8695,7 +8695,7 @@ if (typeof window !== 'undefined') {
 }
 
 // === Sync ===
-// E2E encrypted sync to a drive of the user's choice. There is no Plutus
+// E2E encrypted sync to a drive of the user's choice. There is no INOCULENS PLUTUS
 // server: the plaintext is always the exact exportState() JSON, it is
 // encrypted in this browser with WebCrypto (PBKDF2-SHA256 -> AES-GCM-256),
 // and only the ciphertext envelope below ever leaves the device:
@@ -8733,7 +8733,7 @@ var SYNC_PROVIDERS = [
   { id: 'megas3', label: 'MEGA (S4 object storage)', kind: 's3' }
 ];
 var SYNC_HINTS = {
-  webdav: 'Nextcloud or any WebDAV host. Create a folder (e.g. Plutus), paste its URL, and sign in with an app password. Only ciphertext is uploaded.',
+  webdav: 'Nextcloud or any WebDAV host. Create a folder (e.g. INOCULENS-PLUTUS), paste its URL, and sign in with an app password. Only ciphertext is uploaded.',
   gdrive: 'One-click Google sign-in when enabled below — otherwise expand the advanced box and use your own OAuth app (Web application, Drive API enabled). The app only sees files it created.',
   dropbox: 'One-click Dropbox sign-in when enabled below — otherwise your own Dropbox app (Scoped access, App folder) plus its app key in the advanced box. Files stay in the private app folder.',
   megas3: 'MEGA S4 object storage (needs a MEGA account with S4). Create a bucket and access keys under Object Storage, then fill endpoint, region, bucket and keys. Only ciphertext is stored.'
@@ -8742,7 +8742,7 @@ var SYNC_HINTS = {
 // Built-in OAuth app IDs for one-click sign-in (public by design, exactly
 // like rclone/Joplin ship theirs — the ID only names the app to the
 // provider; tokens and ciphertext still flow directly browser<->provider
-// with no Plutus server anywhere). Empty until the app owner registers
+// with no INOCULENS PLUTUS server anywhere). Empty until the app owner registers
 // them; while empty, users fall back to their own OAuth app below.
 var SYNC_SHARED_APPS = { gdrive: '593485863383-tcl6m894iqoqa2cqan3ui80ihau93fq9.apps.googleusercontent.com', dropbox: 'rractvt806na5rn' };
 
@@ -8887,7 +8887,7 @@ function syncEnvelopeParse(text) {
     throw new Error('sync failed: file is not valid JSON.');
   }
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('sync failed: bad envelope.');
-  if (data.app !== SYNC_APP && data.app !== SYNC_APP_LEGACY) throw new Error('sync failed: not a Plutus sync file.');
+  if (data.app !== SYNC_APP && data.app !== SYNC_APP_LEGACY) throw new Error('sync failed: not an INOCULENS PLUTUS sync file.');
   if (data.v !== SYNC_VERSION) throw new Error('sync failed: unsupported sync version.');
   var iter = Number(data.iter);
   if (!isFinite(iter) || Math.floor(iter) !== iter || iter < 1000 || iter > 5000000) {
@@ -10812,7 +10812,7 @@ function syncRestoreEncryptedFile(file) {
   reader.onerror = function () {
     showBanner('Import failed — could not read the file.', 'error', {
       title: 'Import error',
-      lines: ['Pick a Plutus encrypted backup (.enc.json) and retry.']
+      lines: ['Pick an INOCULENS PLUTUS encrypted backup (.enc.json) and retry.']
     });
   };
   reader.readAsText(file);

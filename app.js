@@ -1066,6 +1066,10 @@ function displayPairs(trades, main) {
 
 // Fill the cache for every pair the current paint needs. Never rejects:
 // a failed pair keeps its stored fxLock (degraded display, corrected later).
+// Failures are recorded (fxFailedList) so the render can say so honestly
+// instead of printing fallback figures as if they were fresh.
+var fxFailedList = [];
+var fxWarnedSession = false;
 function ensureDisplayRates(trades, main) {
   var m = String(main || '').toUpperCase();
   var pairs = displayPairs(trades, m);
@@ -1074,13 +1078,33 @@ function ensureDisplayRates(trades, main) {
     return fetchEcbRate(p.date, p.from, m).then(function (r) {
       cacheRate(p.date, p.from, m, r.rate, r.source);
       return true;
-    }, function () { return false; });
+    }, function () {
+      try {
+        var dup = fxFailedList.some(function (x) { return x && x.date === p.date && x.from === p.from && x.to === m; });
+        if (!dup) fxFailedList.push({ date: p.date, from: p.from, to: m });
+      } catch (e) { /* ignore */ }
+      return false;
+    });
   })).then(function (flags) {
     var changed = false;
     flags.forEach(function (f) { if (f) changed = true; });
     if (changed) saveFxCache();
     return changed;
   });
+}
+
+// One calm banner for unrefreshable conversions (session-once): lists the
+// pairs so a confident-looking fallback is never mistaken for fresh math.
+function fxFailedMessage(pairs) {
+  var lines = (pairs || []).slice(0, 4).map(function (p) {
+    return p.from + ' → ' + p.to + ' · ' + p.date;
+  });
+  if ((pairs || []).length > 4) lines.push('…');
+  return {
+    msg: 'Some conversions couldn\'t refresh — affected figures show entry-time values.',
+    title: 'FX rates unavailable',
+    lines: lines
+  };
 }
 
 // Copy of a trade with fxLock rewritten into `main` at the historical rate.
@@ -1142,6 +1166,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.convertTrades = convertTrades;
   window.Inoculens.displayPairs = displayPairs;
   window.Inoculens.ensureDisplayRates = ensureDisplayRates;
+  window.Inoculens.fxFailedPairs = function () { return fxFailedList.slice(); };
+  window.Inoculens.fxFailedMessage = fxFailedMessage;
   window.Inoculens.getCachedRate = getCachedRate;
   window.Inoculens.cacheRate = cacheRate;
   window.Inoculens.clearFxCache = clearFxCache;
@@ -10795,6 +10821,7 @@ function refreshDisplayRates(st) {
     });
   } catch (e) { kinds = {}; }
   try {
+    try { fxFailedList = []; } catch (e) { /* ignore */ }
     var fills = [ensureDisplayRates(trades, main).catch(function () { return false; })];
     var gf = [];
     try { gf = groupFillFiats(st); } catch (e) { gf = []; }
@@ -10803,6 +10830,14 @@ function refreshDisplayRates(st) {
     Promise.all(fills).then(function (flags) {
       var changed = false;
       (flags || []).forEach(function (f) { if (f) changed = true; });
+      try {
+        var failed = fxFailedPairs();
+        if (failed.length && !fxWarnedSession) {
+          fxWarnedSession = true;
+          var fm = fxFailedMessage(failed);
+          showBanner(fm.msg, 'error', { title: fm.title, lines: fm.lines });
+        }
+      } catch (e) { /* the warning never breaks render */ }
       if (!changed) return;
       var s2;
       try {

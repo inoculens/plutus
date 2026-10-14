@@ -1173,6 +1173,42 @@
           assert(same && same.rate === 1, 'same-fiat 1:1 must stay');
         });
 
+        testAsync('failed display pairs are reported honestly', function () {
+          var realFetch = window.fetch;
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreFx() {
+            window.fetch = realFetch;
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+          L.clearFxCache();
+          window.fetch = function () { return Promise.reject(new Error('offline')); };
+          var t = { id: 'fx1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-06', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'a1', createdAt: '2026-01-06T00:00:00.000Z' };
+          var p = null;
+          try {
+            p = L.ensureDisplayRates([t], 'EUR');
+          } catch (e) {
+            restoreFx();
+            throw e;
+          }
+          return p.then(function (changed) {
+            restoreFx();
+            assert(changed === false, 'failed fill must report false');
+            var failed = L.fxFailedPairs();
+            var found = failed.some(function (x) { return x && x.from === 'RON' && x.to === 'EUR' && x.date === '2026-01-06'; });
+            assert(found, 'failed pair must be recorded: ' + JSON.stringify(failed));
+            var fm = L.fxFailedMessage(failed);
+            assert(fm.msg.indexOf('entry-time') !== -1 && fm.lines.join(' ').indexOf('RON') !== -1, 'message must name the pair: ' + JSON.stringify(fm));
+          }, function (e) {
+            restoreFx();
+            throw e;
+          });
+        });
+
         test('groupFillFiats lists foreign group currencies only', function () {
           var st = {
             settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },

@@ -5821,7 +5821,7 @@ function buildLedgerDialog() {
     '<label for="ld-code">Code</label>' +
     '<input id="ld-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="ld-label">Label</label>' +
-    '<input id="ld-label" autocomplete="off" spellcheck="false" placeholder="e.g. Gigs" maxlength="80">' +
+    '<input id="ld-label" autocomplete="off" spellcheck="false" placeholder="e.g. Projects" maxlength="80">' +
     '<p id="ld-error" class="banner-error" role="alert" hidden></p>' +
     '<button id="ld-save" class="primary" type="button">Save ledger</button>';
   host.appendChild(wrap);
@@ -5833,7 +5833,7 @@ function buildLedgerDialog() {
     var code = uiVal('ld-code', '').trim();
     var label = uiVal('ld-label', '').trim();
     if (!code || !isValidLedgerCode(code) || code === '') { fail('Ledger needs a code (e.g. 1100).'); return; }
-    if (!label) { fail('Ledger needs a label (e.g. Gigs).'); return; }
+    if (!label) { fail('Ledger needs a label (e.g. Projects).'); return; }
     if (!isValidLedgerLabel(label)) { fail('Ledger label is too long — up to 80 characters.'); return; }
     var st = loadState();
     if (!accountById(st, accId)) { fail('Account not found.'); return; }

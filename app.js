@@ -13358,10 +13358,9 @@ function syncCleanupFlow() {
       syncSetStatus((items && items.length) ? 'Cloud files match your records — nothing orphaned.' : 'No invoice/receipt files in the drive folder yet.');
       return;
     }
-    var shown = orphans.slice(0, 5).map(function (o) { return o.name; }).join(', ');
-    if (orphans.length > 5) shown += ', …';
-    confirmAction('Delete ' + orphans.length + ' orphaned file' + (orphans.length === 1 ? '' : 's') + '?',
-      'These cloud copies belong to no record on this device: ' + shown + '. Only continue if every device synced recently — a device that has not uploaded yet would lose its copy.',
+    var count = orphans.length;
+    confirmAction('Delete ' + count + ' orphaned file' + (count === 1 ? '' : 's') + '?',
+      'These ' + count + ' cloud ' + (count === 1 ? 'copy belongs' : 'copies belong') + ' to no record on this device. Only continue if every device synced recently — a device that has not uploaded yet would lose its copy (recoverable from the drive trash).',
       'Delete files').then(function (ok) {
       if (!ok) return;
       syncSetBusy(true, 'Deleting…');

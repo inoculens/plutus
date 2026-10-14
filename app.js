@@ -2531,6 +2531,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.deleteAccountLedger = deleteAccountLedger;
   window.Inoculens.ledgerSignedMain = ledgerSignedMain;
   window.Inoculens.learnLedgerLabel = learnLedgerLabel;
+  window.Inoculens.findLedgerLabel = findLedgerLabel;
   window.Inoculens.refreshLedgerList = refreshLedgerList;
   window.Inoculens.TRADE_TYPES = TRADE_TYPES;
 }
@@ -6736,14 +6737,7 @@ function openLedgerDialog(accountId, editCode, scopeIds) {
     var lbl = '';
     try {
       var st = loadState();
-      var eff = ledgerChartFor(st, accountId);
-      lbl = eff[ledgerDialogEditingCode] || '';
-      if (!lbl) {
-        (st.trades || []).forEach(function (t) {
-          if (!lbl && t && t.accountId === accountId && String(t.ledger || '').trim() === ledgerDialogEditingCode &&
-              t.ledgerLabel && String(t.ledgerLabel).trim() !== '') lbl = String(t.ledgerLabel).trim();
-        });
-      }
+      lbl = findLedgerLabel(st, accountId, ledgerDialogEditingCode, ledgerDialogScope) || '';
     } catch (e) { lbl = ''; }
     uiSetVal('ld-code', ledgerDialogEditingCode);
     uiSetVal('ld-label', lbl);
@@ -8536,6 +8530,25 @@ function buildTradeForm() {
   }
   var sideSel = document.getElementById('t-side');
   if (sideSel) sideSel.addEventListener('change', syncTradeTypeUI);
+  // One name per code: typing an existing code fills its current name when
+  // the label is still empty (a different typed name renames everywhere on
+  // save, same as the main Edit button).
+  var ledCodeEl = document.getElementById('t-ledger');
+  if (ledCodeEl) ledCodeEl.addEventListener('input', function () {
+    try {
+      var labEl = document.getElementById('t-ledger-label');
+      if (!labEl || String(labEl.value || '').trim() !== '') return;
+      var code = String(ledCodeEl.value || '').trim();
+      if (!code) return;
+      var stL = loadState();
+      var accId = uiVal('t-account', '');
+      if (!accountById(stL, accId)) return;
+      var scope = null;
+      try { scope = ledgerScopeOf(stL, accId); } catch (e) { scope = null; }
+      var known = findLedgerLabel(stL, accId, code, scope);
+      if (known) labEl.value = known;
+    } catch (e) { /* never block typing */ }
+  });
   var qtyEl = document.getElementById('t-qty');
   if (qtyEl) qtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var toQtyEl = document.getElementById('t-toqty');
@@ -9059,6 +9072,32 @@ function tradeFormError(msg) {
 // the datalist and reports can reuse it. Learned into the record's own
 // account (snapshotting the default on first edit); historic trades keep
 // their own stored labels; this only updates the chart map.
+// One name per code: chart first, then the first posted label in scope.
+// Pure (no DOM, no save). scopeIds widens the search to the whole group
+// (main first); omitted means the single account.
+function findLedgerLabel(st, accountId, code, scopeIds) {
+  code = (code === undefined || code === null) ? '' : String(code).trim();
+  if (!code) return '';
+  var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  var chartAcc = scope[0];
+  try {
+    var eff = ledgerChartFor(st, chartAcc);
+    if (eff && eff[code]) return String(eff[code]);
+  } catch (e) { /* ignore */ }
+  var found = '';
+  try {
+    var inScope = {};
+    scope.forEach(function (sid) { if (typeof sid === 'string' && sid !== '') inScope[sid] = true; });
+    (st.trades || []).forEach(function (t) {
+      if (found || !t || !inScope[t.accountId]) return;
+      if (String(t.ledger || '').trim() === code && t.ledgerLabel && String(t.ledgerLabel).trim() !== '') {
+        found = String(t.ledgerLabel).trim();
+      }
+    });
+  } catch (e) { /* ignore */ }
+  return found;
+}
+
 function learnLedgerLabel(st, trade) {
   try {
     if (!st || !trade) return;
@@ -9078,10 +9117,40 @@ function learnLedgerLabel(st, trade) {
       }
     }
     // Capped like the validator: beyond 500 codes nothing is learned, so a
-    // large chart can never be wiped by normalization on reload.
-    if (map[code] === label) return;
+    // large chart can never be wiped by normalization on reload. No
+    // early-out on match: propagation below must still run for the records.
     if (!Object.prototype.hasOwnProperty.call(map, code) && Object.keys(map).length >= 500) return;
     map[code] = label;
+    // One name per code: a (re)typed label propagates to the group chart
+    // and every record carrying the code in scope, so the tree, the cards
+    // and the records never disagree afterwards.
+    try {
+      var scope = null;
+      try { scope = trade.accountId ? ledgerScopeOf(st, trade.accountId) : null; } catch (e) { scope = null; }
+      if (scope && scope.length > 1) {
+        var mainMap = ensureAccountChart(st, scope[0]);
+        if (mainMap[code] !== label) {
+          if (!Object.prototype.hasOwnProperty.call(mainMap, code) && Object.keys(mainMap).length >= 500) return;
+          mainMap[code] = label;
+        }
+        (st.trades || []).forEach(function (t) {
+          if (!t) return;
+          var inScope = false;
+          for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) { inScope = true; break; }
+          if (!inScope) return;
+          if (String(t.ledger || '').trim() === code && String(t.ledgerLabel || '').trim() !== label) {
+            t.ledgerLabel = label;
+          }
+        });
+      } else if (trade.accountId) {
+        (st.trades || []).forEach(function (t) {
+          if (!t || t.accountId !== trade.accountId) return;
+          if (String(t.ledger || '').trim() === code && String(t.ledgerLabel || '').trim() !== label) {
+            t.ledgerLabel = label;
+          }
+        });
+      }
+    } catch (e) { /* propagation never breaks saving */ }
   } catch (e) { /* ignore */ }
 }
 

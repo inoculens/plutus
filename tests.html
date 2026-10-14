@@ -1316,6 +1316,65 @@
           }
         });
 
+        test('one name per code: lookup, propagation, auto-fill', function () {
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true, ledgerLabels: { '1000': 'Income' } },
+            accounts: [
+              { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+              { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+            ],
+            trades: [
+              { id: 'r1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a', ledger: '1100', ledgerLabel: 'Work', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'r2', type: 'income', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', ledger: '1100', ledgerLabel: 'Gigs', createdAt: '2026-01-05T00:00:00.000Z' }
+            ],
+            priceOverrides: {}
+          };
+          assert(L.findLedgerLabel(st, 'm', '1000', null) === 'Income', 'chart hit wrong');
+          assert(L.findLedgerLabel(st, 'a', '1100', ['m', 'a', 'b']) === 'Work', 'posted hit must take first in scope');
+          assert(L.findLedgerLabel(st, 'a', '9999', ['m', 'a', 'b']) === '', 'miss must be empty');
+          L.learnLedgerLabel(st, { ledger: '1100', ledgerLabel: 'Projects', accountId: 'b' });
+          assert(L.ledgerChartFor(st, 'm')['1100'] === 'Projects', 'group chart must follow: ' + JSON.stringify(L.ledgerChartFor(st, 'm')));
+          var labels = {};
+          st.trades.forEach(function (t) { labels[t.id] = t.ledgerLabel; });
+          assert(labels.r1 === 'Projects' && labels.r2 === 'Projects', 'every record must follow: ' + JSON.stringify(labels));
+        });
+
+        test('typing an existing code fills its name unless typed over', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true, ledgerLabels: { '1100': 'Gigs' } },
+              accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            openPrefillTrade('a1');
+            var codeEl = document.getElementById('t-ledger');
+            var labEl = document.getElementById('t-ledger-label');
+            codeEl.value = '1100';
+            codeEl.dispatchEvent(new Event('input', { bubbles: true }));
+            assert(labEl.value === 'Gigs', 'existing name must fill, got ' + labEl.value);
+            labEl.value = '';
+            codeEl.value = '9999';
+            codeEl.dispatchEvent(new Event('input', { bubbles: true }));
+            assert(labEl.value === '', 'unknown code must not fill');
+            codeEl.value = '1100';
+            labEl.value = 'Mine';
+            codeEl.dispatchEvent(new Event('input', { bubbles: true }));
+            assert(labEl.value === 'Mine', 'typed name must win (rename intent)');
+          } finally {
+            try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('groupFillFiats lists foreign group currencies only', function () {
           var st = {
             settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },

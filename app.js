@@ -150,6 +150,7 @@ function loadState() {
   var trades = Array.isArray(parsed.trades)
     ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds); }).map(normalizeTradeForStore)
     : [];
+  try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
   var priceOverrides = {};
   if (parsed.priceOverrides && typeof parsed.priceOverrides === 'object' && !Array.isArray(parsed.priceOverrides) && isValidPriceOverrides(parsed.priceOverrides)) {
     priceOverrides = parsed.priceOverrides;
@@ -565,6 +566,7 @@ function importState(json) {
   // Drop quotes baked in the wrong fiat by the pre-fix freezer (exact live
   // override copies) so imports never reintroduce the nominal lie.
   try { dropBakedExecLocks(mappedTrades, priceOverrides); } catch (e) { /* repair never breaks import */ }
+  try { repairCashTradeAmounts(mappedTrades, data.accounts); } catch (e) { /* repair never breaks import */ }
   var next = {
     settings: normalizedSettings,
     accounts: data.accounts.map(normalizeAccount),
@@ -1820,26 +1822,72 @@ function ledgerParentOf(code, known) {
   return best;
 }
 
+// Repair pass for cash bookkeeping records saved before the cash form
+// locked amounts to the account fiat: a cash income/expense with a real
+// quantity but a blank/zero total gains total=qty (exactly what the form
+// saves today). Positive totals are never touched. Idempotent.
+function repairCashTradeAmounts(trades, accounts) {
+  try {
+    var kinds = {};
+    ((accounts) || []).forEach(function (a) {
+      if (a && a.id) kinds[a.id] = (typeof a.kind === 'string') ? a.kind.trim().toLowerCase() : '';
+    });
+    (trades || []).forEach(function (t) {
+      if (!t || (t.type !== 'income' && t.type !== 'expense')) return;
+      if (kinds[t.accountId] !== 'cash') return;
+      var symU = String(t.symbol || '').toUpperCase();
+      if (String(t.currency || '').toUpperCase() !== symU || symU === '') return;
+      var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
+      if (!isFinite(q) || q <= 0) return;
+      var tot = (t.total === undefined || t.total === null || String(t.total).trim() === '') ? NaN : Number(t.total);
+      if (isFinite(tot) && tot > 0) return;
+      t.total = q;
+    });
+  } catch (e) { /* repair never breaks load/import */ }
+}
+// Ledger row value: the signed main-fiat movement. Cash-pattern
+// income/expense (amount in the account fiat) values by quantity at the
+// frozen rate — the optional market-value total may be blank ("free").
+// Everything else values by the booked total, as before.
+function ledgerSignedMain(t) {
+  var isIn = (t.type === 'income' || t.type === 'buy');
+  if (!isIn && t.type !== 'expense' && t.type !== 'sell') return 0;
+  var dir = isIn ? 1 : -1;
+  var symU = String(t.symbol || '').toUpperCase();
+  var ccyU = String(t.currency || '').toUpperCase();
+  if ((t.type === 'income' || t.type === 'expense') && ccyU !== '' && ccyU === symU) {
+    var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
+    if (isFinite(q) && q > 0) return dir * q * ledgerFxRate(t.fxLock);
+    if (t.type === 'expense') {
+      var et = Number(t.total);
+      if (isFinite(et) && et > 0) return -et * ledgerFxRate(t.fxLock);
+    }
+    return 0;
+  }
+  var n = normalizeTrade(t);
+  return dir * (isFinite(n.netMain) ? n.netMain : 0);
+}
+
 function ledgerTree(allTrades, accountId, main, labelMap) {
   var labels = labelMap || {};
   var own = {}; // code -> {code, amount}
   var unassigned = 0;
   var unassignedCount = 0;
+  // Signed zero is still zero: -0 would print as "-€0.00".
+  function z(v) { return (v === 0) ? 0 : Math.round(v * 100) / 100; }
   (allTrades || []).forEach(function (t) {
     if (!t || t.accountId !== accountId) return;
     if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell') return;
-    var n = normalizeTrade(t);
-    var dir = (t.type === 'income' || t.type === 'buy') ? 1 : -1;
-    var signed = dir * (isFinite(n.netMain) ? n.netMain : 0);
+    var signed = z(ledgerSignedMain(t));
     var code = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
     if (!code) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.
-      if (t.type === 'income' || t.type === 'expense') { unassigned += signed; unassignedCount++; }
+      if (t.type === 'income' || t.type === 'expense') { unassigned = z(unassigned + signed); unassignedCount++; }
       return;
     }
     if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
-    own[code].amount += signed;
+    own[code].amount = z(own[code].amount + signed);
     own[code].count++;
   });
   var codes = Object.keys(own);
@@ -1855,7 +1903,7 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
     nodes[c] = {
       code: c,
       label: tradeLabel || (labels[c] ? String(labels[c]) : c),
-      own: Math.round(own[c].amount * 100) / 100,
+      own: z(own[c].amount),
       count: own[c].count,
       total: 0,
       kids: []
@@ -1870,13 +1918,13 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
   function roll(n) {
     var t = n.own;
     n.kids.forEach(function (k) { t += roll(k); });
-    n.total = Math.round(t * 100) / 100;
+    n.total = z(t);
     n.kids.sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
     return n.total;
   }
   roots.forEach(roll);
   roots.sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
-  return { roots: roots, unassigned: Math.round(unassigned * 100) / 100, unassignedCount: unassignedCount };
+  return { roots: roots, unassigned: z(unassigned), unassignedCount: unassignedCount };
 }
 
 function validateTrade(t, heldQty) {
@@ -1982,6 +2030,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cashBalance = cashBalance;
   window.Inoculens.ledgerParentOf = ledgerParentOf;
   window.Inoculens.ledgerTree = ledgerTree;
+  window.Inoculens.ledgerSignedMain = ledgerSignedMain;
   window.Inoculens.learnLedgerLabel = learnLedgerLabel;
   window.Inoculens.refreshLedgerList = refreshLedgerList;
   window.Inoculens.TRADE_TYPES = TRADE_TYPES;

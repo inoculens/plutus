@@ -517,6 +517,35 @@
           assert(tree.roots.length === 1 && tree.roots[0].code === '1000' && tree.roots[0].total === 10, 'ledger buy must aggregate: ' + JSON.stringify(tree.roots));
           assert(tree.unassignedCount === 0, 'plain buy must not pollute unassigned');
         });
+
+        test('ledger values blank-total cash income by quantity, never -0', function () {
+          function freeIncome(id, ledger) {
+            return { id: id, type: 'income', symbol: 'EUR', qty: 100, total: 0, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var tree = L.ledgerTree([freeIncome('z1', '1000')], 'cash1', 'EUR', {});
+          assert(tree.roots.length === 1 && tree.roots[0].total === 100, 'blank-total income must count qty: ' + JSON.stringify(tree.roots));
+          var tree2 = L.ledgerTree([{ id: 'z2', type: 'expense', symbol: 'EUR', qty: '', total: 0, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: '2000', createdAt: '2026-01-05T00:00:00.000Z' }], 'cash1', 'EUR', {});
+          assert(tree2.roots.length === 1 && tree2.roots[0].total === 0 && (1 / tree2.roots[0].total) === Infinity, 'zero must print as 0, never -0: ' + JSON.stringify(tree2.roots));
+        });
+
+        test('load + import repair blank cash totals to the quantity', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            var seed = { settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [{ id: 'cash1', name: 'Cash', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }], trades: [{ id: 'r1', type: 'income', symbol: 'EUR', qty: 100, total: 0, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }, { id: 'r2', type: 'income', symbol: 'EUR', qty: 50, total: 40, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }], priceOverrides: {} };
+            L.saveState(seed);
+            var loaded = L.loadState();
+            var t1 = null, t2 = null;
+            loaded.trades.forEach(function (t) { if (t.id === 'r1') t1 = t; if (t.id === 'r2') t2 = t; });
+            assert(t1 && t1.total === 100, 'blank total must repair to qty, got ' + JSON.stringify(t1 && t1.total));
+            assert(t2 && t2.total === 40, 'positive total must never be touched, got ' + JSON.stringify(t2 && t2.total));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+          }
+        });
       } finally {
         restore();
         try { render(); } catch (e) { /* ignore */ }

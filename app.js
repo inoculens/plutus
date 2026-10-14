@@ -394,6 +394,19 @@ function ungroupAll(st, mainId) {
   return n;
 }
 
+// Delete scope: ids plus the members of any main among them, so removing
+// a main removes its whole group (records included). Pure.
+function expandDeleteIds(st, ids) {
+  var set = {};
+  (ids || []).forEach(function (id) {
+    if (typeof id === 'string' && id !== '' && accountById(st, id)) set[id] = true;
+  });
+  Object.keys(set).forEach(function (id) {
+    groupMembers(st, id).forEach(function (m) { set[m.id] = true; });
+  });
+  return Object.keys(set);
+}
+
 // Fresh sub-account name under a main: sub-<name>, sub-<name> 2, …
 function uniqueSubName(st, base) {
   base = String(base === undefined || base === null ? '' : base).trim() || 'Account';
@@ -2393,6 +2406,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.ensureGroupCurrency = ensureGroupCurrency;
   window.Inoculens.assignGroup = assignGroup;
   window.Inoculens.ungroupAll = ungroupAll;
+  window.Inoculens.expandDeleteIds = expandDeleteIds;
   window.Inoculens.uniqueSubName = uniqueSubName;
   window.Inoculens.assetLedgersOn = assetLedgersOn;
   window.Inoculens.openLedgerDialog = openLedgerDialog;
@@ -4656,14 +4670,17 @@ function buildAccountAction() {
   del.setAttribute('aria-label', 'Delete selected accounts and their trades');
   del.addEventListener('click', function () {
     accountActionOpen = false;
-    var total = selectedCount();
-    confirmAction('Delete accounts', 'Delete ' + total + (total === 1 ? ' account' : ' accounts') + ' and all their trades? This cannot be undone.', 'Delete', true).then(function (ok) {
+    var s0 = loadState();
+    var picked = Object.keys(selectedAccounts).filter(function (id) { return !!accountById(s0, id); });
+    var full = expandDeleteIds(s0, picked);
+    var extra = full.length - picked.length;
+    confirmAction('Delete accounts', 'Delete ' + full.length + (full.length === 1 ? ' account' : ' accounts') +
+      (extra > 0 ? ' (including ' + extra + ' sub-account' + (extra === 1 ? '' : 's') + ')' : '') +
+      ' and all their trades? This cannot be undone.', 'Delete', true).then(function (ok) {
       if (!ok) return;
       var s2 = loadState();
       var inSet = {};
-      Object.keys(selectedAccounts).forEach(function (id) {
-        if (accountById(s2, id)) inSet[id] = true;
-      });
+      expandDeleteIds(s2, Object.keys(selectedAccounts)).forEach(function (id) { inSet[id] = true; });
       if (!Object.keys(inSet).length) {
         selectedAccounts = {};
         selectionMode = false;
@@ -4834,9 +4851,14 @@ function buildTradeTypeFilter(acc, atrades) {
 }
 
 // Home-style account card, shared by the home list and group mains.
-// rows come from the joint engine run (same data as the totals).
-function accountCardEl(acc, rows, dtrades, main, withSelect) {
+// rows come from the joint engine run (same data as the totals). scopeIds
+// widens the figures to the whole group (main first); omitted means the
+// single account. Standalone rendering is unchanged by construction.
+function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   rows = rows || [];
+  var scope = (scopeIds && scopeIds.length) ? scopeIds : [acc.id];
+  var scopeSet = {};
+  scope.forEach(function (sid) { if (typeof sid === 'string' && sid !== '') scopeSet[sid] = true; });
   var card = document.createElement('article');
   card.className = 'account-card';
   card.setAttribute('data-account', acc.id);
@@ -4872,7 +4894,34 @@ function accountCardEl(acc, rows, dtrades, main, withSelect) {
   tickEl.textContent = String(acc.ticker).toUpperCase();
   mid.appendChild(tickEl);
   card.appendChild(mid);
-  var atrades = accountTrades({ trades: dtrades }, acc.id);
+  // Scope figures: asset rows arrive pre-folded; cash balances sum across
+  // scope cash accounts (native only when every balance shares one fiat).
+  var scopeTrades = 0;
+  var cashMain = 0;
+  var cashKnown = false;
+  var cashNative = 0;
+  var cashTickers = {};
+  var seenTrade = {};
+  (dtrades || []).forEach(function (t) {
+    if (!t) return;
+    if (!scopeSet[t.accountId] && !(t.toAccountId && scopeSet[t.toAccountId])) return;
+    if (t.id) {
+      if (seenTrade[t.id]) return;
+      seenTrade[t.id] = true;
+    }
+    scopeTrades++;
+  });
+  scope.forEach(function (sid) {
+    var sa = null;
+    try { sa = accountById(st, sid); } catch (e) { sa = null; }
+    if (!sa || !isCashKind(sa.kind)) return;
+    var at = accountTrades({ trades: dtrades }, sid);
+    if (!at.length) return;
+    var b = cashBalance(dtrades, sid, main);
+    if (isFinite(Number(b.main))) { cashMain += Number(b.main); cashKnown = true; }
+    cashNative += Number(b.native) || 0;
+    cashTickers[String(sa.ticker || '').toUpperCase()] = true;
+  });
   var pl = 0;
   var mv = 0;
   var mvKnown = false;
@@ -4880,25 +4929,36 @@ function accountCardEl(acc, rows, dtrades, main, withSelect) {
     pl += r.totalPL;
     if (r.marketValue !== null) { mv += r.marketValue; mvKnown = true; }
   });
+  var valKnown = mvKnown || cashKnown;
+  var valNum = (mvKnown ? mv : 0) + (cashKnown ? cashMain : 0);
   var figs = document.createElement('span');
   figs.className = 'acct-figs';
   var valv = document.createElement('span');
   valv.className = 'acct-value';
   var plv = document.createElement('span');
-  if (isCashKind(acc.kind)) {
-    // Balance ledger card: value = balance in main fiat, second line =
-    // balance in the account fiat. Never P&L.
-    var cbal = cashBalance(dtrades, acc.id, main);
-    valv.textContent = atrades.length ? fmtMoney(cbal.main, main) : 'New';
-    if (atrades.length && isFinite(Number(cbal.main))) valv.setAttribute('data-value', String(Number(cbal.main)));
-    plv.className = 'acct-pl';
-    plv.textContent = atrades.length ? (fmtQty(cbal.native, cbal.ticker || acc.ticker) + ' ' + String(cbal.ticker || acc.ticker || '').toUpperCase()) : 'New';
-  } else {
-    valv.textContent = mvKnown ? fmtMoney(mv, main) : (atrades.length ? '—' : 'New');
-    var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
+  valv.textContent = valKnown ? fmtMoney(valNum, main) : (scopeTrades ? '—' : 'New');
+  if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
+  var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
+  if (hasKnownPl) {
     plv.className = 'acct-pl ' + plClass(pl);
-    plv.textContent = hasKnownPl ? fmtMoney(pl, main) : (atrades.length ? '—' : 'New');
-    if (isFinite(Number(pl)) && hasKnownPl) plv.setAttribute('data-value', String(Number(pl)));
+    plv.textContent = fmtMoney(pl, main);
+    if (isFinite(Number(pl))) plv.setAttribute('data-value', String(Number(pl)));
+  } else if (cashKnown) {
+    plv.className = 'acct-pl';
+    var tickList = Object.keys(cashTickers);
+    if (tickList.length === 1 && scope.length === 1) {
+      var only = null;
+      try { only = accountById(st, scope[0]); } catch (e) { only = null; }
+      var cb0 = cashBalance(dtrades, scope[0], main);
+      plv.textContent = fmtQty(cb0.native, cb0.ticker || (only && only.ticker) || '') + ' ' + String(cb0.ticker || (only && only.ticker) || '').toUpperCase();
+    } else if (tickList.length === 1) {
+      plv.textContent = fmtQty(cashNative, tickList[0]) + ' ' + tickList[0];
+    } else {
+      plv.textContent = scope.length + ' accounts';
+    }
+  } else {
+    plv.className = 'acct-pl';
+    plv.textContent = scopeTrades ? '—' : 'New';
   }
   figs.appendChild(valv);
   figs.appendChild(plv);
@@ -4943,10 +5003,13 @@ function renderAccounts(st) {
   var main = st.settings.mainCurrency;
   var accounts = Array.isArray(st.accounts) ? st.accounts : [];
   // View filter: only the selected assets render (cards + totals).
+  // Grouped sub-accounts never render on home: their figures and rows fold
+  // into the main, so every trade counts exactly once in cards and totals.
   var filter = selectedTickers(st);
-  var visibleAccounts = filter === null
+  var visibleAccounts = (filter === null
     ? accounts
-    : accounts.filter(function (a) { return filter.indexOf(String(a.ticker).toUpperCase()) !== -1; });
+    : accounts.filter(function (a) { return filter.indexOf(String(a.ticker).toUpperCase()) !== -1; }))
+    .filter(function (a) { return !groupMainOf(st, a.id); });
   // Display conversion: native amounts stay in stone; everything shown is
   // converted into the CURRENT main at historical ECB rates (cached).
   var dtrades = convertTrades(st.trades, main);
@@ -4963,25 +5026,33 @@ function renderAccounts(st) {
   // cards and grand totals agree by construction.
   var pf = null;
   try { pf = computePortfolio(dtrades, livePrices, method); } catch (e) { pf = null; }
-  var perAcctRows;
-  if (pf && pf.byAccount) {
-    perAcctRows = visibleAccounts.map(function (acc) {
-      if (cashIds[acc.id]) return []; // cash ledgers skip the engine
-      var m = pf.byAccount[acc.id];
+  function engineRowsFor(accId) {
+    if (cashIds[accId]) return []; // cash ledgers skip the engine
+    if (pf && pf.byAccount) {
+      var m = pf.byAccount[accId];
       if (!m) return [];
       var arr = [];
       m.forEach(function (r) { arr.push(r); });
       arr.sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
       return arr;
-    });
-  } else {
-    // Fallback: independent per-account runs (no transfers in legacy data).
-    // Cash accounts skip the engine (balance ledgers).
-    perAcctRows = visibleAccounts.map(function (acc) {
-      if (isCashKind(acc.kind)) return [];
-      return computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
-    });
+    }
+    // Fallback: independent per-account run (no transfers in legacy data).
+    var acc = null;
+    try { acc = accountById(st, accId); } catch (e) { acc = null; }
+    if (acc && isCashKind(acc.kind)) return [];
+    return computePositions(accountTrades({ trades: dtrades }, accId), livePrices, method);
   }
+  var scopeRows = {};
+  accounts.forEach(function (acc) { scopeRows[acc.id] = engineRowsFor(acc.id); });
+  // Mains fold their members' rows in: cards and grand totals agree, and no
+  // member trade is ever counted twice.
+  var perAcctRows = visibleAccounts.map(function (acc) {
+    var rows = (scopeRows[acc.id] || []).slice();
+    groupMembers(st, acc.id).forEach(function (m) {
+      (scopeRows[m.id] || []).forEach(function (r) { rows.push(r); });
+    });
+    return rows;
+  });
   var grandRows = [];
   perAcctRows.forEach(function (rows) {
     rows.forEach(function (r) { grandRows.push(r); });
@@ -5069,7 +5140,7 @@ function renderAccounts(st) {
     return;
   }
   pageAccounts.forEach(function (acc) {
-    host.appendChild(accountCardEl(acc, rowsById[acc.id] || [], dtrades, main, true));
+    host.appendChild(accountCardEl(st, acc, rowsById[acc.id] || [], dtrades, main, true, [acc.id].concat(groupMembers(st, acc.id).map(function (m) { return m.id; }))));
   });
   if (pageCount > 1) host.appendChild(buildAccountPager(pageCount));
   restoreAccountFilterFocus();
@@ -6374,7 +6445,7 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
     members.forEach(function (m) { perRows[m.id] = []; });
   }
   members.forEach(function (m) {
-    wrap.appendChild(accountCardEl(m, perRows[m.id] || [], dtrades, main, false));
+    wrap.appendChild(accountCardEl(st, m, perRows[m.id] || [], dtrades, main, false, [m.id]));
   });
   wrap.addEventListener('click', function (e) {
     if (!e || !e.target || !e.target.closest) return;
@@ -7342,20 +7413,23 @@ function deleteAccount(id) {
   var acc = accountById(st, id);
   if (!acc) return; // unknown id: no write, no dialog
   var n = accountTrades(st, id).length;
-  var nSub = groupMembers(st, id).length;
+  var doomedSubs = groupMembers(st, id);
   var msg = 'Delete account "' + acc.name + '" (' + acc.ticker + ')' +
     (n ? ' and its ' + n + ' trade' + (n === 1 ? '' : 's') : '') +
-    (nSub ? ' and release ' + nSub + ' sub-account' + (nSub === 1 ? '' : 's') : '') +
+    (doomedSubs.length ? ' and delete ' + doomedSubs.length + ' sub-account' + (doomedSubs.length === 1 ? '' : 's') + ' with all their trades' : '') +
     '? This cannot be undone.';
   confirmAction('Delete account', msg, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();
     if (!accountById(s2, id)) return;
-    ungroupAll(s2, id); // members survive as standalone accounts
-    s2.trades = (s2.trades || []).filter(function (t) { return !t || (t.accountId !== id && t.toAccountId !== id); });
-    s2.accounts = (s2.accounts || []).filter(function (a) { return !a || a.id !== id; });
+    var inSet = {};
+    expandDeleteIds(s2, [id]).forEach(function (x) { inSet[x] = true; });
+    s2.trades = (s2.trades || []).filter(function (t) { return !t || (!inSet[t.accountId] && !inSet[t.toAccountId]); });
+    s2.accounts = (s2.accounts || []).filter(function (a) { return !a || !inSet[a.id]; });
     if (!saveStateGuarded(s2)) return;
-    try { delete tradePageByAccount[id]; clearTradeTypeFilterState(id); } catch (e) { /* ignore */ }
+    try {
+      Object.keys(inSet).forEach(function (x) { delete tradePageByAccount[x]; clearTradeTypeFilterState(x); });
+    } catch (e) { /* ignore */ }
     clearBanner();
     render();
   });

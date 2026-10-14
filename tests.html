@@ -1012,6 +1012,92 @@
           }
         });
 
+        test('expandDeleteIds cascades mains to their members', function () {
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+            accounts: [
+              { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+              { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+              { id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
+            ],
+            trades: [],
+            priceOverrides: {}
+          };
+          assert(L.expandDeleteIds(st, ['m', 'z']).sort().join(',') === 'a,b,m,z', 'main delete must take members');
+          assert(L.expandDeleteIds(st, ['a']).join(',') === 'a', 'member delete stays single');
+          assert(L.expandDeleteIds(st, ['ghost']).length === 0, 'unknown ids drop out');
+        });
+
+        test('home hides sub-accounts, main card aggregates once', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            function cinc(id, acc, qty) {
+              return { id: id, type: 'income', symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: acc, ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' };
+            }
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
+              ],
+              trades: [cinc('h1', 'a', 100), cinc('h2', 'b', 50), cinc('h3', 'z', 25)],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navHome();
+            route();
+            render();
+            assert(!document.querySelector('#accounts .account-card[data-account="a"]'), 'member a must not render on home');
+            assert(!document.querySelector('#accounts .account-card[data-account="b"]'), 'member b must not render on home');
+            assert(document.querySelector('#accounts .account-card[data-account="m"]'), 'main must render on home');
+            var mval = document.querySelector('#accounts .account-card[data-account="m"] .acct-value');
+            assert(mval && mval.textContent.indexOf('150') !== -1, 'main card must aggregate 100+50, got ' + (mval && mval.textContent));
+            var hv = document.getElementById('hero-value');
+            assert(hv && hv.textContent.indexOf('175') !== -1, 'hero must total 150+25 exactly once, got ' + (hv && hv.textContent));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('main card folds member P&L', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'b', name: 'B', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [
+                { id: 'k1', type: 'buy', symbol: 'BTC', qty: 1, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'k2', type: 'sell', symbol: 'BTC', qty: 1, total: 110, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', createdAt: '2026-01-06T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navHome();
+            route();
+            render();
+            var mpl = document.querySelector('#accounts .account-card[data-account="m"] .acct-pl');
+            assert(mpl && mpl.textContent.indexOf('100') !== -1, 'main card must fold member realized 100, got ' + (mpl && mpl.textContent));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

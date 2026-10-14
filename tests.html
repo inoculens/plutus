@@ -1118,6 +1118,77 @@
           }
         });
 
+        test('cash main cards aggregate the group in group currency', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            function cinc(id, acc, qty, sym) {
+              sym = sym || 'EUR';
+              return { id: id, type: 'income', symbol: sym, qty: qty, total: qty, currency: sym, date: '2026-01-05', fee: 0, feeCurrency: sym, fxLock: { pair: sym + '/EUR', rate: 1, source: '1:1' }, accountId: acc, ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' };
+            }
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [cinc('j1', 'a', 1000)],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var cards = document.querySelector('#account-detail .cards.detail-stats');
+            assert(cards && cards.textContent.indexOf('1,000') !== -1, 'group Value must show 1000, got ' + (cards && cards.textContent));
+            assert(cards && cards.textContent.indexOf('1,000 EUR') !== -1, 'single-fiat Balance must show native, got ' + (cards && cards.textContent));
+            var st = L.loadState();
+            st.accounts.push({ id: 'u', name: 'U', ticker: 'USD', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' });
+            st.trades.push(cinc('j2', 'u', 100, 'USD'));
+            L.saveState(st);
+            render();
+            var cards2 = document.querySelector('#account-detail .cards.detail-stats');
+            assert(cards2 && cards2.textContent.indexOf('3 accounts') !== -1, 'multi-fiat Balance must count accounts, got ' + (cards2 && cards2.textContent));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('asset main cards fold member realized', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'b', name: 'B', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [
+                { id: 'k1', type: 'buy', symbol: 'BTC', qty: 1, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'k2', type: 'sell', symbol: 'BTC', qty: 1, total: 110, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'b', createdAt: '2026-01-06T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var cards = document.querySelector('#account-detail .cards.detail-stats');
+            assert(cards && cards.textContent.indexOf('€100.00') !== -1, 'main must fold member realized 100, got ' + (cards && cards.textContent));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('main card folds member P&L', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

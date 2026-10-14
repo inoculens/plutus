@@ -6875,6 +6875,43 @@ function renderAccountDetail(st, id) {
   // history), members show transactions without their Ledgers section.
   var members = groupMembers(st, acc.id);
   var mainOf = groupMainOf(st, acc.id);
+  // Mains fold member engine rows into the stat grid, and member trades
+  // into lifetime denominators — cards describe the group, never the
+  // (often empty) main alone.
+  var scopeTrades = atrades;
+  if (members.length && !isCashAccD) {
+    try {
+      if (typeof pfDet !== 'undefined' && pfDet && pfDet.byAccount) {
+        members.forEach(function (m) {
+          var mm = pfDet.byAccount[m.id];
+          if (mm) mm.forEach(function (r) { rows.push(r); });
+        });
+        rows.sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
+      } else {
+        members.forEach(function (m) {
+          computePositions(accountTrades({ trades: dtrades }, m.id), livePrices, method).forEach(function (r) { rows.push(r); });
+        });
+      }
+    } catch (e) { /* aggregation never breaks the view */ }
+  }
+  if (members.length) {
+    try {
+      scopeTrades = [];
+      var seenSC = {};
+      var scopeIds = [acc.id];
+      members.forEach(function (m) { scopeIds.push(m.id); });
+      scopeIds.forEach(function (sid) {
+        accountTrades({ trades: dtrades }, sid).forEach(function (t) {
+          if (!t) return;
+          if (t.id) {
+            if (seenSC[t.id]) return;
+            seenSC[t.id] = true;
+          }
+          scopeTrades.push(t);
+        });
+      });
+    } catch (e) { scopeTrades = atrades; }
+  }
   var assetLedgersShown = false;
   // FIFO lot linkage, resolved once for every visible card: every trade by
   // id (all accounts, so cross-account transfer closes still resolve) and
@@ -6966,7 +7003,7 @@ function renderAccountDetail(st, id) {
   // Lifetime return: realized+unrealized vs lifetime buy+income cost (consistent with overview).
   var lifetimeForRet = 0;
   try {
-    atrades.forEach(function (t) {
+    scopeTrades.forEach(function (t) {
       if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
       var cn = normalizeTrade(t);
       // For transfers-in, cost is already in dest's buy-like inflow? No: transfers carry basis via joint engine, but lifetime here should count original buys+income only (transfers move, not new money).
@@ -6986,7 +7023,7 @@ function renderAccountDetail(st, id) {
   var closed = !!(pos && pos.qtyHeld === 0);
   var lifetimeCost = 0;
   if (closed || true) {
-    atrades.forEach(function (t) {
+    scopeTrades.forEach(function (t) {
       if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
       var cn = normalizeTrade(t);
       lifetimeCost += cn.netMain + cn.feeLossMain;
@@ -7029,7 +7066,36 @@ function renderAccountDetail(st, id) {
   rows.forEach(function (r) { feesSum += Number(r.fees) || 0; incomeSum += Number(r.income) || 0; });
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
   if (isCashAccD) {
-    buildCashDetailStats(st, acc, dtrades, main, stats, host, (mainOf || members.length) ? { skipLedgers: true } : null);
+    if (members.length) {
+      // Main aggregates the group in the group currency: one balance for
+      // every sub-account, never the (often empty) main alone.
+      stats.innerHTML = '';
+      var gCcyM = main;
+      try { gCcyM = groupLedgerCurrency(st, acc); } catch (e) { gCcyM = main; }
+      var gIds = [acc.id];
+      members.forEach(function (m) { gIds.push(m.id); });
+      var gConv = null;
+      try { gConv = convertTrades(st.trades, gCcyM); } catch (e) { gConv = []; }
+      var gNative = 0, gValue = 0, gTick = {}, gHas = false;
+      gIds.forEach(function (cid) {
+        var at = accountTrades({ trades: gConv }, cid);
+        if (!at.length) return;
+        var cb = null;
+        try { cb = cashBalance(gConv, cid, gCcyM); } catch (e) { cb = null; }
+        if (!cb) return;
+        if (isFinite(Number(cb.main))) { gValue += Number(cb.main); gHas = true; }
+        gNative += Number(cb.native) || 0;
+        var ca = null;
+        try { ca = accountById(st, cid); } catch (e) { ca = null; }
+        if (ca && ca.ticker) gTick[String(ca.ticker).toUpperCase()] = true;
+      });
+      var gTickList = Object.keys(gTick);
+      stats.appendChild(statCard('Balance', gHas ? (gTickList.length === 1 ? (fmtQty(gNative, gTickList[0]) + ' ' + gTickList[0]) : (gIds.length + ' accounts')) : 'New', gHas ? gNative : null));
+      stats.appendChild(statCard('Value', gHas ? fmtMoney(gValue, gCcyM) : 'New', gHas ? gValue : null));
+      host.appendChild(stats);
+    } else {
+      buildCashDetailStats(st, acc, dtrades, main, stats, host, mainOf ? { skipLedgers: true } : null);
+    }
   } else {
     host.appendChild(stats);
     // Standalone asset accounts show Ledgers while the global switch is on

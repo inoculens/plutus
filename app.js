@@ -5463,6 +5463,14 @@ function resolveExecPrice(t, main, kind) {
   return null;
 }
 
+// Ledger inputs ride income/expense records: always on cash (required at
+// submit), on asset accounts only when the global switch is on (optional).
+function tradeLedgerAllowed(isCashAcc, side) {
+  if (side !== 'income' && side !== 'expense') return false;
+  if (isCashAcc) return true;
+  try { return assetLedgersOn(loadState()); } catch (e) { return true; }
+}
+
 // Plain-language fee economics for transfer cards: what the fee was worth
 // at move time vs what the books record (original cost). Numbers come from
 // the record itself; nothing here touches P&L.
@@ -6340,6 +6348,41 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
   host.appendChild(wrap);
 }
 
+// Standalone asset accounts with the global switch on: their labeled
+// income/expense rolls into a Ledgers section (same rows as cash); the
+// unlabeled rest pools into Unlabeled assets. The panel — buckets included —
+// shows only when at least one record actually carries a ledger code.
+function buildAssetLedgers(st, acc, dtrades, main, host) {
+  var ids = [acc.id];
+  if (!groupHasLabels(st.trades, ids)) return;
+  var kinds = {};
+  kinds[acc.id] = (acc && typeof acc.kind === 'string') ? acc.kind : '';
+  var tree = ledgerTreeMulti(dtrades, ids, main, ledgerChartFor(st, acc.id), kinds);
+  var sec = document.createElement('div');
+  sec.className = 'section-head';
+  var h = document.createElement('h2');
+  h.className = 'section-title';
+  h.textContent = 'Ledgers';
+  sec.appendChild(h);
+  var ladd = document.createElement('button');
+  ladd.type = 'button';
+  ladd.className = 'ghost';
+  ladd.textContent = '+ Ledger';
+  ladd.setAttribute('aria-label', 'Add ledger to ' + acc.name);
+  ladd.addEventListener('click', function () { openLedgerDialog(acc.id); });
+  sec.appendChild(ladd);
+  host.appendChild(sec);
+  if (!tree.roots.length && !tree.unassignedCount && !(tree.unassignedAssetsCount || 0)) {
+    var noneNote = document.createElement('p');
+    noneNote.className = 'muted';
+    noneNote.textContent = 'No labeled records yet — add a ledger code on an income or expense record.';
+    host.appendChild(noneNote);
+    return;
+  }
+  appendLedgerList(host, tree, main, { key: acc.id, chartId: acc.id, scope: ids });
+  try { appendLedgerWarn(host, ledgerViolations(st, acc.id)); } catch (e) { /* ignore */ }
+}
+
 // Per-account ledger management: add/rename writes the account's own
 // chart (snapshotting the default first); delete removes the code plus its
 // whole subtree from the account's chart and clears those codes off the
@@ -6838,6 +6881,13 @@ function renderAccountDetail(st, id) {
     buildCashDetailStats(st, acc, dtrades, main, stats, host, mainOf ? { skipLedgers: true } : null);
   } else {
     host.appendChild(stats);
+    // Standalone asset accounts show Ledgers while the global switch is on
+    // (grouped members and mains are covered by the group view instead).
+    if (!mainOf && !members.length) {
+      try {
+        if (assetLedgersOn(st)) buildAssetLedgers(st, acc, dtrades, main, host);
+      } catch (e) { /* Ledgers never break the detail view */ }
+    }
   }
   // Group mains: merged ledgers in the group currency plus sub-account
   // cards instead of the spent/fees lines and the trade history below.
@@ -8234,11 +8284,12 @@ function syncTradeTypeUI() {
     var clabC = document.getElementById('t-custom-ccy-label');
     if (clabC) clabC.hidden = true;
   }
-  // Ledger row: cash income/expense only (required at submit).
-  setHidden('t-ledger-row', !(isCash && (isIncome || isExpense)));
+  // Ledger row: cash income/expense always; asset income/expense only when
+  // the global switch is on (optional at submit, required never).
+  setHidden('t-ledger-row', !tradeLedgerAllowed(isCash, type));
   try {
     var dl = document.getElementById('t-ledger-codes');
-    if (dl && isCash && (isIncome || isExpense)) {
+    if (dl && tradeLedgerAllowed(isCash, type)) {
       var known = {};
       try {
         var stL = loadState();
@@ -8991,8 +9042,9 @@ function onTradeSubmit(ev) {
       }
       if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
       else if (side === 'expense' && qty === null) { delete trade.qty; }
-      // Bookkeeping: ledger rides cash income/expense records only.
-      if (isCashAcc && (side === 'income' || side === 'expense')) {
+      // Bookkeeping: ledger rides income/expense records — required on cash,
+      // optional on asset accounts while the global switch is on.
+      if (tradeLedgerAllowed(isCashAcc, side)) {
         if (ledgerCode !== '') trade.ledger = ledgerCode;
         if (ledgerLabel !== '') trade.ledgerLabel = ledgerLabel;
       }
@@ -9055,8 +9107,9 @@ function onTradeSubmit(ev) {
     withFeeLock(trade);
     if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
     if (side === 'expense' && qty === null) { delete trade.qty; }
-    // Bookkeeping: ledger rides cash income/expense records only.
-    if (isCashAcc && (side === 'income' || side === 'expense')) {
+    // Bookkeeping: ledger rides income/expense records — required on cash,
+    // optional on asset accounts while the global switch is on.
+    if (tradeLedgerAllowed(isCashAcc, side)) {
       if (ledgerCode !== '') trade.ledger = ledgerCode;
       if (ledgerLabel !== '') trade.ledgerLabel = ledgerLabel;
     }
@@ -9645,6 +9698,12 @@ function showSettingsTab(name) {
   Array.prototype.forEach.call(host.querySelectorAll('[data-setpanel]'), function (p) {
     p.hidden = p.getAttribute('data-setpanel') !== want;
   });
+  if (want === 'ledgers') {
+    try {
+      var abox = document.getElementById('set-assetledgers');
+      if (abox) abox.checked = assetLedgersOn(loadState());
+    } catch (e) { /* ignore */ }
+  }
 }
 
 function refreshLedgerList() {
@@ -9693,6 +9752,7 @@ function buildSettings() {
     '</section>' +
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
     '<p class="muted set-blurb">Default bookkeeping codes every cash account starts from (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Editing codes inside an account diverges it from this default; renaming here changes future suggestions — records keep their own stored labels.</p>' +
+    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Ledgers on asset accounts (optional per income/expense record)</label>' +
     '<label for="l-code">Code</label>' +
     '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="l-label">Label</label>' +
@@ -9854,6 +9914,21 @@ function buildSettings() {
     render();
   });
   try { refreshLedgerList(); } catch (e) { /* ignore */ }
+  var assetBox = document.getElementById('set-assetledgers');
+  if (assetBox) {
+    try { assetBox.checked = assetLedgersOn(loadState()); } catch (e) { /* ignore */ }
+    if (!assetBox.getAttribute('data-wired')) {
+      assetBox.setAttribute('data-wired', '1');
+      assetBox.addEventListener('change', function () {
+        var st = loadState();
+        if (!st.settings || typeof st.settings !== 'object') st.settings = defaultState().settings;
+        st.settings.assetLedgers = !!assetBox.checked;
+        if (!saveStateGuarded(st)) return;
+        clearBanner();
+        render();
+      });
+    }
+  }
   // Fiat tag for legacy bare-number overrides (saved before the entry fiat
   // was recorded): declaring it once converts the override everywhere
   // instead of reading it nominal in the display fiat.

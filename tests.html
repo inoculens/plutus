@@ -875,6 +875,82 @@
           }
         });
 
+        test('asset ledger inputs follow the global switch', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 'ax', name: 'X', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            openPrefillTrade('ax');
+            document.getElementById('t-side').value = 'income';
+            syncTradeTypeUI();
+            assert(!document.getElementById('t-ledger-row').hidden, 'asset income must offer ledger inputs when ON');
+            document.getElementById('t-side').value = 'buy';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-ledger-row').hidden, 'asset buy must never offer ledger inputs');
+            var st = L.loadState();
+            st.settings.assetLedgers = false;
+            L.saveState(st);
+            document.getElementById('t-side').value = 'income';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-ledger-row').hidden, 'asset income must hide ledger inputs when OFF');
+          } finally {
+            try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('asset Ledgers panel shows only when something is labeled', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 'ax', name: 'X', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [
+                { id: 'u1', type: 'income', symbol: 'BTC', qty: 5, total: 5000, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'ax', ledger: '5000', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'u2', type: 'income', symbol: 'BTC', qty: 3, total: 3000, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'ax', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('ax');
+            route();
+            render();
+            var unl = document.querySelector('#account-detail .ledger-row[data-ledger="—"] .ledger-label-text');
+            assert(unl && unl.textContent === '— Unlabeled assets', 'unlabeled asset income pools as Unlabeled assets, got ' + (unl && unl.textContent));
+            var unlAmt = document.querySelector('#account-detail .ledger-row[data-ledger="—"] .ledger-amount');
+            assert(unlAmt && unlAmt.textContent.indexOf('3,000') !== -1, 'Unlabeled assets must value 3000, got ' + (unlAmt && unlAmt.textContent));
+            assert(document.querySelector('#account-detail .ledger-row[data-ledger="5000"]'), 'labeled asset ledger must render');
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 'ax', name: 'X', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [
+                { id: 'u2', type: 'income', symbol: 'BTC', qty: 3, total: 0, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'ax', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            render();
+            assert(!document.querySelector('#account-detail .ledger-list'), 'panel must vanish with nothing labeled');
+            assert(!document.querySelector('#account-detail .ledger-row[data-ledger="—"]'), 'no Unlabeled bucket without labels');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

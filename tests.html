@@ -1163,6 +1163,16 @@
           }
         });
 
+        test('cached 1:1 for distinct fiats refetches instead of posing', function () {
+          L.cacheRate('2026-02-02', 'RON', 'EUR', 1, '1:1');
+          assert(L.getCachedRate('2026-02-02', 'RON', 'EUR') === null, 'stale 1:1 must read as missing');
+          L.cacheRate('2026-02-02', 'RON', 'EUR', 0.2, 'ECB-2026-02-02');
+          var hit = L.getCachedRate('2026-02-02', 'RON', 'EUR');
+          assert(hit && hit.rate === 0.2, 'real rates must still hit: ' + JSON.stringify(hit));
+          var same = L.getCachedRate('2026-02-02', 'EUR', 'EUR');
+          assert(same && same.rate === 1, 'same-fiat 1:1 must stay');
+        });
+
         test('groupFillFiats lists foreign group currencies only', function () {
           var st = {
             settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },

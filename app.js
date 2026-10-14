@@ -1011,6 +1011,10 @@ function getCachedRate(date, from, to) {
   var cache = loadFxCache();
   var hit = cache[fxCacheKey(date, f, t)];
   if (hit && isFinite(Number(hit.rate)) && Number(hit.rate) > 0 && typeof hit.source === 'string') {
+    // Self-heal: a cached exactly-1 for two distinct, non-stable fiats is a
+    // stale artifact, never a real ECB fixing — a 1:1 would pose as a rate
+    // forever (fills skip cached pairs). Treat as missing so it refetches.
+    if (Number(hit.rate) === 1) return null;
     return { rate: Number(hit.rate), source: hit.source };
   }
   return null;

@@ -9009,14 +9009,12 @@ function onTradeSubmit(ev) {
   var manualPrice = (manualPriceRaw === '') ? null : Number(manualPriceRaw);
   if (manualPrice !== null && (!isFinite(manualPrice) || manualPrice <= 0)) { tradeFormError('Manual price must be > 0.'); return; }
   // Ledger inputs (cash income/expense). Length-checked here; attached below.
+  // A blank code is allowed everywhere: cleared records pool into the
+  // Unlabeled buckets instead of being forced into a ledger.
   var ledgerCode = uiVal('t-ledger', '').trim();
   var ledgerLabel = uiVal('t-ledger-label', '').trim();
   if (ledgerCode !== '' && !isValidLedgerCode(ledgerCode)) { tradeFormError('Ledger code is too long — up to 24 characters.'); return; }
   if (ledgerLabel !== '' && !isValidLedgerLabel(ledgerLabel)) { tradeFormError('Ledger label is too long — up to 80 characters.'); return; }
-  if (isCashAcc && (side === 'income' || side === 'expense') && ledgerCode === '') {
-    tradeFormError('Ledger code is required on cash records (e.g. 1100).');
-    return;
-  }
   // Parent-overview rule: ledgers with sub-ledgers are pure totals and take
   // no records; posting under a record-holding ledger is blocked with the
   // fix (move those records to a child, keep the parent record-free).

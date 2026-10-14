@@ -1075,6 +1075,39 @@
           }
         });
 
+        test('clearing a cash record ledger saves it unlabeled', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 'c1', name: 'C', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [{ id: 'e1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'c1', ledger: '1000', ledgerLabel: 'Income', createdAt: '2026-01-05T00:00:00.000Z' }],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            openEditTrade('e1');
+            assert(document.getElementById('t-ledger').value === '1000', 'edit must prefill the code');
+            document.getElementById('t-ledger').value = '';
+            document.getElementById('t-ledger-label').value = '';
+            onTradeSubmit({ preventDefault: function () {} });
+            assert(document.getElementById('t-error').hidden !== false && document.getElementById('t-error').textContent === '', 'no form error may block the clear, got ' + document.getElementById('t-error').textContent);
+            var st = L.loadState();
+            var got = null;
+            st.trades.forEach(function (t) { if (t && t.id === 'e1') got = t; });
+            assert(got && !got.ledger && !got.ledgerLabel, 'stored ledger must be gone: ' + JSON.stringify(got));
+            var tree = L.ledgerTree(st.trades, 'c1', 'EUR', {});
+            assert(tree.unassignedIncome === 100 && tree.unassignedIncomeCount === 1, 'cleared record must pool unlabeled: ' + JSON.stringify(tree.unassignedIncome));
+          } finally {
+            try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('expandDeleteIds cascades mains to their members', function () {
           var st = {
             settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },

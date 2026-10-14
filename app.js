@@ -5302,7 +5302,11 @@ function openFeeExplainer(t, main, feeQty, rate) {
 function infoDot(labelEl, openFn, valueEl) {
   if (!labelEl || typeof openFn !== 'function') return;
   var dot = document.createElement('span');
-  dot.className = 'info-dot';
+  // Overflow-gated dots (a measured value was passed) start hidden and only
+  // ever appear via the sync pass — any rebuild path that skips the sync
+  // then defaults to no dot instead of flashing one. Always-on dots (no
+  // value: the tap always opens something) keep the plain class.
+  dot.className = valueEl ? 'info-dot info-dot-gated' : 'info-dot';
   dot.textContent = 'ⓘ';
   dot.setAttribute('aria-hidden', 'true');
   labelEl.appendChild(dot);
@@ -5332,7 +5336,7 @@ function syncInfoDots() {
       try { lab = box.querySelector('.stat-label, .detail-meta-label'); } catch (e) { lab = null; }
       var overflowing = false;
       try { overflowing = v.scrollWidth > v.clientWidth + 2; } catch (e) { overflowing = false; }
-      if (dot) dot.style.display = overflowing ? '' : 'none';
+      if (dot) dot.style.display = overflowing ? 'inline' : 'none';
       try { v.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
       if (lab) {
         try { lab.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
@@ -6628,6 +6632,9 @@ function route() {
   // deleting the open account) measures zero until now — sync sizes now that
   // the right view is visible.
   try { syncHeroAllocHeight(); } catch (e) { /* ignore */ }
+  // Route rebuilds rows (fresh ⓘ dots start visible): gate them now, so hash
+  // navigation never flashes dots that have nothing to show.
+  try { syncInfoDots(); } catch (e) { /* ignore */ }
   syncTradeButtons();
 }
 

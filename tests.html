@@ -713,6 +713,14 @@
             if (typeof init === 'function') init();
             navTo('a1');
             route();
+            // Navigation alone must leave no visible dots: route rebuilds rows
+            // and gated dots default hidden until a sync proves truncation.
+            var earlyDots = document.querySelectorAll('#account-detail .info-dot-gated');
+            assert(earlyDots.length > 0, 'rows must carry gated dots, found none');
+            for (var di = 0; di < earlyDots.length; di++) {
+              var dd = window.getComputedStyle(earlyDots[di]).display;
+              assert(dd === 'none', 'dot must stay hidden pre-sync, got ' + dd);
+            }
             render();
             var row1100 = document.querySelector('.ledger-row[data-ledger="1100"]');
             assert(row1100, '1100 row must render');

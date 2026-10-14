@@ -1070,6 +1070,10 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 }
 .rate-line .stat-val { font-family: var(--font-ui); font-size: 0.83rem; font-weight: 400; max-width: 70%; }
 
+/* Overflow-gated ⓘ dots start hidden; the sync pass shows them inline only
+   where text actually truncates (always-on dots keep the plain class). */
+.info-dot-gated { display: none; }
+
 /* ————— Cash ledger rows: fixed slots, truncated names, aligned amounts ————— */
 .ledger-row { justify-content: flex-start; align-items: center; gap: 0.75rem; }
 .ledger-row .ledger-toggle { flex: 0 0 auto; min-width: 2.2rem; padding: 0.4rem 0.3rem; border: 1px solid var(--border); border-radius: 0.55rem; background: rgba(255,255,255,0.025); }

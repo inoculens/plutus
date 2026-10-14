@@ -926,6 +926,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.accountById = accountById;
   window.Inoculens.isValidAttachment = isValidAttachment;
   window.Inoculens.syncBlobFilename = syncBlobFilename;
+  window.Inoculens.syncBlobNameHash = syncBlobNameHash;
 }
 
 // === Fx ===
@@ -10817,6 +10818,7 @@ function buildSettings() {
     '<button id="sy-disconnect" type="button">Disconnect</button>' +
     '<button id="sy-push" type="button">Sync now (upload)</button>' +
     '<button id="sy-pull" type="button">Restore from drive</button>' +
+    '<button id="sy-cleanup" type="button">Clean up cloud files</button>' +
     '</div>' +
     '<span id="s-enc-label">Encrypted file — needs your passphrase above</span>' +
     '<button id="sy-enc-download" type="button">Download encrypted file</button>' +
@@ -12816,7 +12818,7 @@ function syncS3Url(cfg) {
   return ep + '/' + encodeURIComponent(cfg.bucket) + '/' + full;
 }
 
-function syncS3CanonicalRequest(method, url, payloadHash, amzDate) {
+function syncS3CanonicalRequest(method, url, payloadHash, amzDate, qs) {
   var parts = syncSplitUrl(url);
   var signed, heads;
   if (method === 'PUT') {
@@ -12828,7 +12830,7 @@ function syncS3CanonicalRequest(method, url, payloadHash, amzDate) {
     heads = 'host:' + parts.host +
       '\nx-amz-content-sha256:' + payloadHash + '\nx-amz-date:' + amzDate + '\n';
   }
-  return method + '\n' + parts.path + '\n\n' + heads + '\n' + signed + '\n' + payloadHash;
+  return method + '\n' + parts.path + '\n' + (qs || '') + '\n' + heads + '\n' + signed + '\n' + payloadHash;
 }
 
 function syncAmzDate(d) {
@@ -12893,6 +12895,60 @@ function syncS3Sign(cfg, method, payloadText) {
         };
         if (method === 'PUT') headers['Content-Type'] = 'application/json';
         return { url: url, headers: headers };
+      });
+    });
+  });
+}
+
+// Query-string sibling of syncS3Sign for ListObjectsV2: same validation
+// and key derivation, but the canonical request carries the (already
+// sorted + encoded) query string and the URL keeps it. Used only by
+// attachment-blob listing; object traffic keeps using syncS3Sign.
+function syncS3SignQuery(cfg, method, canonicalQs) {
+  var secret = syncSecret(cfg);
+  if (!cfg.endpoint || syncSplitUrl(cfg.endpoint).host === '') {
+    return Promise.reject(new Error('sync failed: enter the S3 endpoint URL.'));
+  }
+  try {
+    syncRequireHttpsUrl(cfg.endpoint, 'S3 endpoint');
+  } catch (e) {
+    return Promise.reject(e);
+  }
+  if (!cfg.bucket) return Promise.reject(new Error('sync failed: enter the S3 bucket.'));
+  if (!cfg.accessKey) return Promise.reject(new Error('sync failed: enter the S3 access key.'));
+  if (!secret) return Promise.reject(new Error('sync failed: enter the S3 secret key.'));
+  if (!cfg.region) return Promise.reject(new Error('sync failed: enter the S3 region.'));
+  if (!syncCryptoAvailable()) {
+    return Promise.reject(new Error('sync failed: this browser cannot do encrypted sync (WebCrypto unavailable).'));
+  }
+  var ep = String(cfg.endpoint || '').replace(/\/+$/, '');
+  var path = '/' + encodeURIComponent(cfg.bucket) + '/';
+  var url = ep + path + '?' + canonicalQs;
+  var now = new Date();
+  var amzDate = syncAmzDate(now);
+  var dateStamp = amzDate.slice(0, 8);
+  return syncSha256(syncUtf8Encode('')).then(function (phBytes) {
+    var payloadHash = syncHex(phBytes);
+    var canon = syncS3CanonicalRequest(method, url, payloadHash, amzDate, canonicalQs);
+    return syncSha256(syncUtf8Encode(canon)).then(function (chBytes) {
+      var sts = 'AWS4-HMAC-SHA256\n' + amzDate + '\n' + dateStamp + '/' + cfg.region +
+        '/s3/aws4_request\n' + syncHex(chBytes);
+      return syncHmac(syncUtf8Encode('AWS4' + secret), syncUtf8Encode(dateStamp)).then(function (kDate) {
+        return syncHmac(kDate, syncUtf8Encode(cfg.region));
+      }).then(function (kRegion) {
+        return syncHmac(kRegion, syncUtf8Encode('s3'));
+      }).then(function (kService) {
+        return syncHmac(kService, syncUtf8Encode('aws4_request'));
+      }).then(function (kSigning) {
+        return syncHmac(kSigning, syncUtf8Encode(sts));
+      }).then(function (sigBytes) {
+        var auth = 'AWS4-HMAC-SHA256 Credential=' + cfg.accessKey + '/' + dateStamp + '/' +
+          cfg.region + '/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date' +
+          ', Signature=' + syncHex(sigBytes);
+        return {
+          url: url,
+          headers: { 'x-amz-date': amzDate, 'x-amz-content-sha256': payloadHash, 'Authorization': auth }
+        };
       });
     });
   });
@@ -13021,12 +13077,31 @@ function syncRemoteEnsureFolder(cfg) {
 function syncBlobFilename(cfg, hash) {
   return syncDisplayBasename(cfg.filename) + '-att-' + String(hash).toLowerCase() + '.enc.json';
 }
-function syncBlobCfg(cfg, hash) {
+function syncBlobCfgFor(cfg, filename) {
   var c = {};
   for (var k in cfg) { if (Object.prototype.hasOwnProperty.call(cfg, k)) c[k] = cfg[k]; }
-  c.filename = syncBlobFilename(cfg, hash);
-  c.objectKey = c.filename;
+  c.filename = filename;
+  c.objectKey = filename;
   return c;
+}
+function syncBlobCfg(cfg, hash) {
+  return syncBlobCfgFor(cfg, syncBlobFilename(cfg, hash));
+}
+// Parse our own blob names back to hashes: <base>-att-<hash>.enc.json.
+// The base must match this destination's state file, so cleanup can never
+// touch a stranger's files sharing the folder. Pure — covered by tests.
+function syncBlobNameHash(name, base) {
+  var s = String(name == null ? '' : name);
+  var suffix = '.enc.json';
+  if (s.length <= suffix.length + 6 || s.slice(-suffix.length) !== suffix) return null;
+  var stem = s.slice(0, -suffix.length);
+  var tag = '-att-';
+  var i = stem.lastIndexOf(tag);
+  if (i <= 0) return null;
+  if (base !== undefined && stem.slice(0, i) !== String(base)) return null;
+  var h = stem.slice(i + tag.length).toLowerCase();
+  if (!/^[0-9a-f]{8,64}$/.test(h)) return null;
+  return h;
 }
 function syncAttachmentMetas(st) {
   var out = [], seen = {};
@@ -13093,6 +13168,228 @@ function syncPullAttachment(cfg, pass, meta) {
   });
 }
 
+// --- Orphaned-blob cleanup ("Clean up cloud files") ---
+// Lists our <base>-att-<hash>.enc.json objects at the destination, keeps
+// the ones no record on this device references, and deletes the rest only
+// after an explicit confirm. Never automatic: a hash missing here may be
+// another device's pending upload, so the confirm warns to sync everywhere
+// first. Only names matching our own base pattern are ever touched.
+function syncFilterBlobNames(names, base) {
+  var out = [];
+  (names || []).forEach(function (n) {
+    var h = syncBlobNameHash(n, base);
+    if (h) out.push({ name: String(n), hash: h });
+  });
+  return out;
+}
+function syncDriveListBlobs(access, cfg) {
+  return syncDriveFolderId(access, syncNormalizeFolder(cfg.folder), false).then(function (fid) {
+    if (!fid) return [];
+    var q = "name contains '-att-' and '" + String(fid).replace(/'/g, '') + "' in parents and trashed = false";
+    var base = syncDisplayBasename(cfg.filename);
+    return syncDriveList(access, q).then(function (files) {
+      var names = (files || []).map(function (f) { return f && f.name; });
+      return syncFilterBlobNames(names, base);
+    });
+  });
+}
+function syncDropboxListBlobs(access, cfg) {
+  var folder = syncNormalizeFolder(cfg.folder);
+  var base = syncDisplayBasename(cfg.filename);
+  var out = [];
+  function page(cursor) {
+    var url, body;
+    if (!cursor) {
+      url = 'https://api.dropboxapi.com/2/files/list_folder';
+      body = JSON.stringify({ path: folder ? '/' + folder : '', recursive: false, limit: 2000 });
+    } else {
+      url = 'https://api.dropboxapi.com/2/files/list_folder/continue';
+      body = JSON.stringify({ cursor: cursor });
+    }
+    return syncFetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' }, body: body }, 'Dropbox').then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok) throw new Error('sync failed: Dropbox listing refused (HTTP ' + res.status + ').');
+        ((data && data.entries) || []).forEach(function (e) {
+          if (e && e['.tag'] === 'file' && typeof e.name === 'string') {
+            var h = syncBlobNameHash(e.name, base);
+            if (h) out.push({ name: e.name, hash: h });
+          }
+        });
+        if (data && data.has_more && data.cursor) return page(data.cursor);
+        return out;
+      }, function () { throw new Error('sync failed: bad Dropbox response.'); });
+    });
+  }
+  return page(null);
+}
+function syncS3ListBlobs(cfg) {
+  var folder = syncNormalizeFolder(cfg.folder);
+  var base = syncDisplayBasename(cfg.filename);
+  var prefix = folder ? folder + '/' : '';
+  var out = [];
+  function escQ(s) { return encodeURIComponent(s).replace(/[!'()*]/g, function (c) { return '%' + c.charCodeAt(0).toString(16).toUpperCase(); }); }
+  function page(token) {
+    var qs = 'list-type=2&max-keys=1000&prefix=' + escQ(prefix);
+    if (token) qs = 'continuation-token=' + escQ(token) + '&' + qs;
+    return syncS3SignQuery(cfg, 'GET', qs).then(function (s) {
+      return syncFetch(s.url, { headers: s.headers }, 'the S3 endpoint').then(function (res) {
+        return res.text().then(function (body) {
+          if (!res.ok) throw new Error('sync failed: S3 listing refused (HTTP ' + res.status + ').');
+          var keys = [];
+          try {
+            var re = /<Key>([^<]*)<\/Key>/g, m;
+            while ((m = re.exec(body)) !== null) keys.push(m[1]);
+          } catch (e) { keys = []; }
+          keys.forEach(function (k) {
+            var name = String(k).split('/').pop();
+            var h = syncBlobNameHash(name, base);
+            if (h) out.push({ name: name, hash: h });
+          });
+          var trunc = /<IsTruncated>true<\/IsTruncated>/.test(body);
+          var next = null;
+          try { var nm = body.match(/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/); next = nm ? nm[1] : null; } catch (e) { next = null; }
+          if (trunc && next) return page(next);
+          return out;
+        });
+      });
+    });
+  }
+  return page(null);
+}
+function syncWebdavListBlobs(cfg) {
+  var auth;
+  try { auth = syncWebdavAuth(cfg); } catch (e) { return Promise.reject(e); }
+  if (!cfg.url) return Promise.reject(new Error('sync failed: enter the WebDAV server URL.'));
+  var base = syncDisplayBasename(cfg.filename);
+  var root = String(cfg.url).replace(/\s+$/g, '').replace(/\/+$/, '');
+  return syncFetch(root, {
+    method: 'PROPFIND',
+    headers: { 'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml' },
+    body: '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><propname/></propfind>'
+  }, 'the WebDAV server').then(function (res) {
+    return res.text().then(function (body) {
+      if (!res.ok && res.status !== 207) throw new Error('sync failed: WebDAV listing refused (HTTP ' + res.status + ').');
+      var names = [];
+      try {
+        var re = /<[^>]*href[^>]*>([^<]+)<\//gi, m;
+        while ((m = re.exec(body)) !== null) {
+          var parts = decodeURIComponent(m[1]).split('/');
+          var last = parts.pop() || '';
+          if (last) names.push(last);
+        }
+      } catch (e) { names = []; }
+      return syncFilterBlobNames(names, base);
+    });
+  });
+}
+function syncRemoteListBlobs(cfg) {
+  if (cfg.provider === 'webdav') return syncWebdavListBlobs(cfg);
+  if (cfg.provider === 'megas3') return syncS3ListBlobs(cfg);
+  return syncEnsureAccessToken(cfg).then(function (access) {
+    if (cfg.provider === 'gdrive') return syncDriveListBlobs(access, cfg);
+    if (cfg.provider === 'dropbox') return syncDropboxListBlobs(access, cfg);
+    return Promise.reject(new Error('sync failed: unknown provider.'));
+  });
+}
+function syncRemoteDeleteBlob(cfg, name) {
+  var bc = syncBlobCfgFor(cfg, name);
+  if (cfg.provider === 'webdav') {
+    var auth;
+    try { auth = syncWebdavAuth(cfg); } catch (e) { return Promise.reject(e); }
+    return syncFetch(syncJoinUrl(cfg.url, name), { method: 'DELETE', headers: { 'Authorization': auth } }, 'the WebDAV server').then(function (res) {
+      if (res.ok || res.status === 404) return true;
+      throw new Error('sync failed: WebDAV delete refused (HTTP ' + res.status + ').');
+    });
+  }
+  if (cfg.provider === 'megas3') {
+    return syncS3Sign(bc, 'DELETE', '').then(function (s) {
+      var h = {};
+      for (var k in s.headers) { if (Object.prototype.hasOwnProperty.call(s.headers, k) && k.toLowerCase() !== 'content-type') h[k] = s.headers[k]; }
+      return syncFetch(s.url, { method: 'DELETE', headers: h }, 'the S3 endpoint').then(function (res) {
+        if (res.ok || res.status === 404 || res.status === 204) return true;
+        throw new Error('sync failed: S3 delete refused (HTTP ' + res.status + ').');
+      });
+    });
+  }
+  return syncEnsureAccessToken(cfg).then(function (access) {
+    if (cfg.provider === 'gdrive') {
+      return syncDriveFolderId(access, syncNormalizeFolder(cfg.folder), false).then(function (fid) {
+        if (!fid) return true;
+        return syncDriveFind(access, name, fid).then(function (id) {
+          if (!id) return true;
+          return syncFetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id), {
+            method: 'DELETE', headers: { 'Authorization': 'Bearer ' + access }
+          }, 'Google Drive').then(function (res) {
+            if (res.ok || res.status === 404 || res.status === 204) return true;
+            throw new Error('sync failed: Drive delete refused (HTTP ' + res.status + ').');
+          });
+        });
+      });
+    }
+    if (cfg.provider === 'dropbox') {
+      var folder = syncNormalizeFolder(cfg.folder);
+      return syncFetch('https://api.dropboxapi.com/2/files/delete_v2', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: '/' + (folder ? folder + '/' : '') + name })
+      }, 'Dropbox').then(function (res) {
+        if (res.ok) return true;
+        if (res.status === 409) return true; // already gone counts as cleaned
+        throw new Error('sync failed: Dropbox delete refused (HTTP ' + res.status + ').');
+      });
+    }
+    return Promise.reject(new Error('sync failed: unknown provider.'));
+  });
+}
+function syncCleanupFlow() {
+  if (syncBusy) return;
+  var cfg = syncReadForm().cfg;
+  syncSetBusy(true, 'Listing cloud files…');
+  var referenced = {};
+  try {
+    syncAttachmentMetas(loadState()).forEach(function (m) { referenced[m.hash] = true; });
+  } catch (e) { /* ignore */ }
+  syncRemoteListBlobs(cfg).then(function (items) {
+    var orphans = (items || []).filter(function (it) { return it && it.hash && !referenced[it.hash]; });
+    syncSetBusy(false);
+    syncRefreshSyncPanel({ keepStatus: true });
+    try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+    if (!orphans.length) {
+      syncSetStatus((items && items.length) ? 'Cloud files match your records — nothing orphaned.' : 'No invoice/receipt files in the drive folder yet.');
+      return;
+    }
+    var shown = orphans.slice(0, 5).map(function (o) { return o.name; }).join(', ');
+    if (orphans.length > 5) shown += ', …';
+    confirmAction('Delete ' + orphans.length + ' orphaned file' + (orphans.length === 1 ? '' : 's') + '?',
+      'These cloud copies belong to no record on this device: ' + shown + '. Only continue if every device synced recently — a device that has not uploaded yet would lose its copy.',
+      'Delete files').then(function (ok) {
+      if (!ok) return;
+      syncSetBusy(true, 'Deleting…');
+      var done = 0, failed = 0;
+      var chain = Promise.resolve(true);
+      orphans.forEach(function (o) {
+        chain = chain.then(function () {
+          return syncRemoteDeleteBlob(cfg, o.name).then(function () { done++; }, function () { failed++; });
+        });
+      });
+      chain.then(function () {
+        syncSetBusy(false);
+        syncRefreshSyncPanel({ keepStatus: true });
+        try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+        syncSetStatus('Cleanup done: ' + done + ' deleted' + (failed ? ', ' + failed + ' failed' : '') + '.');
+      });
+    });
+  }, function (err) {
+    syncSetBusy(false);
+    syncRefreshSyncPanel();
+    try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+    showBanner('Cleanup failed — nothing was deleted.', 'error', {
+      title: 'Sync error',
+      lines: [String((err && err.message) || err)]
+    });
+  });
+}
+
 // --- Push / pull orchestration (local data only replaced after full validation) ---
 
 function syncSetStatus(text) {
@@ -13102,7 +13399,7 @@ function syncSetStatus(text) {
 
 function syncSetBusy(on, note) {
   syncBusy = !!on;
-  var ids = ['sy-connect', 'sy-disconnect', 'sy-push', 'sy-pull', 'sy-enc-download'];
+  var ids = ['sy-connect', 'sy-disconnect', 'sy-push', 'sy-pull', 'sy-cleanup', 'sy-enc-download'];
   var i, el;
   for (i = 0; i < ids.length; i++) {
     el = (typeof document !== 'undefined') ? document.getElementById(ids[i]) : null;
@@ -14510,6 +14807,7 @@ function buildSyncSettings() {
   wireBtn('sy-disconnect', syncDisconnect);
   wireBtn('sy-push', syncPushFlow);
   wireBtn('sy-pull', syncPullFlow);
+  wireBtn('sy-cleanup', syncCleanupFlow);
   wireBtn('sy-enc-download', syncDownloadEncrypted);
   var up = document.getElementById('sy-enc-upload');
   if (up && !up.getAttribute('data-wired')) {

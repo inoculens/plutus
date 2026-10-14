@@ -463,6 +463,14 @@
           assert(n === 'plutus-backup-att-abcdef1234.enc.json', 'blob name wrong: ' + n);
         });
 
+        test('blob names parse back to hashes, strangers rejected', function () {
+          assert(L.syncBlobNameHash('plutus-backup-att-abcdef1234.enc.json', 'plutus-backup') === 'abcdef1234', 'hash not parsed');
+          assert(L.syncBlobNameHash('plutus-backup.enc.json', 'plutus-backup') === null, 'state file parsed as blob');
+          assert(L.syncBlobNameHash('other-att-abcdef1234.enc.json', 'plutus-backup') === null, 'stranger base accepted');
+          assert(L.syncBlobNameHash('plutus-backup-att-zzTop.enc.json', 'plutus-backup') === null, 'bad hash accepted');
+          assert(L.syncBlobNameHash('plutus-backup-att-abcdef1234.json', 'plutus-backup') === null, 'bad suffix accepted');
+        });
+
         test('cashBalance signs flows; destination leg uses arrival-fiat rate', function () {
           var trades = [
             cashTrade({ id: 'b1', ledger: '1000' }),

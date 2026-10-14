@@ -8914,9 +8914,12 @@ function allocationData(st, dtrades, visibleIds) {
   var pf = null;
   try { pf = computePortfolio(dtrades, livePrices, method); } catch (e) { pf = null; }
   var bySym = {};
+  var skipCash = {};
+  try { skipCash = cashAccountIds(st); } catch (e) { skipCash = {}; }
   if (pf && pf.byAccount) {
     Object.keys(pf.byAccount).forEach(function (accId) {
       if (visibleIds && visibleIds.indexOf(accId) === -1) return; // honor the asset filter
+      if (skipCash[accId]) return; // cash joins below as balance slices, never engine rows
       pf.byAccount[accId].forEach(function (p, sym) {
         var key = p.symbol;
         if (p.marketValue === null) {
@@ -9370,6 +9373,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.navTo = navTo;
   window.Inoculens.navHome = navHome;
   window.Inoculens.renderHeroAlloc = renderHeroAlloc;
+  window.Inoculens.allocationData = allocationData;
   window.Inoculens.syncHeroAllocHeight = syncHeroAllocHeight;
   window.Inoculens.fitHeroValue = fitHeroValue;
   window.Inoculens.downloadTradesCsv = downloadTradesCsv;

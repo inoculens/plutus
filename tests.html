@@ -470,6 +470,18 @@
           var tree4 = L.ledgerTree([{ id: 'h3', type: 'income', symbol: 'EUR', qty: 20, total: 20, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' }], 'cash1', 'EUR', {});
           assert(tree4.unassigned === 20 && tree4.unassignedCount === 1, 'codeless income lands unassigned');
         });
+
+        test('allocation ring counts a cash balance once, never engine + balance', function () {
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average' },
+            accounts: [{ id: 'cash1', name: 'Cash', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+            trades: [{ id: 'r1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }],
+            priceOverrides: {}
+          };
+          var al = L.allocationData(st, st.trades, null);
+          assert(al.total === 100, 'ring total must be 100, got ' + al.total);
+          assert(al.items.length === 1 && al.items[0].symbol === 'EUR' && al.items[0].value === 100, 'EUR slice must be 100 once: ' + JSON.stringify(al.items));
+        });
       } finally {
         restore();
         try { render(); } catch (e) { /* ignore */ }

@@ -10699,7 +10699,11 @@ function allocationData(st, dtrades, visibleIds) {
     });
   } catch (e) { /* ignore */ }
   Object.keys(bySym).forEach(function (k) { total += bySym[k]; });
-  var arr = Object.keys(bySym).map(function (k) { return { symbol: k, value: bySym[k], pct: total > 0 ? (bySym[k] / total) * 100 : 0 }; });
+  // Empty accounts never display: below half a cent prints as €0.00, so it
+  // reads as content in the ring legend. Totals are unaffected (dust ≈ 0).
+  var arr = Object.keys(bySym)
+    .filter(function (k) { return Math.abs(bySym[k]) >= 0.005; })
+    .map(function (k) { return { symbol: k, value: bySym[k], pct: total > 0 ? (bySym[k] / total) * 100 : 0 }; });
   arr.sort(function (a, b) { return b.value - a.value; });
   return { items: arr, total: total };
 }

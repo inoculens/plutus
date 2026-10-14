@@ -489,6 +489,28 @@
           assert(al.items.length === 1 && al.items[0].symbol === 'EUR' && al.items[0].value === 100, 'EUR slice must be 100 once: ' + JSON.stringify(al.items));
         });
 
+        test('empty accounts never reach the ring or its legend', function () {
+          function flow(id, type, qty, acc) {
+            return { id: id, type: type, symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: acc, createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var st = {
+            settings: { mainCurrency: 'EUR', costMethod: 'average' },
+            accounts: [
+              { id: 'cash1', name: 'Empty', ticker: 'RON', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'cash2', name: 'Funded', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
+            ],
+            trades: [
+              { id: 'e1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-05', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'e2', type: 'expense', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-06', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-06T00:00:00.000Z' },
+              flow('f1', 'income', 970, 'cash2')
+            ],
+            priceOverrides: {}
+          };
+          var al = L.allocationData(st, st.trades, null);
+          assert(al.items.length === 1 && al.items[0].symbol === 'EUR' && al.items[0].value === 970, 'only the funded slice must list: ' + JSON.stringify(al.items));
+          assert(al.total === 970, 'ring total must be 970, got ' + al.total);
+        });
+
         test('cash transfer legs convert in their own fiat (fromFxLock)', function () {
           var trades = [
             { id: 'f1', type: 'income', symbol: 'USD', qty: 100, total: 100, currency: 'USD', date: '2026-01-05', fee: 0, feeCurrency: 'USD', fxLock: { pair: 'USD/EUR', rate: 0.9, source: 'manual' }, accountId: 'cash2', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' },

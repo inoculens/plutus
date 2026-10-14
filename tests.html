@@ -377,6 +377,105 @@
       }
     })();
 
+    // === Cash-ledger tests (bookkeeping: ledgers on cash accounts) ===
+    (function cashLedgerTests() {
+      var L = window.Inoculens || {};
+      var backup = null;
+      try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+      function restore() {
+        try {
+          if (backup === null) localStorage.removeItem('inoculens.v2');
+          else localStorage.setItem('inoculens.v2', backup);
+        } catch (e) { /* ignore */ }
+      }
+      function v2env(trades, settingsOver) {
+        var settings = { mainCurrency: 'EUR', costMethod: 'average' };
+        if (settingsOver) for (var k in settingsOver) { if (Object.prototype.hasOwnProperty.call(settingsOver, k)) settings[k] = settingsOver[k]; }
+        return JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: settings, accounts: [{ id: 'cash1', name: 'Cash', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }, { id: 'cash2', name: 'Bucks', ticker: 'USD', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }], trades: trades, priceOverrides: {} });
+      }
+      function cashTrade(over) {
+        var t = { id: 'x' + Math.random().toString(36).slice(2), type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' };
+        if (over) for (var k in over) { if (Object.prototype.hasOwnProperty.call(over, k)) t[k] = over[k]; }
+        return t;
+      }
+      try {
+        test('ledger validators accept free-form codes, reject junk', function () {
+          assert(L.isValidLedgerCode(undefined) && L.isValidLedgerCode('') && L.isValidLedgerCode('1000'), 'valid codes rejected');
+          assert(L.isValidLedgerCode('1110') && L.isValidLedgerCode('3000 VAT'), 'free-form codes rejected');
+          assert(!L.isValidLedgerCode('x'.repeat(25)), 'overlong code accepted');
+          assert(!L.isValidLedgerCode({}) && !L.isValidLedgerCode(['1000']), 'non-string code accepted');
+          assert(L.isValidLedgerLabel(undefined) && L.isValidLedgerLabel('Income from X'), 'valid labels rejected');
+          assert(!L.isValidLedgerLabel('x'.repeat(81)), 'overlong label accepted');
+        });
+
+        test('import keeps ledger fields + chart labels; trims + uppercases', function () {
+          var back = L.importState(v2env([cashTrade({ ledger: ' 1100 ', ledgerLabel: ' Income from X ' })], { ledgerLabels: { '1100': 'Income from X' } }));
+          assert(back.trades[0].ledger === '1100', 'ledger not trimmed: ' + JSON.stringify(back.trades[0].ledger));
+          assert(back.trades[0].ledgerLabel === 'Income from X', 'label not trimmed');
+          assert(back.settings.ledgerLabels && back.settings.ledgerLabels['1100'] === 'Income from X', 'chart labels lost');
+        });
+
+        test('import rejects malformed ledger fields, keeps legacy trades valid', function () {
+          var before = L.loadState();
+          try { L.importState(v2env([cashTrade({ ledger: { evil: 1 } })])); assert(false, 'object ledger should throw'); }
+          catch (e) { assert(String((e && e.message) || e).indexOf('import failed') !== -1, 'wrong error: ' + ((e && e.message) || e)); }
+          assert(JSON.stringify(L.loadState()) === JSON.stringify(before), 'state changed after rejected ledger');
+          var okBack = L.importState(v2env([cashTrade()]));
+          assert(okBack.trades.length === 1 && !('ledger' in okBack.trades[0]), 'ledger-less trade must stay valid');
+          assert(L.isValidImportTrade({ type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', accountId: 'a1' }, ['a1']), 'legacy buy rejected');
+        });
+
+        test('import drops invalid chart maps, never breaks settings', function () {
+          var back = L.importState(v2env([cashTrade()], { ledgerLabels: { '1100': { evil: 1 } } }));
+          assert(back.settings && back.settings.mainCurrency === 'EUR', 'settings broken by bad chart');
+          assert(!back.settings.ledgerLabels || Object.keys(back.settings.ledgerLabels).length === 0, 'bad chart must be dropped');
+        });
+
+        test('cross-fiat transfer trades validate (toQty/toSymbol), junk rejected', function () {
+          var good = { type: 'transfer', symbol: 'EUR', qty: 100, networkFee: 0, toQty: 110, toSymbol: 'USD', date: '2026-01-08', accountId: 'cash1', toAccountId: 'cash2' };
+          assert(L.isValidImportTrade(good, ['cash1', 'cash2']), 'cross-fiat transfer rejected');
+          assert(!L.isValidImportTrade({ type: 'transfer', symbol: 'EUR', qty: 100, networkFee: 0, toQty: -5, toSymbol: 'USD', date: '2026-01-08', accountId: 'cash1', toAccountId: 'cash2' }, ['cash1', 'cash2']), 'negative toQty accepted');
+          assert(!L.isValidImportTrade({ type: 'transfer', symbol: 'EUR', qty: 100, networkFee: 0, toQty: 110, toSymbol: '!!!', date: '2026-01-08', accountId: 'cash1', toAccountId: 'cash2' }, ['cash1', 'cash2']), 'bad toSymbol accepted');
+        });
+
+        test('cashBalance signs flows; destination leg uses arrival-fiat rate', function () {
+          var trades = [
+            cashTrade({ id: 'b1', ledger: '1000' }),
+            cashTrade({ id: 'b2', type: 'expense', qty: 250, total: 250, ledger: '2000' }),
+            cashTrade({ id: 'b3', type: 'transfer', qty: 100, total: 0, networkFee: 2, toAccountId: 'cash2' }),
+            { id: 'b4', type: 'income', symbol: 'USD', qty: 110, total: 110, currency: 'USD', date: '2026-01-08', fee: 0, feeCurrency: 'USD', fxLock: { pair: 'USD/EUR', rate: 0.9, source: 'manual' }, accountId: 'cash2', ledger: '1100', createdAt: '2026-01-08T00:00:00.000Z' },
+            { id: 'b5', type: 'transfer', symbol: 'USD', qty: 50, total: 0, currency: 'USD', date: '2026-01-09', fee: 0, feeCurrency: 'USD', networkFee: 0, fxLock: { pair: 'USD/EUR', rate: 0.9, source: 'manual' }, toQty: 45, toSymbol: 'EUR', toFxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash2', toAccountId: 'cash1', createdAt: '2026-01-09T00:00:00.000Z' }
+          ];
+          var b1 = L.cashBalance(trades, 'cash1', 'EUR');
+          // 100 − 250 − 100 sent + 45 EUR arrival = −205 native; main: −205 (1:1 legs) 
+          assert(b1.native === -205 && b1.main === -205, 'cash1 balance wrong: ' + JSON.stringify(b1));
+          var b2 = L.cashBalance(trades, 'cash2', 'EUR');
+          // 98 USD arrival (trade-date 1:1 lock on the legacy leg) + 110 − 50 native; main 98 + 99 − 45
+          assert(b2.native === 158 && b2.main === 152, 'cash2 balance wrong: ' + JSON.stringify(b2));
+        });
+
+        test('ledgerTree rolls 1110 under 1100 under 1000; orphans top-level', function () {
+          function inc(id, ledger, qty) {
+            return { id: id, type: 'income', symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var tree = L.ledgerTree([inc('g1', '1000', 1000), inc('g2', '1100', 300), inc('g3', '1110', 50), inc('g4', '1120', 70), inc('g5', '3000', 200)], 'cash1', 'EUR', { '1000': 'Income', '1100': 'From X', '3000': 'VAT' });
+          assert(tree.roots.length === 2, 'two roots expected, got ' + tree.roots.length);
+          var r1000 = tree.roots[0];
+          assert(r1000.code === '1000' && r1000.total === 1420, '1000 rolls children: ' + JSON.stringify(r1000.total));
+          assert(r1000.kids.length === 1 && r1000.kids[0].code === '1100', '1100 nests under 1000');
+          assert(r1000.kids[0].total === 420 && r1000.kids[0].kids.length === 2, '1100 rolls 1110+1120: ' + JSON.stringify(r1000.kids[0]));
+          assert(tree.roots[1].code === '3000' && tree.roots[1].total === 200, '3000 top-level');
+          var tree2 = L.ledgerTree([inc('h1', '9999', 10)], 'cash1', 'EUR', {});
+          assert(tree2.roots.length === 1 && tree2.roots[0].code === '9999', 'orphan code must be top-level');
+          var tree4 = L.ledgerTree([{ id: 'h3', type: 'income', symbol: 'EUR', qty: 20, total: 20, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' }], 'cash1', 'EUR', {});
+          assert(tree4.unassigned === 20 && tree4.unassignedCount === 1, 'codeless income lands unassigned');
+        });
+      } finally {
+        restore();
+        try { render(); } catch (e) { /* ignore */ }
+      }
+    })();
+
     // === Accounts-storage tests (Task 1: Store v2) ===
     (function accountsStorageTests() {
       var Store = window.Inoculens || {};

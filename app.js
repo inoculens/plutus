@@ -6967,7 +6967,8 @@ function renderAccountDetail(st, id) {
   }
   menuBtn('Rename', 'Rename', function () { startInlineRename(acc.id, head, nameEl); });
   menuBtn('Edit label', 'Edit label for', function () { startInlineLabelEdit(acc.id); });
-  menuBtn('Create sub-account', 'Create sub-account in', function () { createSubAccount(acc.id); });
+  // Flat groups: mains and standalone accounts gain subs; members never do.
+  if (!mainOf) menuBtn('Create sub-account', 'Create sub-account in', function () { createSubAccount(acc.id); });
   if (members.length) menuBtn('Ungroup', 'Ungroup', function () { ungroupMain(acc.id); });
   menuBtn('Delete', 'Delete', function () { deleteAccount(acc.id); });
   menu.appendChild(mbox);
@@ -7563,6 +7564,7 @@ function createSubAccount(currentId) {
   var st = loadState();
   var acc = accountById(st, currentId);
   if (!acc) return;
+  if (groupMainOf(st, currentId)) { showBanner('Sub-accounts cannot have their own sub-accounts — create it in the main account instead.'); return; }
   var mainOf = groupMainOf(st, currentId);
   var parentMainId = mainOf ? mainOf.id : currentId;
   var nm = uniqueSubName(st, acc.name);
@@ -10819,8 +10821,16 @@ function init() {
   if (back && !back.getAttribute('data-wired')) {
     back.setAttribute('data-wired', '1');
     back.addEventListener('click', function (e) {
+      // Back climbs one level: a sub-account returns to its main, anything
+      // else returns home. Stateless — no trail to go stale.
+      var main = null;
+      try {
+        var cur = accountDetailId();
+        if (cur) main = groupMainOf(loadState(), cur);
+      } catch (err) { main = null; }
       if (e && e.preventDefault) e.preventDefault();
-      navHome();
+      if (main) navTo(main.id);
+      else navHome();
     });
   }
   var d = document.getElementById('t-date');

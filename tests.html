@@ -1222,6 +1222,57 @@
           }
         });
 
+        test('sub navigation returns to main, members cannot nest', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
+              ],
+              trades: [
+                { id: 'g2', type: 'income', symbol: 'EUR', qty: 200, total: 200, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            function menuTexts() {
+              return Array.prototype.map.call(
+                document.querySelectorAll('#account-detail .menu-box button'),
+                function (b) { return b.textContent; }
+              );
+            }
+            navTo('m');
+            route();
+            render();
+            assert(menuTexts().indexOf('Create sub-account') !== -1, 'main must offer sub-accounts');
+            document.querySelector('#account-detail .group-subs .account-card[data-account="a"]').click();
+            var subTitle = document.querySelector('#account-detail .detail-name');
+            assert(subTitle && subTitle.textContent === 'A', 'sub card must open, got ' + (subTitle && subTitle.textContent));
+            assert(menuTexts().indexOf('Create sub-account') === -1, 'member must not offer sub-accounts');
+            var nAccts = L.loadState().accounts.length;
+            L.createSubAccount('a');
+            assert(L.loadState().accounts.length === nAccts, 'guard must block nesting');
+            document.getElementById('acct-back').click();
+            var backTitle = document.querySelector('#account-detail .detail-name');
+            assert(backTitle && backTitle.textContent === 'Org', 'back from sub must land on main, got ' + (backTitle && backTitle.textContent));
+            navTo('z');
+            route();
+            render();
+            document.getElementById('acct-back').click();
+            assert(document.getElementById('view-home').hidden === false, 'back from standalone must land home');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

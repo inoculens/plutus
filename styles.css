@@ -1326,14 +1326,14 @@ select {
   padding-right: 2.3rem;
   cursor: pointer;
 }
-#trade-form, #account-dialog-body, #settings-dialog-body { display: grid; gap: 0.15rem; padding-bottom: 0.5rem; }
+#trade-form, #account-dialog-body, #ledger-dialog-body, #settings-dialog-body { display: grid; gap: 0.15rem; padding-bottom: 0.5rem; }
 /* Settings body is a flex item of the fixed-height dialog AND a grid parent
    of .set-layout: without min-height:0 + a shrinkable row, tall tabs (Sync)
    force the layout past the dialog box and the panel scrollbar never appears. */
 #settings-dialog-body { min-height: 0; grid-template-rows: minmax(0, 1fr); }
 #settings-dialog-body > .set-layout { min-height: 0; }
 #trade-form label:first-child { margin-top: 0.25rem; }
-#trade-form button.primary, #account-dialog-body button.primary { width: 100%; margin-top: 1.4rem; margin-bottom: 0.5rem; min-height: 3.1rem; font-size: 1rem; }
+#trade-form button.primary, #account-dialog-body button.primary, #ledger-dialog-body button.primary { width: 100%; margin-top: 1.4rem; margin-bottom: 0.5rem; min-height: 3.1rem; font-size: 1rem; }
 .fld-locked { margin-top: 1rem; padding: 0.7rem 0.85rem; background: rgba(227,197,124,0.06); border: 1px dashed var(--hairline-gold); border-radius: var(--radius); font-size: 0.9rem; color: var(--muted); }
 .fld-label { color: var(--muted); }
 #t-symbol-locked { color: var(--gold); font-weight: 700; }
@@ -1789,22 +1789,22 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   }
   dialog[open] { display: flex; flex-direction: column; }
   .dialog-head [data-close] { min-height: 2.75rem; min-width: 2.75rem; }
-  #trade-dialog[open], #account-dialog[open], #settings-dialog[open],
+  #trade-dialog[open], #account-dialog[open], #ledger-dialog[open], #settings-dialog[open],
   #confirm-dialog[open], #note-dialog[open], #error-dialog[open], #color-dialog[open] {
     width: 100vw; max-width: 100vw;
     margin: auto 0 0 0;
     border-radius: 20px 20px 0 0;
   }
-  #trade-dialog-body, #account-dialog-body { overflow-y: visible; min-height: 0; }
+  #trade-dialog-body, #account-dialog-body, #ledger-dialog-body { overflow-y: visible; min-height: 0; }
   #settings-dialog { height: auto; min-height: 0; }
   #error-dialog[open] { width: 100vw; height: auto; min-height: 0; }
 
   /* — Forms: 48px targets, 16px type (no iOS zoom), sticky primary action — */
-  #trade-form, #account-dialog-body, #settings-dialog-body { gap: 0.2rem; }
+  #trade-form, #account-dialog-body, #ledger-dialog-body, #settings-dialog-body { gap: 0.2rem; }
   label { margin-top: 1.1rem; font-size: 0.78rem; }
   input, select, textarea { min-height: 3rem; padding: 0.65rem 0.8rem; font-size: 16px; }
   select { padding-right: 2.4rem; }
-  #trade-form button.primary, #account-dialog-body button.primary {
+  #trade-form button.primary, #account-dialog-body button.primary, #ledger-dialog-body button.primary {
     position: sticky; bottom: 0;
     min-height: 3.25rem; font-size: 1.02rem; z-index: 1;
   }

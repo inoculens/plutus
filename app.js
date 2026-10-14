@@ -5317,7 +5317,8 @@ function infoDot(labelEl, openFn, valueEl) {
 // truncated: hide the decorative ones after layout settles. The pointer
 // follows the same truth — text cursor for fitting text, hand only where
 // a tap does something. Runs on every paint and on resize (truncation
-// follows width).
+// follows width). The 2px floor swallows subpixel rounding so near-fitting
+// labels never flap their dot across paints, refreshes or resizes.
 function syncInfoDots() {
   try {
     var vals = document.querySelectorAll('.stat-val[data-info-cond], .detail-meta-val[data-info-cond], .ledger-label-text[data-info-cond]');
@@ -5330,7 +5331,7 @@ function syncInfoDots() {
       var lab = null;
       try { lab = box.querySelector('.stat-label, .detail-meta-label'); } catch (e) { lab = null; }
       var overflowing = false;
-      try { overflowing = v.scrollWidth > v.clientWidth + 1; } catch (e) { overflowing = false; }
+      try { overflowing = v.scrollWidth > v.clientWidth + 2; } catch (e) { overflowing = false; }
       if (dot) dot.style.display = overflowing ? '' : 'none';
       try { v.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
       if (lab) {
@@ -5358,7 +5359,7 @@ function rateRow(label, text) {
     String(text).trim() !== '—';
   function openRate() {
     // Popup only when the text actually overflows the row.
-    if (rv.scrollWidth <= rv.clientWidth + 1) return;
+    if (rv.scrollWidth <= rv.clientWidth + 2) return;
     openNoteDialog(text, label);
   }
   if (hasContent) {
@@ -5583,7 +5584,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       (function (val, txt) {
         function open() {
           // Popup only when the text actually overflows the row.
-          if (val.scrollWidth <= val.clientWidth + 1) return;
+          if (val.scrollWidth <= val.clientWidth + 2) return;
           openNoteDialog(txt);
         }
         val.addEventListener('click', open);
@@ -5798,7 +5799,7 @@ function detailMetaRow(label, text, title) {
   v.setAttribute('tabindex', '0');
   v.setAttribute('aria-label', 'Show full ' + String(title).toLowerCase());
   function open() {
-    if (v.scrollWidth <= v.clientWidth + 1) return;
+    if (v.scrollWidth <= v.clientWidth + 2) return;
     openNoteDialog(text, title);
   }
   v.addEventListener('click', open);
@@ -5852,7 +5853,7 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   lt.textContent = full;
   l.appendChild(lt);
   function openFull() {
-    if (lt.scrollWidth <= lt.clientWidth + 1) return;
+    if (lt.scrollWidth <= lt.clientWidth + 2) return;
     openNoteDialog(full, 'Ledger ' + code);
   }
   lt.setAttribute('role', 'button');
@@ -9904,8 +9905,11 @@ function init() {
     });
     try {
       if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
-        document.fonts.ready.then(function () { syncHeroAllocHeight(); });
+        document.fonts.ready.then(function () { syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* webfont metrics settle truncation */ } });
       }
+    } catch (e) { /* ignore */ }
+    try {
+      window.addEventListener('load', function () { try { syncInfoDots(); } catch (e) { /* late layout settles truncation */ } });
     } catch (e) { /* ignore */ }
   }
   var back = document.getElementById('acct-back');

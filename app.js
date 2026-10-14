@@ -117,6 +117,13 @@ function normalizeSettings(s, fallback) {
   };
   var flt = normalizeAccountFilter(s.accountFilter);
   if (flt !== null) res.accountFilter = flt;
+  // Implicit chart of accounts: ledger code -> label, learned from usage.
+  // Invalid maps are dropped (never break settings); valid ones persist
+  // through export/import like any other setting.
+  if (s.ledgerLabels !== undefined && s.ledgerLabels !== null) {
+    if (isValidLedgerLabels(s.ledgerLabels)) res.ledgerLabels = normalizeLedgerLabels(s.ledgerLabels);
+    else res.ledgerLabels = {};
+  }
   return res;
 }
 
@@ -214,6 +221,72 @@ function isValidTxid(v) {
   return /^(0x)?[A-Za-z0-9]{8,128}$/.test(String(v).trim());
 }
 
+// --- Cash ledgers (bookkeeping) ---
+// Ledger codes are free-form: any printable label the user wants
+// ('1000', '1100', '1110', '3000 VAT', …). Hierarchy nests by prefix, with
+// digit-level parents for numeric schemes (1110 under 1100 under 1000) —
+// so any numbering scheme rolls up correctly.
+function isValidLedgerCode(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return true;
+  if (typeof v !== 'string' && typeof v !== 'number') return false;
+  var s = String(v).trim();
+  if (s.length < 1 || s.length > 24) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(s)) return false;
+  return true;
+}
+
+function isValidLedgerLabel(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return true;
+  if (typeof v !== 'string' && typeof v !== 'number') return false;
+  return String(v).trim().length <= 80;
+}
+
+function isValidLedgerLabels(map) {
+  if (map === undefined || map === null) return true;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return false;
+  var keys = Object.keys(map);
+  if (keys.length > 500) return false;
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    if (typeof k !== 'string' || k.trim() === '' || k.trim().length > 24) return false;
+    var lv = map[k];
+    if (typeof lv !== 'string' || lv.trim() === '' || lv.trim().length > 80) return false;
+  }
+  return true;
+}
+
+function normalizeLedgerLabels(map) {
+  var out = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+  Object.keys(map).forEach(function (k) {
+    if (typeof k !== 'string') return;
+    var ck = k.trim();
+    if (ck === '' || ck.length > 24) return;
+    var lv = map[k];
+    if (typeof lv !== 'string' || lv.trim() === '' || lv.trim().length > 80) return;
+    out[ck] = lv.trim();
+  });
+  return out;
+}
+
+function isCashKind(k) {
+  return String(k === undefined || k === null ? '' : k).trim().toLowerCase() === 'cash';
+}
+
+function isCashAccount(st, id) {
+  var a = accountById(st, id);
+  return !!a && isCashKind(a.kind);
+}
+
+function cashAccountIds(st) {
+  var out = {};
+  ((st && st.accounts) || []).forEach(function (a) {
+    if (a && a.id && isCashKind(a.kind)) out[a.id] = true;
+  });
+  return out;
+}
+
 function txExplorerUrl(txid) {
   return 'https://mempool.space/tx/' + encodeURIComponent(String(txid).trim());
 }
@@ -238,6 +311,10 @@ function isValidImportTrade(t, accountIds) {
   }
   // txid is optional metadata; when present it must look like a tx hash
   if (!isValidTxid(t.txid)) return false;
+  // ledger code + label are optional bookkeeping metadata (cash records);
+  // when present they must be well-formed, on every trade type
+  if (!isValidLedgerCode(t.ledger)) return false;
+  if (!isValidLedgerLabel(t.ledgerLabel)) return false;
   // networkFee: on-chain fee denominated in the transferred asset itself
   if (t.networkFee !== undefined && t.networkFee !== null && String(t.networkFee).trim() !== '') {
     if (typeof t.networkFee !== 'number' && typeof t.networkFee !== 'string') return false;
@@ -260,6 +337,16 @@ function isValidImportTrade(t, accountIds) {
     // Destination is optional: without one the transfer is an on-chain move
     // inside the same account (e.g. sweeping to a fresh address), where only
     // the network fee is lost. With one it must be a different known account.
+    // Cross-fiat cash moves carry the received amount (toQty) plus the
+    // destination fiat (toSymbol); same-fiat moves derive it from the fee.
+    if (t.toQty !== undefined && t.toQty !== null && String(t.toQty).trim() !== '') {
+      if (typeof t.toQty !== 'number' && typeof t.toQty !== 'string') return false;
+      var tto = Number(t.toQty);
+      if (!isFinite(tto) || tto <= 0) return false;
+    }
+    if (t.toSymbol !== undefined && t.toSymbol !== null && String(t.toSymbol).trim() !== '') {
+      if (!isValidSymbolCode(t.toSymbol)) return false;
+    }
     var hasTo = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
     if (accountIds !== undefined) {
       if (!Array.isArray(accountIds)) return false;
@@ -349,6 +436,9 @@ function normalizeTradeForStore(t) {
   var c = {};
   for (var k in t) { if (Object.prototype.hasOwnProperty.call(t, k)) c[k] = t[k]; }
   if (typeof c.symbol === 'string') c.symbol = c.symbol.trim().toUpperCase();
+  if (typeof c.ledger === 'string' && c.ledger.trim() !== '') c.ledger = c.ledger.trim();
+  if (typeof c.ledgerLabel === 'string' && c.ledgerLabel.trim() !== '') c.ledgerLabel = c.ledgerLabel.trim();
+  if (typeof c.toSymbol === 'string' && c.toSymbol.trim() !== '') c.toSymbol = c.toSymbol.trim().toUpperCase();
   if (typeof c.currency === 'string' && c.currency.trim() !== '') c.currency = c.currency.trim().toUpperCase();
   if (typeof c.feeCurrency === 'string' && c.feeCurrency.trim() !== '') c.feeCurrency = c.feeCurrency.trim().toUpperCase();
   if (typeof c.txid === 'string' && c.txid.trim() !== '') c.txid = c.txid.trim();
@@ -1616,6 +1706,162 @@ function heldForAccount(allTrades, accountId, symbol) {
   return p.qtyHeld;
 }
 
+// --- Cash bookkeeping engine (pure, no DOM) ---
+// Cash accounts are balance ledgers, not positions: balance = signed flows
+// in the account fiat, converted per-flow at the frozen fxLock rate.
+// income/buy credit, expense/sell debit; transfers debit the source and
+// credit the destination (same-fiat: sent − fee; cross-fiat: stored toQty).
+function cashReceivedOf(t) {
+  if (!t || t.type !== 'transfer') return 0;
+  var dest = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
+    ? String(t.symbol || '').toUpperCase()
+    : String(t.toSymbol).trim().toUpperCase();
+  if (dest !== String(t.symbol || '').toUpperCase()) {
+    var cross = (t.toQty === undefined || t.toQty === null || String(t.toQty).trim() === '') ? NaN : Number(t.toQty);
+    return (isFinite(cross) && cross > 0) ? cross : 0;
+  }
+  var sent = Number(t.qty);
+  var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
+  var nf = (isFinite(nfRaw) && nfRaw >= 0) ? nfRaw : 0;
+  if (!isFinite(sent) || sent <= 0) return 0;
+  var recv = sent - nf;
+  return (isFinite(recv) && recv > 0) ? recv : 0;
+}
+
+function cashSignedNative(t, accountId) {
+  if (!t || t.accountId !== accountId) {
+    if (t && t.toAccountId === accountId) return cashReceivedOf(t);
+    return 0;
+  }
+  var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
+  if (t.type === 'income' || t.type === 'buy') return (isFinite(q) && q > 0) ? q : 0;
+  if (t.type === 'expense') {
+    if (isFinite(q) && q > 0) return -q;
+    // Legacy qty-less expense: only the same-fiat total is a balance move.
+    var tot = Number(t.total);
+    if (isFinite(tot) && tot > 0 && String(t.currency || '').toUpperCase() === String(t.symbol || '').toUpperCase()) return -tot;
+    return 0;
+  }
+  if (t.type === 'sell') return (isFinite(q) && q > 0) ? -q : 0;
+  if (t.type === 'transfer') return (isFinite(q) && q > 0) ? -q : 0;
+  return 0;
+}
+
+function cashBalance(allTrades, accountId, main) {
+  var native = 0;
+  var inMain = 0;
+  var ticker = '';
+  var mainU = String(main || '').toUpperCase();
+  function legRate(t, isDest) {
+    if (isDest) {
+      // Destination leg is denominated in the arrival fiat: its own lock
+      // wins; a main-fiat arrival is 1 by definition.
+      var toSym = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
+        ? String(t.symbol || '').toUpperCase()
+        : String(t.toSymbol).trim().toUpperCase();
+      if (toSym === mainU) return 1;
+      if (t.toFxLock) return ledgerFxRate(t.toFxLock);
+    }
+    return ledgerFxRate(t.fxLock);
+  }
+  (allTrades || []).forEach(function (t) {
+    if (!t) return;
+    var isSrc = (t.accountId === accountId);
+    var isDest = (!isSrc && t.toAccountId === accountId);
+    if (!isSrc && !isDest) return;
+    if (isSrc && !ticker && t.symbol) ticker = String(t.symbol).toUpperCase();
+    var signed = isDest ? cashReceivedOf(t) : cashSignedNative(t, accountId);
+    if (!isFinite(signed) || signed === 0) return;
+    native += signed;
+    inMain += signed * legRate(t, isDest);
+  });
+  // Tidy binary dust; keep the sign of tiny remainders at exactly 0.
+  function tidy(v) { return (Math.abs(v) < 1e-9) ? 0 : Math.round(v * 100) / 100; }
+  return { native: tidy(native), main: tidy(inMain), ticker: ticker };
+}
+
+// Ledger tree: income/expense trades carrying a ledger code aggregate by
+// code (signed main amounts), then roll up into parents. Parent = longest
+// other known code that is a strict leading prefix, or — for numeric
+// Twinfield-style schemes — the digit-level parent (1110 → 1100 → 1000).
+// Trades without a code land in the unassigned bucket. Labels resolve
+// trade label first, then the chart map, then the bare code.
+function ledgerParentOf(code, known) {
+  var c = String(code);
+  var set = {};
+  (known || []).forEach(function (k) { set[String(k)] = true; });
+  delete set[c];
+  var best = null;
+  function consider(k) {
+    if (!set[k] || k === '') return;
+    if (best === null || k.length > best.length) best = k;
+  }
+  Object.keys(set).forEach(function (k) {
+    if (c.indexOf(k) === 0) consider(k);
+  });
+  if (/^[0-9]+$/.test(c)) {
+    var core = c.replace(/0+$/, '');
+    while (core.length > 1) {
+      core = core.slice(0, -1);
+      consider(core + new Array(c.length - core.length + 1).join('0'));
+    }
+  }
+  return best;
+}
+
+function ledgerTree(allTrades, accountId, main, labelMap) {
+  var labels = labelMap || {};
+  var own = {}; // code -> {code, amount}
+  var unassigned = 0;
+  var unassignedCount = 0;
+  (allTrades || []).forEach(function (t) {
+    if (!t || t.accountId !== accountId) return;
+    if (t.type !== 'income' && t.type !== 'expense') return;
+    var n = normalizeTrade(t);
+    var signed = (t.type === 'income' ? 1 : -1) * (isFinite(n.netMain) ? n.netMain : 0);
+    var code = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (!code) { unassigned += signed; unassignedCount++; return; }
+    if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
+    own[code].amount += signed;
+    own[code].count++;
+  });
+  var codes = Object.keys(own);
+  var nodes = {};
+  codes.forEach(function (c) {
+    var tradeLabel = '';
+    (allTrades || []).forEach(function (t) {
+      if (tradeLabel) return;
+      if (t && t.accountId === accountId && String(t.ledger || '').trim() === c && t.ledgerLabel && String(t.ledgerLabel).trim() !== '') {
+        tradeLabel = String(t.ledgerLabel).trim();
+      }
+    });
+    nodes[c] = {
+      code: c,
+      label: tradeLabel || (labels[c] ? String(labels[c]) : c),
+      own: Math.round(own[c].amount * 100) / 100,
+      count: own[c].count,
+      total: 0,
+      kids: []
+    };
+  });
+  var roots = [];
+  codes.forEach(function (c) {
+    var p = ledgerParentOf(c, codes);
+    if (p && nodes[p]) nodes[p].kids.push(nodes[c]);
+    else roots.push(nodes[c]);
+  });
+  function roll(n) {
+    var t = n.own;
+    n.kids.forEach(function (k) { t += roll(k); });
+    n.total = Math.round(t * 100) / 100;
+    n.kids.sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
+    return n.total;
+  }
+  roots.forEach(roll);
+  roots.sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
+  return { roots: roots, unassigned: Math.round(unassigned * 100) / 100, unassignedCount: unassignedCount };
+}
+
 function validateTrade(t, heldQty) {
   t = t || {};
   var type = t.type;
@@ -1707,6 +1953,19 @@ if (typeof window !== 'undefined') {
   window.Inoculens.computePortfolio = computePortfolio;
   window.Inoculens.computeAnalytics = computeAnalytics;
   window.Inoculens.heldForAccount = heldForAccount;
+  window.Inoculens.isValidLedgerCode = isValidLedgerCode;
+  window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
+  window.Inoculens.isValidLedgerLabels = isValidLedgerLabels;
+  window.Inoculens.normalizeLedgerLabels = normalizeLedgerLabels;
+  window.Inoculens.isCashKind = isCashKind;
+  window.Inoculens.isCashAccount = isCashAccount;
+  window.Inoculens.cashAccountIds = cashAccountIds;
+  window.Inoculens.cashReceivedOf = cashReceivedOf;
+  window.Inoculens.cashSignedNative = cashSignedNative;
+  window.Inoculens.cashBalance = cashBalance;
+  window.Inoculens.ledgerParentOf = ledgerParentOf;
+  window.Inoculens.ledgerTree = ledgerTree;
+  window.Inoculens.refreshLedgerList = refreshLedgerList;
   window.Inoculens.TRADE_TYPES = TRADE_TYPES;
 }
 
@@ -3535,6 +3794,41 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   var mvKnown = false;
   var unKnown = false;
   var hasRealized = false;
+  // Cash ledgers: balances count toward total Value only — never toward
+  // Unrealized/Realized/Return/Invested/Spent. Same asset filter as cards.
+  var cashIdsS = {};
+  try { cashIdsS = cashAccountIds(st); } catch (e) { cashIdsS = {}; }
+  var cashTickers = {};
+  try {
+    ((st && st.accounts) || []).forEach(function (a) {
+      if (a && a.id && cashIdsS[a.id] && a.ticker) cashTickers[a.id] = String(a.ticker).toUpperCase();
+    });
+  } catch (e) { cashTickers = {}; }
+  var cashFilter = null;
+  try { cashFilter = selectedTickers(st); } catch (e) { cashFilter = null; }
+  function cashVisible(aid) {
+    if (!cashIdsS[aid]) return false;
+    if (cashFilter === null) return true;
+    return cashFilter.indexOf(cashTickers[aid] || '') !== -1;
+  }
+  var dtrCash = null;
+  try { dtrCash = dtradesOpt || convertTrades(st.trades, main); } catch (e) { dtrCash = []; }
+  var cashTrades = 0;
+  (dtrCash || []).forEach(function (t) {
+    if (!t) return;
+    if ((t.accountId && cashVisible(t.accountId)) || (t.toAccountId && cashVisible(t.toAccountId))) cashTrades++;
+  });
+  var cashBalTotal = 0;
+  var cashBalKnown = false;
+  Object.keys(cashIdsS).forEach(function (aid) {
+    if (!cashVisible(aid)) return;
+    var hasAny = (dtrCash || []).some(function (t) { return !!t && (t.accountId === aid || t.toAccountId === aid); });
+    if (!hasAny) return;
+    var b = cashBalance(dtrCash, aid, main);
+    if (isFinite(b.main)) { cashBalTotal += b.main; cashBalKnown = true; }
+  });
+  if (cashBalKnown) { mv += cashBalTotal; mvKnown = true; }
+  var anyContent = rows.length > 0 || cashTrades > 0;
   rows.forEach(function (p) {
     rz += p.realized;
     if (Math.abs(p.realized || 0) > 1e-9) hasRealized = true;
@@ -3555,6 +3849,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
     var buyBySym = {};
     dtr.forEach(function (t) {
       if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
+      if (t.accountId && cashIdsS[t.accountId]) return; // cash is balance-only
       var s = String(t.symbol || '').toUpperCase();
       if (!s) return;
       var q = Number(t.qty);
@@ -3580,7 +3875,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   var tb = document.getElementById('tb-totals');
   if (tb) {
     var nAccts = (typeof nAcctsOpt === 'number' && isFinite(nAcctsOpt)) ? nAcctsOpt : (st.accounts || []).length;
-    tb.textContent = rows.length
+    tb.textContent = anyContent
       ? (nAccts + (nAccts === 1 ? ' account' : ' accounts') + ' · ' +
         (st.settings.costMethod === 'fifo' ? 'FIFO' : 'Average cost') + ' · in ' + main)
       : '';
@@ -3588,7 +3883,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   var host = document.getElementById('summary-cards');
   if (!host) return;
   host.innerHTML = '';
-  if (!rows.length) {
+  if (!anyContent) {
     var p = document.createElement('p');
     p.className = 'muted';
     p.textContent = 'No trades yet — add your first trade.';
@@ -3612,7 +3907,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   try { hvn = document.getElementById('hero-value-num'); } catch (e0) { hvn = null; }
   var hvTarget = hvn || hv;
   if (hvTarget) {
-    hvTarget.textContent = rows.length ? (mvKnown ? fmtMoney(mv, main) : '—') : '—';
+    hvTarget.textContent = anyContent ? (mvKnown ? fmtMoney(mv, main) : '—') : '—';
   }
   if (hv) hv.title = hvTarget ? hvTarget.textContent : '';
   fitHeroValue();
@@ -3622,7 +3917,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   // the box.
   var hi = document.getElementById('hero-invested');
   if (hi) {
-    if (!rows.length) {
+    if (!anyContent) {
       hi.textContent = '';
       hi.hidden = true;
     } else {
@@ -3631,6 +3926,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
         var dtrInv = dtradesOpt || convertTrades(st.trades, main);
         dtrInv.forEach(function (t) {
           if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
+          if (t.accountId && cashIdsS[t.accountId]) return; // cash is balance-only
           var q = Number(t.qty);
           if (!isFinite(q) || q <= 0) return;
           var nn = normalizeTrade(t);
@@ -3649,7 +3945,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   // above invested. feeMain is never added: the all-in totals include it.
   var hs = document.getElementById('hero-spent');
   if (hs) {
-    if (!rows.length) {
+    if (!anyContent) {
       hs.textContent = '';
       hs.hidden = true;
     } else {
@@ -3664,6 +3960,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
         } catch (e) { kindsSpent = {}; }
         dtrSpent.forEach(function (t) {
           if (!t) return;
+          if (t.accountId && cashIdsS[t.accountId]) return; // cash is balance-only
           var sn = normalizeTrade(t);
           if (t.type === 'sell') {
             if (isFinite(sn.totalMain) && sn.totalMain > 0) spent += sn.totalMain;
@@ -3690,7 +3987,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   }
   var hp = document.getElementById('hero-pl');
   if (hp) {
-    if (!rows.length || !plKnown) {
+    if (!anyContent || !plKnown) {
       hp.textContent = '';
       hp.className = 'hero-pl';
     } else {
@@ -4093,6 +4390,11 @@ function renderAccounts(st) {
   // Display conversion: native amounts stay in stone; everything shown is
   // converted into the CURRENT main at historical ECB rates (cached).
   var dtrades = convertTrades(st.trades, main);
+  // Cash accounts are balance ledgers, never positions: the joint run below
+  // stays whole (so cross-account transfer basis never shifts), but cash
+  // rows are dropped at aggregation — cards and the hero add cash balances
+  // explicitly instead.
+  var cashIds = cashAccountIds(st);
   // Joint portfolio engine: one date-ordered pass keeps per-account cost
   // queues separate (so AGGREGATE-BEATS-GLOBAL holds for buy/sell), while
   // transfers move basis from source to dest at the source's basis — the
@@ -4104,6 +4406,7 @@ function renderAccounts(st) {
   var perAcctRows;
   if (pf && pf.byAccount) {
     perAcctRows = visibleAccounts.map(function (acc) {
+      if (cashIds[acc.id]) return []; // cash ledgers skip the engine
       var m = pf.byAccount[acc.id];
       if (!m) return [];
       var arr = [];
@@ -4113,7 +4416,9 @@ function renderAccounts(st) {
     });
   } else {
     // Fallback: independent per-account runs (no transfers in legacy data).
+    // Cash accounts skip the engine (balance ledgers).
     perAcctRows = visibleAccounts.map(function (acc) {
+      if (isCashKind(acc.kind)) return [];
       return computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
     });
   }
@@ -4252,13 +4557,23 @@ function renderAccounts(st) {
     figs.className = 'acct-figs';
     var valv = document.createElement('span');
     valv.className = 'acct-value';
-    valv.textContent = mvKnown ? fmtMoney(mv, main) : (atrades.length ? '—' : 'New');
-    figs.appendChild(valv);
     var plv = document.createElement('span');
-    var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
-    plv.className = 'acct-pl ' + plClass(pl);
-    plv.textContent = hasKnownPl ? fmtMoney(pl, main) : (atrades.length ? '—' : 'New');
-    if (isFinite(Number(pl)) && hasKnownPl) plv.setAttribute('data-value', String(Number(pl)));
+    if (isCashKind(acc.kind)) {
+      // Balance ledger card: value = balance in main fiat, second line =
+      // balance in the account fiat. Never P&L.
+      var cbal = cashBalance(dtrades, acc.id, main);
+      valv.textContent = atrades.length ? fmtMoney(cbal.main, main) : 'New';
+      if (atrades.length && isFinite(Number(cbal.main))) valv.setAttribute('data-value', String(Number(cbal.main)));
+      plv.className = 'acct-pl';
+      plv.textContent = atrades.length ? (fmtQty(cbal.native, cbal.ticker || acc.ticker) + ' ' + String(cbal.ticker || acc.ticker || '').toUpperCase()) : 'New';
+    } else {
+      valv.textContent = mvKnown ? fmtMoney(mv, main) : (atrades.length ? '—' : 'New');
+      var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
+      plv.className = 'acct-pl ' + plClass(pl);
+      plv.textContent = hasKnownPl ? fmtMoney(pl, main) : (atrades.length ? '—' : 'New');
+      if (isFinite(Number(pl)) && hasKnownPl) plv.setAttribute('data-value', String(Number(pl)));
+    }
+    figs.appendChild(valv);
     figs.appendChild(plv);
     card.appendChild(figs);
     if (selectionMode) {
@@ -5052,6 +5367,11 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     }
     box.appendChild(noteRow);
   }
+  if (t.ledger && String(t.ledger).trim() !== '') {
+    var ledTxt = String(t.ledger).trim();
+    if (t.ledgerLabel && String(t.ledgerLabel).trim() !== '') ledTxt += ' · ' + String(t.ledgerLabel).trim();
+    box.appendChild(statRow('Ledger', ledTxt, null, false));
+  }
   if (t.txid && isValidTxid(t.txid)) {
     var txFull = String(t.txid).trim();
     var txRow = document.createElement('div');
@@ -5261,6 +5581,55 @@ function detailMetaRow(label, text, title) {
   return d;
 }
 
+function ledgerRowEl(code, label, total, main, depth) {
+  var d = document.createElement('div');
+  d.className = 'stat-row ledger-row';
+  d.setAttribute('data-label', 'ledger');
+  d.setAttribute('data-ledger', code);
+  if (isFinite(Number(total))) d.setAttribute('data-value', String(Number(total)));
+  try { d.style.paddingLeft = 'calc(0.6rem + ' + (depth * 1.1) + 'rem)'; } catch (e) { /* ignore */ }
+  var l = document.createElement('span');
+  l.className = 'stat-label';
+  l.textContent = code + ((label && label !== code) ? ' · ' + label : '');
+  var v = document.createElement('span');
+  v.className = 'stat-val num ' + (plClass(total) || '');
+  v.textContent = fmtMoney(total, main);
+  d.appendChild(l);
+  d.appendChild(v);
+  return d;
+}
+
+// Cash account detail: balance cards plus the bookkeeping ledger tree
+// (prefix roll-up). No cost-basis cards, no spent/fees lines — the flows
+// below plus the tree are the accounting view.
+function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
+  stats.innerHTML = ''; // drop the cost-basis grid (built for assets above)
+  var bal = cashBalance(dtrades, acc.id, main);
+  stats.appendChild(statCard('Balance', fmtQty(bal.native, bal.ticker || acc.ticker) + ' ' + String(bal.ticker || acc.ticker || '').toUpperCase(), bal.native));
+  stats.appendChild(statCard('Value', fmtMoney(bal.main, main), bal.main));
+  host.appendChild(stats);
+  var labels = (st.settings && st.settings.ledgerLabels) || {};
+  var tree = ledgerTree(dtrades, acc.id, main, labels);
+  if (!tree.roots.length && !tree.unassignedCount) return;
+  var sec = document.createElement('div');
+  sec.className = 'section-head';
+  var h = document.createElement('h2');
+  h.className = 'section-title';
+  h.textContent = 'Ledgers';
+  sec.appendChild(h);
+  host.appendChild(sec);
+  var list = document.createElement('div');
+  list.className = 'ledger-list';
+  (function walk(nodes, depth) {
+    nodes.forEach(function (n) {
+      list.appendChild(ledgerRowEl(n.code, n.label, n.total, main, depth));
+      if (n.kids && n.kids.length) walk(n.kids, depth + 1);
+    });
+  })(tree.roots, 0);
+  if (tree.unassignedCount) list.appendChild(ledgerRowEl('—', 'No ledger', tree.unassigned, main, 0));
+  host.appendChild(list);
+}
+
 function renderAccountDetail(st, id) {
   var host = document.getElementById('account-detail');
   if (!host) return;
@@ -5272,14 +5641,15 @@ function renderAccountDetail(st, id) {
   var main = st.settings.mainCurrency;
   var method = st.settings.costMethod;
   var dtrades = convertTrades(st.trades, main);
+  var isCashAccD = isCashKind(acc.kind);
   var rows = [];
   try {
     var pfDet = computePortfolio(dtrades, livePrices, method);
     var mDet = pfDet.byAccount[id];
-    if (mDet) mDet.forEach(function (r) { rows.push(r); });
+    if (mDet && !isCashAccD) mDet.forEach(function (r) { rows.push(r); });
     rows.sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
   } catch (e) {
-    rows = computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
+    rows = isCashAccD ? [] : computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
   }
   var atrades = accountTrades({ trades: dtrades }, acc.id);
   // FIFO lot linkage, resolved once for every visible card: every trade by
@@ -5432,7 +5802,11 @@ function renderAccountDetail(st, id) {
   var feesSum = 0, incomeSum = 0;
   rows.forEach(function (r) { feesSum += Number(r.fees) || 0; incomeSum += Number(r.income) || 0; });
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
-  host.appendChild(stats);
+  if (isCashAccD) {
+    buildCashDetailStats(st, acc, dtrades, main, stats, host);
+  } else {
+    host.appendChild(stats);
+  }
   // Per-account spent (this account only): lifetime sell proceeds, cash legs
   // and crypto fees at the frozen tx-date rate — same definition as the home
   // SPENT AMOUNT, scoped to atrades. Orange pill above the red fees pill.
@@ -5458,7 +5832,7 @@ function renderAccountDetail(st, id) {
       }
     });
   } catch (e) { spentSum = 0; }
-  if (spentSum > 1e-9) {
+  if (!isCashAccD && spentSum > 1e-9) {
     var spentLine = document.createElement('p');
     spentLine.className = 'spent-line';
     spentLine.setAttribute('data-label', 'Spent amount');
@@ -5466,7 +5840,7 @@ function renderAccountDetail(st, id) {
     spentLine.textContent = 'Spent amount: ' + fmtMoney(spentSum, main);
     host.appendChild(spentLine);
   }
-  if (Math.abs(feesSum) > 1e-9) {
+  if (!isCashAccD && Math.abs(feesSum) > 1e-9) {
     var feesLine = document.createElement('p');
     feesLine.className = 'fees-line';
     feesLine.setAttribute('data-label', 'Total fees paid');
@@ -6487,26 +6861,51 @@ function buildAccountDialog() {
   wrap.innerHTML =
     '<label for="na-name">Account name</label>' +
     '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cold wallet">' +
-    '<label for="na-ticker">Ticker</label>' +
-    '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
+    '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
+    '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<label for="na-kind">Asset type</label>' +
     '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
+    '<div id="na-fiat-row" hidden><label for="na-fiat">Currency</label>' +
+    '<select id="na-fiat"><option value="EUR">EUR</option><option value="USD">USD</option><option value="GBP">GBP</option><option value="CHF">CHF</option><option value="RON">RON</option><option value="CUSTOM">Other…</option></select></div>' +
+    '<div id="na-fiatcode-row" hidden><label for="na-fiatcode">Currency code</label>' +
+    '<input id="na-fiatcode" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY"></div>' +
     '<label for="na-address">Label (optional)</label>' +
     '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="e.g. cold storage">' +
     '<p id="na-error" class="banner-error" role="alert" hidden></p>' +
     '<button id="na-create" class="primary" type="button">Create account</button>';
   host.appendChild(wrap);
+  function syncAccountKindUI() {
+    var isCash = uiVal('na-kind', 'crypto') === 'cash';
+    var tRow = document.getElementById('na-ticker-row');
+    if (tRow) tRow.hidden = isCash;
+    var fRow = document.getElementById('na-fiat-row');
+    if (fRow) fRow.hidden = !isCash;
+    var fcRow = document.getElementById('na-fiatcode-row');
+    var needCustom = isCash && uiVal('na-fiat', 'EUR') === 'CUSTOM';
+    if (fcRow) fcRow.hidden = !needCustom;
+  }
+  document.getElementById('na-kind').addEventListener('change', syncAccountKindUI);
+  document.getElementById('na-fiat').addEventListener('change', syncAccountKindUI);
   document.getElementById('na-create').addEventListener('click', function () {
     naError(null);
-    var tk = uiVal('na-ticker', '').trim().toUpperCase();
-    if (!tk) { naError('Ticker is required (e.g. BTC).'); return; }
-    if (!/^[A-Z0-9._-]{1,12}$/.test(tk)) { naError('Ticker looks invalid — letters/numbers, up to 12 chars.'); return; }
+    var kind = uiVal('na-kind', 'crypto');
+    var tk;
+    if (kind === 'cash') {
+      var fiat = uiVal('na-fiat', 'EUR');
+      tk = (fiat === 'CUSTOM' ? uiVal('na-fiatcode', '').trim().toUpperCase() : String(fiat).toUpperCase());
+      if (!isValidCurrencyCode(tk)) { naError('Pick a currency for the cash account (or enter a 2–10 letter code).'); return; }
+    } else {
+      tk = uiVal('na-ticker', '').trim().toUpperCase();
+      if (!tk) { naError('Ticker is required (e.g. BTC).'); return; }
+      if (!/^[A-Z0-9._-]{1,12}$/.test(tk)) { naError('Ticker looks invalid — letters/numbers, up to 12 chars.'); return; }
+    }
     var hadTrades = (loadState().trades || []).length > 0;
-    var acc = createAccount(uiVal('na-name', ''), tk, uiVal('na-kind', 'crypto'), { address: uiVal('na-address', '') });
+    var acc = createAccount(uiVal('na-name', ''), tk, kind, { address: uiVal('na-address', '') });
     if (!acc) { naError('Could not create the account — storage unavailable.'); return; }
     uiSetVal('na-name', '');
     uiSetVal('na-ticker', '');
     uiSetVal('na-address', '');
+    uiSetVal('na-fiatcode', '');
     closeDialog('account-dialog');
     // Story guidance: first account + no trades yet → continue straight
     // to Step 2 instead of leaving the user on a quiet screen.
@@ -6550,6 +6949,12 @@ function buildTradeForm() {
     '<select id="t-currency">' + ccyOptions('EUR') + '</select></div>' +
     '<label for="t-custom-ccy" id="t-custom-ccy-label" hidden>Custom currency code</label>' +
     '<input id="t-custom-ccy" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY" hidden>' +
+    '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger</label>' +
+    '<input id="t-ledger" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24" list="t-ledger-codes">' +
+    '<datalist id="t-ledger-codes"></datalist>' +
+    '<label for="t-ledger-label">Ledger label (optional)</label>' +
+    '<input id="t-ledger-label" autocomplete="off" spellcheck="false" placeholder="e.g. Income from X" maxlength="80">' +
+    '<p class="fld-hint" id="t-ledger-hint">Bookkeeping code for this record — subledgers nest by prefix (1110 under 1100 under 1000).</p></div>' +
     '<label for="t-date">Date</label>' +
     '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" maxlength="10">' +
     '<p class="fld-hint">Format dd/mm/yyyy.</p>' +
@@ -6588,7 +6993,7 @@ function buildTradeForm() {
   var toQtyEl = document.getElementById('t-toqty');
   if (toQtyEl) toQtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var toSel = document.getElementById('t-toaccount');
-  if (toSel) toSel.addEventListener('change', function () { /* hint only */ });
+  if (toSel) toSel.addEventListener('change', function () { try { syncTradeTypeUI(); } catch (e) { /* hint only */ } });
   var ccy = document.getElementById('t-currency');
   var custom = document.getElementById('t-custom-ccy');
   ccy.addEventListener('change', function () {
@@ -6605,6 +7010,42 @@ function syncTradeTypeUI() {
   var type = sideEl ? sideEl.value : 'buy';
   function setHidden(id, hide) { var el = document.getElementById(id); if (el) el.hidden = !!hide; }
   function setLabel(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+  // Cash accounts are bookkeeping ledgers: only money-movement types.
+  // (Legacy buy/sell/swap records on cash stay editable, never creatable.)
+  var cashAcc = null;
+  try { cashAcc = accountById(loadState(), uiVal('t-account', '')); } catch (e) { cashAcc = null; }
+  var isCash = !!(cashAcc && isCashKind(cashAcc.kind));
+  var cashTicker = isCash ? String(cashAcc.ticker || '').toUpperCase() : '';
+  var legacyCashEdit = false;
+  try { legacyCashEdit = !!(editingTradeId && (type === 'buy' || type === 'sell' || type === 'swap')); } catch (e) { legacyCashEdit = false; }
+  if (isCash && !legacyCashEdit && sideEl) {
+    var want = ['income', 'expense', 'transfer'];
+    var labels = { income: 'Income', expense: 'Expense', transfer: 'Transfer' };
+    var cur = sideEl.value;
+    sideEl.innerHTML = '';
+    want.forEach(function (v) {
+      var o = document.createElement('option');
+      o.value = v;
+      o.textContent = labels[v];
+      sideEl.appendChild(o);
+    });
+    sideEl.value = (want.indexOf(cur) !== -1) ? cur : 'income';
+    type = sideEl.value;
+  } else if (!isCash && sideEl && sideEl.options && sideEl.options.length !== 6) {
+    // Back to a non-cash account: restore the full type list.
+    var full = ['buy', 'sell', 'transfer', 'income', 'expense', 'swap'];
+    var fullLabels = { buy: 'Buy', sell: 'Sell', transfer: 'Transfer (self move + gas)', income: 'Income (reward / airdrop)', expense: 'Expense / fee', swap: 'Swap (coin → coin)' };
+    var curF = sideEl.value;
+    sideEl.innerHTML = '';
+    full.forEach(function (v) {
+      var oo = document.createElement('option');
+      oo.value = v;
+      oo.textContent = fullLabels[v];
+      sideEl.appendChild(oo);
+    });
+    if (full.indexOf(curF) !== -1) sideEl.value = curF;
+    type = sideEl.value;
+  }
   var isTransfer = type === 'transfer';
   var isSwap = type === 'swap';
   var isIncome = type === 'income';
@@ -6639,15 +7080,15 @@ function syncTradeTypeUI() {
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else if (isIncome) {
-    setLabel('t-qty-label', 'Quantity received');
+    setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : 'Quantity received');
     setLabel('t-total-label', 'Market value at receipt (optional, 0 = free)');
-    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
+    setLabel('t-qty-hint', isCash ? 'Money in, in the account currency.' : 'Amount you received (net of any fee taken in asset).');
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else if (isExpense) {
-    setLabel('t-qty-label', 'Quantity lost (optional if cash-only)');
+    setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : 'Quantity lost (optional if cash-only)');
     setLabel('t-total-label', 'Fiat lost (optional if crypto-only)');
-    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
+    setLabel('t-qty-hint', isCash ? 'Money out, in the account currency.' : 'Amount you received (net of any fee taken in asset).');
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else {
@@ -6657,6 +7098,39 @@ function syncTradeTypeUI() {
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   }
+  // Cash income/expense amounts live in the account fiat alone: the total
+  // and currency rows hide (submit derives total=qty, currency=ticker).
+  var cashSimple = isCash && (isIncome || isExpense);
+  if (cashSimple) {
+    setHidden('t-total-row', true);
+    setHidden('t-currency-row', true);
+    var custC = document.getElementById('t-custom-ccy');
+    if (custC) custC.hidden = true;
+    var clabC = document.getElementById('t-custom-ccy-label');
+    if (clabC) clabC.hidden = true;
+  }
+  // Ledger row: cash income/expense only (required at submit).
+  setHidden('t-ledger-row', !(isCash && (isIncome || isExpense)));
+  try {
+    var dl = document.getElementById('t-ledger-codes');
+    if (dl && isCash && (isIncome || isExpense)) {
+      var known = {};
+      try {
+        var stL = loadState();
+        ((stL && stL.trades) || []).forEach(function (t) {
+          if (t && t.ledger && String(t.ledger).trim() !== '') known[String(t.ledger).trim()] = true;
+        });
+        var mapL = (stL && stL.settings && stL.settings.ledgerLabels) || {};
+        Object.keys(mapL).forEach(function (k) { known[String(k).trim()] = true; });
+      } catch (e) { /* ignore */ }
+      dl.innerHTML = '';
+      Object.keys(known).sort().forEach(function (c) {
+        var op = document.createElement('option');
+        op.value = c;
+        dl.appendChild(op);
+      });
+    }
+  } catch (e) { /* ignore */ }
   if (!isTransfer) {
     // Leaving a transfer must restore the custom-currency input when the
     // (now visible again) Currency select sits on Other….
@@ -6691,7 +7165,8 @@ function syncTradeTypeUI() {
       }
       (st.accounts || []).forEach(function (a) {
         if (a.id === fromId) return;
-        if (isTransfer && fromAcc && String(a.ticker).toUpperCase() !== String(fromAcc.ticker).toUpperCase()) return; // same asset only
+        if (isTransfer && fromAcc && !isCashKind(fromAcc.kind) && String(a.ticker).toUpperCase() !== String(fromAcc.ticker).toUpperCase()) return; // same asset only (non-cash)
+        if (isTransfer && fromAcc && isCashKind(fromAcc.kind) && !isCashKind(a.kind)) return; // cash moves only between cash accounts
         var o = document.createElement('option');
         o.value = a.id;
         o.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
@@ -6703,10 +7178,30 @@ function syncTradeTypeUI() {
       // first entry (the on-chain move for transfers).
       if (cur && curKept) toSel.value = cur;
       else if (toSel.options.length) toSel.selectedIndex = 0;
+      // Cross-fiat cash move: the received amount is in the destination
+      // fiat, converted at the trade-date rate — not a same-unit fee.
+      var crossFiat = false;
+      try {
+        var toAccPick = accountById(st, toSel.value);
+        crossFiat = !!(isTransfer && isCash && toAccPick && isCashKind(toAccPick.kind) &&
+          String(toAccPick.ticker).toUpperCase() !== cashTicker);
+      } catch (e) { crossFiat = false; }
+      if (isTransfer && isCash) {
+        setLabel('t-qty-label', 'You send (in ' + cashTicker + ')');
+        if (crossFiat) {
+          var destTick = '';
+          try { destTick = String(accountById(st, toSel.value).ticker).toUpperCase(); } catch (e) { destTick = ''; }
+          setLabel('t-toqty-label', 'You receive (in ' + destTick + ')');
+        }
+      }
       if (hint) {
         if (isTransfer && eligible === 0) {
           var need = fromAcc ? String(fromAcc.ticker).toUpperCase() : 'this asset';
-          hint.textContent = 'No other ' + need + ' account — recording as an on-chain move in this account.';
+          hint.textContent = isCash
+            ? 'No other cash account — create one to move money between accounts.'
+            : 'No other ' + need + ' account — recording as an on-chain move in this account.';
+        } else if (isTransfer && crossFiat) {
+          hint.textContent = 'Converts at the trade-date rate — enter what arrives in the destination fiat.';
         } else {
           hint.textContent = 'Transfer moves cost basis — only the network + fiat fees count as losses.';
         }
@@ -6742,6 +7237,18 @@ function syncTransferFeePreview() {
   if (!sideEl || sideEl.value !== 'transfer') return;
   var hint = document.getElementById('t-toqty-hint');
   var feeInput = document.getElementById('t-networkfee');
+  // Cross-fiat cash move: received is a converted amount, not sent − fee.
+  try {
+    var stx = loadState();
+    var fromX = accountById(stx, uiVal('t-account', ''));
+    var toX = accountById(stx, uiVal('t-toaccount', ''));
+    if (fromX && toX && isCashKind(fromX.kind) && isCashKind(toX.kind) &&
+      String(fromX.ticker).toUpperCase() !== String(toX.ticker).toUpperCase()) {
+      if (feeInput) feeInput.value = '0';
+      if (hint) hint.textContent = 'Converted at the trade-date rate — enter what arrives.';
+      return;
+    }
+  } catch (e) { /* same-unit path below */ }
   var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-toqty', ''));
   var sym = '';
   try {
@@ -6801,6 +7308,8 @@ function resetTradeForm() {
   uiSetVal('t-note', '');
   uiSetVal('t-txid', '');
   uiSetVal('t-networkfee', '');
+  uiSetVal('t-ledger', '');
+  uiSetVal('t-ledger-label', '');
   uiSetVal('t-manual-rate', '');
   uiSetVal('t-manual-price', '');
   var toSel = document.getElementById('t-toaccount');
@@ -6880,6 +7389,19 @@ function openEditTrade(tradeId) {
   var sideSel = document.getElementById('t-side');
   if (sideSel) {
     var tt = tr.type === 'buy' || tr.type === 'sell' || tr.type === 'transfer' || tr.type === 'income' || tr.type === 'expense' ? tr.type : 'buy';
+    // Legacy buy/sell/swap on cash stays editable: ensure the full type
+    // list exists before selecting (cash-new mode filters it).
+    if ((tt === 'buy' || tt === 'sell' || tt === 'swap') && sideSel.options && sideSel.options.length !== 6) {
+      var fullE = ['buy', 'sell', 'transfer', 'income', 'expense', 'swap'];
+      var fullLE = { buy: 'Buy', sell: 'Sell', transfer: 'Transfer (self move + gas)', income: 'Income (reward / airdrop)', expense: 'Expense / fee', swap: 'Swap (coin → coin)' };
+      sideSel.innerHTML = '';
+      fullE.forEach(function (v) {
+        var ooe = document.createElement('option');
+        ooe.value = v;
+        ooe.textContent = fullLE[v];
+        sideSel.appendChild(ooe);
+      });
+    }
     sideSel.value = tt;
   }
   syncLockedSymbol();
@@ -6899,12 +7421,16 @@ function openEditTrade(tradeId) {
   uiSetVal('t-date', fmtDateDmy(tr.date || todayStr()));
   uiSetVal('t-fee', tr.fee !== undefined && tr.fee !== null ? String(tr.fee) : '');
   uiSetVal('t-note', tr.note || '');
+  uiSetVal('t-ledger', (tr.ledger === undefined || tr.ledger === null) ? '' : String(tr.ledger));
+  uiSetVal('t-ledger-label', (tr.ledgerLabel === undefined || tr.ledgerLabel === null) ? '' : String(tr.ledgerLabel));
   uiSetVal('t-txid', tr.txid !== undefined && tr.txid !== null ? String(tr.txid) : '');
   uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
   if (tr.type === 'transfer') {
     var trQty = Number(tr.qty);
     var trNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
-    if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
+    if (tr.toQty !== undefined && tr.toQty !== null && String(tr.toQty).trim() !== '' && isFinite(Number(tr.toQty))) {
+      uiSetVal('t-toqty', String(Number(tr.toQty))); // cross-fiat cash move
+    } else if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
       var recv = roundQty8(trQty - trNf);
       uiSetVal('t-toqty', String(recv));
     }
@@ -6969,6 +7495,25 @@ function tradeFormError(msg) {
   }
 }
 
+// Implicit chart of accounts: remember a ledger label the user typed so
+// the datalist and reports can reuse it. Historic trades keep their own
+// stored labels; this only updates the settings map.
+function learnLedgerLabel(st, trade) {
+  try {
+    if (!st || !trade) return;
+    var code = (trade.ledger === undefined || trade.ledger === null) ? '' : String(trade.ledger).trim();
+    var label = (trade.ledgerLabel === undefined || trade.ledgerLabel === null) ? '' : String(trade.ledgerLabel).trim();
+    if (code === '' || label === '') return;
+    if (!st.settings || typeof st.settings !== 'object') return;
+    var map = st.settings.ledgerLabels;
+    if (!map || typeof map !== 'object' || Array.isArray(map)) {
+      map = {};
+      st.settings.ledgerLabels = map;
+    }
+    if (map[code] !== label) map[code] = label;
+  } catch (e) { /* ignore */ }
+}
+
 function onTradeSubmit(ev) {
   if (ev && ev.preventDefault) ev.preventDefault();
   tradeFormError(null);
@@ -6981,6 +7526,13 @@ function onTradeSubmit(ev) {
   if (!acc) { tradeFormError('Create your first account to enable Add record.'); return; }
   var symbol = String(acc.ticker).toUpperCase();
   var accountId = acc.id;
+  var isCashAcc = isCashKind(acc.kind);
+  var isEditing = !!(editingTradeId);
+  // Cash accounts are bookkeeping ledgers: only money-movement types.
+  if (isCashAcc && !isEditing && (side === 'buy' || side === 'sell' || side === 'swap')) {
+    tradeFormError('Cash accounts use income, expense and transfer — buy/sell/swap are for assets.');
+    return;
+  }
   var submitBtn = document.getElementById('t-submit');
   function lockSubmit(locked, label) {
     if (!submitBtn) return;
@@ -7001,12 +7553,21 @@ function onTradeSubmit(ev) {
   if (manualRate !== null && (!isFinite(manualRate) || manualRate <= 0)) { tradeFormError('Manual rate must be > 0.'); return; }
   var manualPrice = (manualPriceRaw === '') ? null : Number(manualPriceRaw);
   if (manualPrice !== null && (!isFinite(manualPrice) || manualPrice <= 0)) { tradeFormError('Manual price must be > 0.'); return; }
-  var isEditing = !!(editingTradeId);
+  // Ledger inputs (cash income/expense). Length-checked here; attached below.
+  var ledgerCode = uiVal('t-ledger', '').trim();
+  var ledgerLabel = uiVal('t-ledger-label', '').trim();
+  if (ledgerCode !== '' && !isValidLedgerCode(ledgerCode)) { tradeFormError('Ledger code is too long — up to 24 characters.'); return; }
+  if (ledgerLabel !== '' && !isValidLedgerLabel(ledgerLabel)) { tradeFormError('Ledger label is too long — up to 80 characters.'); return; }
+  if (isCashAcc && (side === 'income' || side === 'expense') && ledgerCode === '') {
+    tradeFormError('Ledger code is required on cash records (e.g. 1100).');
+    return;
+  }
   // --- Swap: creates a linked sell+buy pair ---
   if (side === 'swap' && !isEditing) {
     var toAccSwap = accountById(st0, uiVal('t-toaccount', ''));
     if (!toAccSwap) { tradeFormError('Pick a destination account for the swap.'); return; }
     if (toAccSwap.id === accountId) { tradeFormError('Swap needs two different accounts.'); return; }
+    if (isCashAcc || isCashKind(toAccSwap.kind)) { tradeFormError('Cash accounts do not swap — record income, expense or transfer instead.'); return; }
     var fromSym = symbol;
     var toSym = String(toAccSwap.ticker).toUpperCase();
     if (fromSym === toSym) { tradeFormError('Same asset — use Transfer instead of Swap.'); return; }
@@ -7107,7 +7668,21 @@ function onTradeSubmit(ev) {
   // Send + receive mode: the fee is always the difference (exchange +
   // network fee), recorded as the loss — e.g. exchange → self-custody or
   // wallet → wallet. Received is required; the fee field is computed-only.
+  // Cross-fiat cash moves are the exception: received is a converted amount
+  // in the destination fiat (trade-date rate), with no network fee.
+  var toAccId = uiVal('t-toaccount', '');
+  var toAccCash = accountById(st0, toAccId);
+  var isCrossFiat = !!(isCashAcc && side === 'transfer' && toAccCash && isCashKind(toAccCash.kind) &&
+    String(toAccCash.ticker).toUpperCase() !== symbol);
   if (side === 'transfer') {
+    if (isCrossFiat) {
+      var sentX = Number(qtyRaw);
+      var recvX = Number(toQtyRaw);
+      if (!isFinite(sentX) || sentX <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
+      if (!isFinite(recvX) || recvX <= 0) { tradeFormError('Enter what arrives in the destination fiat (> 0).'); return; }
+      networkFee = 0;
+      uiSetVal('t-networkfee', '0');
+    } else {
     if (String(toQtyRaw).trim() === '') { tradeFormError('Enter what you received (> 0).'); return; }
     var sentChk = Number(qtyRaw);
     var recvChk = Number(toQtyRaw);
@@ -7116,13 +7691,21 @@ function onTradeSubmit(ev) {
     if (recvChk > sentChk) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
     networkFee = roundQty8(sentChk - recvChk);
     uiSetVal('t-networkfee', String(networkFee));
+    }
   }
-  var toAccId = uiVal('t-toaccount', '');
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
   if (!isFinite(fee) || fee < 0) { tradeFormError('Fee must be >= 0.'); return; }
   if (!isFinite(networkFee) || networkFee < 0) { tradeFormError('Transfer fees must be >= 0.'); return; }
   var qty = (side === 'expense' && String(qtyRaw).trim() === '') ? null : Number(qtyRaw);
   var total = (String(totalRaw).trim() === '') ? (side === 'buy' || side === 'sell' ? NaN : 0) : Number(totalRaw);
+  // Cash income/expense amounts live in the account fiat alone: the amount
+  // is the quantity, and total/currency derive from it (the rows hide).
+  if (isCashAcc && (side === 'income' || side === 'expense')) {
+    if (!isFinite(qty) || qty <= 0) { tradeFormError('Amount must be > 0.'); return; }
+    total = qty;
+    currency = symbol;
+    feeCurrency = symbol;
+  }
   if (side === 'transfer') {
     // Transfers carry no fiat of their own: the network fee IS the fee,
     // valued in fiat at the frozen historical rate. Ignore any stale fiat
@@ -7143,7 +7726,9 @@ function onTradeSubmit(ev) {
     if (toAccId && !toAccT) { tradeFormError('Destination account not found.'); return; }
     if (toAccT) {
       if (toAccT.id === accountId) { tradeFormError('Transfer needs two different accounts.'); return; }
-      if (String(toAccT.ticker).toUpperCase() !== symbol) { tradeFormError('Transfer needs the same asset in both accounts — use Swap for different assets.'); return; }
+      var toTick = String(toAccT.ticker).toUpperCase();
+      var crossOk = isCashAcc && isCashKind(toAccT.kind) && toTick !== symbol;
+      if (!crossOk && toTick !== symbol) { tradeFormError('Transfer needs the same asset in both accounts — use Swap for different assets.'); return; }
     }
   } else if (side === 'income') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
@@ -7249,6 +7834,17 @@ function onTradeSubmit(ev) {
       }
       if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
       else if (side === 'expense' && qty === null) { delete trade.qty; }
+      // Bookkeeping: ledger rides cash income/expense records only.
+      if (isCashAcc && (side === 'income' || side === 'expense')) {
+        if (ledgerCode !== '') trade.ledger = ledgerCode;
+        if (ledgerLabel !== '') trade.ledgerLabel = ledgerLabel;
+      }
+      // Cross-fiat cash move: the converted arrival, in destination fiat.
+      if (isCrossFiat) {
+        trade.toQty = Number(toQtyRaw);
+        trade.toSymbol = String(toAccCash.ticker).toUpperCase();
+        if (destLockForTrade) trade.toFxLock = destLockForTrade;
+      }
       if (prev.swapId) trade.swapId = prev.swapId;
       var errE = validateTrade(trade, 1e18); // structural only; held already checked directionally above
       if (errE && String(errE).indexOf('oversell') === -1) { tradeFormError(errE); lockSubmit(false, 'Save changes'); return; }
@@ -7262,6 +7858,7 @@ function onTradeSubmit(ev) {
         }
       } catch (e2) { /* ignore */ }
       st.trades[idx] = trade;
+      learnLedgerLabel(st, trade);
       if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Save changes'); return; }
       if (needRefreeze) {
         try { freezeExecLock(trade.id, symbol, date, mainU, (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }
@@ -7295,6 +7892,17 @@ function onTradeSubmit(ev) {
     withFeeLock(trade);
     if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
     if (side === 'expense' && qty === null) { delete trade.qty; }
+    // Bookkeeping: ledger rides cash income/expense records only.
+    if (isCashAcc && (side === 'income' || side === 'expense')) {
+      if (ledgerCode !== '') trade.ledger = ledgerCode;
+      if (ledgerLabel !== '') trade.ledgerLabel = ledgerLabel;
+    }
+    // Cross-fiat cash move: the converted arrival, in destination fiat.
+    if (isCrossFiat) {
+      trade.toQty = Number(toQtyRaw);
+      trade.toSymbol = String(toAccCash.ticker).toUpperCase();
+      if (destLockForTrade) trade.toFxLock = destLockForTrade;
+    }
     if (side === 'buy' || side === 'sell' || side === 'transfer') {
       if (manualPrice !== null) {
         // Same rule as the edit path: the manual quote follows the trade's
@@ -7315,6 +7923,7 @@ function onTradeSubmit(ev) {
       : validateTrade(trade, 1e18);
     if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
     st.trades.push(trade);
+    learnLedgerLabel(st, trade);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
     if ((side === 'buy' || side === 'sell' || side === 'transfer') && manualPrice === null) {
       // No manual quote: freeze the reference exec price in the background.
@@ -7342,8 +7951,13 @@ function onTradeSubmit(ev) {
   }
   // One fiat per trade: only the trade currency->main rate is ever needed.
   // Native total/fee stay in stone; only the lock converts for display/P&L.
+  // Cross-fiat cash moves additionally lock the arrival fiat (toFxLock) so
+  // the destination balance converts in the right currency.
   var mainU = String(main).toUpperCase();
   var needTotal = (total > 0 && from !== mainU);
+  var destSym = isCrossFiat ? String(toAccCash.ticker).toUpperCase() : null;
+  var needDest = !!(isCrossFiat && destSym && destSym !== mainU);
+  var destLockForTrade = null;
   function lock11(pairFrom) {
     return { pair: pairFrom + '/' + mainU, rate: 1, source: '1:1', interpolated: false };
   }
@@ -7360,22 +7974,40 @@ function onTradeSubmit(ev) {
     });
     tradeFormError('ECB rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.');
   }
-  if (!needTotal) {
+  if (!needTotal && !needDest) {
+    if (isCrossFiat) destLockForTrade = lock11(destSym);
     proceed(lock11(from));
     return;
   }
-  if (manualRate !== null) {
+  if (manualRate !== null && !needDest) {
+    if (isCrossFiat) destLockForTrade = lock11(destSym);
     proceed((from === mainU) ? lock11(from)
       : { pair: from + '/' + mainU, rate: manualRate, source: 'manual', interpolated: false });
     return;
   }
   lockSubmit(true, 'Saving…');
-  fetchEcbRate(date, from, mainU).then(function (totalRes) {
-    var tLock = { pair: from + '/' + mainU, rate: totalRes.rate, source: totalRes.source, interpolated: !!totalRes.interpolated };
-    try { cacheRate(date, from, mainU, totalRes.rate, totalRes.source); saveFxCache(); } catch (e) { /* ignore */ }
-    proceed(tLock);
+  var srcP = !needTotal
+    ? Promise.resolve(lock11(from))
+    : (manualRate !== null
+      ? Promise.resolve((from === mainU) ? lock11(from)
+        : { pair: from + '/' + mainU, rate: manualRate, source: 'manual', interpolated: false })
+      : fetchEcbRate(date, from, mainU).then(function (totalRes) {
+        var tLock = { pair: from + '/' + mainU, rate: totalRes.rate, source: totalRes.source, interpolated: !!totalRes.interpolated };
+        try { cacheRate(date, from, mainU, totalRes.rate, totalRes.source); saveFxCache(); } catch (e) { /* ignore */ }
+        return tLock;
+      }));
+  var destP = !needDest
+    ? Promise.resolve(isCrossFiat ? lock11(destSym) : null)
+    : fetchEcbRate(date, destSym, mainU).then(function (destRes) {
+      var dLock = { pair: destSym + '/' + mainU, rate: destRes.rate, source: destRes.source, interpolated: !!destRes.interpolated };
+      try { cacheRate(date, destSym, mainU, destRes.rate, destRes.source); saveFxCache(); } catch (e) { /* ignore */ }
+      return dLock;
+    });
+  Promise.all([srcP, destP]).then(function (locks) {
+    destLockForTrade = locks[1];
+    proceed(locks[0]);
   }, function () {
-    fxError([from + ' → ' + mainU]);
+    fxError(isCrossFiat ? [from + ' → ' + mainU, destSym + ' → ' + mainU] : [from + ' → ' + mainU]);
   });
 }
 
@@ -7426,6 +8058,7 @@ function openDialog(id) {
   try { updateModalLock(); } catch (e) { /* ignore */ }
   if (id === 'settings-dialog') {
     try { refreshSettingsAlert(); } catch (e) { /* ignore */ }
+    try { refreshLedgerList(); } catch (e) { /* ignore */ }
   }
   var first = dlg.querySelector('input, select, button:not([data-close])');
   // Mobile: long forms (trade / account / settings) must not pop the
@@ -7827,6 +8460,28 @@ function showSettingsTab(name) {
   });
 }
 
+function refreshLedgerList() {
+  if (typeof document === 'undefined') return;
+  var list = document.getElementById('l-list');
+  if (!list) return;
+  var map = {};
+  try { map = normalizeLedgerLabels((loadState().settings || {}).ledgerLabels); } catch (e) { map = {}; }
+  list.innerHTML = '';
+  Object.keys(map).sort().forEach(function (code) {
+    var li = document.createElement('li');
+    var span = document.createElement('span');
+    span.textContent = code + ' · ' + map[code];
+    li.appendChild(span);
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = 'Delete';
+    del.setAttribute('data-ledger-del', code);
+    del.setAttribute('aria-label', 'Delete ledger ' + code);
+    li.appendChild(del);
+    list.appendChild(li);
+  });
+}
+
 function buildSettings() {
   var host = document.getElementById('settings-dialog-body');
   if (!host || document.getElementById('o-add')) return;
@@ -7835,6 +8490,7 @@ function buildSettings() {
   wrap.innerHTML =
     '<div class="set-tabs" role="tablist" aria-label="Settings sections">' +
     '<button type="button" role="tab" data-settab="overrides" aria-selected="true">Price overrides</button>' +
+    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledgers</button>' +
     '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backup &amp; restore</button>' +
     '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud Sync</button>' +
     '<button type="button" role="tab" data-settab="danger" aria-selected="false">Danger zone</button>' +
@@ -7847,6 +8503,15 @@ function buildSettings() {
     '<input id="o-price" inputmode="decimal" placeholder="e.g. 67000">' +
     '<button id="o-add" type="button">Save override</button>' +
     '<ul id="o-list"></ul>' +
+    '</section>' +
+    '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
+    '<p class="muted set-blurb">Bookkeeping codes for cash records, learned as you type (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Renaming here changes future suggestions — records keep their own stored labels.</p>' +
+    '<label for="l-code">Code</label>' +
+    '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
+    '<label for="l-label">Label</label>' +
+    '<input id="l-label" autocomplete="off" spellcheck="false" placeholder="e.g. Income from X" maxlength="80">' +
+    '<button id="l-add" type="button">Save ledger</button>' +
+    '<ul id="l-list"></ul>' +
     '</section>' +
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
     '<p class="muted set-blurb">Your data never leaves this browser. Download a backup file to move it to another device.</p>' +
@@ -7967,6 +8632,41 @@ function buildSettings() {
     }
     refreshPrices();
   });
+  // Ledger chart: explicit add/rename (same code overwrites) + delete.
+  // Records keep their own stored labels regardless of this map.
+  document.getElementById('l-add').addEventListener('click', function () {
+    var code = uiVal('l-code', '').trim();
+    var label = uiVal('l-label', '').trim();
+    if (!code || !isValidLedgerCode(code) || String(code).trim() === '') { showBanner('Ledger needs a code (e.g. 1100).'); return; }
+    if (!label) { showBanner('Ledger needs a label (e.g. Income from X).'); return; }
+    if (!isValidLedgerLabel(label)) { showBanner('Ledger label is too long — up to 80 characters.'); return; }
+    var st = loadState();
+    if (!st.settings || typeof st.settings !== 'object') st.settings = defaultState().settings;
+    var map = normalizeLedgerLabels(st.settings.ledgerLabels);
+    map[String(code).trim()] = String(label).trim();
+    st.settings.ledgerLabels = map;
+    if (!saveStateGuarded(st)) return;
+    uiSetVal('l-code', '');
+    uiSetVal('l-label', '');
+    clearBanner();
+    refreshLedgerList();
+    render();
+  });
+  document.getElementById('l-list').addEventListener('click', function (e) {
+    var btn = e && e.target && e.target.closest ? e.target.closest('[data-ledger-del]') : null;
+    if (!btn) return;
+    var code = btn.getAttribute('data-ledger-del');
+    var st = loadState();
+    var map = normalizeLedgerLabels(st.settings && st.settings.ledgerLabels);
+    if (Object.prototype.hasOwnProperty.call(map, code)) {
+      delete map[code];
+      st.settings.ledgerLabels = map;
+      if (!saveStateGuarded(st)) return;
+    }
+    refreshLedgerList();
+    render();
+  });
+  try { refreshLedgerList(); } catch (e) { /* ignore */ }
   // Fiat tag for legacy bare-number overrides (saved before the entry fiat
   // was recorded): declaring it once converts the override everywhere
   // instead of reading it nominal in the display fiat.
@@ -8228,6 +8928,20 @@ function allocationData(st, dtrades, visibleIds) {
     });
   }
   var total = 0;
+  // Cash ledgers join the ring as balance slices (same totals as the hero).
+  try {
+    var cIds = cashAccountIds(st);
+    var dAll = dtrades || [];
+    Object.keys(cIds).forEach(function (aid) {
+      if (visibleIds && visibleIds.indexOf(aid) === -1) return;
+      var hasAny = dAll.some(function (t) { return !!t && (t.accountId === aid || t.toAccountId === aid); });
+      if (!hasAny) return;
+      var cb = cashBalance(dAll, aid, st.settings.mainCurrency);
+      var key = String(cb.ticker || '').toUpperCase();
+      if (!key || !isFinite(cb.main)) return;
+      bySym[key] = (bySym[key] || 0) + cb.main;
+    });
+  } catch (e) { /* ignore */ }
   Object.keys(bySym).forEach(function (k) { total += bySym[k]; });
   var arr = Object.keys(bySym).map(function (k) { return { symbol: k, value: bySym[k], pct: total > 0 ? (bySym[k] / total) * 100 : 0 }; });
   arr.sort(function (a, b) { return b.value - a.value; });

@@ -1850,6 +1850,33 @@ function ledgerParentOf(code, known) {
   return best;
 }
 
+// Every code nested under `target` via the same parent rules as the tree
+// (prefix + numeric Twinfield parents). Used by ledger delete so removing a
+// top ledger cascades to the whole subtree, including posted-only codes.
+function ledgerDescendantsOf(target, allCodes) {
+  var t = (target === undefined || target === null) ? '' : String(target).trim();
+  if (!t) return [];
+  var keys = [];
+  (allCodes || []).forEach(function (k) {
+    var ck = String(k);
+    if (ck !== t && keys.indexOf(ck) === -1) keys.push(ck);
+  });
+  var full = keys.concat([t]);
+  var out = [];
+  keys.forEach(function (c) {
+    var cur = c;
+    var seen = {};
+    while (cur && !seen[cur]) {
+      seen[cur] = true;
+      var p = ledgerParentOf(cur, full);
+      if (!p) break;
+      if (p === t) { out.push(c); break; }
+      cur = p;
+    }
+  });
+  return out;
+}
+
 // Repair pass for cash bookkeeping records saved before the cash form
 // locked amounts to the account fiat: a cash income/expense with a real
 // quantity but a blank/zero total gains total=qty (exactly what the form
@@ -1899,8 +1926,10 @@ function ledgerSignedMain(t) {
 function ledgerTree(allTrades, accountId, main, labelMap) {
   var labels = labelMap || {};
   var own = {}; // code -> {code, amount}
-  var unassigned = 0;
-  var unassignedCount = 0;
+  var unassignedIncome = 0;
+  var unassignedIncomeCount = 0;
+  var unassignedExpense = 0;
+  var unassignedExpenseCount = 0;
   // Signed zero is still zero: -0 would print as "-€0.00".
   function z(v) { return (v === 0) ? 0 : Math.round(v * 100) / 100; }
   (allTrades || []).forEach(function (t) {
@@ -1911,7 +1940,10 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
     if (!code) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.
-      if (t.type === 'income' || t.type === 'expense') { unassigned = z(unassigned + signed); unassignedCount++; }
+      // Unlabeled records (e.g. freed by a ledger delete) surface under two
+      // virtual defaults so totals never lose money: income vs expenses.
+      if (t.type === 'income') { unassignedIncome = z(unassignedIncome + signed); unassignedIncomeCount++; }
+      else if (t.type === 'expense') { unassignedExpense = z(unassignedExpense + signed); unassignedExpenseCount++; }
       return;
     }
     if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
@@ -1963,7 +1995,9 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
   }
   roots.forEach(roll);
   roots.sort(function (a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
-  return { roots: roots, unassigned: z(unassigned), unassignedCount: unassignedCount };
+  var unassigned = z(unassignedIncome + unassignedExpense);
+  var unassignedCount = unassignedIncomeCount + unassignedExpenseCount;
+  return { roots: roots, unassigned: unassigned, unassignedCount: unassignedCount, unassignedIncome: z(unassignedIncome), unassignedIncomeCount: unassignedIncomeCount, unassignedExpense: z(unassignedExpense), unassignedExpenseCount: unassignedExpenseCount };
 }
 
 function validateTrade(t, heldQty) {
@@ -2068,6 +2102,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cashSignedNative = cashSignedNative;
   window.Inoculens.cashBalance = cashBalance;
   window.Inoculens.ledgerParentOf = ledgerParentOf;
+  window.Inoculens.ledgerDescendantsOf = ledgerDescendantsOf;
   window.Inoculens.ledgerTree = ledgerTree;
   window.Inoculens.ledgerChartFor = ledgerChartFor;
   window.Inoculens.ensureAccountChart = ensureAccountChart;
@@ -5761,7 +5796,8 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
       if (n.kids && n.kids.length) walk(n.kids, depth + 1);
     });
   })(tree.roots, 0);
-  if (tree.unassignedCount) list.appendChild(ledgerRowEl('—', 'No ledger', tree.unassigned, main, 0));
+  if (tree.unassignedIncomeCount) list.appendChild(ledgerRowEl('—', 'Unlabeled income', tree.unassignedIncome, main, 0));
+  if (tree.unassignedExpenseCount) list.appendChild(ledgerRowEl('—', 'Unlabeled expenses', tree.unassignedExpense, main, 0));
   list.addEventListener('click', function (e) {
     var btn = e && e.target && e.target.closest ? e.target.closest('[data-ledger-del]') : null;
     if (!btn) return;
@@ -5771,8 +5807,9 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
 }
 
 // Per-account ledger management: add/rename writes the account's own
-// chart (snapshotting the default first); delete removes the code from the
-// account's effective chart. Records keep their own stored codes either way.
+// chart (snapshotting the default first); delete removes the code plus its
+// whole subtree from the account's chart and clears those codes off the
+// account's records, which then surface under Unlabeled income/expenses.
 var ledgerDialogAccountId = null;
 
 function buildLedgerDialog() {
@@ -5824,17 +5861,48 @@ function openLedgerDialog(accountId) {
 
 function deleteAccountLedger(accountId, code) {
   if (!accountId || !code) return;
+  code = String(code).trim();
+  if (!code || code === '—') return;
   var st = loadState();
   var acc = accountById(st, accountId);
   if (!acc) return;
   var effective = ledgerChartFor(st, accountId);
+  var allSet = {};
+  Object.keys(effective).forEach(function (k) { var ck = String(k).trim(); if (ck) allSet[ck] = true; });
+  (st.trades || []).forEach(function (t) {
+    if (!t || t.accountId !== accountId) return;
+    var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (c) allSet[c] = true;
+  });
+  var subs = ledgerDescendantsOf(code, Object.keys(allSet));
+  var doomedSet = {};
+  doomedSet[code] = true;
+  subs.forEach(function (c) { doomedSet[c] = true; });
+  var recCount = 0;
+  (st.trades || []).forEach(function (t) {
+    if (!t || t.accountId !== accountId) return;
+    var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (c && doomedSet[c]) recCount++;
+  });
   var label = effective[code] ? code + ' · ' + effective[code] : code;
-  confirmAction('Delete ledger', 'Remove "' + label + '" from ' + acc.name + '? Records keep their codes.', 'Delete', true).then(function (ok) {
+  var subTxt = subs.length ? ' Also deletes ' + subs.length + ' sub-ledger' + (subs.length === 1 ? '' : 's') + ' underneath (' + subs.slice().sort().join(', ') + ').' : '';
+  var recTxt = recCount ? ' ' + recCount + ' record' + (recCount === 1 ? '' : 's') + ' lose' + (recCount === 1 ? 's' : '') + ' their ledger and move under Unlabeled income/expenses (totals unchanged).' : ' No records use it.';
+  confirmAction('Delete ledger', 'Delete "' + label + '" from ' + acc.name + '?' + subTxt + recTxt, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();
     if (!accountById(s2, accountId)) return;
     var map = ensureAccountChart(s2, accountId);
-    if (Object.prototype.hasOwnProperty.call(map, code)) delete map[code];
+    Object.keys(doomedSet).forEach(function (c) {
+      if (Object.prototype.hasOwnProperty.call(map, c)) delete map[c];
+    });
+    (s2.trades || []).forEach(function (t) {
+      if (!t || t.accountId !== accountId) return;
+      var c = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+      if (c && doomedSet[c]) {
+        try { delete t.ledger; } catch (e) { t.ledger = undefined; }
+        try { delete t.ledgerLabel; } catch (e) { t.ledgerLabel = undefined; }
+      }
+    });
     if (!saveStateGuarded(s2)) return;
     clearBanner();
     render();

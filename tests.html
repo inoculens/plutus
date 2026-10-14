@@ -534,6 +534,47 @@
           assert(tree2.roots.length === 1 && tree2.roots[0].code === '1000' && tree2.roots[0].total === 0, 'empty chart still structures: ' + JSON.stringify(tree2.roots));
         });
 
+        test('unlabeled records split into income vs expenses buckets', function () {
+          function rec(id, type, qty) {
+            return { id: id, type: type, symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var tree = L.ledgerTree([rec('u1', 'income', 100), rec('u2', 'expense', 40)], 'cash1', 'EUR', { '1000': 'Income' });
+          assert(tree.unassignedIncome === 100 && tree.unassignedIncomeCount === 1, 'income bucket wrong: ' + JSON.stringify(tree));
+          assert(tree.unassignedExpense === -40 && tree.unassignedExpenseCount === 1, 'expense bucket wrong: ' + JSON.stringify(tree));
+          assert(tree.unassigned === 60 && tree.unassignedCount === 2, 'legacy combined bucket must keep working: ' + JSON.stringify(tree));
+          var empty = L.ledgerTree([], 'cash1', 'EUR', { '1000': 'Income' });
+          assert(empty.unassignedIncomeCount === 0 && empty.unassignedExpenseCount === 0, 'defaults must stay hidden when empty');
+        });
+
+        test('ledgerDescendantsOf cascades prefix + numeric subtrees', function () {
+          var all = ['1000', '1100', '1110', '1120', '3000'];
+          var subs = L.ledgerDescendantsOf('1000', all).sort();
+          assert(subs.length === 3 && subs.join(',') === '1100,1110,1120', '1000 must own 1100/1110/1120, got ' + JSON.stringify(subs));
+          assert(L.ledgerDescendantsOf('1100', all).sort().join(',') === '1110,1120', '1100 must own its pair');
+          assert(L.ledgerDescendantsOf('3000', all).length === 0, 'leaf must have no descendants');
+          assert(L.ledgerDescendantsOf('nope', all).length === 0, 'unknown code must own nothing');
+        });
+
+        test('deleting a top ledger unlabels its subtree but keeps the money', function () {
+          function inc(id, ledger, qty) {
+            return { id: id, type: 'income', symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var trades = [inc('d1', '1100', 100), inc('d2', '1110', 50), inc('d3', '3000', 200)];
+          var beforeBal = L.cashBalance(trades, 'cash1', 'EUR');
+          var doomed = { '1000': true };
+          L.ledgerDescendantsOf('1000', ['1000', '1100', '1110', '3000']).forEach(function (c) { doomed[c] = true; });
+          var freed = trades.map(function (t) {
+            var c = String(t.ledger || '').trim();
+            if (c && doomed[c]) { var n = {}; for (var k in t) if (Object.prototype.hasOwnProperty.call(t, k) && k !== 'ledger' && k !== 'ledgerLabel') n[k] = t[k]; return n; }
+            return t;
+          });
+          var tree = L.ledgerTree(freed, 'cash1', 'EUR', { '1000': 'Income', '3000': 'Costs' });
+          assert(tree.roots.length === 1 && tree.roots[0].code === '3000', 'only 3000 must survive: ' + JSON.stringify(tree.roots.map(function (r) { return r.code; })));
+          assert(tree.unassignedIncome === 150 && tree.unassignedIncomeCount === 2, 'freed income must pool unlabeled: ' + JSON.stringify(tree));
+          var afterBal = L.cashBalance(freed, 'cash1', 'EUR');
+          assert(afterBal.native === beforeBal.native && afterBal.main === beforeBal.main, 'balance must not move on unlabel: ' + JSON.stringify(afterBal));
+        });
+
         test('effective chart: own overrides global, empty own stays empty', function () {
           function stWith(accounts, globalLabels) {
             return { settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: globalLabels || {} }, accounts: accounts, trades: [], priceOverrides: {} };

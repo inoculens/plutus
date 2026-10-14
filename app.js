@@ -1891,6 +1891,17 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
     own[code].count++;
   });
   var codes = Object.keys(own);
+  // Chart codes without records are structural parents (e.g. 1000 holding
+  // only subledger postings): they render with zero of their own so the
+  // tree shows the full chart, not just posted codes.
+  Object.keys(labels || {}).forEach(function (k) {
+    k = String(k).trim();
+    if (k === '') return;
+    if (!Object.prototype.hasOwnProperty.call(own, k)) {
+      own[k] = { code: k, amount: 0, count: 0 };
+      codes.push(k);
+    }
+  });
   var nodes = {};
   codes.forEach(function (c) {
     var tradeLabel = '';

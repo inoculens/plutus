@@ -518,6 +518,18 @@
           assert(tree.unassignedCount === 0, 'plain buy must not pollute unassigned');
         });
 
+        test('chart-only codes render as structural parents with zero of their own', function () {
+          function inc(id, ledger, qty) {
+            return { id: id, type: 'income', symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };
+          }
+          var tree = L.ledgerTree([inc('p1', '1100', 100), inc('p2', '1200', 50)], 'cash1', 'EUR', { '1000': 'Income', '1100': 'Gigs', '1200': 'Refund' });
+          assert(tree.roots.length === 1 && tree.roots[0].code === '1000', 'parent 1000 must exist without postings: ' + JSON.stringify(tree.roots.map(function (r) { return r.code; })));
+          assert(tree.roots[0].own === 0 && tree.roots[0].total === 150, 'parent rolls children only: ' + JSON.stringify(tree.roots[0]));
+          assert(tree.roots[0].kids.length === 2, 'both subledgers nest under 1000');
+          var tree2 = L.ledgerTree([], 'cash1', 'EUR', { '1000': 'Income' });
+          assert(tree2.roots.length === 1 && tree2.roots[0].code === '1000' && tree2.roots[0].total === 0, 'empty chart still structures: ' + JSON.stringify(tree2.roots));
+        });
+
         test('ledger values blank-total cash income by quantity, never -0', function () {
           function freeIncome(id, ledger) {
             return { id: id, type: 'income', symbol: 'EUR', qty: 100, total: 0, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: ledger, createdAt: '2026-01-05T00:00:00.000Z' };

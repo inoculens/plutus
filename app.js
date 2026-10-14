@@ -9306,7 +9306,7 @@ function attUiSync() {
     var label = '';
     var removed = !pendingAttachFile && pendingAttachRemove;
     if (pendingAttachFile) label = 'New file: ' + pendingAttachFile.name;
-    else if (removed) label = '✓ Removed — press Save changes to confirm.';
+    else if (removed) label = '✓ Removed — press "Save changes" to confirm.';
     else if (currentAttachMeta) label = 'Attached: ' + currentAttachMeta.name;
     if (cur) {
       cur.textContent = label;

@@ -2149,8 +2149,9 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
 // Multi-account tree for group mains (and asset views): the same roll-up
 // over every id in scope. kinds maps id -> account kind; null means all
 // cash (the legacy single-account behavior). Asset income/expense without
-// a code pool into Unlabeled assets; buy/sell without a code stay out of
-// the tree entirely, on every kind.
+// a code pool into Unlabeled assets; buy/sell without a code and codeless
+// transfers stay out of the tree entirely, on every kind. A labeled transfer
+// posts -sent on the source and +received on the arrival under one code.
 function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
   var labels = labelMap || {};
   var inScope = {};
@@ -2170,9 +2171,39 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
   function z(v) { return (v === 0) ? 0 : Math.round(v * 100) / 100; }
   (allTrades || []).forEach(function (t) {
     if (!t || !inScope[t.accountId]) return;
-    if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell') return;
-    var signed = z(ledgerSignedMain(t));
+    if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer') return;
     var code = (t.ledger === undefined || t.ledger === null) ? '' : String(t.ledger).trim();
+    if (t.type === 'transfer') {
+      // Codeless transfers stay out of every bucket; a labeled move posts
+      // -sent on the source leg and +received on the arrival leg under the
+      // same code, so a group scope nets to the fee. Rates mirror the
+      // balance legs (frozen source/arrival locks, main-fiat arrival at 1).
+      if (!code) return;
+      var sent = Number(t.qty);
+      if (!isFinite(sent) || sent <= 0) return;
+      var mainU = String(main || '').toUpperCase();
+      var srcRate = t.fromFxLock ? ledgerFxRate(t.fromFxLock) : ledgerFxRate(t.fxLock);
+      var toSym = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
+        ? String(t.symbol || '').toUpperCase()
+        : String(t.toSymbol).trim().toUpperCase();
+      var dstRate = (toSym === mainU) ? 1 : (t.toFxLock ? ledgerFxRate(t.toFxLock) : ledgerFxRate(t.fxLock));
+      var recv = cashReceivedOf(t);
+      if (!isFinite(recv) || recv < 0) recv = 0;
+      var destId = (t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '')
+        ? String(t.toAccountId).trim() : null;
+      if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
+      own[code].amount = z(own[code].amount - sent * srcRate);
+      own[code].count++;
+      if (destId && destId !== t.accountId && inScope[destId]) {
+        own[code].amount = z(own[code].amount + recv * dstRate);
+        own[code].count++;
+      } else if (!destId && inScope[t.accountId]) {
+        own[code].amount = z(own[code].amount + recv * dstRate);
+        own[code].count++;
+      }
+      return;
+    }
+    var signed = z(ledgerSignedMain(t));
     if (!code) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.
@@ -5464,11 +5495,17 @@ function resolveExecPrice(t, main, kind) {
 }
 
 // Ledger inputs ride records that can carry a code: cash income/expense
-// always (required at submit); every asset type except transfer/swap while
-// the global switch is on (optional). Transfers and swaps move value —
-// they never aggregate into the tree, so they offer no input.
+// always (required at submit); transfers on every kind (a move posts -sent
+// on the source and +received on the arrival under the same code, so groups
+// net to the fee); every other asset type while the global switch is on
+// (optional). Swaps move value through generated sell/buy legs — label the
+// legs afterwards via record edit instead.
 function tradeLedgerAllowed(isCashAcc, side) {
-  if (side === 'transfer' || side === 'swap') return false;
+  if (side === 'swap') return false;
+  if (side === 'transfer') {
+    if (isCashAcc) return true;
+    try { return assetLedgersOn(loadState()); } catch (e) { return true; }
+  }
   if (isCashAcc) return side === 'income' || side === 'expense';
   try { return assetLedgersOn(loadState()); } catch (e) { return true; }
 }

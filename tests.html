@@ -895,13 +895,19 @@
             assert(!document.getElementById('t-ledger-row').hidden, 'asset buy must offer ledger inputs when ON');
             document.getElementById('t-side').value = 'transfer';
             syncTradeTypeUI();
-            assert(document.getElementById('t-ledger-row').hidden, 'asset transfer must never offer ledger inputs');
+            assert(!document.getElementById('t-ledger-row').hidden, 'asset transfer must offer ledger inputs when ON');
+            document.getElementById('t-side').value = 'swap';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-ledger-row').hidden, 'swap must never offer ledger inputs');
             var st = L.loadState();
             st.settings.assetLedgers = false;
             L.saveState(st);
             document.getElementById('t-side').value = 'income';
             syncTradeTypeUI();
             assert(document.getElementById('t-ledger-row').hidden, 'asset income must hide ledger inputs when OFF');
+            document.getElementById('t-side').value = 'transfer';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-ledger-row').hidden, 'asset transfer must hide ledger inputs when OFF');
           } finally {
             try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
             try {
@@ -910,6 +916,27 @@
             } catch (e) { /* ignore */ }
             try { render(); } catch (e) { /* ignore */ }
           }
+        });
+
+        test('labeled transfers post source and arrival legs', function () {
+          function mv(id, from, to, qty, fee, ledger) {
+            var t = { id: id, type: 'transfer', symbol: 'EUR', qty: qty, date: '2026-01-05', fee: 0, feeCurrency: 'EUR', networkFee: fee, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: from, createdAt: '2026-01-05T00:00:00.000Z' };
+            if (to) t.toAccountId = to;
+            if (ledger) t.ledger = ledger;
+            return t;
+          }
+          // Single scope, outflow only: the arrival lives outside.
+          var solo = L.ledgerTree([mv('m1', 'a', 'b', 100, 2, '9000')], 'a', 'EUR', {});
+          assert(solo.roots.length === 1 && solo.roots[0].code === '9000' && solo.roots[0].total === -100, 'source leg must post -sent, got ' + JSON.stringify(solo.roots));
+          // Group scope nets to the fee.
+          var grp = L.ledgerTreeMulti([mv('m1', 'a', 'b', 100, 2, '9000')], ['a', 'b'], 'EUR', {}, { a: 'cash', b: 'cash' });
+          assert(grp.roots.length === 1 && grp.roots[0].total === -2, 'group scope must net to -fee, got ' + JSON.stringify(grp.roots[0] && grp.roots[0].total));
+          // Same-account sweep nets to the fee too.
+          var sweep = L.ledgerTree([mv('m2', 'a', null, 100, 2, '9000')], 'a', 'EUR', {});
+          assert(sweep.roots.length === 1 && sweep.roots[0].total === -2, 'sweep must net to -fee, got ' + JSON.stringify(sweep.roots[0] && sweep.roots[0].total));
+          // Codeless transfers never pollute any bucket.
+          var bare = L.ledgerTree([mv('m3', 'a', 'b', 100, 2, null)], 'a', 'EUR', {});
+          assert(bare.roots.length === 0 && bare.unassignedCount === 0 && bare.unassignedAssetsCount === 0, 'codeless moves must stay out: ' + JSON.stringify(bare.roots));
         });
 
         test('asset Ledgers panel shows only when something is labeled', function () {

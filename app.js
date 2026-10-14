@@ -5928,10 +5928,11 @@ function openAttachmentPreview(meta) {
       '<div class="dialog-actions"><button type="button" id="attach-dialog-dl" class="primary" hidden>Download</button> ' +
       '<button type="button" data-close>Close</button></div>';
     document.body.appendChild(dlg);
-    dlg.addEventListener('click', function (ev) {
-      var t = ev && ev.target;
-      if (t && t.hasAttribute && t.hasAttribute('data-close')) closeDialog('attach-dialog');
-    });
+    // Same wiring as every other dialog: backdrop clicks close via
+    // [data-close], Esc restores focus and recomputes the background
+    // freeze — without this the page scrolls under the preview (and the
+    // lock could stick the other way if Esc bypassed the recount).
+    try { wireDialog('attach-dialog'); } catch (e) { /* ignore */ }
     dlg.addEventListener('close', function () {
       try {
         var old = dlg.getAttribute('data-objurl');
@@ -10236,7 +10237,7 @@ var dialogOpener = null;
 // dialogs (e.g. Settings + confirm) count, so closing one never unlocks
 // while another is still open. Ancient browsers without showModal fall
 // back to the [open] attribute: scroll still locks, clicks do not.
-var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'group-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog'];
+var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'group-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog', 'attach-dialog'];
 
 function updateModalLock() {
   try {

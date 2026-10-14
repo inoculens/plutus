@@ -1109,6 +1109,10 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .ledger-row .ledger-amount.ledger-box-exp { border: 1px solid rgba(248,113,113,0.45); background: var(--loss-bg); color: var(--loss); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
 .ledger-row .ledger-side button.quiet { padding: 0.4rem 0.55rem; }
 .ledger-row .ledger-act-sp { visibility: hidden; pointer-events: none; }
+/* Zero-width but full-height: keeps the row tall without pushing the amount
+   off the row end (no gaps, no horizontal padding/border, no wrapping). */
+.ledger-row.is-unlabeled .ledger-side { gap: 0; }
+.ledger-row.is-unlabeled .ledger-side .ledger-act-sp { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; border-right-width: 0; overflow: hidden; white-space: nowrap; }
 /* Virtual Unlabeled rows carry no actions: the amount hugs the row end. */
 .ledger-row.is-unlabeled .ledger-side { margin-left: auto; }
 .ledger-row.is-unlabeled .ledger-amount { min-width: 0; }

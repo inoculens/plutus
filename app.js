@@ -1249,6 +1249,93 @@ function cashIncomeRate(t, main) {
   return ledgerFxRate(t && t.fxLock);
 }
 
+// --- Cash realization (display attribution, IAS 21 style) ---
+// Holdings float, spending realizes: a cash income's DISPLAY value is
+// remainder_qty * today_rate + sum(consumed_qty_i * spend_rate_i), where
+// each spend_rate_i is the consuming expense's frozen display rate
+// (trade-date fixing into the current main). Consumption is FIFO, oldest
+// income first, same account + same fiat, expenses only. Transfers are
+// moves, never spends. Qty-less (fiat-only) expenses consume nothing and
+// book straight through. Asset incomes stay frozen (never in the map).
+// Record lines, linkage, cost basis, invested/spent and native balances
+// are untouched — only the converted view numbers use this.
+function cashFiatOf(t) {
+  return String((t && t.symbol) || '').trim().toUpperCase();
+}
+
+function cashQtyOf(t) {
+  var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
+  return (isFinite(q) && q > 0) ? q : 0;
+}
+
+// Map cash-income trade object -> realized display value (signed +, main
+// fiat). allTrades are display-converted (fxLock into main). isCash(id)
+// gates which accounts realize; null/false means none. Expenses never
+// appear in the map (their frozen value is used directly).
+function buildCashRealization(allTrades, main, isCash) {
+  var map = new Map();
+  try {
+    if (!allTrades || !allTrades.length) return map;
+    var byKey = {};
+    (allTrades || []).forEach(function (t) {
+      if (!t) return;
+      try {
+        if (!isCash || !isCash(t.accountId)) return;
+      } catch (e) { return; }
+      if (t.type !== 'income' && t.type !== 'expense') return;
+      var fiat = cashFiatOf(t);
+      if (!fiat) return;
+      var q = cashQtyOf(t);
+      if (!(q > 0)) return;
+      var key = String(t.accountId) + '|' + fiat;
+      if (!byKey[key]) byKey[key] = { incomes: [], expenses: [] };
+      if (t.type === 'income') byKey[key].incomes.push(t);
+      else byKey[key].expenses.push(t);
+    });
+    function dOf(t) { return (t && typeof t.date === 'string') ? t.date : ''; }
+    function byDate(a, b) {
+      var da = dOf(a), db = dOf(b);
+      if (da < db) return -1;
+      if (da > db) return 1;
+      return 0;
+    }
+    Object.keys(byKey).forEach(function (key) {
+      var g = byKey[key];
+      var incomes = g.incomes.slice().sort(byDate);
+      var expenses = g.expenses.slice().sort(byDate);
+      var lots = incomes.map(function (t) { return { t: t, left: cashQtyOf(t), consumedMain: 0 }; });
+      var li = 0;
+      expenses.forEach(function (e) {
+        var need = cashQtyOf(e);
+        if (!(need > 0)) return;
+        var spendRate = ledgerFxRate(e.fxLock);
+        while (need > LEDGER_EPS && li < lots.length) {
+          var lot = lots[li];
+          if (!lot || lot.left <= LEDGER_EPS) { li++; continue; }
+          var take = Math.min(lot.left, need);
+          lot.consumedMain += take * spendRate;
+          lot.left -= take;
+          need -= take;
+          if (lot.left <= LEDGER_EPS) { lot.left = 0; li++; }
+        }
+        // Overspend beyond held income consumes nothing further: the excess
+        // stays as a frozen expense (negative balances allowed).
+      });
+      lots.forEach(function (lot) {
+        var rem = lot.left;
+        if (Math.abs(rem) < LEDGER_EPS) rem = 0;
+        var todayRate = null;
+        try { todayRate = cashIncomeRate(lot.t, main); } catch (e2) { todayRate = null; }
+        if (!(isFinite(Number(todayRate)) && Number(todayRate) > 0)) {
+          try { todayRate = ledgerFxRate(lot.t.fxLock); } catch (e3) { todayRate = 1; }
+        }
+        map.set(lot.t, lot.consumedMain + rem * Number(todayRate));
+      });
+    });
+  } catch (e) { /* realization never breaks display; callers fall back frozen */ }
+  return map;
+}
+
 function normalizeTrade(t) {
   t = t || {};
   var rate = ledgerFxRate(t.fxLock);
@@ -1993,6 +2080,14 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
   var inMain = 0;
   var ticker = '';
   var mainU = String(main || '').toUpperCase();
+  // Realization map: consumed income locks at spend rates, remainder floats.
+  // Built once per balance so the total is remainder x current by construction.
+  var realMap = null;
+  if (doFloat) {
+    try {
+      realMap = buildCashRealization(allTrades, main, function (id) { return id === accountId; });
+    } catch (e) { realMap = null; }
+  }
   function legRate(t, isDest) {
     if (isDest) {
       // Destination leg is denominated in the arrival fiat: its own lock
@@ -2019,10 +2114,16 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
     var signed = isDest ? cashReceivedOf(t) : cashSignedNative(t, accountId);
     if (!isFinite(signed) || signed === 0) return;
     native += signed;
-    // Open income floats at the latest fixing (holdings revalue); every
-    // other leg — expenses, transfers, sells — stays on its frozen lock.
+    // Realization: holdings float, spending locks. A consumed income's value
+    // is remainder x today + consumed x spend-day (already in realMap), so a
+    // fully spent account nets to exactly zero. Every other leg — expenses,
+    // transfers, sells — stays on its frozen lock.
+    if (doFloat && !isDest && t.type === 'income' && realMap && realMap.has(t)) {
+      var rv = realMap.get(t);
+      if (isFinite(Number(rv))) { inMain += Number(rv); return; }
+    }
     var leg = legRate(t, isDest);
-    if (doFloat && !isDest && t.type === 'income') {
+    if (doFloat && !isDest && t.type === 'income' && !(realMap && realMap.has(t))) {
       try { leg = cashIncomeRate(t, main); } catch (e) { /* keep frozen leg */ }
     }
     inMain += signed * leg;
@@ -2267,7 +2368,9 @@ function ledgerSignedMain(t, cashHint, main) {
   // blank or mismatched: the quantity is still account-fiat money, so it
   // converts at the frozen rate instead of booking a zero. Open cash income
   // floats at the latest fixing (main display fiat); everything else —
-  // expenses, transfers, buys/sells, cost basis — stays frozen.
+  // expenses, transfers, buys/sells, cost basis — stays frozen. When a
+  // realization map is supplied (ledger tree / balances), consumed income
+  // locks at spend-day rates and only the remainder floats.
   if ((t.type === 'income' || t.type === 'expense') && (cashHint || (ccyU !== '' && ccyU === symU))) {
     var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
     if (isFinite(q) && q > 0) {
@@ -2288,6 +2391,19 @@ function ledgerSignedMain(t, cashHint, main) {
   }
   var n = normalizeTrade(t);
   return dir * (isFinite(n.netMain) ? n.netMain : 0);
+}
+
+// Realization-aware row value: cash incomes in realMap use their attributed
+// value (locked consumed + floated remainder); everything else keeps the
+// frozen ledgerSignedMain behavior. realMap may be null (single-trade callers).
+function ledgerSignedMainRealized(t, cashHint, main, realMap) {
+  try {
+    if (t && t.type === 'income' && cashHint && realMap && realMap.has(t)) {
+      var v = realMap.get(t);
+      if (isFinite(Number(v))) return Number(v);
+    }
+  } catch (e) { /* fall through frozen */ }
+  return ledgerSignedMain(t, cashHint, main);
 }
 
 function ledgerTree(allTrades, accountId, main, labelMap) {
@@ -2317,6 +2433,13 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
   var unassignedAssetsCount = 0;
   // Signed zero is still zero: -0 would print as "-€0.00".
   function z(v) { return (v === 0) ? 0 : Math.round(v * 100) / 100; }
+  // Realization (one attribution over the whole scope): consumed cash income
+  // locks at spend-day rates, remainder floats. Same FIFO as balances, so
+  // tree totals and account Values agree and closed accounts net to zero.
+  var realMap = null;
+  try {
+    realMap = buildCashRealization(allTrades, main, function (id) { return !!inScope[id] && cashScope(id); });
+  } catch (e) { realMap = null; }
   (allTrades || []).forEach(function (t) {
     if (!t || !inScope[t.accountId]) return;
     if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer') return;
@@ -2351,7 +2474,7 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       }
       return;
     }
-    var signed = z(ledgerSignedMain(t, cashScope(t.accountId), main));
+    var signed = z(ledgerSignedMainRealized(t, cashScope(t.accountId), main, realMap));
     if (!code) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.
@@ -2552,6 +2675,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.renameAccountLedger = renameAccountLedger;
   window.Inoculens.deleteAccountLedger = deleteAccountLedger;
   window.Inoculens.ledgerSignedMain = ledgerSignedMain;
+  window.Inoculens.ledgerSignedMainRealized = ledgerSignedMainRealized;
+  window.Inoculens.buildCashRealization = buildCashRealization;
+  window.Inoculens.cashFiatOf = cashFiatOf;
+  window.Inoculens.cashQtyOf = cashQtyOf;
   window.Inoculens.learnLedgerLabel = learnLedgerLabel;
   window.Inoculens.findLedgerLabel = findLedgerLabel;
   window.Inoculens.refreshLedgerList = refreshLedgerList;

@@ -1437,7 +1437,7 @@
           assert(assetTree.roots.length === 1 && assetTree.roots[0].total === 0, 'asset path must stay total-based, got ' + JSON.stringify(assetTree.roots));
         });
 
-        test('open cash income floats at the latest fixing', function () {
+        test('cash realization: remainder floats, consumed locks at spend rate', function () {
           var fxBackup = null;
           try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
           function restoreFx() {
@@ -1462,7 +1462,7 @@
               ['c1', 'c2', 'x1'], 'EUR', {}, { c1: 'cash', c2: 'cash', x1: 'crypto' });
             var got = {};
             tree.roots.forEach(function (r) { got[r.code] = r.total; });
-            assert(got['1100'] === 20, 'cash income must float 100x0.2, got ' + JSON.stringify(got));
+            assert(got['1100'] === 60, 'cash income must realize 50x1 + 50x0.2, got ' + JSON.stringify(got));
             assert(got['2000'] === -50, 'cash expense must stay frozen, got ' + JSON.stringify(got));
             assert(got['9000'] === -2, 'transfer legs must stay frozen and net to the fee, got ' + JSON.stringify(got));
             assert(got['5000'] === 5000, 'asset income must stay frozen, got ' + JSON.stringify(got));
@@ -1470,7 +1470,140 @@
               ron('b1', 'income', null),
               { id: 'b2', type: 'expense', symbol: 'RON', qty: 50, total: 50, currency: 'RON', date: '2026-04-03', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'c1', createdAt: '2026-04-03T00:00:00.000Z' }
             ], 'c1', 'EUR');
-            assert(bal.native === 50 && bal.main === -30, 'balance must float income only: ' + JSON.stringify(bal));
+            assert(bal.native === 50 && bal.main === 10, 'balance must be remainder x current (50x0.2): ' + JSON.stringify(bal));
+          } finally {
+            restoreFx();
+          }
+        });
+
+        test('cash realization closes to zero when fully spent', function () {
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreFx() {
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+          try {
+            L.clearFxCache();
+            var dk = todayStr();
+            L.cacheRate(dk, 'RON', 'EUR', 0.1874, 'ECB-test');
+            function inc(id, ledger) {
+              return { id: id, type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-14', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.1965, source: 'ECB-2026-01-14' }, accountId: 'c1', ledger: ledger, createdAt: '2026-01-14T00:00:00.000Z' };
+            }
+            function exp(id, ledger) {
+              return { id: id, type: 'expense', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-07-14', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.1905, source: 'ECB-2026-07-14' }, accountId: 'c1', ledger: ledger, createdAt: '2026-07-14T00:00:00.000Z' };
+            }
+            var same = L.ledgerTreeMulti([inc('f1', '1100'), exp('f2', '1100')], ['c1'], 'EUR', {}, { c1: 'cash' });
+            var sameGot = {};
+            same.roots.forEach(function (r) { sameGot[r.code] = r.total; });
+            assert(sameGot['1100'] === 0, 'fully spent code must net to zero, got ' + JSON.stringify(sameGot));
+            var split = L.ledgerTreeMulti([inc('g1', '1200'), exp('g2', '2100')], ['c1'], 'EUR', {}, { c1: 'cash' });
+            var splitGot = {};
+            split.roots.forEach(function (r) { splitGot[r.code] = r.total; });
+            assert(splitGot['1200'] === 19.05, 'consumed income must lock at spend-day 100x0.1905, got ' + JSON.stringify(splitGot));
+            assert(splitGot['2100'] === -19.05, 'expense must stay frozen at spend-day, got ' + JSON.stringify(splitGot));
+            var bal = L.cashBalance([inc('h1', null), exp('h2', null)], 'c1', 'EUR');
+            assert(bal.native === 0 && bal.main === 0, 'closed account must read 0 / 0.00, got ' + JSON.stringify(bal));
+            var bare = L.ledgerTreeMulti([inc('u1', null), exp('u2', null)], ['c1'], 'EUR', {}, { c1: 'cash' });
+            assert(bare.unassigned === 0 && bare.unassignedIncome === 19.05 && bare.unassignedExpense === -19.05,
+              'unlabeled buckets must lock + float to zero net, got ' + JSON.stringify(bare));
+          } finally {
+            restoreFx();
+          }
+        });
+
+        test('cash realization partial spend floats remainder only (FIFO oldest first)', function () {
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreFx() {
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+          try {
+            L.clearFxCache();
+            var dk = todayStr();
+            L.cacheRate(dk, 'RON', 'EUR', 0.2, 'ECB-test');
+            function mkInc(id, qty, date) {
+              return { id: id, type: 'income', symbol: 'RON', qty: qty, total: qty, currency: 'RON', date: date, fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.1965, source: 'ECB-test' }, accountId: 'c1', ledger: '1100', createdAt: date + 'T00:00:00.000Z' };
+            }
+            function mkExp(id, qty, date, rate) {
+              return { id: id, type: 'expense', symbol: 'RON', qty: qty, total: qty, currency: 'RON', date: date, fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: rate, source: 'ECB-test' }, accountId: 'c1', ledger: '2000', createdAt: date + 'T00:00:00.000Z' };
+            }
+            var trades = [mkInc('p1', 100, '2026-01-10'), mkInc('p2', 100, '2026-03-10'), mkExp('p3', 120, '2026-05-10', 0.19)];
+            var tree = L.ledgerTreeMulti(trades, ['c1'], 'EUR', {}, { c1: 'cash' });
+            var got = {};
+            tree.roots.forEach(function (r) { got[r.code] = r.total; });
+            assert(got['1100'] === 38.8, 'income must be locked 22.8 + floated 16, got ' + JSON.stringify(got));
+            assert(got['2000'] === -22.8, 'expense must stay frozen 120x0.19, got ' + JSON.stringify(got));
+            var bal = L.cashBalance(trades, 'c1', 'EUR');
+            assert(bal.native === 80 && bal.main === 16, 'balance must be remainder 80 x 0.2, got ' + JSON.stringify(bal));
+          } finally {
+            restoreFx();
+          }
+        });
+
+        test('cash realization ignores transfers, fiat-only expenses and other fiats', function () {
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreFx() {
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+          try {
+            L.clearFxCache();
+            var dk = todayStr();
+            L.cacheRate(dk, 'RON', 'EUR', 0.2, 'ECB-test');
+            L.cacheRate(dk, 'USD', 'EUR', 0.9, 'ECB-test');
+            var inc = { id: 't1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-04-03', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.1965, source: 'ECB-test' }, accountId: 'c1', ledger: '1100', createdAt: '2026-04-03T00:00:00.000Z' };
+            var mv = { id: 't2', type: 'transfer', symbol: 'RON', qty: 40, date: '2026-04-04', fee: 0, feeCurrency: 'RON', networkFee: 0, fxLock: { pair: 'RON/EUR', rate: 0.19, source: 'ECB-test' }, accountId: 'c1', toAccountId: 'c2', ledger: '9000', createdAt: '2026-04-04T00:00:00.000Z' };
+            var lone = { id: 't3', type: 'expense', symbol: 'RON', total: 30, currency: 'RON', date: '2026-04-05', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.19, source: 'ECB-test' }, accountId: 'c1', ledger: '2000', createdAt: '2026-04-05T00:00:00.000Z' };
+            var other = { id: 't4', type: 'expense', symbol: 'USD', qty: 50, total: 50, currency: 'USD', date: '2026-04-05', fee: 0, feeCurrency: 'USD', fxLock: { pair: 'USD/EUR', rate: 0.9, source: 'ECB-test' }, accountId: 'c1', ledger: '2000', createdAt: '2026-04-05T00:00:00.000Z' };
+            var tree = L.ledgerTreeMulti([inc, mv, lone, other], ['c1', 'c2'], 'EUR', {}, { c1: 'cash', c2: 'cash' });
+            var got = {};
+            tree.roots.forEach(function (r) { got[r.code] = r.total; });
+            assert(got['1100'] === 20, 'transfer must not consume income (100x0.2), got ' + JSON.stringify(got));
+            assert(got['2000'] === -50.7, 'fiat-only -5.7 plus USD -45 must book through, got ' + JSON.stringify(got));
+          } finally {
+            restoreFx();
+          }
+        });
+
+        test('cash realization no-ops on empty and single-leg books', function () {
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreFx() {
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+          try {
+            L.clearFxCache();
+            var dk = todayStr();
+            L.cacheRate(dk, 'RON', 'EUR', 0.2, 'ECB-test');
+            var solo = { id: 's1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-04-03', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.1965, source: 'ECB-test' }, accountId: 'c1', ledger: '1100', createdAt: '2026-04-03T00:00:00.000Z' };
+            var treeSolo = L.ledgerTreeMulti([solo], ['c1'], 'EUR', {}, { c1: 'cash' });
+            var gotSolo = {};
+            treeSolo.roots.forEach(function (r) { gotSolo[r.code] = r.total; });
+            assert(gotSolo['1100'] === 20, 'lone income must float in full, got ' + JSON.stringify(gotSolo));
+            var balSolo = L.cashBalance([solo], 'c1', 'EUR');
+            assert(balSolo.native === 100 && balSolo.main === 20, 'lone balance must float, got ' + JSON.stringify(balSolo));
+            var balEmpty = L.cashBalance([], 'c1', 'EUR');
+            assert(balEmpty.native === 0 && balEmpty.main === 0, 'empty balance must be zero, got ' + JSON.stringify(balEmpty));
+            var treeEmpty = L.ledgerTreeMulti([], ['c1'], 'EUR', {}, { c1: 'cash' });
+            assert(treeEmpty.roots.length === 0 && treeEmpty.unassignedCount === 0, 'empty tree must stay empty');
+            var mapEmpty = L.buildCashRealization([], 'EUR', function () { return true; });
+            assert(mapEmpty.size === 0, 'empty realization must be empty');
           } finally {
             restoreFx();
           }

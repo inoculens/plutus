@@ -1080,7 +1080,11 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 /* Trillions-proof: tabular figures never wrap mid-number; the slot fits
    ~€999,999,999,999.99 with room to spare, so every row starts at one x. */
 .ledger-row .ledger-amount { flex: 0 0 auto; min-width: 13rem; text-align: left; white-space: nowrap; overflow-wrap: normal; }
-/* Parent overviews box their rolled total: pill colors, not a pill. */
+/* Parent overviews box their rolled total: pill colors, not a pill. The box
+   is nudged left by exactly its padding + border (relative: siblings stay
+   put) so its text starts on the same x as a plain amount — € aligns with
+   €, the box sits outside. */
+.ledger-row .ledger-amount.ledger-box-inc, .ledger-row .ledger-amount.ledger-box-exp { position: relative; left: calc(-0.6rem - 1px); }
 .ledger-row .ledger-amount.ledger-box-inc { border: 1px solid rgba(52,211,153,0.45); background: var(--gain-bg); color: var(--gain); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
 .ledger-row .ledger-amount.ledger-box-exp { border: 1px solid rgba(248,113,113,0.45); background: var(--loss-bg); color: var(--loss); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
 .ledger-row .ledger-side button.quiet { padding: 0.4rem 0.55rem; }
@@ -1833,6 +1837,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .ledger-row .ledger-label { flex: 1 1 60%; }
   .ledger-row .ledger-side { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap; }
   .ledger-row .ledger-amount { min-width: 0; }
+  .ledger-row .ledger-amount.ledger-box-inc, .ledger-row .ledger-amount.ledger-box-exp { left: 0; }
   .ledger-row .ledger-side button.quiet { min-height: 2.75rem; }
   .dialog-actions { flex-wrap: wrap; }
   .dialog-actions button { flex: 1 1 8rem; min-height: 3rem; }

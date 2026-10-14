@@ -705,6 +705,7 @@
               trades: [
                 { id: 'w1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1100', ledgerLabel: 'Gigs', createdAt: '2026-01-05T00:00:00.000Z' },
                 { id: 'w2', type: 'income', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1110', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'w4', type: 'income', symbol: 'EUR', qty: 75, total: 75, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '3000', ledgerLabel: 'Solo', createdAt: '2026-01-05T00:00:00.000Z' },
                 { id: 'w3', type: 'expense', symbol: 'EUR', qty: 20, total: 20, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', createdAt: '2026-01-06T00:00:00.000Z' }
               ],
               priceOverrides: {}
@@ -744,6 +745,17 @@
             assert(unt.left - unr.left < 16, 'Unlabeled label must start at the row beginning');
             var row1000 = document.querySelector('.ledger-row[data-ledger="1000"]');
             assert(row1000 && row1000.querySelector('.ledger-amount.ledger-box-inc'), 'parent overview needs the boxed income total');
+            // Same-level texts align: boxed € starts where plain € starts (desktop slot geometry).
+            if (window.matchMedia && window.matchMedia('(min-width: 721px)').matches) {
+              var row3000 = document.querySelector('.ledger-row[data-ledger="3000"]');
+              assert(row3000 && !row3000.querySelector('.ledger-toggle'), '3000 must be a plain leaf');
+              var rBox = document.createRange();
+              rBox.selectNodeContents(row1000.querySelector('.ledger-amount').firstChild);
+              var rPlain = document.createRange();
+              rPlain.selectNodeContents(row3000.querySelector('.ledger-amount').firstChild);
+              var dx = Math.abs(rBox.getBoundingClientRect().left - rPlain.getBoundingClientRect().left);
+              assert(dx < 2, 'boxed and plain texts must share an x, off by ' + dx);
+            }
             var warn = document.querySelector('.ledger-warn');
             assert(warn && warn.textContent.indexOf('1100') !== -1, 'posted parent must raise the cleanup hint');
             row1100.querySelector('[data-ledger-toggle]').click();

@@ -17,7 +17,7 @@ var STORE_VERSION = 2;
 
 function defaultState() {
   return {
-    settings: { mainCurrency: 'EUR', costMethod: 'average' },
+    settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
     accounts: [],
     trades: [],
     priceOverrides: {}
@@ -92,6 +92,13 @@ function normalizeAccount(a) {
     var nl = normalizeLedgerLabels(a.ledgers);
     if (Object.keys(nl).length) out.ledgers = nl;
   }
+  // Group link: members carry their main account's id. Self-links and
+  // non-strings are dropped; dangling links simply match no main.
+  if (typeof a.groupId === 'string' && a.groupId.trim() !== '' && a.groupId !== a.id) out.groupId = a.groupId;
+  // Group ledger currency (mains): a MAIN_CURRENCIES fiat, else dropped.
+  if (typeof a.groupCurrency === 'string' && MAIN_CURRENCIES.indexOf(a.groupCurrency.trim().toUpperCase()) !== -1) {
+    out.groupCurrency = a.groupCurrency.trim().toUpperCase();
+  }
   return out;
 }
 
@@ -110,16 +117,17 @@ function normalizeAccountFilter(v) {
 }
 
 function normalizeSettings(s, fallback) {
-  var fb = fallback || { mainCurrency: 'EUR', costMethod: 'average' };
+  var fb = fallback || { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true };
   if (!isValidSettings(s)) {
-    var outFb = { mainCurrency: fb.mainCurrency, costMethod: fb.costMethod };
+    var outFb = { mainCurrency: fb.mainCurrency, costMethod: fb.costMethod, assetLedgers: (fb.assetLedgers === false) ? false : true };
     var fbf = normalizeAccountFilter(fb.accountFilter);
     if (fbf !== null) outFb.accountFilter = fbf;
     return outFb;
   }
   var res = {
     mainCurrency: String(s.mainCurrency).toUpperCase(),
-    costMethod: s.costMethod
+    costMethod: s.costMethod,
+    assetLedgers: (s.assetLedgers === false) ? false : true
   };
   var flt = normalizeAccountFilter(s.accountFilter);
   if (flt !== null) res.accountFilter = flt;
@@ -306,6 +314,102 @@ function ensureAccountChart(st, accountId) {
     acc.ledgers = ledgerChartFor(st, accountId);
   }
   return acc.ledgers;
+}
+
+// --- Account groups (organisation of bank accounts and more) ---
+// Members link to their main via groupId; records never move on grouping —
+// the main view only aggregates. Flat by design: a main can never join
+// another group (nesting is refused in assignGroup).
+function groupMembers(st, mainId) {
+  if (!st || !mainId || !accountById(st, mainId)) return [];
+  return ((st.accounts) || []).filter(function (a) {
+    return !!a && a.id !== mainId && typeof a.groupId === 'string' && a.groupId === mainId;
+  });
+}
+
+// The live main of a grouped account, or null (standalone, dangling or
+// self link). Use this — never the raw groupId — to decide member views.
+function groupMainOf(st, id) {
+  if (!st || !id) return null;
+  var acc = accountById(st, id);
+  if (!acc || typeof acc.groupId !== 'string' || acc.groupId === '' || acc.groupId === id) return null;
+  return accountById(st, acc.groupId);
+}
+
+function isGroupMain(st, id) {
+  return groupMembers(st, id).length > 0;
+}
+
+// Group ledger currency: a cash main's own fiat, else the header fiat at
+// merge time. Always a MAIN_CURRENCIES fiat, never the asset ticker.
+function defaultGroupCurrency(st, mainAcc) {
+  var t = mainAcc && typeof mainAcc.ticker === 'string' ? mainAcc.ticker.trim().toUpperCase() : '';
+  if (mainAcc && isCashKind(mainAcc.kind) && MAIN_CURRENCIES.indexOf(t) !== -1) return t;
+  var m = st && st.settings ? String(st.settings.mainCurrency || '').toUpperCase() : '';
+  return MAIN_CURRENCIES.indexOf(m) !== -1 ? m : 'EUR';
+}
+
+// Read the main's group currency, persisting the default when absent.
+function ensureGroupCurrency(st, mainId) {
+  var acc = accountById(st, mainId);
+  if (!acc) return 'EUR';
+  var g = typeof acc.groupCurrency === 'string' ? acc.groupCurrency.trim().toUpperCase() : '';
+  if (MAIN_CURRENCIES.indexOf(g) !== -1) return g;
+  g = defaultGroupCurrency(st, acc);
+  acc.groupCurrency = g;
+  return g;
+}
+
+// Link members under a main (mutates, no save): mains can't nest, unknown
+// ids and self-links fail, re-pointing a member between mains is allowed.
+function assignGroup(st, memberIds, mainId) {
+  var main = accountById(st, mainId);
+  if (!main) return 'Main account not found.';
+  var seen = {};
+  var ids = [];
+  (memberIds || []).forEach(function (id) {
+    if (typeof id !== 'string' || id === '' || id === mainId || seen[id]) return;
+    seen[id] = true;
+    ids.push(id);
+  });
+  for (var i = 0; i < ids.length; i++) {
+    var a = accountById(st, ids[i]);
+    if (!a) return 'Account not found.';
+    if (isGroupMain(st, ids[i])) return '"' + a.name + '" is already a main account — ungroup it first.';
+  }
+  ids.forEach(function (id) { accountById(st, id).groupId = mainId; });
+  ensureGroupCurrency(st, mainId);
+  return null;
+}
+
+// Release every member of a main (mutates, no save). Records and charts
+// stay exactly where they are.
+function ungroupAll(st, mainId) {
+  var n = 0;
+  groupMembers(st, mainId).forEach(function (a) {
+    try { delete a.groupId; } catch (e) { a.groupId = undefined; }
+    n++;
+  });
+  return n;
+}
+
+// Fresh sub-account name under a main: sub-<name>, sub-<name> 2, …
+function uniqueSubName(st, base) {
+  base = String(base === undefined || base === null ? '' : base).trim() || 'Account';
+  var taken = {};
+  ((st && st.accounts) || []).forEach(function (a) {
+    if (a && typeof a.name === 'string') taken[a.name] = true;
+  });
+  var nm = 'sub-' + base;
+  if (!taken[nm]) return nm;
+  var i = 2;
+  while (taken['sub-' + base + ' ' + i]) i++;
+  return 'sub-' + base + ' ' + i;
+}
+
+// Global asset-ledgers switch. Absent (legacy states) means ON.
+function assetLedgersOn(st) {
+  return !st || !st.settings || st.settings.assetLedgers !== false;
 }
 
 function cashAccountIds(st) {
@@ -2191,6 +2295,15 @@ if (typeof window !== 'undefined') {
   window.Inoculens.ledgerTree = ledgerTree;
   window.Inoculens.ledgerChartFor = ledgerChartFor;
   window.Inoculens.ensureAccountChart = ensureAccountChart;
+  window.Inoculens.groupMembers = groupMembers;
+  window.Inoculens.groupMainOf = groupMainOf;
+  window.Inoculens.isGroupMain = isGroupMain;
+  window.Inoculens.defaultGroupCurrency = defaultGroupCurrency;
+  window.Inoculens.ensureGroupCurrency = ensureGroupCurrency;
+  window.Inoculens.assignGroup = assignGroup;
+  window.Inoculens.ungroupAll = ungroupAll;
+  window.Inoculens.uniqueSubName = uniqueSubName;
+  window.Inoculens.assetLedgersOn = assetLedgersOn;
   window.Inoculens.openLedgerDialog = openLedgerDialog;
   window.Inoculens.renameAccountLedger = renameAccountLedger;
   window.Inoculens.deleteAccountLedger = deleteAccountLedger;

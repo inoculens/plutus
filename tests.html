@@ -695,6 +695,67 @@
           assert(L.renameAccountLedger(held, 'a1', '3000', '1000', 'Projects') !== null, 'rename carrying records onto children must still fail');
         });
 
+        test('account groups: link, guard, currency, release', function () {
+          function gst() {
+            return {
+              settings: { mainCurrency: 'USD', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'b', name: 'B', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 'c', name: 'C', ticker: 'ETH', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'ghost' }
+              ],
+              trades: [],
+              priceOverrides: {}
+            };
+          }
+          var st = gst();
+          assert(L.groupMembers(st, 'm').length === 0, 'no members yet');
+          assert(!L.isGroupMain(st, 'm'), 'not a main yet');
+          assert(L.groupMainOf(st, 'a') === null, 'standalone has no main');
+          assert(L.groupMainOf(st, 'c') === null, 'dangling link has no main');
+          assert(L.assignGroup(st, ['a', 'b'], 'm') === null, 'assign must succeed');
+          assert(L.groupMembers(st, 'm').length === 2, 'two members expected');
+          assert(L.isGroupMain(st, 'm'), 'm is a main now');
+          assert(L.groupMainOf(st, 'a').id === 'm', 'a points at m');
+          var main = null;
+          st.accounts.forEach(function (x) { if (x.id === 'm') main = x; });
+          assert(main.groupCurrency === 'EUR', 'cash main keeps its fiat, got ' + main.groupCurrency);
+          assert(L.assignGroup(st, ['c'], 'b') === null, 're-point must succeed');
+          assert(L.groupMainOf(st, 'c').id === 'b', 'c moved to b');
+          var bAcc = null;
+          st.accounts.forEach(function (x) { if (x.id === 'b') bAcc = x; });
+          assert(bAcc.groupCurrency === 'USD', 'crypto main falls back to header fiat, got ' + bAcc.groupCurrency);
+          assert(L.assignGroup(st, ['a'], 'nope') !== null, 'missing main must fail');
+          assert(L.assignGroup(st, ['m'], 'b') !== null, 'nesting a main must fail');
+          assert(L.assignGroup(st, ['b'], 'b') === null, 'self link is skipped, not fatal');
+          assert(L.groupMainOf(st, 'b').id === 'm', 'b still under m (self skipped)');
+          assert(L.ungroupAll(st, 'm') === 2, 'two members released');
+          assert(!L.isGroupMain(st, 'm') && L.groupMainOf(st, 'a') === null, 'group dissolved');
+          assert(L.uniqueSubName(st, 'Org') === 'sub-Org', 'first sub name wrong');
+          st.accounts.push({ id: 's', name: 'sub-Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' });
+          assert(L.uniqueSubName(st, 'Org') === 'sub-Org 2', 'collision must number up');
+        });
+
+        test('group fields + assetLedgers survive normalize and import', function () {
+          var acc = { id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm1', groupCurrency: 'usd', ledgers: { '1000': 'Mine' } };
+          var env = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: false }, accounts: [{ id: 'm1', name: 'M', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }, acc], trades: [], priceOverrides: {} });
+          var back = L.importState(env);
+          var got = null;
+          back.accounts.forEach(function (a) { if (a.id === 'a1') got = a; });
+          assert(got && got.groupId === 'm1', 'groupId must survive: ' + JSON.stringify(got));
+          assert(got && got.groupCurrency === 'USD', 'groupCurrency must normalize upper: ' + JSON.stringify(got));
+          assert(back.settings.assetLedgers === false, 'assetLedgers=false must persist');
+          assert(L.assetLedgersOn(back) === false, 'helper must read false');
+          var env2 = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [], trades: [], priceOverrides: {} });
+          var back2 = L.importState(env2);
+          assert(back2.settings.assetLedgers === true && L.assetLedgersOn(back2) === true, 'absent flag must default ON');
+          var bad = { id: 'x', name: 'X', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'x', groupCurrency: '!!!' };
+          var env3 = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [bad], trades: [], priceOverrides: {} });
+          var back3 = L.importState(env3);
+          assert(!back3.accounts[0].groupId && !back3.accounts[0].groupCurrency, 'self link + bad fiat must drop: ' + JSON.stringify(back3.accounts[0]));
+        });
+
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

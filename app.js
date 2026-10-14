@@ -86,6 +86,12 @@ function normalizeAccount(a) {
   if (a && typeof a.address === 'string' && a.address.trim() !== '') out.address = a.address.trim().slice(0, 128);
   if (a && typeof a.note === 'string' && a.note.trim() !== '') out.note = a.note.trim().slice(0, 280);
   if (a && isValidHexColor(a.color)) out.color = String(a.color).trim().toUpperCase();
+  // Own ledger chart (bookkeeping): absent means "use the global default".
+  // Invalid maps are dropped to the default rather than breaking the account.
+  if (a && a.ledgers !== undefined && a.ledgers !== null && a.ledgers && typeof a.ledgers === 'object' && !Array.isArray(a.ledgers)) {
+    var nl = normalizeLedgerLabels(a.ledgers);
+    if (Object.keys(nl).length) out.ledgers = nl;
+  }
   return out;
 }
 
@@ -117,12 +123,10 @@ function normalizeSettings(s, fallback) {
   };
   var flt = normalizeAccountFilter(s.accountFilter);
   if (flt !== null) res.accountFilter = flt;
-  // Implicit chart of accounts: ledger code -> label, learned from usage.
-  // Invalid maps are dropped (never break settings); valid ones persist
-  // through export/import like any other setting.
-  if (s.ledgerLabels !== undefined && s.ledgerLabels !== null) {
-    if (isValidLedgerLabels(s.ledgerLabels)) res.ledgerLabels = normalizeLedgerLabels(s.ledgerLabels);
-    else res.ledgerLabels = {};
+  // Default chart of accounts: code -> label. Bad keys are dropped
+  // individually; valid entries persist through export/import.
+  if (s.ledgerLabels !== undefined && s.ledgerLabels !== null && s.ledgerLabels && typeof s.ledgerLabels === 'object' && !Array.isArray(s.ledgerLabels)) {
+    res.ledgerLabels = normalizeLedgerLabels(s.ledgerLabels);
   }
   return res;
 }
@@ -278,6 +282,30 @@ function isCashKind(k) {
 function isCashAccount(st, id) {
   var a = accountById(st, id);
   return !!a && isCashKind(a.kind);
+}
+
+// Effective ledger chart for an account: its own chart when present,
+// otherwise the global default. Own charts diverge by copy-on-first-edit,
+// so accounts stay strictly isolated after diverging.
+function ledgerChartFor(st, accountId) {
+  try {
+    var acc = accountById(st, accountId);
+    if (acc && acc.ledgers && typeof acc.ledgers === 'object' && !Array.isArray(acc.ledgers)) {
+      return normalizeLedgerLabels(acc.ledgers);
+    }
+    return normalizeLedgerLabels(st && st.settings ? st.settings.ledgerLabels : null);
+  } catch (e) { return {}; }
+}
+
+// Ensure the account owns its chart: snapshot the current effective chart
+// on first per-account change, then hand back the live map to edit.
+function ensureAccountChart(st, accountId) {
+  var acc = accountById(st, accountId);
+  if (!acc) return {};
+  if (!acc.ledgers || typeof acc.ledgers !== 'object' || Array.isArray(acc.ledgers)) {
+    acc.ledgers = ledgerChartFor(st, accountId);
+  }
+  return acc.ledgers;
 }
 
 function cashAccountIds(st) {
@@ -2041,6 +2069,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cashBalance = cashBalance;
   window.Inoculens.ledgerParentOf = ledgerParentOf;
   window.Inoculens.ledgerTree = ledgerTree;
+  window.Inoculens.ledgerChartFor = ledgerChartFor;
+  window.Inoculens.ensureAccountChart = ensureAccountChart;
+  window.Inoculens.openLedgerDialog = openLedgerDialog;
+  window.Inoculens.deleteAccountLedger = deleteAccountLedger;
   window.Inoculens.ledgerSignedMain = ledgerSignedMain;
   window.Inoculens.learnLedgerLabel = learnLedgerLabel;
   window.Inoculens.refreshLedgerList = refreshLedgerList;
@@ -5674,6 +5706,17 @@ function ledgerRowEl(code, label, total, main, depth) {
   v.textContent = fmtMoney(total, main);
   d.appendChild(l);
   d.appendChild(v);
+  // Structural rows can be removed from this account's chart (materializes
+  // the account's own chart when it still follows the default).
+  if (code !== '—') {
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'quiet';
+    del.textContent = 'Delete';
+    del.setAttribute('data-ledger-del', code);
+    del.setAttribute('aria-label', 'Delete ledger ' + code + ' from this account');
+    d.appendChild(del);
+  }
   return d;
 }
 
@@ -5686,18 +5729,32 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
   stats.appendChild(statCard('Balance', fmtQty(bal.native, bal.ticker || acc.ticker) + ' ' + String(bal.ticker || acc.ticker || '').toUpperCase(), bal.native));
   stats.appendChild(statCard('Value', fmtMoney(bal.main, main), bal.main));
   host.appendChild(stats);
-  var labels = (st.settings && st.settings.ledgerLabels) || {};
+  var labels = ledgerChartFor(st, acc.id);
   var tree = ledgerTree(dtrades, acc.id, main, labels);
-  if (!tree.roots.length && !tree.unassignedCount) return;
   var sec = document.createElement('div');
   sec.className = 'section-head';
   var h = document.createElement('h2');
   h.className = 'section-title';
   h.textContent = 'Ledgers';
   sec.appendChild(h);
+  var ladd = document.createElement('button');
+  ladd.type = 'button';
+  ladd.className = 'ghost';
+  ladd.textContent = '+ Ledger';
+  ladd.setAttribute('aria-label', 'Add ledger to ' + acc.name);
+  ladd.addEventListener('click', function () { openLedgerDialog(acc.id); });
+  sec.appendChild(ladd);
   host.appendChild(sec);
+  if (!tree.roots.length && !tree.unassignedCount) {
+    var noneNote = document.createElement('p');
+    noneNote.className = 'muted';
+    noneNote.textContent = 'No ledgers yet — add a parent code like 1000, then post to subledgers.';
+    host.appendChild(noneNote);
+    return;
+  }
   var list = document.createElement('div');
   list.className = 'ledger-list';
+  list.setAttribute('data-ledger-account', acc.id);
   (function walk(nodes, depth) {
     nodes.forEach(function (n) {
       list.appendChild(ledgerRowEl(n.code, n.label, n.total, main, depth));
@@ -5705,7 +5762,83 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host) {
     });
   })(tree.roots, 0);
   if (tree.unassignedCount) list.appendChild(ledgerRowEl('—', 'No ledger', tree.unassigned, main, 0));
+  list.addEventListener('click', function (e) {
+    var btn = e && e.target && e.target.closest ? e.target.closest('[data-ledger-del]') : null;
+    if (!btn) return;
+    deleteAccountLedger(acc.id, btn.getAttribute('data-ledger-del'));
+  });
   host.appendChild(list);
+}
+
+// Per-account ledger management: add/rename writes the account's own
+// chart (snapshotting the default first); delete removes the code from the
+// account's effective chart. Records keep their own stored codes either way.
+var ledgerDialogAccountId = null;
+
+function buildLedgerDialog() {
+  var host = document.getElementById('ledger-dialog-body');
+  if (!host || document.getElementById('ld-save')) return;
+  wireDialog('ledger-dialog');
+  var wrap = document.createElement('div');
+  wrap.innerHTML =
+    '<label for="ld-code">Code</label>' +
+    '<input id="ld-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
+    '<label for="ld-label">Label</label>' +
+    '<input id="ld-label" autocomplete="off" spellcheck="false" placeholder="e.g. Gigs" maxlength="80">' +
+    '<p id="ld-error" class="banner-error" role="alert" hidden></p>' +
+    '<button id="ld-save" class="primary" type="button">Save ledger</button>';
+  host.appendChild(wrap);
+  document.getElementById('ld-save').addEventListener('click', function () {
+    var err = document.getElementById('ld-error');
+    function fail(msg) { if (err) { err.textContent = String(msg); err.hidden = false; } }
+    if (err) { err.textContent = ''; err.hidden = true; }
+    var accId = ledgerDialogAccountId;
+    var code = uiVal('ld-code', '').trim();
+    var label = uiVal('ld-label', '').trim();
+    if (!code || !isValidLedgerCode(code) || code === '') { fail('Ledger needs a code (e.g. 1100).'); return; }
+    if (!label) { fail('Ledger needs a label (e.g. Gigs).'); return; }
+    if (!isValidLedgerLabel(label)) { fail('Ledger label is too long — up to 80 characters.'); return; }
+    var st = loadState();
+    if (!accountById(st, accId)) { fail('Account not found.'); return; }
+    var map = ensureAccountChart(st, accId);
+    if (!Object.prototype.hasOwnProperty.call(map, code) && Object.keys(map).length >= 500) { fail('This account already holds 500 codes.'); return; }
+    map[String(code).trim()] = String(label).trim();
+    if (!saveStateGuarded(st)) { fail('Storage unavailable — ledger was not saved.'); return; }
+    uiSetVal('ld-code', '');
+    uiSetVal('ld-label', '');
+    closeDialog('ledger-dialog');
+    clearBanner();
+    render();
+  });
+}
+
+function openLedgerDialog(accountId) {
+  ledgerDialogAccountId = accountId;
+  buildLedgerDialog();
+  uiSetVal('ld-code', '');
+  uiSetVal('ld-label', '');
+  var err = document.getElementById('ld-error');
+  if (err) { err.textContent = ''; err.hidden = true; }
+  openDialog('ledger-dialog');
+}
+
+function deleteAccountLedger(accountId, code) {
+  if (!accountId || !code) return;
+  var st = loadState();
+  var acc = accountById(st, accountId);
+  if (!acc) return;
+  var effective = ledgerChartFor(st, accountId);
+  var label = effective[code] ? code + ' · ' + effective[code] : code;
+  confirmAction('Delete ledger', 'Remove "' + label + '" from ' + acc.name + '? Records keep their codes.', 'Delete', true).then(function (ok) {
+    if (!ok) return;
+    var s2 = loadState();
+    if (!accountById(s2, accountId)) return;
+    var map = ensureAccountChart(s2, accountId);
+    if (Object.prototype.hasOwnProperty.call(map, code)) delete map[code];
+    if (!saveStateGuarded(s2)) return;
+    clearBanner();
+    render();
+  });
 }
 
 function renderAccountDetail(st, id) {
@@ -7196,9 +7329,9 @@ function syncTradeTypeUI() {
       try {
         var stL = loadState();
         ((stL && stL.trades) || []).forEach(function (t) {
-          if (t && t.ledger && String(t.ledger).trim() !== '') known[String(t.ledger).trim()] = true;
+          if (t && t.accountId === cashAcc.id && t.ledger && String(t.ledger).trim() !== '') known[String(t.ledger).trim()] = true;
         });
-        var mapL = (stL && stL.settings && stL.settings.ledgerLabels) || {};
+        var mapL = ledgerChartFor(stL, cashAcc.id);
         Object.keys(mapL).forEach(function (k) { known[String(k).trim()] = true; });
       } catch (e) { /* ignore */ }
       dl.innerHTML = '';
@@ -7574,19 +7707,26 @@ function tradeFormError(msg) {
 }
 
 // Implicit chart of accounts: remember a ledger label the user typed so
-// the datalist and reports can reuse it. Historic trades keep their own
-// stored labels; this only updates the settings map.
+// the datalist and reports can reuse it. Learned into the record's own
+// account (snapshotting the default on first edit); historic trades keep
+// their own stored labels; this only updates the chart map.
 function learnLedgerLabel(st, trade) {
   try {
     if (!st || !trade) return;
     var code = (trade.ledger === undefined || trade.ledger === null) ? '' : String(trade.ledger).trim();
     var label = (trade.ledgerLabel === undefined || trade.ledgerLabel === null) ? '' : String(trade.ledgerLabel).trim();
     if (code === '' || label === '') return;
-    if (!st.settings || typeof st.settings !== 'object') return;
-    var map = st.settings.ledgerLabels;
-    if (!map || typeof map !== 'object' || Array.isArray(map)) {
-      map = {};
-      st.settings.ledgerLabels = map;
+    var map = null;
+    if (trade.accountId) {
+      if (!accountById(st, trade.accountId)) return;
+      map = ensureAccountChart(st, trade.accountId);
+    } else {
+      if (!st.settings || typeof st.settings !== 'object') return;
+      map = st.settings.ledgerLabels;
+      if (!map || typeof map !== 'object' || Array.isArray(map)) {
+        map = {};
+        st.settings.ledgerLabels = map;
+      }
     }
     // Capped like the validator: beyond 500 codes nothing is learned, so a
     // large chart can never be wiped by normalization on reload.
@@ -8137,7 +8277,7 @@ var dialogOpener = null;
 // dialogs (e.g. Settings + confirm) count, so closing one never unlocks
 // while another is still open. Ancient browsers without showModal fall
 // back to the [open] attribute: scroll still locks, clicks do not.
-var MODAL_IDS = ['trade-dialog', 'account-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog'];
+var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog'];
 
 function updateModalLock() {
   try {
@@ -8602,7 +8742,7 @@ function buildSettings() {
   wrap.innerHTML =
     '<div class="set-tabs" role="tablist" aria-label="Settings sections">' +
     '<button type="button" role="tab" data-settab="overrides" aria-selected="true">Price overrides</button>' +
-    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledgers</button>' +
+    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledgers (default)</button>' +
     '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backup &amp; restore</button>' +
     '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud Sync</button>' +
     '<button type="button" role="tab" data-settab="danger" aria-selected="false">Danger zone</button>' +
@@ -8617,7 +8757,7 @@ function buildSettings() {
     '<ul id="o-list"></ul>' +
     '</section>' +
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
-    '<p class="muted set-blurb">Bookkeeping codes for cash records, learned as you type (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Renaming here changes future suggestions — records keep their own stored labels.</p>' +
+    '<p class="muted set-blurb">Default bookkeeping codes every cash account starts from (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Editing codes inside an account diverges it from this default; renaming here changes future suggestions — records keep their own stored labels.</p>' +
     '<label for="l-code">Code</label>' +
     '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="l-label">Label</label>' +

@@ -66,6 +66,10 @@
         <div class="dialog-head"><h2 id="account-dialog-title">New account</h2></div>
         <div id="account-dialog-body"></div>
       </dialog>
+      <dialog id="ledger-dialog" aria-labelledby="ledger-dialog-title">
+        <div class="dialog-head"><h2 id="ledger-dialog-title">New ledger</h2></div>
+        <div id="ledger-dialog-body"></div>
+      </dialog>
       <dialog id="settings-dialog" aria-labelledby="settings-dialog-title">
         <div class="dialog-head"><h2 id="settings-dialog-title">Settings</h2></div>
         <div id="settings-dialog-body"></div>
@@ -528,6 +532,69 @@
           assert(tree.roots[0].kids.length === 2, 'both subledgers nest under 1000');
           var tree2 = L.ledgerTree([], 'cash1', 'EUR', { '1000': 'Income' });
           assert(tree2.roots.length === 1 && tree2.roots[0].code === '1000' && tree2.roots[0].total === 0, 'empty chart still structures: ' + JSON.stringify(tree2.roots));
+        });
+
+        test('effective chart: own overrides global, empty own stays empty', function () {
+          function stWith(accounts, globalLabels) {
+            return { settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: globalLabels || {} }, accounts: accounts, trades: [], priceOverrides: {} };
+          }
+          var both = stWith([
+            { id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'a2', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', ledgers: { '1000': 'Mine' } },
+            { id: 'a3', name: 'C', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', ledgers: {} }
+          ], { '1000': 'Income', '2000': 'Expenses' });
+          var c1 = L.ledgerChartFor(both, 'a1');
+          assert(c1['1000'] === 'Income' && c1['2000'] === 'Expenses', 'no own chart must follow global: ' + JSON.stringify(c1));
+          var c2 = L.ledgerChartFor(both, 'a2');
+          assert(c2['1000'] === 'Mine' && !c2['2000'], 'own chart must be strictly isolated: ' + JSON.stringify(c2));
+          var c3 = L.ledgerChartFor(both, 'a3');
+          assert(Object.keys(c3).length === 0, 'emptied own chart must not fall back to global');
+        });
+
+        test('first per-account edit snapshots the default, then diverges', function () {
+          var st = { settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '1000': 'Income' } }, accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }], trades: [], priceOverrides: {} };
+          var map = L.ensureAccountChart(st, 'a1');
+          assert(map['1000'] === 'Income', 'snapshot must copy the default');
+          map['1100'] = 'Gigs';
+          assert(!st.settings.ledgerLabels['1100'], 'account edit must not leak into the default');
+          assert(L.ledgerChartFor(st, 'a1')['1100'] === 'Gigs', 'own chart must serve after snapshot');
+        });
+
+        test('learning writes into the record account, never the default', function () {
+          var st = { settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '1000': 'Income' } }, accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }], trades: [], priceOverrides: {} };
+          L.learnLedgerLabel(st, { ledger: '1100', ledgerLabel: 'Gigs', accountId: 'a1' });
+          assert(st.settings.ledgerLabels['1100'] === undefined, 'learning must not touch the default');
+          assert(L.ledgerChartFor(st, 'a1')['1100'] === 'Gigs', 'learning must land in the account chart');
+        });
+
+        test('accounts persist own charts through normalize + import', function () {
+          var acc = { id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', ledgers: { '1000': 'Mine', 'bad key with way too many characters here': 'X' } };
+          var env = JSON.stringify({ app: 'inoculens-plutus', version: 2, exportedAt: '2026-01-01T00:00:00.000Z', settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [acc], trades: [], priceOverrides: {} });
+          var back = L.importState(env);
+          assert(back.accounts[0].ledgers && back.accounts[0].ledgers['1000'] === 'Mine', 'own chart must survive import: ' + JSON.stringify(back.accounts[0].ledgers));
+          assert(!back.accounts[0].ledgers['bad key with way too many characters here'], 'invalid codes must be dropped');
+        });
+
+        test('+ Ledger dialog saves into the account chart and closes', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({ settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '1000': 'Income' } }, accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }], trades: [], priceOverrides: {} });
+            if (typeof init === 'function') init();
+            L.openLedgerDialog('a1');
+            document.getElementById('ld-code').value = '1100';
+            document.getElementById('ld-label').value = 'Gigs';
+            document.getElementById('ld-save').click();
+            var chart = L.ledgerChartFor(L.loadState(), 'a1');
+            assert(chart['1100'] === 'Gigs' && chart['1000'] === 'Income', 'dialog must snapshot + save: ' + JSON.stringify(chart));
+            assert(document.getElementById('ledger-dialog').open !== true, 'dialog must close after save');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
         });
 
         test('ledger values blank-total cash income by quantity, never -0', function () {

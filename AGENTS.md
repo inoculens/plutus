@@ -4,6 +4,18 @@ Local-first portfolio tracker. Static site: `index.html`, `app.js`,
 `styles.css` (+ `tests.html` harness, `netlify.toml`, `stamp-version.sh`).
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
+## Session start — always work on latest
+- Before ANY work: `git fetch origin`, then compare `HEAD` vs
+  `origin/main` (`git rev-parse HEAD`, `git rev-parse origin/main`,
+  or `git status -sb`).
+- If the local checkout is behind: FIRST fast-forward it
+  (`git pull --ff-only`) on a clean tree, re-verify, and only then
+  start editing.
+- If the tree is dirty or the pull would overwrite local work: STOP and
+  ask the owner before touching anything.
+- This applies to every new session and every new agent with no prompting
+  needed.
+
 ## Versioning — mandatory on EVERY change
 - The footer shows `<short-hash> (#<count>)`, e.g. `c493d6f (#111)`.
 - A commit id only exists AFTER committing, so never hand-write it: the

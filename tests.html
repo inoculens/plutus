@@ -1141,6 +1141,7 @@
             render();
             var cards = document.querySelector('#account-detail .cards.detail-stats');
             assert(cards && cards.textContent.indexOf('1,000') !== -1, 'group Value must show 1000, got ' + (cards && cards.textContent));
+            assert(cards && cards.classList.contains('cards-duo'), 'two-card grid must center its pair');
             assert(cards && cards.textContent.indexOf('1,000 EUR') !== -1, 'single-fiat Balance must show native, got ' + (cards && cards.textContent));
             var st = L.loadState();
             st.accounts.push({ id: 'u', name: 'U', ticker: 'USD', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' });
@@ -1180,6 +1181,7 @@
             render();
             var cards = document.querySelector('#account-detail .cards.detail-stats');
             assert(cards && cards.textContent.indexOf('€100.00') !== -1, 'main must fold member realized 100, got ' + (cards && cards.textContent));
+            assert(cards && !cards.classList.contains('cards-duo'), 'full grid must not center');
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

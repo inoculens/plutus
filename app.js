@@ -6290,6 +6290,8 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host, opts) {
   var bal = cashBalance(dtrades, acc.id, main);
   stats.appendChild(statCard('Balance', fmtQty(bal.native, bal.ticker || acc.ticker) + ' ' + String(bal.ticker || acc.ticker || '').toUpperCase(), bal.native));
   stats.appendChild(statCard('Value', fmtMoney(bal.main, main), bal.main));
+  // Two cards in a four-track box: center the pair (see cards-duo).
+  stats.classList.add('cards-duo');
   host.appendChild(stats);
   if (opts && opts.skipLedgers) return;
   var labels = ledgerChartFor(st, acc.id);
@@ -7092,6 +7094,7 @@ function renderAccountDetail(st, id) {
       var gTickList = Object.keys(gTick);
       stats.appendChild(statCard('Balance', gHas ? (gTickList.length === 1 ? (fmtQty(gNative, gTickList[0]) + ' ' + gTickList[0]) : (gIds.length + ' accounts')) : 'New', gHas ? gNative : null));
       stats.appendChild(statCard('Value', gHas ? fmtMoney(gValue, gCcyM) : 'New', gHas ? gValue : null));
+      stats.classList.add('cards-duo');
       host.appendChild(stats);
     } else {
       buildCashDetailStats(st, acc, dtrades, main, stats, host, mainOf ? { skipLedgers: true } : null);

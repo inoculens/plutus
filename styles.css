@@ -1892,6 +1892,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 
 @media (min-width: 721px) {
   #fab-trade { display: none !important; }
+  /* Two-card grids (cash Balance/Value) center their pair: first card starts
+     on track 2, empty tracks read as background left and right. */
+  .cards.detail-stats.cards-duo > .card:first-child { grid-column: 2; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

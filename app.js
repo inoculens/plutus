@@ -6073,6 +6073,27 @@ function openLedgerDialog(accountId, editCode) {
   openDialog('ledger-dialog');
 }
 
+// Clone just enough state to simulate a ledger rename: account charts +
+// record ledgers. The source state is never touched.
+function cloneLedgerState(st) {
+  function copyObj(o) {
+    var n = {};
+    if (!o || typeof o !== 'object') return n;
+    Object.keys(o).forEach(function (k) { n[k] = o[k]; });
+    return n;
+  }
+  var c = { settings: (st && st.settings) || {}, accounts: [], trades: [], priceOverrides: (st && st.priceOverrides) || {} };
+  ((st && st.accounts) || []).forEach(function (a) {
+    var n = copyObj(a);
+    if (a && a.ledgers && typeof a.ledgers === 'object' && !Array.isArray(a.ledgers)) {
+      n.ledgers = copyObj(a.ledgers);
+    }
+    c.accounts.push(n);
+  });
+  ((st && st.trades) || []).forEach(function (t) { c.trades.push(copyObj(t)); });
+  return c;
+}
+
 // Rename (or relabel) one ledger inside an account's own chart: the chart
 // entry moves and every record carrying the old code follows it, so the
 // tree + totals never lose money. Pure against the passed state (no DOM,
@@ -6095,11 +6116,24 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel) {
     });
     if (posted) return 'Ledger code already exists — pick a new code or edit it.';
     if (Object.keys(map).length >= 500) return 'This account already holds 500 codes.';
-    // Parent-overview rule on the destination: its incoming records must not
-    // land on a parent, nor strand records on a new parent. Records carrying
-    // oldCode move away, so they are excluded from the scan.
-    var conf = ledgerRecordConflict(st, accountId, newCode, null, oldCode);
-    if (conf) return ledgerConflictMessage(conf);
+    // Parent-overview rule, judged on the AFTER state: simulate the rename
+    // on a clone and block only when it would newly strand records on a
+    // parent (a record-free parent renamed under other codes just works).
+    var before = [];
+    try { before = ledgerViolations(st, accountId); } catch (e) { before = []; }
+    var sim = cloneLedgerState(st);
+    var smap = ensureAccountChart(sim, accountId);
+    if (Object.prototype.hasOwnProperty.call(smap, oldCode)) delete smap[oldCode];
+    smap[newCode] = newLabel;
+    (sim.trades || []).forEach(function (t) {
+      if (!t || t.accountId !== accountId) return;
+      if (String(t.ledger || '').trim() === oldCode) { t.ledger = newCode; t.ledgerLabel = newLabel; }
+    });
+    var added = [];
+    try {
+      added = ledgerViolations(sim, accountId).filter(function (c) { return before.indexOf(c) === -1; });
+    } catch (e) { added = []; }
+    if (added.length) return '"' + added[0] + '" would hold records and sub-ledgers after this change — move its records to a child ledger first, keeping parents record-free.';
     if (Object.prototype.hasOwnProperty.call(map, oldCode)) delete map[oldCode];
     map[newCode] = newLabel;
   } else {

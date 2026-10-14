@@ -669,6 +669,32 @@
           assert(L.renameAccountLedger(stC, 'a1', 'X', 'AB', 'New') !== null, 'rename under a posted ledger must fail');
         });
 
+        test('renaming a record-free parent back just works', function () {
+          function stParent(recordsOnParent) {
+            var trades = [
+              { id: 'p1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1100', createdAt: '2026-01-05T00:00:00.000Z' },
+              { id: 'p2', type: 'income', symbol: 'EUR', qty: 200, total: 200, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1200', createdAt: '2026-01-05T00:00:00.000Z' }
+            ];
+            if (recordsOnParent) {
+              trades.push({ id: 'p0', type: 'income', symbol: 'EUR', qty: 10, total: 10, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '3000', createdAt: '2026-01-05T00:00:00.000Z' });
+            }
+            return {
+              settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '3000': 'Projects', '1100': 'A', '1200': 'B' } },
+              accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: trades,
+              priceOverrides: {}
+            };
+          }
+          var free = stParent(false);
+          assert(L.renameAccountLedger(free, 'a1', '3000', '1000', 'Projects') === null, 'record-free parent rename-back must succeed');
+          var chart = L.ledgerChartFor(free, 'a1');
+          assert(chart['1000'] === 'Projects' && !chart['3000'], 'chart must move back: ' + JSON.stringify(chart));
+          var tree = L.ledgerTree(free.trades, 'a1', 'EUR', chart);
+          assert(tree.roots.length === 1 && tree.roots[0].code === '1000' && tree.roots[0].total === 300, 'children must roll under 1000 again: ' + JSON.stringify(tree.roots));
+          var held = stParent(true);
+          assert(L.renameAccountLedger(held, 'a1', '3000', '1000', 'Projects') !== null, 'rename carrying records onto children must still fail');
+        });
+
         test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

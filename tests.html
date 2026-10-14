@@ -444,6 +444,20 @@
           assert(!L.isValidImportTrade(noArrival, ['cash1', 'cash2']), 'cross-fiat arrival without toQty accepted');
         });
 
+        test('record attachments validate, plain trades keep working', function () {
+          var meta = { name: 'invoice.pdf', mime: 'application/pdf', size: 1024, hash: 'abcdef1234567890' };
+          assert(L.isValidAttachment(meta), 'valid attachment rejected');
+          assert(L.isValidAttachment(null) && L.isValidAttachment(undefined), 'absent attachment rejected');
+          assert(!L.isValidAttachment({ name: 'x.exe', mime: 'application/x-msdownload', size: 10, hash: 'abcdef12' }), 'bad mime accepted');
+          assert(!L.isValidAttachment({ name: 'big.pdf', mime: 'application/pdf', size: 99 * 1024 * 1024, hash: 'abcdef12' }), 'oversize accepted');
+          var plain = { type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', accountId: 'a1' };
+          assert(L.isValidImportTrade(plain, ['a1']), 'plain buy rejected');
+          var withFile = { type: 'expense', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', accountId: 'cash1', attachment: meta };
+          assert(L.isValidImportTrade(withFile, ['cash1']), 'attached expense rejected');
+          var badFile = { type: 'expense', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', accountId: 'cash1', attachment: { name: 'x', mime: 'text/plain', size: 5, hash: 'zz' } };
+          assert(!L.isValidImportTrade(badFile, ['cash1']), 'bad attachment accepted');
+        });
+
         test('cashBalance signs flows; destination leg uses arrival-fiat rate', function () {
           var trades = [
             cashTrade({ id: 'b1', ledger: '1000' }),

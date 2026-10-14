@@ -254,6 +254,100 @@ function isValidTxid(v) {
   return /^(0x)?[A-Za-z0-9]{8,128}$/.test(String(v).trim());
 }
 
+// --- Record attachments (invoices / receipts) ---
+// One file per record: PDF, PNG or JPG, max ATTACH_MAX_BYTES. The trade
+// carries only small metadata {name, mime, size, hash}; the binary lives
+// in IndexedDB (never in localStorage, which caps at ~5-10 MB per origin).
+// Cloud sync / zip backup (phase 2) move the same blobs by content hash.
+var ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+var ATTACH_MIMES = ['application/pdf', 'image/png', 'image/jpeg'];
+function isValidAttachment(v) {
+  if (v === undefined || v === null) return true; // absent is valid
+  if (typeof v !== 'object' || Array.isArray(v)) return false;
+  if (typeof v.name !== 'string' || v.name.trim().length < 1 || v.name.trim().length > 120) return false;
+  if (ATTACH_MIMES.indexOf(String(v.mime)) === -1) return false;
+  if (typeof v.size !== 'number' || !isFinite(v.size) || v.size <= 0 || v.size > ATTACH_MAX_BYTES) return false;
+  if (typeof v.hash !== 'string' || !/^[0-9a-f]{8,64}$/.test(v.hash)) return false;
+  return true;
+}
+// Small promise-free IndexedDB blob store keyed by content hash.
+// Every helper resolves (never rejects) so a missing/private-mode IDB can
+// never break saving: callers treat null/false as "blob unavailable".
+var ATTACH_DB = 'inoculens.plutus.attachments';
+var ATTACH_STORE = 'blobs';
+function attDb() {
+  return new Promise(function (resolve) {
+    try {
+      if (typeof indexedDB === 'undefined') { resolve(null); return; }
+      var req = indexedDB.open(ATTACH_DB, 1);
+      req.onupgradeneeded = function () {
+        try { req.result.createObjectStore(ATTACH_STORE); } catch (e) { /* exists */ }
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { resolve(null); };
+      req.onblocked = function () { resolve(null); };
+    } catch (e) { resolve(null); }
+  });
+}
+function attPut(hash, blob, meta) {
+  return attDb().then(function (db) {
+    if (!db) return false;
+    return new Promise(function (resolve) {
+      try {
+        var tx = db.transaction(ATTACH_STORE, 'readwrite');
+        tx.oncomplete = function () { try { db.close(); } catch (e) { /* ignore */ } resolve(true); };
+        tx.onerror = function () { try { db.close(); } catch (e) { /* ignore */ } resolve(false); };
+        tx.objectStore(ATTACH_STORE).put({ hash: hash, blob: blob, name: meta.name, mime: meta.mime, size: meta.size, createdAt: new Date().toISOString() }, hash);
+      } catch (e) { try { db.close(); } catch (e2) { /* ignore */ } resolve(false); }
+    });
+  });
+}
+function attGet(hash) {
+  return attDb().then(function (db) {
+    if (!db) return null;
+    return new Promise(function (resolve) {
+      try {
+        var tx = db.transaction(ATTACH_STORE, 'readonly');
+        var rq = tx.objectStore(ATTACH_STORE).get(hash);
+        rq.onsuccess = function () { try { db.close(); } catch (e) { /* ignore */ } resolve(rq.result || null); };
+        rq.onerror = function () { try { db.close(); } catch (e) { /* ignore */ } resolve(null); };
+      } catch (e) { try { db.close(); } catch (e2) { /* ignore */ } resolve(null); }
+    });
+  });
+}
+function attDelete(hash) {
+  return attDb().then(function (db) {
+    if (!db) return false;
+    return new Promise(function (resolve) {
+      try {
+        var tx = db.transaction(ATTACH_STORE, 'readwrite');
+        tx.oncomplete = function () { try { db.close(); } catch (e) { /* ignore */ } resolve(true); };
+        tx.onerror = function () { try { db.close(); } catch (e) { /* ignore */ } resolve(false); };
+        tx.objectStore(ATTACH_STORE).delete(hash);
+      } catch (e) { try { db.close(); } catch (e2) { /* ignore */ } resolve(false); }
+    });
+  });
+}
+function attHashBytes(buf) {
+  function hex(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) { var h = bytes[i].toString(16); s += (h.length < 2 ? '0' : '') + h; }
+    return s;
+  }
+  try {
+    if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+      return crypto.subtle.digest('SHA-256', buf).then(function (d) { return hex(new Uint8Array(d)); });
+    }
+  } catch (e) { /* fall through to FNV */ }
+  return Promise.resolve().then(function () {
+    var b = new Uint8Array(buf);
+    var h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (var i = 0; i < b.length; i++) { h1 = Math.imul(h1 ^ b[i], 16777619) >>> 0; h2 = Math.imul(h2 + b[i], 16777619) >>> 0; }
+    function p(n) { var s = n.toString(16); while (s.length < 8) s = '0' + s; return s; }
+    return (p(h1) + p(h2)).toLowerCase();
+  });
+}
+
 // --- Cash ledgers (bookkeeping) ---
 // Ledger codes are free-form: any printable label the user wants
 // ('1000', '1100', '1110', '3000 VAT', …). Hierarchy nests by prefix, with
@@ -479,6 +573,9 @@ function isValidImportTrade(t, accountIds) {
   }
   // txid is optional metadata; when present it must look like a tx hash
   if (!isValidTxid(t.txid)) return false;
+  // attachment (invoice/receipt) is optional metadata; plain trades without
+  // it must keep validating — when present it must be well-formed
+  if (t.attachment !== undefined && t.attachment !== null && !isValidAttachment(t.attachment)) return false;
   // ledger code + label are optional bookkeeping metadata (cash records);
   // when present they must be well-formed, on every trade type
   if (!isValidLedgerCode(t.ledger)) return false;
@@ -616,6 +713,11 @@ function normalizeTradeForStore(t) {
   if (typeof c.currency === 'string' && c.currency.trim() !== '') c.currency = c.currency.trim().toUpperCase();
   if (typeof c.feeCurrency === 'string' && c.feeCurrency.trim() !== '') c.feeCurrency = c.feeCurrency.trim().toUpperCase();
   if (typeof c.txid === 'string' && c.txid.trim() !== '') c.txid = c.txid.trim();
+  if (c.attachment !== undefined && c.attachment !== null && isValidAttachment(c.attachment)) {
+    c.attachment = { name: String(c.attachment.name).trim(), mime: String(c.attachment.mime), size: Number(c.attachment.size), hash: String(c.attachment.hash).toLowerCase() };
+  } else if (c.attachment !== undefined && (c.attachment === null || !isValidAttachment(c.attachment))) {
+    try { delete c.attachment; } catch (e) { c.attachment = undefined; }
+  }
   return c;
 }
 
@@ -822,6 +924,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.importState = importState;
   window.Inoculens.defaultState = defaultState;
   window.Inoculens.accountById = accountById;
+  window.Inoculens.isValidAttachment = isValidAttachment;
 }
 
 // === Fx ===
@@ -2611,6 +2714,7 @@ function validateTrade(t, heldQty) {
     if (!isValidCurrencyCode(t.feeCurrency)) return 'fee currency invalid';
   }
   if (!isValidTxid(t.txid)) return 'transaction ID looks invalid — paste the full tx hash';
+  if (t.attachment !== undefined && t.attachment !== null && !isValidAttachment(t.attachment)) return 'attachment is invalid — re-attach the file';
   if (t.currency !== undefined && t.currency !== null && String(t.currency).trim() !== '') {
     if (!isValidCurrencyCode(t.currency)) return 'currency invalid';
   }
@@ -6228,6 +6332,41 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     txRow.appendChild(txV);
     box.appendChild(txRow);
   }
+  if (t.attachment && isValidAttachment(t.attachment)) {
+    (function (meta) {
+      var atRow = document.createElement('div');
+      atRow.className = 'stat-row';
+      atRow.setAttribute('data-label', 'Receipt');
+      var atL = document.createElement('span');
+      atL.className = 'stat-label';
+      atL.textContent = 'Receipt';
+      var atV = document.createElement('span');
+      atV.className = 'stat-val num';
+      var atA = document.createElement('a');
+      atA.className = 'tx-link';
+      atA.href = '#';
+      atA.textContent = String(meta.name).length > 24 ? String(meta.name).slice(0, 23) + '…' : String(meta.name);
+      atA.title = String(meta.name) + ' (' + String(meta.mime) + ') — click to view';
+      atA.addEventListener('click', function (ev) {
+        if (ev && ev.preventDefault) ev.preventDefault();
+        attGet(meta.hash).then(function (rec) {
+          if (!rec || !rec.blob) { showBanner('File is not on this device — it was attached elsewhere or its backup did not include files.', 'error', { title: 'Attachment', lines: ['File: ' + meta.name] }); return; }
+          try {
+            var urls = window.URL || window.webkitURL;
+            var url = urls.createObjectURL(rec.blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = meta.name; a.target = '_blank'; a.rel = 'noopener';
+            document.body.appendChild(a); a.click();
+            setTimeout(function () { try { urls.revokeObjectURL(url); } catch (e) { /* ignore */ } if (a.parentNode) a.parentNode.removeChild(a); }, 4000);
+          } catch (e) { showBanner('Could not open the file on this device.'); }
+        });
+      });
+      atV.appendChild(atA);
+      atRow.appendChild(atL);
+      atRow.appendChild(atV);
+      box.appendChild(atRow);
+    })(t.attachment);
+  }
   if (t.type === 'buy' || t.type === 'sell') {
     box.appendChild(statRow('Amount', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
   }
@@ -8681,6 +8820,11 @@ function buildTradeForm() {
     '<label for="t-txid">Transaction ID</label>' +
     '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash">' +
     '<p class="fld-hint">Optional — saved with the record and linked to mempool.space.</p>' +
+    '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt</label>' +
+    '<input id="t-attach" type="file" accept="application/pdf,image/png,image/jpeg">' +
+    '<p class="fld-hint" id="t-attach-hint">Optional — PDF, PNG or JPG up to 10 MB. Stored on this device.</p>' +
+    '<p class="fld-hint" id="t-attach-cur" hidden></p>' +
+    '<button type="button" id="t-attach-remove" hidden>Remove file</button></div>' +
     '<label for="t-manual-rate">Manual FX rate (fallback when ECB is unavailable)</label>' +
     '<input id="t-manual-rate" inputmode="decimal" placeholder="e.g. 0.92">' +
     '<label for="t-manual-price">Manual exec price (this trade only, in trade fiat)</label>' +
@@ -8732,6 +8876,24 @@ function buildTradeForm() {
     var clabel = document.getElementById('t-custom-ccy-label');
     if (clabel) clabel.hidden = !needCustom;
   });
+  var attInp = document.getElementById('t-attach');
+  if (attInp) attInp.addEventListener('change', function () {
+    try {
+      pendingAttachFile = (attInp.files && attInp.files[0]) ? attInp.files[0] : null;
+      if (pendingAttachFile) pendingAttachRemove = false;
+      var cur = document.getElementById('t-attach-cur');
+      if (pendingAttachFile && cur) { cur.textContent = 'New file: ' + pendingAttachFile.name; cur.hidden = false; }
+      attUiSync();
+    } catch (e) { /* never block the form */ }
+  });
+  var attRm = document.getElementById('t-attach-remove');
+  if (attRm) attRm.addEventListener('click', function () {
+    pendingAttachFile = null;
+    try { if (attInp) attInp.value = ''; } catch (e) { /* ignore */ }
+    if (currentAttachMeta) pendingAttachRemove = true;
+    else pendingAttachRemove = false;
+    attUiSync();
+  });
   syncTradeTypeUI();
 }
 
@@ -8782,6 +8944,9 @@ function syncTradeTypeUI() {
   var isExpense = type === 'expense';
   var isBuySell = type === 'buy' || type === 'sell';
   setHidden('t-toaccount-row', !(isTransfer || isSwap));
+  // Attachments ride single-leg records; swaps create two linked legs, so
+  // files attach by editing the resulting buy/sell instead.
+  setHidden('t-attach-row', isSwap);
   setHidden('t-toqty-row', !(isSwap || isTransfer));
   setHidden('t-networkfee-row', !(isTransfer));
   // Transfers carry no fiat of their own: the network fee IS the fee, valued
@@ -9030,6 +9195,66 @@ function syncLockedSymbol() {
 
 var editingTradeId = null;
 
+// Pending attachment for the open trade dialog: a newly picked File, a
+// remove flag, and the metadata of the record being edited (if any).
+var pendingAttachFile = null;
+var pendingAttachRemove = false;
+var currentAttachMeta = null;
+var pendingAttachResolved = 'keep'; // 'keep' | null | {name,mime,size,hash}
+function attUiSync() {
+  try {
+    var cur = document.getElementById('t-attach-cur');
+    var rm = document.getElementById('t-attach-remove');
+    var inp = document.getElementById('t-attach');
+    var label = '';
+    if (pendingAttachFile) label = 'New file: ' + pendingAttachFile.name;
+    else if (pendingAttachRemove) label = (currentAttachMeta ? 'Will remove ' + currentAttachMeta.name : 'Attachment will be removed.');
+    else if (currentAttachMeta) label = 'Attached: ' + currentAttachMeta.name;
+    if (cur) { cur.textContent = label; cur.hidden = !label; }
+    if (rm) rm.hidden = !(pendingAttachFile || currentAttachMeta);
+  } catch (e) { /* never block the form */ }
+}
+function attReset(meta) {
+  pendingAttachFile = null;
+  pendingAttachRemove = false;
+  currentAttachMeta = (meta && isValidAttachment(meta)) ? meta : null;
+  pendingAttachResolved = 'keep';
+  try { var inp = document.getElementById('t-attach'); if (inp) inp.value = ''; } catch (e) { /* ignore */ }
+  attUiSync();
+}
+// Resolves the dialog attachment plan into metadata for the trade being
+// saved: cb(err, meta|'keep'|null). New files are hashed + stored in
+// IndexedDB first; removals delete best-effort; 'keep' preserves edits.
+function attResolveForSave(cb) {
+  if (pendingAttachFile) {
+    var f = pendingAttachFile;
+    if (ATTACH_MIMES.indexOf(f.type) === -1) { cb('Only PDF, PNG or JPG files can be attached.'); return; }
+    if (!f.size || f.size > ATTACH_MAX_BYTES) { cb('File is too large — up to 10 MB.'); return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var buf = rd.result;
+        attHashBytes(buf).then(function (hash) {
+          var meta = { name: String(f.name).slice(0, 120), mime: f.type, size: f.size, hash: hash };
+          attPut(hash, new Blob([buf], { type: f.type }), meta).then(function (ok) {
+            if (!ok) { cb('Could not store the file on this device — record was not saved.'); return; }
+            cb(null, meta);
+          });
+        }, function () { cb('Could not read the file — record was not saved.'); });
+      } catch (e) { cb('Could not read the file — record was not saved.'); }
+    };
+    rd.onerror = function () { cb('Could not read the file — record was not saved.'); };
+    try { rd.readAsArrayBuffer(f); } catch (e) { cb('Could not read the file — record was not saved.'); }
+    return;
+  }
+  if (pendingAttachRemove && currentAttachMeta) {
+    (function (h) { try { attDelete(h); } catch (e) { /* best-effort */ } })(currentAttachMeta.hash);
+    cb(null, null);
+    return;
+  }
+  cb(null, 'keep');
+}
+
 // Fresh-trade reset: a new dialog must never inherit type, amounts, notes or
 // destination picks from the previous entry — otherwise e.g. a Transfer's
 // To-account row leaks into the next Buy.
@@ -9063,6 +9288,7 @@ function resetTradeForm() {
   var dd = document.getElementById('t-date');
   if (dd) dd.value = todayDmy();
   tradeFormError(null);
+  attReset(null);
 }
 
 function openPrefillTrade(accountId, lockIt, presetType) {
@@ -9213,6 +9439,7 @@ function openEditTrade(tradeId) {
   var titleEl2 = document.getElementById('trade-dialog-title');
   if (titleEl2) titleEl2.textContent = 'Edit record';
   tradeFormError(null);
+  attReset(tr.attachment);
   openDialog('trade-dialog');
 }
 
@@ -9382,6 +9609,7 @@ function onTradeSubmit(ev) {
   }
   // --- Swap: creates a linked sell+buy pair ---
   if (side === 'swap' && !isEditing) {
+    if (pendingAttachFile) { tradeFormError('Attachments ride single records — save the swap, then edit its buy/sell leg to attach the file.'); return; }
     var toAccSwap = accountById(st0, uiVal('t-toaccount', ''));
     if (!toAccSwap) { tradeFormError('Pick a destination account for the swap.'); return; }
     if (toAccSwap.id === accountId) { tradeFormError('Swap needs two different accounts.'); return; }
@@ -9593,7 +9821,20 @@ function onTradeSubmit(ev) {
     }
   } catch (e) { /* validation continues; engine clamps anyway */ }
   // proceed() re-reads state so a slow ECB fetch cannot clobber newer writes.
+  // The attachment (if any) resolves first: the trade is only built after
+  // its file is hashed + stored, so a record never points at a missing blob.
     function proceed(lock) {
+      var __lock = lock;
+      lockSubmit(true, 'Saving…');
+      try {
+        attResolveForSave(function (err, meta) {
+          if (err) { tradeFormError(err); lockSubmit(false, isEditing ? 'Save changes' : 'Add record'); return; }
+          pendingAttachResolved = meta;
+          try { proceedSave(__lock); } catch (e) { lockSubmit(false, 'Add record'); throw e; }
+        });
+      } catch (e) { tradeFormError('Could not save the attachment — record was not saved.'); lockSubmit(false, 'Add record'); }
+    }
+    function proceedSave(lock) {
     var st = loadState();
     // NOTE: a trade-dialog manual price stays per-trade (trade.execLock,
     // attached below) and never touches the global live-price overrides —
@@ -9627,6 +9868,12 @@ function onTradeSubmit(ev) {
       };
       if (txid !== '') trade.txid = txid;
       withFeeLock(trade);
+      if (pendingAttachResolved !== 'keep') {
+        if (pendingAttachResolved) trade.attachment = pendingAttachResolved;
+        else { try { delete trade.attachment; } catch (e) { trade.attachment = undefined; } }
+      } else if (prev.attachment && isValidAttachment(prev.attachment)) {
+        trade.attachment = prev.attachment;
+      }
       // Reference exec quote: manual wins; else keep the frozen quote when the
       // identifying fields are untouched; otherwise refreeze after save.
       // Transfers freeze it too: it values the network fee in fiat at the
@@ -9693,6 +9940,7 @@ function onTradeSubmit(ev) {
       st.trades[idx] = trade;
       learnLedgerLabel(st, trade);
       if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Save changes'); return; }
+      attReset(trade.attachment);
       if (needRefreeze) {
         try { freezeExecLock(trade.id, symbol, date, mainU, (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }
       }
@@ -9723,6 +9971,10 @@ function onTradeSubmit(ev) {
     };
     if (txid !== '') trade.txid = txid;
     withFeeLock(trade);
+    if (pendingAttachResolved !== 'keep') {
+      if (pendingAttachResolved) trade.attachment = pendingAttachResolved;
+      else { try { delete trade.attachment; } catch (e) { trade.attachment = undefined; } }
+    }
     if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
     if (side === 'expense' && qty === null) { delete trade.qty; }
     // Bookkeeping: ledger rides income/expense records — required on cash,
@@ -9782,6 +10034,7 @@ function onTradeSubmit(ev) {
     uiSetVal('t-networkfee', '');
     uiSetVal('t-manual-rate', '');
     uiSetVal('t-manual-price', '');
+    attReset(null);
     var d = document.getElementById('t-date');
     if (d) d.value = todayDmy();
     tradeFormError(null);

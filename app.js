@@ -13360,7 +13360,9 @@ function syncCleanupFlow() {
     }
     var count = orphans.length;
     confirmAction('Delete ' + count + ' orphaned file' + (count === 1 ? '' : 's') + '?',
-      'These ' + count + ' cloud ' + (count === 1 ? 'copy belongs' : 'copies belong') + ' to no record on this device. Only continue if every device synced recently — a device that has not uploaded yet would lose its copy (recoverable from the drive trash).',
+      (count === 1)
+      ? 'This 1 cloud copy belongs to no record on this device. Only continue if every device synced recently — a device that has not uploaded yet would lose its copy (recoverable from the drive trash).'
+      : 'These ' + count + ' cloud copies belong to no record on this device. Only continue if every device synced recently — a device that has not uploaded yet would lose its copy (recoverable from the drive trash).',
       'Delete files').then(function (ok) {
       if (!ok) return;
       syncSetBusy(true, 'Deleting…');

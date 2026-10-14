@@ -765,7 +765,7 @@
           assert(back.accounts.every(function (a) { return !a.groupId; }), 'import must persist the flattened group');
         });
 
-        test('bulk Group refuses sub-accounts', function () {
+        test('Group option hides for sub-accounts, shows for clean picks', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
           try {
@@ -774,30 +774,41 @@
               accounts: [
                 { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
                 { id: 'a', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
-                { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+                { id: 'b', name: 'B', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' },
+                { id: 'z', name: 'Z', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }
               ],
               trades: [],
               priceOverrides: {}
             });
             if (typeof init === 'function') init();
+            function panelHasGroup(scope) {
+              var panel = document.querySelector(scope + ' [data-action-panel]');
+              if (!panel) return false;
+              var found = false;
+              Array.prototype.forEach.call(panel.querySelectorAll('button'), function (b) {
+                if (b.textContent.indexOf('Group') !== -1) found = true;
+              });
+              return found;
+            }
             navTo('m');
             route();
             render();
             document.querySelector('#account-detail [aria-label="Select sub-accounts"]').click();
             document.querySelector('#account-detail .group-subs .card-check').click();
             document.querySelector('#account-detail [data-action-btn]').click();
-            var panel = document.querySelector('#account-detail [data-action-panel]');
-            var grpBtn = null;
-            Array.prototype.forEach.call(panel.querySelectorAll('button'), function (b) {
-              if (b.textContent.indexOf('Group') !== -1) grpBtn = b;
-            });
-            assert(grpBtn, 'Group option must exist');
-            grpBtn.click();
-            var banner = document.getElementById('banner');
-            assert(banner && banner.hidden === false && banner.textContent.indexOf('sub-account') !== -1, 'refusal banner must show, got ' + (banner && banner.textContent));
+            assert(!panelHasGroup('#account-detail'), 'Group option must not exist for subs');
+            try { if (typeof cancelSelection === 'function') cancelSelection(); } catch (e) { /* ignore */ }
+            navHome();
+            route();
+            render();
+            document.querySelector('#accounts [data-select-btn]').click();
+            var homeCheck = document.querySelector('#accounts .account-card[data-account="z"] .card-check');
+            assert(homeCheck, 'standalone card needs its checkbox');
+            homeCheck.click();
+            document.querySelector('#accounts [data-action-btn]').click();
+            assert(panelHasGroup('#accounts'), 'Group option must exist for clean picks');
           } finally {
             try { if (typeof cancelSelection === 'function') cancelSelection(); } catch (e) { /* ignore */ }
-            try { if (typeof clearBanner === 'function') clearBanner(); } catch (e) { /* ignore */ }
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');
               else localStorage.setItem('inoculens.v2', backup);

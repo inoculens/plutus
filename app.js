@@ -381,7 +381,7 @@ function ensureGroupCurrency(st, mainId) {
 }
 
 // Link members under a main (mutates, no save): flat only — mains can't
-// nest and members can't regroup. Unknown ids and self-links fail.
+// nest and sub-accounts can't be grouped. Unknown ids and self-links fail.
 function assignGroup(st, memberIds, mainId) {
   var main = accountById(st, mainId);
   if (!main) return 'Main account not found.';
@@ -397,7 +397,7 @@ function assignGroup(st, memberIds, mainId) {
     var a = accountById(st, ids[i]);
     if (!a) return 'Account not found.';
     if (isGroupMain(st, ids[i])) return '"' + a.name + '" is already a main account — ungroup it first.';
-    if (groupMainOf(st, ids[i])) return '"' + a.name + '" is a sub-account — ungroup it first to regroup.';
+    if (groupMainOf(st, ids[i])) return '"' + a.name + '" is a sub-account and cannot be grouped.';
   }
   ids.forEach(function (id) { accountById(st, id).groupId = mainId; });
   ensureGroupCurrency(st, mainId);
@@ -4780,6 +4780,17 @@ function buildAccountAction() {
     openDialog('color-dialog');
   });
   panel.appendChild(col);
+  // Group… is offered only for grouping-clean selections: mains regroup
+  // through Ungroup, and sub-accounts have no regroup option at all — the
+  // button simply isn't there when one is selected.
+  var grpBlocked = false;
+  try {
+    var stG = loadState();
+    grpBlocked = Object.keys(selectedAccounts).some(function (id) {
+      return !!accountById(stG, id) && (isGroupMain(stG, id) || groupMainOf(stG, id));
+    });
+  } catch (e) { grpBlocked = false; }
+  if (!grpBlocked) {
   var grp = document.createElement('button');
   grp.type = 'button';
   grp.className = 'action-opt';
@@ -4796,11 +4807,12 @@ function buildAccountAction() {
     if (!ids.length) return;
     for (var i = 0; i < ids.length; i++) {
       if (isGroupMain(st, ids[i])) { showBanner('"' + accountById(st, ids[i]).name + '" is already a main account — ungroup it first.'); return; }
-      if (groupMainOf(st, ids[i])) { showBanner('"' + accountById(st, ids[i]).name + '" is a sub-account — ungroup it first to regroup.'); return; }
+      if (groupMainOf(st, ids[i])) { showBanner('"' + accountById(st, ids[i]).name + '" is a sub-account and cannot be grouped.'); return; }
     }
     openGroupDialog(ids);
   });
   panel.appendChild(grp);
+  }
   var del = document.createElement('button');
   del.type = 'button';
   del.className = 'action-del';

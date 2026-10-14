@@ -1084,6 +1084,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .ledger-row .ledger-amount.ledger-box-inc { border: 1px solid rgba(52,211,153,0.45); background: var(--gain-bg); color: var(--gain); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
 .ledger-row .ledger-amount.ledger-box-exp { border: 1px solid rgba(248,113,113,0.45); background: var(--loss-bg); color: var(--loss); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
 .ledger-row .ledger-side button.quiet { padding: 0.4rem 0.55rem; }
+/* Virtual Unlabeled rows carry no actions: the amount hugs the row end. */
+.ledger-row.is-unlabeled .ledger-side { margin-left: auto; }
+.ledger-row.is-unlabeled .ledger-amount { min-width: 0; }
 p.muted.ledger-warn { margin: 0.5rem 0 0; }
 
 .trade-block {

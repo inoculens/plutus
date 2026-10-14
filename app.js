@@ -5814,8 +5814,9 @@ function detailMetaRow(label, text, title) {
 
 function ledgerRowEl(code, label, total, main, depth, opts) {
   var o = opts || {};
+  var unlabeled = (code === '—');
   var d = document.createElement('div');
-  d.className = 'stat-row ledger-row' + (o.isParent ? ' is-parent' : '');
+  d.className = 'stat-row ledger-row' + (o.isParent ? ' is-parent' : '') + (unlabeled ? ' is-unlabeled' : '');
   d.setAttribute('data-label', 'ledger');
   d.setAttribute('data-ledger', code);
   if (isFinite(Number(total))) d.setAttribute('data-value', String(Number(total)));
@@ -5840,7 +5841,8 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   }
   // Fixed slots keep every amount at the same x: long names truncate with
   // ellipsis and an ⓘ popup (same pattern as record notes), never pushing.
-  var full = code + ((label && label !== code) ? ' · ' + label : '');
+  // Virtual Unlabeled rows join code and name with a plain space (no dot).
+  var full = unlabeled ? (code + (label ? ' ' + label : '')) : (code + ((label && label !== code) ? ' · ' + label : ''));
   var l = document.createElement('span');
   l.className = 'stat-label ledger-label';
   var lt = document.createElement('span');

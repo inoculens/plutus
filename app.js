@@ -9000,10 +9000,16 @@ function renderHeroAlloc(st) {
     svg.appendChild(c);
     off += frac;
   });
-  // Total distinct visible assets in the hole (same count as the header).
-  var holeTickers = accountTickers(vIds === null
+  // Total distinct visible assets in the hole: an asset counts from its
+  // first record — an empty account never grows the number.
+  var holePool = vIds === null
     ? (st.accounts || [])
-    : (st.accounts || []).filter(function (a) { return vIds.indexOf(a.id) !== -1; }));
+    : (st.accounts || []).filter(function (a) { return vIds.indexOf(a.id) !== -1; });
+  var holeTickers = accountTickers(holePool.filter(function (a) {
+    return ((st && st.trades) || []).some(function (t) {
+      return !!t && (t.accountId === a.id || t.toAccountId === a.id);
+    });
+  }));
   var nAssets = holeTickers.length;
   svg.setAttribute('aria-label', 'Allocation: ' + nAssets + (nAssets === 1 ? ' asset' : ' assets'));
   var num = document.createElementNS(svgNS, 'text');

@@ -845,6 +845,12 @@
             assert(lhead, 'Ledgers head must carry its one-line class');
             var ltops = Array.prototype.map.call(lhead.children, function (c) { return c.getBoundingClientRect().top; });
             assert(Math.max.apply(null, ltops) - Math.min.apply(null, ltops) < 2, 'Ledgers head must stay one line, tops ' + JSON.stringify(ltops));
+            var ltitle = lhead.querySelector('.section-title');
+            var lsel = lhead.querySelector('select');
+            var lbtn = lhead.querySelector('button');
+            assert(ltitle && ltitle.getBoundingClientRect().width > 10, 'Ledgers title must stay visible');
+            assert(lsel && lsel.getBoundingClientRect().width < lhead.getBoundingClientRect().width, 'currency dropdown must size to content');
+            assert(lbtn && lbtn.getBoundingClientRect().right <= window.innerWidth + 1, '+ Ledger must stay inside the viewport');
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

@@ -572,6 +572,8 @@ section h2, aside h2 {
 #account-detail .section-head.ledgers-head { flex-wrap: nowrap; }
 #account-detail .section-head.ledgers-head .section-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #account-detail .section-head.ledgers-head select, #account-detail .section-head.ledgers-head button { flex: 0 0 auto; }
+/* Form fields default to width:100% — the header dropdown must size to content. */
+#account-detail .section-head.ledgers-head select { width: auto; }
 
 .section-actions { display: flex; align-items: center; gap: 0.6rem; }
 

@@ -1027,6 +1027,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   overflow-y: auto;
 }
 .detail-stats { margin: 1rem 0 0.25rem; }
+/* Two-card grids (cash Balance/Value): the box ends with the pair — two
+   tracks, capped and centered. Values truncate inside (see .card-value). */
+.cards.detail-stats.cards-duo { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 38rem; margin-left: auto; margin-right: auto; }
 .closed-flag { margin: 0.9rem 0 0; }
 .fees-line {
   display: inline-block;
@@ -1892,9 +1895,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 
 @media (min-width: 721px) {
   #fab-trade { display: none !important; }
-  /* Two-card grids (cash Balance/Value) center their pair: first card starts
-     on track 2, empty tracks read as background left and right. */
-  .cards.detail-stats.cards-duo > .card:first-child { grid-column: 2; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

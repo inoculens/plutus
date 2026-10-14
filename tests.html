@@ -458,6 +458,11 @@
           assert(!L.isValidImportTrade(badFile, ['cash1']), 'bad attachment accepted');
         });
 
+        test('attachment blob names ride next to the state file on every provider', function () {
+          var n = L.syncBlobFilename({ filename: 'plutus-backup.enc.json' }, 'ABCDEF1234');
+          assert(n === 'plutus-backup-att-abcdef1234.enc.json', 'blob name wrong: ' + n);
+        });
+
         test('cashBalance signs flows; destination leg uses arrival-fiat rate', function () {
           var trades = [
             cashTrade({ id: 'b1', ledger: '1000' }),

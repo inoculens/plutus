@@ -925,6 +925,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.defaultState = defaultState;
   window.Inoculens.accountById = accountById;
   window.Inoculens.isValidAttachment = isValidAttachment;
+  window.Inoculens.syncBlobFilename = syncBlobFilename;
 }
 
 // === Fx ===
@@ -5907,6 +5908,100 @@ function openNoteDialog(text, title) {
   openDialog('note-dialog');
 }
 
+// Invoice / receipt preview: inline for images + PDFs, with a download
+// button. Builds its dialog once. When the blob is missing locally and
+// sync holds a passphrase, it lazy-fetches the encrypted copy first;
+// otherwise it says plainly where the file lives instead of doing nothing.
+function openAttachmentPreview(meta) {
+  if (!meta || !isValidAttachment(meta)) return;
+  var dlg = document.getElementById('attach-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'attach-dialog';
+    dlg.setAttribute('aria-labelledby', 'attach-dialog-title');
+    dlg.innerHTML =
+      '<div class="dialog-head"><h2 id="attach-dialog-title">Invoice / Receipt</h2>' +
+      '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
+      '<p id="attach-dialog-name" class="muted"></p>' +
+      '<div id="attach-dialog-view"></div>' +
+      '<p id="attach-dialog-msg" class="muted" hidden></p>' +
+      '<div class="dialog-actions"><a id="attach-dialog-dl" class="primary" href="#" download>Download</a> ' +
+      '<button type="button" data-close>Close</button></div>';
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', function (ev) {
+      var t = ev && ev.target;
+      if (t && t.hasAttribute && t.hasAttribute('data-close')) closeDialog('attach-dialog');
+    });
+    dlg.addEventListener('close', function () {
+      try {
+        var old = dlg.getAttribute('data-objurl');
+        if (old) { (window.URL || window.webkitURL).revokeObjectURL(old); dlg.removeAttribute('data-objurl'); }
+        var v = document.getElementById('attach-dialog-view'); if (v) v.innerHTML = '';
+      } catch (e) { /* ignore */ }
+    });
+  }
+  var nameEl = document.getElementById('attach-dialog-name');
+  var viewEl = document.getElementById('attach-dialog-view');
+  var msgEl = document.getElementById('attach-dialog-msg');
+  var dlEl = document.getElementById('attach-dialog-dl');
+  if (nameEl) nameEl.textContent = meta.name;
+  if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+  if (viewEl) viewEl.innerHTML = '';
+  if (dlEl) { dlEl.setAttribute('href', '#'); dlEl.style.display = 'none'; }
+  function showBlob(blob, label) {
+    try {
+      var urls = window.URL || window.webkitURL;
+      var url = urls.createObjectURL(blob);
+      dlg.setAttribute('data-objurl', url);
+      if (dlEl) { dlEl.setAttribute('href', url); dlEl.setAttribute('download', (label && label.name) || meta.name); dlEl.style.display = ''; }
+      if (viewEl) {
+        var mime = (label && label.mime) || meta.mime;
+        if (String(mime).indexOf('image/') === 0) {
+          var img = document.createElement('img');
+          img.src = url; img.alt = meta.name;
+          img.style.cssText = 'max-width:100%;border-radius:10px;border:1px solid var(--border)';
+          viewEl.appendChild(img);
+        } else {
+          var emb = document.createElement('embed');
+          emb.src = url; emb.type = 'application/pdf';
+          emb.style.cssText = 'width:100%;height:60vh;border-radius:10px;border:1px solid var(--border)';
+          viewEl.appendChild(emb);
+        }
+      }
+    } catch (e) {
+      if (msgEl) { msgEl.hidden = false; msgEl.textContent = 'Could not display the file on this device.'; }
+    }
+    openDialog('attach-dialog');
+  }
+  function showMissing(note) {
+    if (msgEl) { msgEl.hidden = false; msgEl.textContent = note; }
+    openDialog('attach-dialog');
+  }
+  attGet(meta.hash).then(function (rec) {
+    if (rec && rec.blob) { showBlob(rec.blob, rec); return; }
+    var cfg = null, pass = '';
+    try {
+      cfg = syncLoadConfig();
+      pass = (cfg && cfg.passphrase) ? cfg.passphrase : '';
+      if (!pass) {
+        try {
+          var pv = document.getElementById('sy-pass');
+          if (pv && pv.value) pass = pv.value;
+        } catch (e) { /* settings closed */ }
+      }
+    } catch (e) { cfg = null; }
+    if (!cfg || !pass) { showMissing('File is not on this device — it was attached elsewhere. Open the original device, or enter the sync passphrase in Settings → Sync to fetch it.'); return; }
+    if (msgEl) { msgEl.hidden = false; msgEl.textContent = 'Fetching encrypted copy…'; }
+    openDialog('attach-dialog');
+    syncPullAttachment(cfg, pass, meta).then(function (got) {
+      if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+      showBlob(got.blob, got.meta);
+    }, function () {
+      showMissing('File is not on this device yet — sync has no copy either. Open the original device with sync on so it can upload, then retry here.');
+    });
+  });
+}
+
 // Resolve the reference Exec quote for a trade row: {price, ccy} or null.
 // Precedence is deliberate: a fiat-tagged global override is explicit live
 // intent and always convertible; a frozen per-trade quote carries its own
@@ -6336,30 +6431,20 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     (function (meta) {
       var atRow = document.createElement('div');
       atRow.className = 'stat-row';
-      atRow.setAttribute('data-label', 'Receipt');
+      atRow.setAttribute('data-label', 'Invoice / Receipt');
       var atL = document.createElement('span');
       atL.className = 'stat-label';
-      atL.textContent = 'Receipt';
+      atL.textContent = 'Invoice / Receipt';
       var atV = document.createElement('span');
       atV.className = 'stat-val num';
       var atA = document.createElement('a');
       atA.className = 'tx-link';
       atA.href = '#';
       atA.textContent = String(meta.name).length > 24 ? String(meta.name).slice(0, 23) + '…' : String(meta.name);
-      atA.title = String(meta.name) + ' (' + String(meta.mime) + ') — click to view';
+      atA.title = String(meta.name) + ' (' + String(meta.mime) + ') — click to preview';
       atA.addEventListener('click', function (ev) {
         if (ev && ev.preventDefault) ev.preventDefault();
-        attGet(meta.hash).then(function (rec) {
-          if (!rec || !rec.blob) { showBanner('File is not on this device — it was attached elsewhere or its backup did not include files.', 'error', { title: 'Attachment', lines: ['File: ' + meta.name] }); return; }
-          try {
-            var urls = window.URL || window.webkitURL;
-            var url = urls.createObjectURL(rec.blob);
-            var a = document.createElement('a');
-            a.href = url; a.download = meta.name; a.target = '_blank'; a.rel = 'noopener';
-            document.body.appendChild(a); a.click();
-            setTimeout(function () { try { urls.revokeObjectURL(url); } catch (e) { /* ignore */ } if (a.parentNode) a.parentNode.removeChild(a); }, 4000);
-          } catch (e) { showBanner('Could not open the file on this device.'); }
-        });
+        try { openAttachmentPreview(meta); } catch (e) { showBanner('Could not open the file on this device.'); }
       });
       atV.appendChild(atA);
       atRow.appendChild(atL);
@@ -8822,7 +8907,7 @@ function buildTradeForm() {
     '<p class="fld-hint">Optional — saved with the record and linked to mempool.space.</p>' +
     '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt</label>' +
     '<input id="t-attach" type="file" accept="application/pdf,image/png,image/jpeg">' +
-    '<p class="fld-hint" id="t-attach-hint">Optional — PDF, PNG or JPG up to 10 MB. Stored on this device.</p>' +
+    '<p class="fld-hint" id="t-attach-hint">Optional — PDF, PNG or JPG up to 10 MB. Stored on this device, synced encrypted when sync is on.</p>' +
     '<p class="fld-hint" id="t-attach-cur" hidden></p>' +
     '<button type="button" id="t-attach-remove" hidden>Remove file</button></div>' +
     '<label for="t-manual-rate">Manual FX rate (fallback when ECB is unavailable)</label>' +
@@ -12906,6 +12991,91 @@ function syncRemoteEnsureFolder(cfg) {
   });
 }
 
+// --- Record-attachment blobs (invoices / receipts) ---
+// One encrypted object per file, flat next to the state file so every
+// provider works unchanged: <base>-att-<hash>.enc.json (hex hash is safe
+// in Drive names, Dropbox Latin1 paths, S3 keys and WebDAV URLs; the
+// sanitizer passes it through byte-identical). The envelope reuses the
+// state crypto: plaintext is JSON {v,name,mime,b64}, so binary rides the
+// same text upload/download paths. Push uploads what this device holds
+// (skip-if-exists); preview lazy-fetches what it lacks. Nothing is ever
+// auto-deleted remotely: a hash missing here may be another device's
+// pending upload.
+function syncBlobFilename(cfg, hash) {
+  return syncDisplayBasename(cfg.filename) + '-att-' + String(hash).toLowerCase() + '.enc.json';
+}
+function syncBlobCfg(cfg, hash) {
+  var c = {};
+  for (var k in cfg) { if (Object.prototype.hasOwnProperty.call(cfg, k)) c[k] = cfg[k]; }
+  c.filename = syncBlobFilename(cfg, hash);
+  c.objectKey = c.filename;
+  return c;
+}
+function syncAttachmentMetas(st) {
+  var out = [], seen = {};
+  (((st && st.trades) || [])).forEach(function (t) {
+    if (t && t.attachment && isValidAttachment(t.attachment) && !seen[t.attachment.hash]) {
+      seen[t.attachment.hash] = true;
+      out.push(t.attachment);
+    }
+  });
+  return out;
+}
+function attBlobToB64(blob) {
+  return new Promise(function (resolve, reject) {
+    try {
+      var rd = new FileReader();
+      rd.onload = function () {
+        try { resolve(syncB64encode(new Uint8Array(rd.result))); }
+        catch (e) { reject(new Error('sync failed: could not read the file.')); }
+      };
+      rd.onerror = function () { reject(new Error('sync failed: could not read the file.')); };
+      rd.readAsArrayBuffer(blob);
+    } catch (e) { reject(new Error('sync failed: could not read the file.')); }
+  });
+}
+// Best-effort: resolves {up, skip} and never rejects, so blob trouble can
+// never fail an already-synced state push — leftovers retry next push.
+function syncPushAttachments(cfg, pass) {
+  var metas = [];
+  try { metas = syncAttachmentMetas(loadState()); } catch (e) { metas = []; }
+  if (!metas.length || !pass) return Promise.resolve({ up: 0, skip: 0 });
+  var up = 0, skipped = 0;
+  var chain = Promise.resolve(true);
+  metas.forEach(function (meta) {
+    chain = chain.then(function () {
+      return attGet(meta.hash).then(function (rec) {
+        if (!rec || !rec.blob) { skipped++; return true; }
+        var bc = syncBlobCfg(cfg, meta.hash);
+        return syncRemoteExists(bc).then(function (exists) {
+          if (exists) return true;
+          return attBlobToB64(rec.blob).then(function (b64) {
+            var plain = JSON.stringify({ v: 1, name: meta.name, mime: meta.mime, b64: b64 });
+            return syncEncryptEnvelope(plain, pass).then(function (env) {
+              return syncRemoteUpload(bc, env).then(function () { up++; return true; });
+            });
+          });
+        });
+      }, function () { skipped++; return true; });
+    });
+  });
+  return chain.then(function () { return { up: up, skip: skipped }; },
+    function () { return { up: up, skip: skipped }; });
+}
+function syncPullAttachment(cfg, pass, meta) {
+  var bc = syncBlobCfg(cfg, meta.hash);
+  return syncRemoteDownload(bc).then(function (envText) {
+    return syncDecryptEnvelope(envText, pass);
+  }).then(function (plain) {
+    var d = JSON.parse(plain);
+    if (!d || d.v !== 1 || typeof d.b64 !== 'string') throw new Error('sync failed: bad attachment file.');
+    var bytes = syncB64decode(d.b64);
+    var blob = new Blob([bytes], { type: d.mime || meta.mime });
+    var full = { name: String(d.name || meta.name).slice(0, 120), mime: d.mime || meta.mime, size: bytes.length, hash: meta.hash };
+    return attPut(meta.hash, blob, full).then(function () { return { blob: blob, meta: full }; });
+  });
+}
+
 // --- Push / pull orchestration (local data only replaced after full validation) ---
 
 function syncSetStatus(text) {
@@ -13353,6 +13523,16 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
     clearBanner();
     syncSetStatus('Synced ' + fmtDateTimeDmy(now) + '.');
+    // Attachments ride along: upload this device's blobs (skip-if-exists)
+    // after the state lands. Best-effort — state is already synced, blobs
+    // retry on the next push, so this never fails the sync itself.
+    if (outcome === 'pushed') {
+      try {
+        syncPushAttachments(cfg, pass).then(function (r) {
+          if (r && r.up > 0) syncSetStatus('Synced ' + fmtDateTimeDmy(now) + ' + ' + r.up + ' file' + (r.up === 1 ? '' : 's') + '.');
+        });
+      } catch (e) { /* blobs retry next push */ }
+    }
   }, function (err) {
     syncSetBusy(false);
     syncRefreshSyncPanel();

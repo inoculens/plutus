@@ -5925,7 +5925,7 @@ function openAttachmentPreview(meta) {
       '<p id="attach-dialog-name" class="muted"></p>' +
       '<div id="attach-dialog-view"></div>' +
       '<p id="attach-dialog-msg" class="muted" hidden></p>' +
-      '<div class="dialog-actions"><a id="attach-dialog-dl" class="primary" href="#" download>Download</a> ' +
+      '<div class="dialog-actions"><button type="button" id="attach-dialog-dl" class="primary" hidden>Download</button> ' +
       '<button type="button" data-close>Close</button></div>';
     document.body.appendChild(dlg);
     dlg.addEventListener('click', function (ev) {
@@ -5947,13 +5947,24 @@ function openAttachmentPreview(meta) {
   if (nameEl) nameEl.textContent = meta.name;
   if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
   if (viewEl) viewEl.innerHTML = '';
-  if (dlEl) { dlEl.setAttribute('href', '#'); dlEl.style.display = 'none'; }
+  if (dlEl) { dlEl.hidden = true; dlEl.onclick = null; }
   function showBlob(blob, label) {
     try {
       var urls = window.URL || window.webkitURL;
       var url = urls.createObjectURL(blob);
       dlg.setAttribute('data-objurl', url);
-      if (dlEl) { dlEl.setAttribute('href', url); dlEl.setAttribute('download', (label && label.name) || meta.name); dlEl.style.display = ''; }
+      var fname = (label && label.name) || meta.name;
+      if (dlEl) {
+        dlEl.hidden = false;
+        dlEl.onclick = function () {
+          try {
+            var a = document.createElement('a');
+            a.href = url; a.download = fname;
+            document.body.appendChild(a); a.click();
+            if (a.parentNode) a.parentNode.removeChild(a);
+          } catch (e) { /* ignore */ }
+        };
+      }
       if (viewEl) {
         var mime = (label && label.mime) || meta.mime;
         if (String(mime).indexOf('image/') === 0) {

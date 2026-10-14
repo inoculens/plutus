@@ -2219,17 +2219,18 @@ label.sync-check input {
 #sy-enc-upload:disabled::file-selector-button,
 #sy-enc-upload:disabled::-webkit-file-upload-button { opacity: 0.45; cursor: not-allowed; }
 /* Record dialog attachment picker: same Browse-button look as Settings. */
+#t-attach { pointer-events: none; cursor: default; }
 #t-attach::file-selector-button {
   font: inherit; font-weight: 600; color: var(--text);
   background: var(--surface-3); border: 1px solid var(--border-strong);
   border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
-  cursor: pointer;
+  cursor: pointer; pointer-events: auto;
 }
 #t-attach::-webkit-file-upload-button {
   font: inherit; font-weight: 600; color: var(--text);
   background: var(--surface-3); border: 1px solid var(--border-strong);
   border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
-  cursor: pointer;
+  cursor: pointer; pointer-events: auto;
 }
 #sy-enc-download:disabled { opacity: 0.45; cursor: not-allowed; }
 #s-enc-label {

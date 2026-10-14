@@ -1253,6 +1253,69 @@
           assert(assetTree.roots.length === 1 && assetTree.roots[0].total === 0, 'asset path must stay total-based, got ' + JSON.stringify(assetTree.roots));
         });
 
+        test('open cash income floats at the latest fixing', function () {
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          function restoreFx() {
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+          try {
+            L.clearFxCache();
+            var dk = todayStr();
+            L.cacheRate(dk, 'RON', 'EUR', 0.2, 'ECB-test');
+            function ron(id, type, ledger) {
+              return { id: id, type: type, symbol: 'RON', qty: 100, total: type === 'income' ? 100 : 0, currency: 'RON', date: '2026-04-03', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'c1', ledger: ledger, createdAt: '2026-04-03T00:00:00.000Z' };
+            }
+            var tree = L.ledgerTreeMulti(
+              [ron('o1', 'income', '1100'),
+               { id: 'o2', type: 'expense', symbol: 'RON', qty: 50, total: 50, currency: 'RON', date: '2026-04-03', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'c1', ledger: '2000', createdAt: '2026-04-03T00:00:00.000Z' },
+               { id: 'o3', type: 'transfer', symbol: 'RON', qty: 100, date: '2026-04-03', fee: 0, feeCurrency: 'RON', networkFee: 2, fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'c1', toAccountId: 'c2', ledger: '9000', createdAt: '2026-04-03T00:00:00.000Z' },
+               { id: 'o4', type: 'income', symbol: 'BTC', qty: 5, total: 5000, currency: 'EUR', date: '2026-04-03', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'x1', ledger: '5000', createdAt: '2026-04-03T00:00:00.000Z' }],
+              ['c1', 'c2', 'x1'], 'EUR', {}, { c1: 'cash', c2: 'cash', x1: 'crypto' });
+            var got = {};
+            tree.roots.forEach(function (r) { got[r.code] = r.total; });
+            assert(got['1100'] === 20, 'cash income must float 100x0.2, got ' + JSON.stringify(got));
+            assert(got['2000'] === -50, 'cash expense must stay frozen, got ' + JSON.stringify(got));
+            assert(got['9000'] === -2, 'transfer legs must stay frozen and net to the fee, got ' + JSON.stringify(got));
+            assert(got['5000'] === 5000, 'asset income must stay frozen, got ' + JSON.stringify(got));
+            var bal = L.cashBalance([
+              ron('b1', 'income', null),
+              { id: 'b2', type: 'expense', symbol: 'RON', qty: 50, total: 50, currency: 'RON', date: '2026-04-03', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'c1', createdAt: '2026-04-03T00:00:00.000Z' }
+            ], 'c1', 'EUR');
+            assert(bal.native === 50 && bal.main === -30, 'balance must float income only: ' + JSON.stringify(bal));
+          } finally {
+            restoreFx();
+          }
+        });
+
+        test('displayPairs prefetches today rates for open cash income', function () {
+          var fxBackup = null;
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          try {
+            L.clearFxCache();
+            var dk = todayStr();
+            function inc(id, sym, ledger) {
+              return { id: id, type: 'income', symbol: sym, qty: 100, total: 100, currency: sym, date: '2026-04-03', fee: 0, feeCurrency: sym, fxLock: { pair: sym + '/' + sym, rate: 1, source: '1:1' }, accountId: 'a', ledger: ledger, createdAt: '2026-04-03T00:00:00.000Z' };
+            }
+            var withKinds = L.displayPairs([inc('d1', 'RON', '1100')], 'EUR', { a: 'cash' });
+            assert(withKinds.some(function (p) { return p.from === 'RON' && p.date === dk; }), 'today pair must be queued with kinds: ' + JSON.stringify(withKinds));
+            var legacy = L.displayPairs([inc('d1', 'RON', '1100')], 'EUR');
+            assert(!legacy.some(function (p) { return p.from === 'RON' && p.date === dk; }), 'legacy calls must stay trade-date only: ' + JSON.stringify(legacy));
+            var asset = L.displayPairs([inc('d1', 'RON', '1100')], 'EUR', { a: 'crypto' });
+            assert(!asset.some(function (p) { return p.from === 'RON' && p.date === dk; }), 'asset income needs no today pair: ' + JSON.stringify(asset));
+          } finally {
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('groupFillFiats lists foreign group currencies only', function () {
           var st = {
             settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
@@ -1317,7 +1380,7 @@
           }
         });
 
-        test('cross-fiat group cards convert through cached rates', function () {
+        test('cross-fiat group cards fall back to frozen locks', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
           try {
@@ -1328,11 +1391,10 @@
                 { id: 'r', name: 'Lei', ticker: 'RON', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
               ],
               trades: [
-                { id: 'j1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-05', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/RON', rate: 1, source: '1:1' }, accountId: 'r', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }
+                { id: 'j1', type: 'income', symbol: 'RON', qty: 100, total: 100, currency: 'RON', date: '2026-01-05', fee: 0, feeCurrency: 'RON', fxLock: { pair: 'RON/EUR', rate: 0.2, source: 'manual' }, accountId: 'r', ledger: '1000', createdAt: '2026-01-05T00:00:00.000Z' }
               ],
               priceOverrides: {}
             });
-            L.cacheRate('2026-01-05', 'RON', 'EUR', 0.2, 'ECB-2026-01-05');
             if (typeof init === 'function') init();
             navTo('m');
             route();

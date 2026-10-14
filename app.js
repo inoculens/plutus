@@ -1031,7 +1031,10 @@ function cacheRate(date, from, to, rate, source) {
 // into `main`. Same-currency needs nothing (rate 1, no network). One fiat
 // per trade: only the trade currency (plus frozen exec / tagged override
 // fiats, which ride the same pair when they match) ever needs converting.
-function displayPairs(trades, main) {
+// Optional kinds ({accountId: kind}) additionally prefetches today's rate
+// for open cash income — holdings float, so the current fixing is needed
+// alongside the frozen trade-date locks.
+function displayPairs(trades, main, kinds) {
   var m = String(main || '').toUpperCase();
   var seen = {};
   var out = [];
@@ -1043,12 +1046,28 @@ function displayPairs(trades, main) {
     seen[k] = true;
     out.push({ date: date, from: f });
   }
+  function needToday(fiat) {
+    var f = String(fiat || '').toUpperCase();
+    if (!f || f === m) return;
+    var dk = '';
+    try { dk = todayStr(); } catch (e) { return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return;
+    var k = dk + '|' + f;
+    if (seen[k] || getCachedRate(dk, f, m)) return;
+    seen[k] = true;
+    out.push({ date: dk, from: f });
+  }
   (trades || []).forEach(function (t) {
     if (!t) return;
     var c = (typeof t.currency === 'string') ? t.currency.toUpperCase() : '';
     var d = (typeof t.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.date)) ? t.date.slice(0, 10) : '';
     if (!c || !d) return;
     need(d, c);
+    if (kinds && t.type === 'income' && c !== m) {
+      var kd = '';
+      try { kd = kinds[t.accountId] || ''; } catch (e) { kd = ''; }
+      if (isCashKind(kd)) needToday(c);
+    }
     // Frozen exec quote in another fiat needs its own historical rate to
     // render in the current main (deduped by `seen` when it matches a leg).
     // Same for a fiat-tagged manual override (Exec falls back to it).
@@ -1070,9 +1089,9 @@ function displayPairs(trades, main) {
 // instead of printing fallback figures as if they were fresh.
 var fxFailedList = [];
 var fxWarnedSession = false;
-function ensureDisplayRates(trades, main) {
+function ensureDisplayRates(trades, main, kinds) {
   var m = String(main || '').toUpperCase();
-  var pairs = displayPairs(trades, m);
+  var pairs = displayPairs(trades, m, kinds);
   if (!pairs.length) return Promise.resolve(false);
   return Promise.all(pairs.map(function (p) {
     return fetchEcbRate(p.date, p.from, m).then(function (r) {
@@ -1191,6 +1210,22 @@ if (typeof window !== 'undefined') {
 function ledgerFxRate(lock) {
   var r = lock ? Number(lock.rate) : NaN;
   return (isFinite(r) && r > 0) ? r : 1;
+}
+
+// Open cash income converts at the latest fixing, not the receipt lock:
+// holdings float, closed flows stay frozen. Falls back to the frozen lock
+// (same as every other figure) when no current rate is cached yet.
+function cashIncomeRate(t, main) {
+  try {
+    var m = String(main || '').toUpperCase();
+    var f = String((t && t.symbol) || (t && t.currency) || '').toUpperCase();
+    if (!f || f === m) return ledgerFxRate(t && t.fxLock);
+    var dk = todayStr();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dk)) return ledgerFxRate(t && t.fxLock);
+    var hit = getCachedRate(dk, f, m);
+    if (hit && isFinite(Number(hit.rate)) && Number(hit.rate) > 0) return Number(hit.rate);
+  } catch (e) { /* fall through to frozen */ }
+  return ledgerFxRate(t && t.fxLock);
 }
 
 function normalizeTrade(t) {
@@ -1931,7 +1966,8 @@ function cashSignedNative(t, accountId) {
   return 0;
 }
 
-function cashBalance(allTrades, accountId, main) {
+function cashBalance(allTrades, accountId, main, floatIncome) {
+  var doFloat = floatIncome !== false;
   var native = 0;
   var inMain = 0;
   var ticker = '';
@@ -1962,7 +1998,13 @@ function cashBalance(allTrades, accountId, main) {
     var signed = isDest ? cashReceivedOf(t) : cashSignedNative(t, accountId);
     if (!isFinite(signed) || signed === 0) return;
     native += signed;
-    inMain += signed * legRate(t, isDest);
+    // Open income floats at the latest fixing (holdings revalue); every
+    // other leg — expenses, transfers, sells — stays on its frozen lock.
+    var leg = legRate(t, isDest);
+    if (doFloat && !isDest && t.type === 'income') {
+      try { leg = cashIncomeRate(t, main); } catch (e) { /* keep frozen leg */ }
+    }
+    inMain += signed * leg;
   });
   // Tidy binary dust; keep the sign of tiny remainders at exactly 0.
   function tidy(v) { return (Math.abs(v) < 1e-9) ? 0 : Math.round(v * 100) / 100; }
@@ -2193,7 +2235,7 @@ function repairCashTradeAmounts(trades, accounts) {
 // income/expense (amount in the account fiat) values by quantity at the
 // frozen rate — the optional market-value total may be blank ("free").
 // Everything else values by the booked total, as before.
-function ledgerSignedMain(t, cashHint) {
+function ledgerSignedMain(t, cashHint, main) {
   var isIn = (t.type === 'income' || t.type === 'buy');
   if (!isIn && t.type !== 'expense' && t.type !== 'sell') return 0;
   var dir = isIn ? 1 : -1;
@@ -2202,8 +2244,19 @@ function ledgerSignedMain(t, cashHint) {
   // Cash bookkeeping values the amount in the account fiat by quantity.
   // cashHint (cash-scope accounts) covers records whose currency field is
   // blank or mismatched: the quantity is still account-fiat money, so it
-  // converts at the frozen rate instead of booking a zero.
+  // converts at the frozen rate instead of booking a zero. Open cash income
+  // floats at the latest fixing (main display fiat); everything else —
+  // expenses, transfers, buys/sells, cost basis — stays frozen.
   if ((t.type === 'income' || t.type === 'expense') && (cashHint || (ccyU !== '' && ccyU === symU))) {
+    var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
+    if (isFinite(q) && q > 0) {
+      if (t.type === 'income' && cashHint) {
+        var live = null;
+        try { live = cashIncomeRate(t, main); } catch (e) { live = null; }
+        if (live !== null && live !== undefined && isFinite(Number(live))) return dir * q * Number(live);
+      }
+      return dir * q * ledgerFxRate(t.fxLock);
+    }
     var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
     if (isFinite(q) && q > 0) return dir * q * ledgerFxRate(t.fxLock);
     if (t.type === 'expense') {
@@ -2277,7 +2330,7 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       }
       return;
     }
-    var signed = z(ledgerSignedMain(t, cashScope(t.accountId)));
+    var signed = z(ledgerSignedMain(t, cashScope(t.accountId), main));
     if (!code) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.
@@ -7155,7 +7208,12 @@ function renderAccountDetail(st, id) {
         var at = accountTrades({ trades: dtrades }, cid);
         if (!at.length) return;
         var cb = null;
-        try { cb = cashBalance(dtrades, cid, main); } catch (e) { cb = null; }
+        var ckind = '';
+        try {
+          var cacc = accountById(st, cid);
+          ckind = (cacc && typeof cacc.kind === 'string') ? cacc.kind : '';
+        } catch (e) { ckind = ''; }
+        try { cb = cashBalance(dtrades, cid, main, isCashKind(ckind)); } catch (e) { cb = null; }
         if (!cb) return;
         if (isFinite(Number(cb.main))) { gValue += Number(cb.main); gHas = true; }
         gNative += Number(cb.native) || 0;
@@ -10831,10 +10889,16 @@ function refreshDisplayRates(st) {
   } catch (e) { kinds = {}; }
   try {
     try { fxFailedList = []; } catch (e) { /* ignore */ }
-    var fills = [ensureDisplayRates(trades, main).catch(function () { return false; })];
+    var kindsByAccount = {};
+    try {
+      (st.accounts || []).forEach(function (a) {
+        if (a && a.id) kindsByAccount[a.id] = (typeof a.kind === 'string') ? a.kind : '';
+      });
+    } catch (e) { kindsByAccount = {}; }
+    var fills = [ensureDisplayRates(trades, main, kindsByAccount).catch(function () { return false; })];
     var gf = [];
     try { gf = groupFillFiats(st); } catch (e) { gf = []; }
-    gf.forEach(function (f) { fills.push(ensureDisplayRates(trades, f).catch(function () { return false; })); });
+    gf.forEach(function (f) { fills.push(ensureDisplayRates(trades, f, kindsByAccount).catch(function () { return false; })); });
     fills.push(ensureHistoricalExec(trades, main, kinds).catch(function () { return false; }));
     Promise.all(fills).then(function (flags) {
       var changed = false;

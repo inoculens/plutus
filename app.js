@@ -6675,9 +6675,13 @@ function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
   ladd.addEventListener('click', function () { openLedgerDialog(mainAcc.id, null, ids); });
   sec.appendChild(ladd);
   host.appendChild(sec);
-  // The head (currency + first-ledger entry) always renders; rows only once
-  // something is actually labeled.
-  if (!groupHasLabels(st.trades, ids)) {
+  // The head (currency + first-ledger entry) always renders; rows show as
+  // soon as the chart exists (even empty of records, like standalone
+  // accounts) or something is actually labeled.
+  var groupChart = null;
+  try { groupChart = ledgerChartFor(st, mainAcc.id); } catch (e) { groupChart = null; }
+  var hasGroupChart = !!(groupChart && Object.keys(groupChart).length);
+  if (!hasGroupChart && !groupHasLabels(st.trades, ids)) {
     var gateNote = document.createElement('p');
     gateNote.className = 'muted';
     gateNote.textContent = 'No labeled records yet — post records with ledger codes in the sub-accounts.';

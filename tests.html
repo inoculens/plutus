@@ -1787,6 +1787,65 @@
           }
         });
 
+        test('group ledgers show an empty chart even with an empty sub-account', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true, ledgerLabels: { '1000': 'Income' } },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 's', name: 'Sub', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var row = document.querySelector('#account-detail .ledger-row[data-ledger="1000"]');
+            assert(row, 'empty chart code 1000 must render on the group, found none');
+            var gate = document.querySelector('#account-detail');
+            assert(gate && gate.textContent.indexOf('No labeled records yet') === -1, 'gate note must not hide an existing chart, got ' + (gate && gate.textContent.slice(0, 160)));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('group ledgers keep the gate note when chartless and recordless', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [
+                { id: 'm', name: 'Org', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+                { id: 's', name: 'Sub', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z', groupId: 'm' }
+              ],
+              trades: [],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('m');
+            route();
+            render();
+            var host = document.querySelector('#account-detail');
+            assert(host && host.textContent.indexOf('No labeled records yet') !== -1, 'chartless recordless group must keep the gate note');
+            assert(!document.querySelector('#account-detail .ledger-row[data-ledger]'), 'no ledger rows must render without a chart');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('asset main cards fold member realized', function () {
           var backup = null;
           try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }

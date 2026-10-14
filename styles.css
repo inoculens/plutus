@@ -1070,6 +1070,15 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 }
 .rate-line .stat-val { font-family: var(--font-ui); font-size: 0.83rem; font-weight: 400; max-width: 70%; }
 
+/* ————— Cash ledger rows: fixed slots, truncated names, aligned amounts ————— */
+.ledger-row { justify-content: flex-start; align-items: center; gap: 0.75rem; }
+.ledger-row .ledger-toggle { flex: 0 0 auto; min-width: 2.2rem; padding: 0.4rem 0.3rem; }
+.ledger-row .ledger-label { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 0.3rem; overflow: hidden; }
+.ledger-row .ledger-label-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-row .ledger-side { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; }
+.ledger-row .ledger-amount { flex: 0 0 auto; min-width: 9rem; text-align: left; }
+.ledger-row .ledger-side button.quiet { padding: 0.4rem 0.55rem; }
+
 .trade-block {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1809,6 +1818,12 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     min-height: 3.25rem; font-size: 1.02rem; z-index: 1;
   }
   details.adv summary, details.opt summary { min-height: 2.75rem; line-height: 2.75rem; font-size: 0.92rem; }
+  /* — Ledger rows go two-line: name (+ arrow) on top, amount + actions below. — */
+  .ledger-row { flex-wrap: wrap; row-gap: 0.2rem; }
+  .ledger-row .ledger-label { flex: 1 1 60%; }
+  .ledger-row .ledger-side { flex: 1 1 100%; justify-content: flex-end; }
+  .ledger-row .ledger-amount { min-width: 0; }
+  .ledger-row .ledger-side button.quiet { min-height: 2.75rem; }
   .dialog-actions { flex-wrap: wrap; }
   .dialog-actions button { flex: 1 1 8rem; min-height: 3rem; }
   .swatches { grid-template-columns: repeat(2, minmax(0, 1fr)); }

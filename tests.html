@@ -575,6 +575,78 @@
           assert(afterBal.native === beforeBal.native && afterBal.main === beforeBal.main, 'balance must not move on unlabel: ' + JSON.stringify(afterBal));
         });
 
+        test('renameAccountLedger moves chart + records, blocks duplicates', function () {
+          function mkSt() {
+            return {
+              settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '1000': 'Income', '1100': 'Gigs' } },
+              accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [
+                { id: 'r1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1100', ledgerLabel: 'Gigs', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'r2', type: 'income', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1110', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            };
+          }
+          var st = mkSt();
+          assert(L.renameAccountLedger(st, 'a1', '1100', '1150', 'Projects') === null, 'rename must succeed');
+          var chart = L.ledgerChartFor(st, 'a1');
+          assert(chart['1150'] === 'Projects' && !chart['1100'], 'chart must move: ' + JSON.stringify(chart));
+          var t1 = null;
+          st.trades.forEach(function (t) { if (t.id === 'r1') t1 = t; });
+          assert(t1 && t1.ledger === '1150' && t1.ledgerLabel === 'Projects', 'record must follow the rename: ' + JSON.stringify(t1));
+          assert(L.renameAccountLedger(st, 'a1', '1110', '1150', 'Taken') !== null, 'rename onto an existing code must fail');
+          assert(L.renameAccountLedger(st, 'a1', '1150', '1150', 'Renamed') === null, 'label-only edit must succeed');
+          assert(L.ledgerChartFor(st, 'a1')['1150'] === 'Renamed', 'label must update: ' + JSON.stringify(L.ledgerChartFor(st, 'a1')));
+          var st2 = mkSt();
+          assert(L.renameAccountLedger(st2, 'a1', '1000', '1110', 'Taken') !== null, 'rename onto a posted-only code must fail');
+        });
+
+        test('ledger rows: Edit before Delete, toggles on parents, collapse hides kids', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: { '1000': 'Income', '1100': 'Gigs' } },
+              accounts: [{ id: 'a1', name: 'A', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [
+                { id: 'w1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1100', ledgerLabel: 'Gigs', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'w2', type: 'income', symbol: 'EUR', qty: 50, total: 50, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', ledger: '1110', createdAt: '2026-01-05T00:00:00.000Z' },
+                { id: 'w3', type: 'expense', symbol: 'EUR', qty: 20, total: 20, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'a1', createdAt: '2026-01-06T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('a1');
+            route();
+            render();
+            var row1100 = document.querySelector('.ledger-row[data-ledger="1100"]');
+            assert(row1100, '1100 row must render');
+            assert(row1100.querySelector('[data-ledger-toggle]'), 'parent row needs a collapse toggle');
+            var eb = row1100.querySelector('[data-ledger-edit]');
+            var db = row1100.querySelector('[data-ledger-del]');
+            assert(eb && db, 'row needs Edit + Delete');
+            var kids = Array.prototype.slice.call(eb.parentNode.children);
+            assert(kids.indexOf(eb) !== -1 && kids.indexOf(eb) < kids.indexOf(db), 'Edit must sit left of Delete');
+            assert(row1100.querySelector('.ledger-amount'), 'amount needs its fixed slot');
+            assert(row1100.querySelector('.ledger-label-text[data-info-cond]'), 'label needs overflow info wiring');
+            var leaf = document.querySelector('.ledger-row[data-ledger="1110"]');
+            assert(leaf && !leaf.querySelector('[data-ledger-toggle]'), 'leaf row needs no toggle');
+            var unl = document.querySelector('.ledger-row[data-ledger="—"]');
+            assert(unl && !unl.querySelector('[data-ledger-edit]') && !unl.querySelector('[data-ledger-del]'), 'Unlabeled row needs no actions');
+            row1100.querySelector('[data-ledger-toggle]').click();
+            assert(!document.querySelector('.ledger-row[data-ledger="1110"]'), 'collapsed child must hide');
+            assert(document.querySelector('.ledger-row[data-ledger="1100"]'), 'collapsed parent must stay');
+            document.querySelector('.ledger-row[data-ledger="1100"] [data-ledger-toggle]').click();
+            assert(document.querySelector('.ledger-row[data-ledger="1110"]'), 'expanded child must return');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('effective chart: own overrides global, empty own stays empty', function () {
           function stWith(accounts, globalLabels) {
             return { settings: { mainCurrency: 'EUR', costMethod: 'average', ledgerLabels: globalLabels || {} }, accounts: accounts, trades: [], priceOverrides: {} };

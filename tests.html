@@ -1209,6 +1209,50 @@
           });
         });
 
+        test('repair heals blank-currency cash records into the books', function () {
+          var backup = null, fxBackup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try { fxBackup = localStorage.getItem('inoculens.fxcache.v1'); } catch (e) { fxBackup = null; }
+          try {
+            L.clearFxCache();
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 'cash1', name: 'Lei', ticker: 'RON', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [{ id: 'rc1', type: 'income', symbol: 'RON', qty: 100, date: '2026-04-03', fee: 0, feeCurrency: 'RON', accountId: 'cash1', ledger: '1100', createdAt: '2026-04-03T00:00:00.000Z' }],
+              priceOverrides: {}
+            });
+            var loaded = L.loadState();
+            var got = null;
+            loaded.trades.forEach(function (t) { if (t && t.id === 'rc1') got = t; });
+            assert(got && got.currency === 'RON' && Number(got.total) === 100, 'repair must backfill currency + total: ' + JSON.stringify(got));
+            var pairs = L.displayPairs(loaded.trades, 'EUR');
+            assert(pairs.some(function (p) { return p.from === 'RON' && p.date === '2026-04-03'; }), 'repaired pair must be fetchable: ' + JSON.stringify(pairs));
+            var tree = L.ledgerTree(loaded.trades, 'cash1', 'EUR', {});
+            assert(tree.roots.length === 1 && tree.roots[0].code === '1100' && tree.roots[0].total === 100, 'repaired record must aggregate at fallback: ' + JSON.stringify(tree.roots));
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try {
+              if (fxBackup === null) localStorage.removeItem('inoculens.fxcache.v1');
+              else localStorage.setItem('inoculens.fxcache.v1', fxBackup);
+            } catch (e) { /* ignore */ }
+            try { L.reloadFxCache(); } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('cash ledgers value quantity regardless of currency field', function () {
+          function badCcy(id, kinds) {
+            return { id: id, type: 'income', symbol: 'RON', qty: 100, total: 0, currency: 'EUR', date: '2026-04-03', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'cash1', ledger: '1100', createdAt: '2026-04-03T00:00:00.000Z' };
+          }
+          var cashTree = L.ledgerTreeMulti([badCcy('q1')], ['cash1'], 'EUR', {}, { cash1: 'cash' });
+          assert(cashTree.roots.length === 1 && cashTree.roots[0].total === 100, 'cash must value qty despite mismatch, got ' + JSON.stringify(cashTree.roots));
+          var assetTree = L.ledgerTreeMulti([badCcy('q2')], ['cash1'], 'EUR', {}, { cash1: 'crypto' });
+          assert(assetTree.roots.length === 1 && assetTree.roots[0].total === 0, 'asset path must stay total-based, got ' + JSON.stringify(assetTree.roots));
+        });
+
         test('groupFillFiats lists foreign group currencies only', function () {
           var st = {
             settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },

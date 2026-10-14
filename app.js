@@ -2175,6 +2175,11 @@ function repairCashTradeAmounts(trades, accounts) {
       if (!t || (t.type !== 'income' && t.type !== 'expense')) return;
       if (kinds[t.accountId] !== 'cash') return;
       var symU = String(t.symbol || '').toUpperCase();
+      // Blank currency rejoins the books under the account fiat: without it
+      // the record is unfetchable (no pair) and values at zero.
+      if (String(t.currency || '').trim() === '' && symU !== '' && isValidCurrencyCode(symU)) {
+        t.currency = symU;
+      }
       if (String(t.currency || '').toUpperCase() !== symU || symU === '') return;
       var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
       if (!isFinite(q) || q <= 0) return;
@@ -2188,13 +2193,17 @@ function repairCashTradeAmounts(trades, accounts) {
 // income/expense (amount in the account fiat) values by quantity at the
 // frozen rate — the optional market-value total may be blank ("free").
 // Everything else values by the booked total, as before.
-function ledgerSignedMain(t) {
+function ledgerSignedMain(t, cashHint) {
   var isIn = (t.type === 'income' || t.type === 'buy');
   if (!isIn && t.type !== 'expense' && t.type !== 'sell') return 0;
   var dir = isIn ? 1 : -1;
   var symU = String(t.symbol || '').toUpperCase();
   var ccyU = String(t.currency || '').toUpperCase();
-  if ((t.type === 'income' || t.type === 'expense') && ccyU !== '' && ccyU === symU) {
+  // Cash bookkeeping values the amount in the account fiat by quantity.
+  // cashHint (cash-scope accounts) covers records whose currency field is
+  // blank or mismatched: the quantity is still account-fiat money, so it
+  // converts at the frozen rate instead of booking a zero.
+  if ((t.type === 'income' || t.type === 'expense') && (cashHint || (ccyU !== '' && ccyU === symU))) {
     var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
     if (isFinite(q) && q > 0) return dir * q * ledgerFxRate(t.fxLock);
     if (t.type === 'expense') {
@@ -2268,7 +2277,7 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       }
       return;
     }
-    var signed = z(ledgerSignedMain(t));
+    var signed = z(ledgerSignedMain(t, cashScope(t.accountId)));
     if (!code) {
       // Only bookkeeping types can be uncategorized; plain asset
       // buy/sell records without a code stay out of the tree entirely.

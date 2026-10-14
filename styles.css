@@ -1120,6 +1120,14 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   margin: 0.35rem 0;
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
 }
+/* Ledgers read as one table: same bordered card as trade records. */
+.ledger-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.2rem 1rem 0.1rem;
+  margin: 0.35rem 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
+}
 .trade-block:last-child { margin-bottom: 0; }
 /* FIFO lot linkage: per-record Sold / Closed-from lines replacing the old
    detached dump. Ellipsis keeps the fixed box shape; tap jumps to the card. */
@@ -1920,7 +1928,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 @media print {
   body { background: #fff; color: #000; }
   header.brand, #fab-trade, .menu, dialog { display: none !important; }
-  .cards, .account-card, .trade-block, #hero, #landing { border: 1px solid #ccc; background: none; box-shadow: none; }
+  .cards, .account-card, .trade-block, .ledger-list, #hero, #landing { border: 1px solid #ccc; background: none; box-shadow: none; }
 }
 
 /* ————— Ultimate tracker: trade types + hero allocation ————— */

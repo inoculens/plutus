@@ -851,6 +851,8 @@
             assert(ltitle && ltitle.getBoundingClientRect().width > 10, 'Ledgers title must stay visible');
             assert(lsel && lsel.getBoundingClientRect().width < lhead.getBoundingClientRect().width, 'currency dropdown must size to content');
             assert(lbtn && lbtn.getBoundingClientRect().right <= window.innerWidth + 1, '+ Ledger must stay inside the viewport');
+            var llist = document.querySelector('#account-detail .ledger-list');
+            assert(llist && window.getComputedStyle(llist).borderStyle !== 'none', 'Ledgers must read as one bordered table');
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

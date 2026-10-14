@@ -892,7 +892,10 @@
             assert(!document.getElementById('t-ledger-row').hidden, 'asset income must offer ledger inputs when ON');
             document.getElementById('t-side').value = 'buy';
             syncTradeTypeUI();
-            assert(document.getElementById('t-ledger-row').hidden, 'asset buy must never offer ledger inputs');
+            assert(!document.getElementById('t-ledger-row').hidden, 'asset buy must offer ledger inputs when ON');
+            document.getElementById('t-side').value = 'transfer';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-ledger-row').hidden, 'asset transfer must never offer ledger inputs');
             var st = L.loadState();
             st.settings.assetLedgers = false;
             L.saveState(st);
@@ -942,6 +945,37 @@
             render();
             assert(!document.querySelector('#account-detail .ledger-list'), 'panel must vanish with nothing labeled');
             assert(!document.querySelector('#account-detail .ledger-row[data-ledger="—"]'), 'no Unlabeled bucket without labels');
+          } finally {
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
+        test('bootstrap + Ledger sits in Trades head until Ledgers exists', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+              accounts: [{ id: 'ax', name: 'X', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [
+                { id: 'b1', type: 'buy', symbol: 'BTC', qty: 1, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: 'ax', createdAt: '2026-01-05T00:00:00.000Z' }
+              ],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            navTo('ax');
+            route();
+            render();
+            assert(!document.querySelector('#account-detail .ledger-list'), 'no Ledgers section without labels');
+            var boot = document.querySelector('#account-detail [data-ledger-add="ax"]');
+            assert(boot && boot.textContent === '+ Ledger', 'bootstrap + Ledger must sit in Trades head');
+            var headKids = Array.prototype.slice.call(boot.parentNode.children);
+            var recBtn = document.querySelector('#account-detail .t-add');
+            assert(recBtn && headKids.indexOf(boot) !== -1 && headKids.indexOf(boot) < headKids.indexOf(recBtn), '+ Ledger must precede + Record');
           } finally {
             try {
               if (backup === null) localStorage.removeItem('inoculens.v2');

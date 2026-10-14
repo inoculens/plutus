@@ -5463,11 +5463,13 @@ function resolveExecPrice(t, main, kind) {
   return null;
 }
 
-// Ledger inputs ride income/expense records: always on cash (required at
-// submit), on asset accounts only when the global switch is on (optional).
+// Ledger inputs ride records that can carry a code: cash income/expense
+// always (required at submit); every asset type except transfer/swap while
+// the global switch is on (optional). Transfers and swaps move value —
+// they never aggregate into the tree, so they offer no input.
 function tradeLedgerAllowed(isCashAcc, side) {
-  if (side !== 'income' && side !== 'expense') return false;
-  if (isCashAcc) return true;
+  if (side === 'transfer' || side === 'swap') return false;
+  if (isCashAcc) return side === 'income' || side === 'expense';
   try { return assetLedgersOn(loadState()); } catch (e) { return true; }
 }
 
@@ -6235,15 +6237,7 @@ function groupHasLabels(allTrades, ids) {
 function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
   var ids = [mainAcc.id];
   members.forEach(function (m) { ids.push(m.id); });
-  if (!groupHasLabels(st.trades, ids)) return;
   var gCcy = groupLedgerCurrency(st, mainAcc);
-  var gdtrades = (gCcy === headerMain) ? dtrades : convertTrades(st.trades, gCcy);
-  var kinds = {};
-  ids.forEach(function (id) {
-    var a = accountById(st, id);
-    kinds[id] = (a && typeof a.kind === 'string') ? a.kind : '';
-  });
-  var tree = ledgerTreeMulti(gdtrades, ids, gCcy, ledgerChartFor(st, mainAcc.id), kinds);
   var sec = document.createElement('div');
   sec.className = 'section-head';
   var h = document.createElement('h2');
@@ -6279,6 +6273,22 @@ function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
   ladd.addEventListener('click', function () { openLedgerDialog(mainAcc.id, null, ids); });
   sec.appendChild(ladd);
   host.appendChild(sec);
+  // The head (currency + first-ledger entry) always renders; rows only once
+  // something is actually labeled.
+  if (!groupHasLabels(st.trades, ids)) {
+    var gateNote = document.createElement('p');
+    gateNote.className = 'muted';
+    gateNote.textContent = 'No labeled records yet — post records with ledger codes in the sub-accounts.';
+    host.appendChild(gateNote);
+    return;
+  }
+  var gdtrades = (gCcy === headerMain) ? dtrades : convertTrades(st.trades, gCcy);
+  var kinds = {};
+  ids.forEach(function (id) {
+    var a = accountById(st, id);
+    kinds[id] = (a && typeof a.kind === 'string') ? a.kind : '';
+  });
+  var tree = ledgerTreeMulti(gdtrades, ids, gCcy, ledgerChartFor(st, mainAcc.id), kinds);
   if (!tree.roots.length && !tree.unassignedCount && !(tree.unassignedAssetsCount || 0)) {
     var noneNote = document.createElement('p');
     noneNote.className = 'muted';
@@ -6354,7 +6364,7 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
 // shows only when at least one record actually carries a ledger code.
 function buildAssetLedgers(st, acc, dtrades, main, host) {
   var ids = [acc.id];
-  if (!groupHasLabels(st.trades, ids)) return;
+  if (!groupHasLabels(st.trades, ids)) return false;
   var kinds = {};
   kinds[acc.id] = (acc && typeof acc.kind === 'string') ? acc.kind : '';
   var tree = ledgerTreeMulti(dtrades, ids, main, ledgerChartFor(st, acc.id), kinds);
@@ -6375,12 +6385,13 @@ function buildAssetLedgers(st, acc, dtrades, main, host) {
   if (!tree.roots.length && !tree.unassignedCount && !(tree.unassignedAssetsCount || 0)) {
     var noneNote = document.createElement('p');
     noneNote.className = 'muted';
-    noneNote.textContent = 'No labeled records yet — add a ledger code on an income or expense record.';
+    noneNote.textContent = 'No labeled records yet — add a ledger code on a record.';
     host.appendChild(noneNote);
-    return;
+    return true;
   }
   appendLedgerList(host, tree, main, { key: acc.id, chartId: acc.id, scope: ids });
   try { appendLedgerWarn(host, ledgerViolations(st, acc.id)); } catch (e) { /* ignore */ }
+  return true;
 }
 
 // Per-account ledger management: add/rename writes the account's own
@@ -6725,6 +6736,7 @@ function renderAccountDetail(st, id) {
   // history), members show transactions without their Ledgers section.
   var members = groupMembers(st, acc.id);
   var mainOf = groupMainOf(st, acc.id);
+  var assetLedgersShown = false;
   // FIFO lot linkage, resolved once for every visible card: every trade by
   // id (all accounts, so cross-account transfer closes still resolve) and
   // every closed lot grouped by opening / closing trade. Average pools cost
@@ -6883,9 +6895,11 @@ function renderAccountDetail(st, id) {
     host.appendChild(stats);
     // Standalone asset accounts show Ledgers while the global switch is on
     // (grouped members and mains are covered by the group view instead).
+    // assetLedgersShown feeds the + Ledger bootstrap in the Trades head.
+    assetLedgersShown = false;
     if (!mainOf && !members.length) {
       try {
-        if (assetLedgersOn(st)) buildAssetLedgers(st, acc, dtrades, main, host);
+        if (assetLedgersOn(st)) assetLedgersShown = buildAssetLedgers(st, acc, dtrades, main, host) === true;
       } catch (e) { /* Ledgers never break the detail view */ }
     }
   }
@@ -6951,6 +6965,23 @@ function renderAccountDetail(st, id) {
     tAdd.setAttribute('aria-label', 'Add record to ' + acc.name);
     tAdd.addEventListener('click', function () { openPrefillTrade(acc.id, true); });
     tHead.appendChild(buildTradeTypeFilter(acc, atrades));
+    // Bootstrap: standalone asset accounts with nothing labeled yet get
+    // their + Ledger here (filter … + Ledger … + Record); once the Ledgers
+    // section exists it owns the button instead.
+    if (!isCashAccD && !mainOf && !members.length && !assetLedgersShown) {
+      var showBoot = false;
+      try { showBoot = assetLedgersOn(st); } catch (e) { showBoot = false; }
+      if (showBoot) {
+        var lBoot = document.createElement('button');
+        lBoot.type = 'button';
+        lBoot.className = 'ghost';
+        lBoot.textContent = '+ Ledger';
+        lBoot.setAttribute('data-ledger-add', acc.id);
+        lBoot.setAttribute('aria-label', 'Add ledger to ' + acc.name);
+        lBoot.addEventListener('click', function () { openLedgerDialog(acc.id); });
+        tHead.appendChild(lBoot);
+      }
+    }
     tHead.appendChild(tAdd);
     host.appendChild(tHead);
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
@@ -8764,7 +8795,8 @@ function onTradeSubmit(ev) {
   // no records; posting under a record-holding ledger is blocked with the
   // fix (move those records to a child, keep the parent record-free).
   // Grouped accounts judge against the whole group (main chart + members).
-  if ((side === 'income' || side === 'expense') && ledgerCode !== '') {
+  // Any side that can carry a ledger is checked.
+  if (ledgerCode !== '' && tradeLedgerAllowed(isCashAcc, side)) {
     var lscope = null;
     try { lscope = ledgerScopeOf(st0, accountId); } catch (e) { lscope = null; }
     var lconf = ledgerRecordConflict(st0, accountId, ledgerCode, isEditing ? editingTradeId : null, null, lscope);
@@ -9047,6 +9079,10 @@ function onTradeSubmit(ev) {
       if (tradeLedgerAllowed(isCashAcc, side)) {
         if (ledgerCode !== '') trade.ledger = ledgerCode;
         if (ledgerLabel !== '') trade.ledgerLabel = ledgerLabel;
+        if (ledgerCode === '') {
+          try { delete trade.ledger; } catch (e) { trade.ledger = undefined; }
+          try { delete trade.ledgerLabel; } catch (e) { trade.ledgerLabel = undefined; }
+        }
       }
       // Cross-fiat cash move: the converted arrival, in destination fiat.
       if (isCrossFiat) {
@@ -9112,6 +9148,10 @@ function onTradeSubmit(ev) {
     if (tradeLedgerAllowed(isCashAcc, side)) {
       if (ledgerCode !== '') trade.ledger = ledgerCode;
       if (ledgerLabel !== '') trade.ledgerLabel = ledgerLabel;
+      if (ledgerCode === '') {
+        try { delete trade.ledger; } catch (e) { trade.ledger = undefined; }
+        try { delete trade.ledgerLabel; } catch (e) { trade.ledgerLabel = undefined; }
+      }
     }
     // Cross-fiat cash move: the converted arrival, in destination fiat.
     if (isCrossFiat) {

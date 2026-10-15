@@ -3061,6 +3061,65 @@ function parseStooqClose(csv) {
   } catch (e) { return null; }
 }
 
+// Stocks via Yahoo Finance chart API, fetched through the allorigins proxy
+// (Yahoo blocks browser CORS directly; the proxy is a dumb pipe for public
+// quotes — no user data ever leaves the browser). Stooq's q/l quote
+// endpoint currently answers 404, so Yahoo is primary and Stooq is kept as
+// the fallback below.
+function yahooSymbol(sym) {
+  var s = String(sym || '').trim().toUpperCase();
+  if (!/^[A-Z0-9.-]{1,12}$/.test(s)) return null;
+  if (/^(XAU|XAG|XPT|XPD)$/.test(s)) return null; // metals belong to gold-api
+  return s;
+}
+
+function yahooChartUrl(sym, query) {
+  return 'https://api.allorigins.win/raw?url=' +
+    encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' +
+      encodeURIComponent(sym) + '?' + query);
+}
+
+// Latest quote from a Yahoo chart payload: regularMarketPrice first, else
+// the newest non-null daily close. Returns {price, currency} or null.
+function parseYahooQuote(data) {
+  try {
+    var r = data && data.chart && data.chart.result && data.chart.result[0];
+    if (!r) return null;
+    var cur = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var px = r.meta ? Number(r.meta.regularMarketPrice) : NaN;
+    if (isFinite(px) && px > 0) return { price: px, currency: cur };
+    var q = r.indicators && r.indicators.quote && r.indicators.quote[0];
+    var cl = (q && q.close) || [];
+    for (var i = cl.length - 1; i >= 0; i--) {
+      var c = Number(cl[i]);
+      if (isFinite(c) && c > 0) return { price: c, currency: cur };
+    }
+  } catch (e) { /* fall through */ }
+  return null;
+}
+
+// Daily closes from a Yahoo chart payload: [{day:'YYYY-MM-DD', close}]
+// in UTC date (US session hours never cross UTC midnight, so the trading
+// date and UTC date coincide for .us listings).
+function parseYahooDaily(data) {
+  var out = [];
+  try {
+    var r = data && data.chart && data.chart.result && data.chart.result[0];
+    if (!r) return out;
+    var ts = r.timestamp || [];
+    var q = r.indicators && r.indicators.quote && r.indicators.quote[0];
+    var cl = (q && q.close) || [];
+    for (var i = 0; i < ts.length; i++) {
+      var c = Number(cl[i]);
+      if (!isFinite(c) || c <= 0) continue;
+      var d = new Date(Number(ts[i]) * 1000);
+      if (!isFinite(d.getTime())) continue;
+      out.push({ day: d.toISOString().slice(0, 10), close: c });
+    }
+  } catch (e) { /* fall through */ }
+  return out;
+}
+
 function fetchStockPrice(symbol, vs) {
   var sym = String(symbol || '').trim().toUpperCase();
   var cur = priceDefaultVs(vs);
@@ -3072,43 +3131,54 @@ function fetchStockPrice(symbol, vs) {
   if (cached && (now - cached.at) < PRICE_CACHE_TTL_MS && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
     return Promise.resolve(Number(cached.price));
   }
-  var sq = stooqSymbol(sym);
-  if (!sq) return Promise.resolve(cached && cached.price > 0 ? Number(cached.price) : null);
-  var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
-  return capturedFetch(url).then(function (res) {
-    if (!res.ok) throw new Error('price-http-' + res.status);
-    return res.text();
-  }).then(function (csv) {
-    var usd = parseStooqClose(csv);
-    if (!isFinite(usd) || usd <= 0) {
-      if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-      return null;
-    }
-    if (cur === 'USD') {
-      priceCache[key] = { price: usd, at: Date.now() };
-      return usd;
-    }
-    return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
-      var v = usd * Number(r.rate);
-      if (!isFinite(v) || v <= 0) {
-        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-        return null;
-      }
-      priceCache[key] = { price: v, at: Date.now() };
-      return v;
-    }, function () {
-      if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-      return null;
-    });
-  }).then(null, function () {
+  function cachedOrNull() {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
     return null;
-  });
+  }
+  // Native-currency quote into the display fiat via ECB (1:1 when equal).
+  function converted(usdOrNative, native, ecbDay) {
+    var p = Number(usdOrNative);
+    var nat = String(native || 'USD').toUpperCase();
+    if (!isFinite(p) || p <= 0) return Promise.resolve(cachedOrNull());
+    if (nat === cur) {
+      priceCache[key] = { price: p, at: Date.now() };
+      return Promise.resolve(p);
+    }
+    return fetchEcbRate(ecbDay || todayStr(), nat, cur).then(function (r) {
+      var v = p * Number(r.rate);
+      if (!isFinite(v) || v <= 0) return cachedOrNull();
+      priceCache[key] = { price: v, at: Date.now() };
+      return v;
+    }, function () { return cachedOrNull(); });
+  }
+  // Legacy Stooq quote (q/l currently 404s — kept as the fallback in case
+  // it recovers; Stooq closes are USD-denominated like before).
+  function viaStooq() {
+    var sq = stooqSymbol(sym);
+    if (!sq) return Promise.resolve(cachedOrNull());
+    var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
+    return capturedFetch(url).then(function (res) {
+      if (!res.ok) throw new Error('price-http-' + res.status);
+      return res.text();
+    }).then(function (csv) {
+      return converted(parseStooqClose(csv), 'USD');
+    }).then(null, function () { return cachedOrNull(); });
+  }
+  var yq = yahooSymbol(sym);
+  if (!yq) return viaStooq();
+  return capturedFetch(yahooChartUrl(yq, 'interval=1d&range=5d')).then(function (res) {
+    if (!res.ok) throw new Error('price-http-' + res.status);
+    return res.json();
+  }).then(function (data) {
+    var q = parseYahooQuote(data);
+    if (!q) throw new Error('no-quote');
+    return converted(q.price, q.currency);
+  }).then(null, function () { return viaStooq(); });
 }
 
 function fetchCommodityPrice(symbol, vs) {
@@ -4056,8 +4126,45 @@ function fetchCoinbaseHistory(sym, dateStr, vs) {
 function fetchHistoricalStockPrice(symbol, dateStr, vs) {
   var sym = String(symbol || '').trim().toUpperCase();
   var cur = String(priceDefaultVs(vs)).trim().toUpperCase();
+  if (!isValidDateStr(dateStr)) return Promise.resolve(null);
+  var wantDay = dateStr.slice(0, 10);
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  if (!capturedFetch) return Promise.resolve(null);
+  function stooqFallback() { return fetchHistoricalStockStooq(sym, wantDay, cur); }
+  var yq = yahooSymbol(sym);
+  if (!yq) return stooqFallback();
+  // One 12-day window ending the day after `wantDay`: pick the newest
+  // candle at or before it (weekends/holidays resolve to the previous
+  // close, flagged interpolated — same contract as the Stooq walk-back).
+  var endSec = Math.floor(Date.UTC(Number(wantDay.slice(0, 4)), Number(wantDay.slice(5, 7)) - 1, Number(wantDay.slice(8, 10))) / 1000) + 86400;
+  if (!isFinite(endSec) || endSec <= 0) return stooqFallback();
+  var startSec = endSec - 12 * 86400;
+  return capturedFetch(yahooChartUrl(yq, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d')).then(function (res) {
+    if (!res.ok) throw new Error('price-http-' + res.status);
+    return res.json();
+  }).then(function (data) {
+    var r = data && data.chart && data.chart.result && data.chart.result[0];
+    if (!r) throw new Error('no-quotes');
+    var nat = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var candles = parseYahooDaily(data).filter(function (c) { return c.day <= wantDay; });
+    if (!candles.length) throw new Error('no-fixing');
+    var pick = candles[candles.length - 1];
+    var back = (pick.day !== wantDay);
+    if (nat === cur) return { price: pick.close, interpolated: back, day: pick.day };
+    return fetchEcbRate(pick.day, nat, cur).then(function (fx) {
+      var v = pick.close * Number(fx.rate);
+      if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
+      return { price: v, interpolated: back || !!fx.interpolated, day: pick.day };
+    });
+  }).then(function (r) { return r; }, function () { return stooqFallback(); });
+}
+
+// Legacy Stooq daily closes with up to 5-day walk-back (kept as the stock
+// history fallback; Stooq daily currently sits behind a bot challenge that
+// programmatic fetches may not pass).
+function fetchHistoricalStockStooq(sym, wantDay, cur) {
   var sq = stooqSymbol(sym);
-  if (!sq || !isValidDateStr(dateStr)) return Promise.resolve(null);
+  if (!sq || !isValidDateStr(wantDay)) return Promise.resolve(null);
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) return Promise.resolve(null);
   // Walk back up to 5 days for weekends/holidays (same window as FX).
@@ -4245,6 +4352,9 @@ if (typeof window !== 'undefined') {
   window.Inoculens.clearHistCache = clearHistCache;
   window.Inoculens.reloadHistCache = function () { loadHistCache(true); };
   window.Inoculens.parseStooqDaily = parseStooqDaily;
+  window.Inoculens.yahooSymbol = yahooSymbol;
+  window.Inoculens.parseYahooQuote = parseYahooQuote;
+  window.Inoculens.parseYahooDaily = parseYahooDaily;
   window.Inoculens.toCoingeckoDate = toCoingeckoDate;
   window.Inoculens.roundHalfUp2 = roundHalfUp2;
   window.Inoculens.frozenExecOf = frozenExecOf;
@@ -8987,7 +9097,7 @@ function buildAccountDialog() {
     '<label for="na-name">Account name</label>' +
     '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cold wallet">' +
     '<label for="na-kind">Asset type</label>' +
-    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="commodity">Commodity / Metal (live prices)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
+    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live prices)</option><option value="commodity">Commodity / Metal (live prices)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
     '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
     '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<div id="na-fiat-row" hidden><label for="na-fiat">Currency</label>' +

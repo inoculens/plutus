@@ -31,7 +31,7 @@
        user-configured encrypted-sync endpoints (OAuth + Drive/Dropbox/
        MEGA-S4 APIs, any https: for self-hosted WebDAV/S3). Only
        ciphertext ever leaves the browser; plaintext stays local. -->
-  <meta http-equiv="Content-Security-Policy" content="connect-src 'self' https: api.coingecko.com api.gold-api.com api.kraken.com api.exchange.coinbase.com api.frankfurter.dev stooq.com fonts.googleapis.com fonts.gstatic.com accounts.google.com oauth2.googleapis.com www.googleapis.com drive.googleapis.com api.dropboxapi.com content.dropboxapi.com www.dropbox.com www.googletagmanager.com www.google-analytics.com">
+  <meta http-equiv="Content-Security-Policy" content="connect-src 'self' https: api.coingecko.com api.gold-api.com query1.finance.yahoo.com api.allorigins.win api.kraken.com api.exchange.coinbase.com api.frankfurter.dev stooq.com fonts.googleapis.com fonts.gstatic.com accounts.google.com oauth2.googleapis.com www.googleapis.com drive.googleapis.com api.dropboxapi.com content.dropboxapi.com www.dropbox.com www.googletagmanager.com www.google-analytics.com">
   <script>
     // Consent Mode v2 default: analytics denied until the visitor presses
     // Accept in the cookie banner (app.js loads gtag.js only then — Basic mode).
@@ -67,13 +67,13 @@
   <meta name="twitter:image" content="https://plutus.inoculens.com/icons/plutus-logo.png">
   <meta name="twitter:image:alt" content="INOCULENS PLUTUS logo">
 
-  <link rel="manifest" href="/manifest.json?v=296">
+  <link rel="manifest" href="/manifest.json?v=297">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/styles.css?v=296">
+  <link rel="stylesheet" href="/styles.css?v=297">
 
   <script type="application/ld+json">
   {
@@ -123,7 +123,7 @@
           {
             "@type": "Question",
             "name": "What does INOCULENS PLUTUS track for business accounting and portfolios?",
-            "acceptedAnswer": { "@type": "Answer", "text": "Business accounting with cash bookkeeping ledgers, free-form nested codes (e.g. 1000, 1100, 1110), income and expenses, plus crypto (100+ coins via CoinGecko), stocks (via Stooq), commodities and metals such as gold, silver and oil (live prices) and custom accounts. Record types: buy, sell, transfer with network fee, swap, income such as staking, and business expenses." }
+            "acceptedAnswer": { "@type": "Answer", "text": "Business accounting with cash bookkeeping ledgers, free-form nested codes (e.g. 1000, 1100, 1110), income and expenses, plus crypto (100+ coins via CoinGecko), stocks (live prices), commodities and metals such as gold, silver and oil (live prices) and custom accounts. Record types: buy, sell, transfer with network fee, swap, income such as staking, and business expenses." }
           },
           {
             "@type": "Question",
@@ -184,7 +184,7 @@
   <main id="main">
     <section class="sr-only" aria-label="About INOCULENS PLUTUS">
       <h2>INOCULENS PLUTUS — private, local-first business accounting and portfolio tracker for crypto and stocks</h2>
-      <p>INOCULENS PLUTUS (inoculens.com) manages business expenses, income and nested bookkeeping ledgers alongside crypto, stock, commodity, custom and cash portfolios — buys, sells, transfers with on-chain fees, swaps and staking income, with live CoinGecko and Stooq prices, ECB exchange rates locked at trade date, and average-cost or FIFO profit and loss. Business and portfolio data stays in your browser with optional encrypted sync. See the <a href="/privacy.html">privacy policy</a> and <a href="/credits.html">credits</a>.</p>
+      <p>INOCULENS PLUTUS (inoculens.com) manages business expenses, income and nested bookkeeping ledgers alongside crypto, stock, commodity, custom and cash portfolios — buys, sells, transfers with on-chain fees, swaps and staking income, with live CoinGecko, Yahoo Finance and metals prices, ECB exchange rates locked at trade date, and average-cost or FIFO profit and loss. Business and portfolio data stays in your browser with optional encrypted sync. See the <a href="/privacy.html">privacy policy</a> and <a href="/credits.html">credits</a>.</p>
     </section>
     <div id="view-home">
       <section id="landing" aria-label="Welcome" hidden>
@@ -341,6 +341,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=296" defer></script>
+  <script src="/app.js?v=297" defer></script>
 </body>
 </html>

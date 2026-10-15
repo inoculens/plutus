@@ -1710,9 +1710,9 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   }
   /* Higher specificity than the later base coin rules, which would
      otherwise win on source order and render desktop sizes here. */
-  #landing .landing-coins .coin-btc { height: 150px; }
-  #landing .landing-coins .coin-usd { height: 104px; position: relative; left: 58px; }
-  #landing .landing-coins .coin-eur { height: 104px; margin-left: -58px; }
+  #landing .landing-coins .coin-btc { height: 230px; }
+  #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 58px; }
+  #landing .landing-coins .coin-eur { height: 148px; margin-left: -58px; }
   .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
 @media (min-width: 1024px) {

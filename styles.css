@@ -1679,6 +1679,25 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 .landing-feats li { display: flex; flex-direction: column; gap: 0.25rem; }
 .landing-feats strong { font-size: 0.93rem; font-weight: 650; }
 .landing-feats span { font-size: 0.83rem; color: var(--muted); }
+/* Floating currency trio (welcome card): decorative white glyphs filling
+   the empty upper-right. One shared drift so all three move together;
+   absolute layer, so text boxes never shift. Hidden on narrow screens. */
+.landing-coins {
+  position: absolute;
+  top: 2.2rem;
+  right: 2.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  pointer-events: none;
+}
+.landing-coins .coin { display: block; filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.28)); }
+.landing-coins .coin-eur { width: 104px; height: 104px; }
+.landing-coins .coin-usd { width: 82px; height: 82px; }
+.landing-coins .coin-btc { width: 96px; height: 96px; }
+@media (max-width: 899px) {
+  .landing-coins { display: none; }
+}
 @media (max-width: 720px) {
   #landing { padding: 2.25rem 1.4rem 1.6rem; }
   .landing-ctas { flex-direction: column; align-items: stretch; }
@@ -1939,6 +1958,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     to { opacity: 1; transform: none; }
   }
   .account-card, button { transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
+  .landing-coins { animation: coin-float 6s ease-in-out infinite; }
+  @keyframes coin-float {
+    0%, 100% { transform: translateY(-10px); }
+    50% { transform: translateY(10px); }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

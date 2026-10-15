@@ -2945,7 +2945,7 @@
         clearPriceCache();
         window.fetch = function (url) {
           urls.push(String(url));
-          if (String(url).indexOf('allorigins') !== -1) {
+          if (String(url).indexOf('allorigins') !== -1 || String(url).indexOf('codetabs') !== -1) {
             return Promise.resolve({ ok: false, status: 500 });
           }
           return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Symbol,Date,Time,Open,High,Low,Close,Volume\nAAPL.US,2026-10-14,22:00,230,233,229,231.75,100\n'); } });
@@ -2955,6 +2955,29 @@
           restore();
           assert(Math.abs(p - 231.75) < 1e-9, 'Stooq fallback wrong: ' + p);
           assert(urls.some(function (u) { return u.indexOf('stooq.com') !== -1; }), 'must fall back to Stooq: ' + urls.join(','));
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('stock tries the second proxy when the first fails', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('allorigins') !== -1) {
+            return Promise.resolve({ ok: false, status: 500 });
+          }
+          if (String(url).indexOf('codetabs') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ chart: { result: [{ meta: { currency: 'USD', symbol: 'AAPL', regularMarketPrice: 232.5 }, timestamp: [], indicators: { quote: [{ close: [] }] } }] } }); } });
+          }
+          return Promise.reject(new Error('must not reach Stooq: ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('AAPL', 'USD', 'stock').then(function (p) {
+          restore();
+          assert(Math.abs(p - 232.5) < 1e-9, 'second proxy wrong: ' + p);
+          assert(urls.some(function (u) { return u.indexOf('codetabs') !== -1; }), 'must try codetabs: ' + urls.join(','));
         }, function (e) { restore(); throw e; });
       });
 

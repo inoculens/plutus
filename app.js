@@ -3079,6 +3079,32 @@ function yahooChartUrl(sym, query) {
       encodeURIComponent(sym) + '?' + query);
 }
 
+// Both CORS proxies for the Yahoo chart URL, in order: allorigins first,
+// codetabs second (some networks/adblockers kill one but not the other).
+function yahooProxyUrls(sym, query) {
+  var base = 'https://query1.finance.yahoo.com/v8/finance/chart/' +
+    encodeURIComponent(sym) + '?' + query;
+  return ['https://api.allorigins.win/raw?url=' + encodeURIComponent(base),
+    'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(base)];
+}
+
+// First URL that answers ok + parses as JSON; rejects when all fail.
+// Never throws synchronously.
+function fetchFirstJson(urls, fetchImpl) {
+  function next(i) {
+    if (i >= urls.length) return Promise.reject(new Error('no-source'));
+    var p;
+    try {
+      p = fetchImpl(urls[i]);
+    } catch (e) { return next(i + 1); }
+    return p.then(function (res) {
+      if (!res || !res.ok) throw new Error('proxy-http-' + (res && res.status));
+      return res.json();
+    }).then(null, function () { return next(i + 1); });
+  }
+  return next(0);
+}
+
 // Latest quote from a Yahoo chart payload: regularMarketPrice first, else
 // the newest non-null daily close. Returns {price, currency} or null.
 function parseYahooQuote(data) {
@@ -3171,10 +3197,7 @@ function fetchStockPrice(symbol, vs) {
   }
   var yq = yahooSymbol(sym);
   if (!yq) return viaStooq();
-  return capturedFetch(yahooChartUrl(yq, 'interval=1d&range=5d')).then(function (res) {
-    if (!res.ok) throw new Error('price-http-' + res.status);
-    return res.json();
-  }).then(function (data) {
+  return fetchFirstJson(yahooProxyUrls(yq, 'interval=1d&range=5d'), capturedFetch).then(function (data) {
     var q = parseYahooQuote(data);
     if (!q) throw new Error('no-quote');
     return converted(q.price, q.currency);
@@ -4139,10 +4162,7 @@ function fetchHistoricalStockPrice(symbol, dateStr, vs) {
   var endSec = Math.floor(Date.UTC(Number(wantDay.slice(0, 4)), Number(wantDay.slice(5, 7)) - 1, Number(wantDay.slice(8, 10))) / 1000) + 86400;
   if (!isFinite(endSec) || endSec <= 0) return stooqFallback();
   var startSec = endSec - 12 * 86400;
-  return capturedFetch(yahooChartUrl(yq, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d')).then(function (res) {
-    if (!res.ok) throw new Error('price-http-' + res.status);
-    return res.json();
-  }).then(function (data) {
+  return fetchFirstJson(yahooProxyUrls(yq, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d'), capturedFetch).then(function (data) {
     var r = data && data.chart && data.chart.result && data.chart.result[0];
     if (!r) throw new Error('no-quotes');
     var nat = String((r.meta && r.meta.currency) || 'USD').toUpperCase();

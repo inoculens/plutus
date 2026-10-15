@@ -1722,12 +1722,15 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   #landing:not([hidden]) { display: grid; }
   #landing {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    /* Step/CTAs/restore-link stack in the left column right under the body
+       text; the art cell spans those rows so the tall coin cluster never
+       pushes the actions down. Feats stay a full-width footer strip. */
     grid-template-areas:
       "eyebrow eyebrow"
       "herotext art"
-      "step step"
-      "ctas ctas"
-      "alt alt"
+      "step art"
+      "ctas art"
+      "alt art"
       "feats feats";
     column-gap: 2.5rem;
   }

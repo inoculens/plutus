@@ -73,7 +73,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/styles.css?v=346">
+  <link rel="stylesheet" href="/styles.css?v=347">
 
   <script type="application/ld+json">
   {
@@ -187,8 +187,7 @@
       <p>INOCULENS PLUTUS (inoculens.com) manages business expenses, income and nested bookkeeping ledgers alongside crypto, stock, commodity, custom and cash portfolios — buys, sells, transfers with on-chain fees, swaps and staking income, with live CoinGecko, Yahoo Finance and metals prices, ECB exchange rates locked at trade date, and average-cost or FIFO profit and loss. Business and portfolio data stays in your browser with optional encrypted sync. See the <a href="/privacy.html">privacy policy</a> and <a href="/credits.html">credits</a>.</p>
     </section>
     <div id="view-home">
-      <section id="landing" aria-label="Welcome" hidden>
-        <div class="landing-top">
+      <div class="landing-ticker-wrap" id="landing-ticker-wrap" hidden>
         <div class="landing-ticker" role="status" aria-label="Live sample prices">
           <span class="tick"><span class="tick-sym">BTC</span> <span class="tick-val is-loading" id="tick-btc">…</span></span>
           <span class="tick-sep" aria-hidden="true">|</span>
@@ -196,9 +195,10 @@
           <span class="tick-sep" aria-hidden="true">|</span>
           <span class="tick"><span class="tick-sym">SPCX</span> <span class="tick-val is-loading" id="tick-spcx">…</span></span>
         </div>
-        <p class="landing-eyebrow"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 5.5v5.6c0 5 3.4 8.6 8 10.4 4.6-1.8 8-5.4 8-10.4V5.5L12 2z"></path><path d="m9.5 11.5 2 2 3.5-4"></path></svg><span>Private · No account needed</span></p>
-        </div>
+      </div>
+      <section id="landing" aria-label="Welcome" hidden>
         <div class="landing-copy">
+        <p class="landing-eyebrow"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 5.5v5.6c0 5 3.4 8.6 8 10.4 4.6-1.8 8-5.4 8-10.4V5.5L12 2z"></path><path d="m9.5 11.5 2 2 3.5-4"></path></svg><span>Private · No account needed</span></p>
         <div class="landing-herotext">
         <h2 class="landing-title">Manage your business expenses and portfolio in <span class="crayon">one place</span>.</h2>
         <p class="landing-sub"><span class="ls-a">Track business expenses, income and ledgers</span> <span class="ls-b">next to<br class="br-desktop"> your crypto, stocks and commodities.</span> <span class="ls-free"><span class="nowrap">FREE &amp; Open source.</span></span></p>
@@ -349,8 +349,7 @@
       <span class="foot-tag">Private · Local-first · No account</span>
       <a class="foot-link" href="/privacy.html">Privacy</a>
       <a class="foot-link" href="/credits.html">Credits</a>
-      <a id="gh-link" class="foot-link foot-gh" href="https://github.com/inoculens/plutus" target="_blank" rel="noopener"><img src="/icons/GitHub_Invertocat_White.png" alt="" width="14" height="14" aria-hidden="true"><span>GitHub</span></a>
-      <span id="app-ver" class="muted foot-ver"></span>
+      <a id="app-ver" class="foot-ver" href="https://github.com/inoculens/plutus" target="_blank" rel="noopener"><img src="/icons/GitHub_Invertocat_White.png" alt="" width="14" height="14" aria-hidden="true"><span data-ver-text></span></a>
     </div>
   </footer>
 
@@ -362,6 +361,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=329" defer></script>
+  <script src="/app.js?v=330" defer></script>
 </body>
 </html>

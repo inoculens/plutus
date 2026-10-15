@@ -1669,17 +1669,13 @@ main, footer, #banner { position: relative; z-index: 1; }
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--hairline-gold), transparent);
 }
-.landing-top {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-.landing-ticker { align-self: center; }
-.landing-eyebrow { align-self: flex-start; }
+/* Sample-price ribbon: sits ABOVE the welcome card on its own row, centered.
+   The negative bottom margin tightens the home grid gap so it hugs the card
+   instead of floating a full row away. */
+#landing-ticker-wrap { display: flex; justify-content: center; margin-bottom: -0.9rem; }
+#landing-ticker-wrap[hidden] { display: none !important; }
 .landing-eyebrow {
-  margin: 0;
+  margin: 0 0 1rem;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -1814,7 +1810,7 @@ main, footer, #banner { position: relative; z-index: 1; }
   #landing .landing-coins .coin-btc { height: 230px; }
   #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 83px; }
   #landing .landing-coins .coin-eur { height: 148px; margin-left: -78px; }
-  .landing-top, .landing-copy, .landing-feats { position: relative; z-index: 1; }
+  .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
 @media (min-width: 1024px) {
   #landing:not([hidden]) { display: flex; }
@@ -1826,11 +1822,10 @@ main, footer, #banner { position: relative; z-index: 1; }
     align-content: start;
     column-gap: 2.5rem;
   }
-  /* Left text column: headline, step, actions stack in flow. The ticker
-     row (.landing-top) and feats each take a full row. No grid areas, no
-     display:contents — plain flow next to art. */
-  .landing-top { flex: 1 1 100%; }
+  /* Left text column: eyebrow, headline, step, actions stack in flow.
+     No grid areas, no display:contents — plain flow next to art. */
   .landing-copy { display: flex; flex-direction: column; align-items: flex-start; flex: 1.15 1 0; min-width: 0; }
+  .landing-eyebrow { align-self: flex-start; }
   .landing-herotext { min-width: 0; }
   .landing-feats { flex: 1 1 100%; }
   /* Right art column: stretches to the text height; the row is pinned to
@@ -1881,6 +1876,7 @@ main, footer, #banner { position: relative; z-index: 1; }
   .landing-ctas button { width: 100%; }
   #landing-restore { width: auto; align-self: center; min-height: 2.75rem; }
   .landing-ticker { justify-content: space-between; width: 100%; }
+  #landing-ticker-wrap { margin-bottom: -0.35rem; }
   .landing-feats { grid-template-columns: 1fr; gap: 1rem; }
 }
 
@@ -1927,11 +1923,11 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
 .foot-tag { margin: 0; color: var(--muted); font-size: 0.8rem; }
 .foot-link { color: var(--muted); font-size: 0.8rem; text-decoration: underline; text-underline-offset: 3px; }
 .foot-link:hover { color: var(--text); }
-/* GitHub repo link: same hover brightening as the other footer links, but
-   never underlined. The element + class selector beats .foot-link. */
-a.foot-gh { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }
-a.foot-gh:hover { text-decoration: none; }
-.foot-gh img { width: 0.9rem; height: 0.9rem; display: block; }
+/* Version number doubles as the repo link: same quiet look, brightens on
+   hover like the other footer links, never underlined. */
+#app-ver { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }
+#app-ver:hover { color: var(--text); text-decoration: none; }
+#app-ver img { width: 0.9rem; height: 0.9rem; display: block; }
 .foot-ver { margin: 0 0 0 auto; font-size: 0.79rem; color: var(--muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 720px) {
   /* Brand, tagline and version each take a full row; Privacy + Credits

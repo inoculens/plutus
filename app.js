@@ -6469,6 +6469,8 @@ function renderAccounts(st) {
   var emptyState = !accounts.length;
   var noTrades = !emptyState && !(st.trades || []).length;
   if (landing) landing.hidden = !emptyState;
+  var landingTicker = document.getElementById('landing-ticker-wrap');
+  if (landingTicker) landingTicker.hidden = !emptyState;
   if (hero) hero.hidden = emptyState || noTrades;
   if (overview) overview.hidden = emptyState || noTrades;
   if (fab) fab.hidden = emptyState || noTrades;
@@ -12914,15 +12916,13 @@ function render() {
   try { renderHeroAlloc(st); } catch (e) { /* best-effort */ }
   syncTopbar(st);
   var ver = document.getElementById('app-ver');
-  if (ver) ver.textContent = APP_VERSION;
-  // Footer GitHub link points at the actual deployed commit: the short hash
-  // is read from the stamped version string (bottom-right number), so every
-  // deploy links its own commit. Falls back to the repo root pre-stamp.
-  try {
-    var gh = document.getElementById('gh-link');
-    var ghm = /([0-9a-f]{7,40})/i.exec(String(APP_VERSION || ''));
-    if (gh && ghm) gh.href = 'https://github.com/inoculens/plutus/commit/' + ghm[1].toLowerCase();
-  } catch (e) { /* static repo link stays */ }
+  if (ver) {
+    // The version number doubles as the repo link: paint only the text span
+    // so the icon survives, and keep working if the markup ever loses it.
+    var verText = ver.querySelector ? ver.querySelector('[data-ver-text]') : null;
+    if (verText) verText.textContent = APP_VERSION;
+    else ver.textContent = APP_VERSION;
+  }
   route(); // show home or the routed account page
   refreshDisplayRates(st); // fill missing historical pairs, then repaint once
   try { syncInfoDots(); } catch (e) { /* hide decorative ⓘ where nothing overflows */ }

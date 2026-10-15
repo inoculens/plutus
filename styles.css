@@ -1719,40 +1719,30 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
 @media (min-width: 1024px) {
-  #landing:not([hidden]) { display: grid; }
+  #landing:not([hidden]) { display: flex; }
   #landing {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-    /* The card stretches to fill an empty page — without this the rows
-       stretch with it and the centered art sinks toward the container
-       bottom. Rows hug content so the art centers on pill-top..divider. */
+    flex-wrap: wrap;
+    align-items: stretch;
+    /* A stretched card must not stretch the content: packs the text row +
+       feats at the top so the art column matches the text height. */
     align-content: start;
-    /* Step/CTAs/restore-link stack in the left column right under the body
-       text; the art cell spans eyebrow..alt so the coin cluster centers
-       across the full block, from the top down to the feats divider
-       (not the card bottom). Feats stay a full-width footer strip. */
-    grid-template-areas:
-      "eyebrow art"
-      "herotext art"
-      "step art"
-      "ctas art"
-      "alt art"
-      "feats feats";
     column-gap: 2.5rem;
   }
-  .landing-copy { display: contents; }
-  .landing-eyebrow { grid-area: eyebrow; justify-self: start; }
-  .landing-herotext { grid-area: herotext; min-width: 0; }
-  .landing-step { grid-area: step; }
-  .landing-ctas { grid-area: ctas; }
-  .landing-alt { grid-area: alt; }
-  .landing-feats { grid-area: feats; }
+  /* Left text column: eyebrow, headline, step, actions, restore-link stack
+     in flow. No grid areas, no display:contents — plain flow next to art. */
+  .landing-copy { display: flex; flex-direction: column; align-items: flex-start; flex: 1.15 1 0; min-width: 0; }
+  .landing-eyebrow { align-self: flex-start; }
+  .landing-herotext { min-width: 0; }
+  .landing-feats { flex: 1 1 100%; }
+  /* Right art column: stretches to the text height, cluster centered in it
+     (ends at the feats divider, never the card bottom). */
   .landing-coins {
-    grid-area: art;
-    align-self: center;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
+    flex: 1 1 0;
     min-width: 0;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     /* Nudge the whole cluster 5px left of center. `translate` (not
        `left`) so it composes with the children's float animation;
        the mobile query already resets it with `translate: none`. */
@@ -1776,6 +1766,9 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 .landing-coins .coin-usd { height: 214px; }
 .landing-coins .coin-eur { height: 214px; }
 .coin-float { display: flex; align-items: flex-end; will-change: transform; backface-visibility: hidden; }
+/* Inner row: shared baseline + interlock for the three coins. The column
+   (.landing-coins) centers this row; the row keeps the bottom alignment. */
+.coin-row { display: flex; align-items: flex-end; justify-content: center; }
 .coin-float-btc { z-index: 1; }
 .coin-float-usd { z-index: 2; }
 .coin-float-eur { z-index: 3; }

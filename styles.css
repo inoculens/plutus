@@ -1700,7 +1700,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     display: flex;
     position: absolute;
     top: 2.75rem;
-    right: -24px;
+    right: -44px;
     translate: none;
     align-items: flex-end;
     opacity: 0.5;
@@ -1711,8 +1711,8 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   /* Higher specificity than the later base coin rules, which would
      otherwise win on source order and render desktop sizes here. */
   #landing .landing-coins .coin-btc { height: 230px; }
-  #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 58px; }
-  #landing .landing-coins .coin-eur { height: 148px; margin-left: -58px; }
+  #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 78px; }
+  #landing .landing-coins .coin-eur { height: 148px; margin-left: -78px; }
   .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
 @media (min-width: 1024px) {

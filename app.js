@@ -9520,7 +9520,7 @@ function buildTradeForm() {
     '<select id="t-side"><option value="buy">Buy</option><option value="sell">Sell</option><option value="transfer">Transfer (self move + gas)</option><option value="income">Income (reward / airdrop)</option><option value="expense">Expense / fee</option><option value="swap">Swap (coin → coin)</option></select>' +
     '<div id="t-account-row"><label for="t-account">Account</label>' +
     '<select id="t-account"></select></div>' +
-    '<div id="t-toaccount-row" hidden><label for="t-toaccount">To account</label>' +
+    '<div id="t-toaccount-row" hidden><label for="t-toaccount">To account (optional)</label>' +
     '<select id="t-toaccount"></select><p class="fld-hint" id="t-toaccount-hint">Transfer moves cost basis — only the network + fiat fees count as losses.</p></div>' +
     '<div class="fld-locked" hidden><span class="fld-label">Symbol (locked to account)</span> <span id="t-symbol-locked" role="status"></span></div>' +
     '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
@@ -9536,7 +9536,7 @@ function buildTradeForm() {
     '<select id="t-currency">' + ccyOptions('EUR') + '</select></div>' +
     '<label for="t-custom-ccy" id="t-custom-ccy-label" hidden>Custom currency code</label>' +
     '<input id="t-custom-ccy" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY" hidden>' +
-    '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger</label>' +
+    '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger (optional)</label>' +
     '<input id="t-ledger" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24" list="t-ledger-codes">' +
     '<datalist id="t-ledger-codes"></datalist>' +
     '<label for="t-ledger-label">Ledger label (optional)</label>' +
@@ -9549,22 +9549,22 @@ function buildTradeForm() {
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
     '<p class="fld-hint" id="t-networkfee-hint">Fee calculated automatically from the send and received inputs above.</p></div>' +
-    '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat)</label>' +
+    '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat, optional)</label>' +
     '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
     '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p></div>' +
-    '<label for="t-note">Note</label>' +
+    '<label for="t-note">Note (optional)</label>' +
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
-    '<label for="t-txid">Transaction ID</label>' +
+    '<label for="t-txid">Transaction ID (optional)</label>' +
     '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash">' +
     '<p class="fld-hint">Optional — saved with the record and linked to mempool.space.</p>' +
-    '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt</label>' +
+    '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt (optional)</label>' +
     '<input id="t-attach" type="file" accept="application/pdf,image/png,image/jpeg">' +
     '<p class="fld-hint" id="t-attach-hint">Optional — PDF, PNG or JPG up to 10 MB. Stored on this device, synced encrypted when sync is on.</p>' +
     '<p class="fld-hint" id="t-attach-cur" hidden></p>' +
     '<button type="button" id="t-attach-remove" hidden>Remove file</button></div>' +
-    '<label for="t-manual-rate">Manual FX rate (fallback when ECB is unavailable)</label>' +
+    '<label for="t-manual-rate">Manual FX rate (optional fallback when ECB is unavailable)</label>' +
     '<input id="t-manual-rate" inputmode="decimal" placeholder="e.g. 0.92">' +
-    '<label for="t-manual-price">Manual exec price (this trade only, in trade fiat)</label>' +
+    '<label for="t-manual-price">Manual exec price (optional, this trade only, in trade fiat)</label>' +
     '<input id="t-manual-price" inputmode="decimal" placeholder="e.g. 67000">' +
     '</details>' +
     '<div class="fld-error-row"><p id="t-error" class="banner-error" role="alert" hidden></p>' +

@@ -5926,20 +5926,25 @@
         openPrefillTrade('a1');
         document.getElementById('t-side').value = 'transfer';
         document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
-        // No recipients: same-account move, the fee is typed directly.
-        assert(document.getElementById('t-networkfee').readOnly !== true, 'self-move fee must be typeable');
-        // With a recipient the fee computes itself.
-        document.getElementById('t-rec-add').click();
-        assert(document.getElementById('t-networkfee').readOnly === true, 'fee field must be read-only computed');
+        // No recipients: same-account move — the fee stays locked, derived
+        // from what arrived back.
+        assert(document.getElementById('t-networkfee').readOnly === true, 'fee field must stay read-only computed');
+        assert(document.getElementById('t-selfrecv-row').hidden === false, 'received-back must show with no recipients');
         // Live preview fills the fee as both amounts are typed.
         document.getElementById('t-qty').value = '1';
         document.getElementById('t-qty').dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('t-selfrecv').value = '0.99';
+        document.getElementById('t-selfrecv').dispatchEvent(new Event('input', { bubbles: true }));
+        assert(document.getElementById('t-networkfee').value === '0.01', 'preview must compute the fee, got ' + document.getElementById('t-networkfee').value);
+        // With a recipient the received-back row hides and the rows drive it.
+        document.getElementById('t-rec-add').click();
+        assert(document.getElementById('t-selfrecv-row').hidden === true, 'received-back must hide once rows exist');
         var prow = document.querySelector('#t-rec-list .rec-row');
         prow.querySelector('.rec-account').value = 'a2';
         prow.querySelector('.rec-account').dispatchEvent(new Event('change', { bubbles: true }));
         prow.querySelector('.rec-qty').value = '0.99';
         prow.querySelector('.rec-qty').dispatchEvent(new Event('input', { bubbles: true }));
-        assert(document.getElementById('t-networkfee').value === '0.01', 'preview must compute the fee, got ' + document.getElementById('t-networkfee').value);
+        assert(document.getElementById('t-networkfee').value === '0.01', 'rows must drive the fee, got ' + document.getElementById('t-networkfee').value);
         // Blank row amount never saves.
         prow.querySelector('.rec-qty').value = '';
         document.getElementById('t-total').value = '';
@@ -5950,6 +5955,38 @@
         var err = document.getElementById('t-error');
         assert(err && err.hidden === false, 'blank received must surface a form error');
         try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+      });
+
+      test('legacy self-move reopens with received-back and a locked fee', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 't2', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0.01, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openEditTrade('t2');
+        assert(document.querySelectorAll('#t-rec-list .rec-row').length === 0, 'self-move must open with no rows');
+        assert(document.getElementById('t-selfrecv').value === '0.99', 'edit should prefill received-back, got ' + document.getElementById('t-selfrecv').value);
+        assert(document.getElementById('t-networkfee').readOnly === true, 'fee must stay locked on edit');
+        assert(document.getElementById('t-networkfee').value === '0.01', 'fee must recompute on edit, got ' + document.getElementById('t-networkfee').value);
+        document.getElementById('t-total').value = '';
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        onTradeSubmit({ preventDefault: function () {} });
+        var st = L.loadState();
+        assert(st.trades.length === 2, 'edit save must keep both trades');
+        var back = null;
+        st.trades.forEach(function (t) { if (t && t.id === 't2') back = t; });
+        assert(back && Math.abs(Number(back.networkFee) - 0.01) < 1e-9, 'fee must survive the round-trip, got ' + JSON.stringify(back && back.networkFee));
+        assert(back && !('outputs' in back), 'self-move must not gain outputs, got ' + JSON.stringify(back && back.outputs));
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        navHome();
       });
     })();
 

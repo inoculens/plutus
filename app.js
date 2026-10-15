@@ -9936,6 +9936,9 @@ function buildTradeForm() {
     '<div id="t-rec-list"></div>' +
     '<button type="button" id="t-rec-add">+ Add recipient</button>' +
     '<p class="fld-hint" id="t-rec-hint">One transaction, many recipients — internal moves keep their cost basis, external rows spend by default.</p></div>' +
+    '<div id="t-selfrecv-row" hidden><label for="t-selfrecv" id="t-selfrecv-label">Received back (same account)</label>' +
+    '<input id="t-selfrecv" inputmode="decimal" placeholder="e.g. 0.99">' +
+    '<p class="fld-hint" id="t-selfrecv-hint">Amount that stayed in this account — the fee below fills in itself.</p></div>' +
     '<div class="fld-locked" hidden><span class="fld-label">Symbol (locked to account)</span> <span id="t-symbol-locked" role="status"></span></div>' +
     '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
     '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
@@ -10015,6 +10018,8 @@ function buildTradeForm() {
   });
   var qtyEl = document.getElementById('t-qty');
   if (qtyEl) qtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
+  var selfRecvEl = document.getElementById('t-selfrecv');
+  if (selfRecvEl) selfRecvEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var toQtyEl = document.getElementById('t-toqty');
   if (toQtyEl) toQtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var recAdd = document.getElementById('t-rec-add');
@@ -10304,6 +10309,7 @@ function syncTradeTypeUI() {
   setHidden('t-attach-row', isSwap);
   setHidden('t-toqty-row', !isSwap);
   setHidden('t-recipients', !isTransfer);
+  setHidden('t-selfrecv-row', !isTransfer);
   setHidden('t-networkfee-row', !(isTransfer));
   // Transfers carry no fiat of their own: the network fee IS the fee, valued
   // in fiat at the frozen historical rate. Fiat fee + total + currency stay
@@ -10463,6 +10469,7 @@ function syncTransferFeePreview() {
   if (!sideEl || sideEl.value !== 'transfer') return;
   var hint = document.getElementById('t-rec-hint');
   var feeInput = document.getElementById('t-networkfee');
+  var selfRow = document.getElementById('t-selfrecv-row');
   var rows = readRecipientRows();
   var sent = Number(uiVal('t-qty', ''));
   var sentOk = isFinite(sent) && sent > 0;
@@ -10472,14 +10479,27 @@ function syncTransferFeePreview() {
     if (acc) sym = ' ' + String(acc.ticker).toUpperCase();
   } catch (e) { sym = ''; }
   if (!feeInput) return;
+  // The fee is always computed — the field never unlocks. With recipients
+  // it is sent − received across rows; with none (same-account move) it is
+  // sent − received-back below.
+  try { feeInput.setAttribute('readonly', ''); } catch (e) { /* ignore */ }
+  if (selfRow) selfRow.hidden = rows.length > 0;
   if (!rows.length) {
-    // No recipients: on-chain move inside this account — the fee is entered
-    // directly under Details instead of being derived.
-    try { feeInput.removeAttribute('readonly'); } catch (e) { /* ignore */ }
-    if (hint) hint.textContent = 'No recipients — on-chain move inside this account. Enter the miner fee under Details.';
+    var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-selfrecv', ''));
+    if (!r) {
+      var recvTxt = String(uiVal('t-selfrecv', '')).trim();
+      feeInput.value = '';
+      if (hint) hint.textContent = recvTxt === '' ? 'Enter what arrived back — the fee below fills in itself.' : 'Received back must be > 0 and at most what you sent.';
+      return;
+    }
+    feeInput.value = String(r.fee);
+    if (hint) {
+      hint.textContent = r.fee === 0
+        ? 'No fee — everything stayed in this account.'
+        : 'Fee ' + String(r.fee) + sym + ' will be recorded as the loss.';
+    }
     return;
   }
-  try { feeInput.setAttribute('readonly', ''); } catch (e) { /* ignore */ }
   // Single cross-fiat row: the arrival is a converted amount, not sent − fee.
   if (rows.length === 1 && rows[0].kind === 'internal' && rows[0].toSymbol) {
     feeInput.value = '0';
@@ -10616,6 +10636,7 @@ function resetTradeForm() {
   uiSetVal('t-side', 'buy');
   uiSetVal('t-qty', '');
   uiSetVal('t-toqty', '');
+  uiSetVal('t-selfrecv', '');
   clearRecipientRows();
   uiSetVal('t-total', '');
   var ccy = document.getElementById('t-currency');
@@ -10784,7 +10805,15 @@ function openEditTrade(tradeId) {
       }
     }
     erows.forEach(function (r) { try { addRecipientRow(r); } catch (e) { /* ignore */ } });
-    if (!erows.length) uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
+    if (!erows.length) {
+      // Same-account move: restore what arrived back so the locked fee
+      // recomputes exactly (legacy records carry sent + fee only).
+      var selfQty = Number(tr.qty);
+      var selfNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
+      if (isFinite(selfQty) && selfQty > 0 && isFinite(selfNf) && selfNf >= 0 && selfNf < selfQty) {
+        uiSetVal('t-selfrecv', String(roundQty8(selfQty - selfNf)));
+      }
+    }
   }
   // Manual fields reflect their persistent state, like every other input:
   // the FX rate lives on in the trade's manual fxLock, the price in the
@@ -11165,10 +11194,16 @@ function onTradeSubmit(ev) {
       if (sumF - networkFee > 1e-12) { tradeFormError('Recipient fees exceed the transfer fee (' + networkFee + ').'); return; }
     }
     if (!recRows.length) {
-      // No recipients: on-chain move inside this account — the fee is typed.
-      var manFee = Number(netRaw);
-      if (!isFinite(manFee) || manFee < 0 || manFee >= sentChk) { tradeFormError('Enter the miner fee (>= 0 and < sent).'); return; }
-      networkFee = roundQty8(manFee);
+      // No recipients: same-account move — the fee derives from what
+      // arrived back (the fee field is computed-only, as ever).
+      var backRaw = uiVal('t-selfrecv', '');
+      var backChk = transferFeeFrom(String(qtyRaw), backRaw);
+      if (!backChk) {
+        if (String(backRaw).trim() === '') tradeFormError('Enter what arrived back (> 0).');
+        else tradeFormError('Received back must be > 0 and at most what you sent.');
+        return;
+      }
+      networkFee = backChk.fee;
     }
     if (!isFinite(networkFee) || networkFee < 0 || networkFee >= sentChk) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     uiSetVal('t-networkfee', String(networkFee));

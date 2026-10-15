@@ -3089,15 +3089,39 @@ function yahooProxyUrls(sym, query) {
 }
 
 // First URL that answers ok + parses as JSON; rejects when all fail.
-// Never throws synchronously.
+// Each attempt fails fast (12s race) so one hanging proxy cannot stick the
+// UI on "loading" for minutes. Never throws synchronously.
+function fetchWithTimeout(fetchImpl, url, ms) {
+  var timeoutMs = (isFinite(Number(ms)) && Number(ms) > 0) ? Number(ms) : 12000;
+  var timer = null;
+  var timeoutP = new Promise(function (_, reject) {
+    timer = setTimeout(function () { reject(new Error('proxy-timeout')); }, timeoutMs);
+    if (timer && typeof timer.unref === 'function') { try { timer.unref(); } catch (e) { /* ignore */ } }
+  });
+  var attempt;
+  try {
+    attempt = fetchImpl(url);
+  } catch (e) {
+    if (timer) { try { clearTimeout(timer); } catch (e2) { /* ignore */ } }
+    return Promise.reject(e);
+  }
+  if (!attempt || typeof attempt.then !== 'function') {
+    if (timer) { try { clearTimeout(timer); } catch (e) { /* ignore */ } }
+    return Promise.reject(new Error('no-promise'));
+  }
+  return Promise.race([attempt, timeoutP]).then(function (res) {
+    if (timer) { try { clearTimeout(timer); } catch (e) { /* ignore */ } }
+    return res;
+  }, function (e) {
+    if (timer) { try { clearTimeout(timer); } catch (e2) { /* ignore */ } }
+    throw e;
+  });
+}
+
 function fetchFirstJson(urls, fetchImpl) {
   function next(i) {
     if (i >= urls.length) return Promise.reject(new Error('no-source'));
-    var p;
-    try {
-      p = fetchImpl(urls[i]);
-    } catch (e) { return next(i + 1); }
-    return p.then(function (res) {
+    return fetchWithTimeout(fetchImpl, urls[i]).then(function (res) {
       if (!res || !res.ok) throw new Error('proxy-http-' + (res && res.status));
       return res.json();
     }).then(null, function () { return next(i + 1); });
@@ -3146,6 +3170,108 @@ function parseYahooDaily(data) {
   return out;
 }
 
+// Stocks via CNBC (direct, CORS `*`, no proxy): one batched quote call for
+// any number of tickers. Each code-0 quote yields {price, currency} keyed
+// by uppercased symbol. Never rejects: misses are simply absent.
+var CNBC_QUOTE_URL = 'https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol';
+function parseCnbcQuotes(data) {
+  var map = {};
+  try {
+    var list = data && data.FormattedQuoteResult && data.FormattedQuoteResult.FormattedQuote;
+    if (!Array.isArray(list)) return map;
+    list.forEach(function (q) {
+      if (!q || Number(q.code) !== 0) return;
+      var s = String(q.symbol || '').toUpperCase();
+      var p = Number(q.last);
+      if (!s || !isFinite(p) || p <= 0) return;
+      map[s] = { price: p, currency: String(q.currencyCode || 'USD').toUpperCase() };
+    });
+  } catch (e) { /* fall through */ }
+  return map;
+}
+
+function fetchBatchCnbc(syms, fetchImpl) {
+  var list = [];
+  (syms || []).forEach(function (s) {
+    var t = String(s || '').trim().toUpperCase();
+    if (t && /^[A-Z0-9.-]{1,12}$/.test(t) && list.indexOf(t) === -1) list.push(t);
+  });
+  if (!list.length) return Promise.resolve({});
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve({});
+  var url = CNBC_QUOTE_URL + '?symbols=' +
+    list.map(function (t) { return encodeURIComponent(t); }).join('|') +
+    '&requestMethod=quick&noform=1&partnerId=2&fund=1&exthrs=1&output=json';
+  try {
+    return f(url).then(function (res) {
+      if (!res || !res.ok) throw new Error('cnbc-http-' + (res && res.status));
+      return res.json();
+    }).then(function (data) {
+      return parseCnbcQuotes(data);
+    }).then(null, function () { return {}; });
+  } catch (e) { return Promise.resolve({}); }
+}
+
+// Native-currency stock quote into the display fiat (1:1 when equal),
+// cached under STOCK:sym:cur. Stale cache wins over null on any failure.
+function convertStockQuote(sym, price, native, cur) {
+  var s = String(sym || '').trim().toUpperCase();
+  var c = String(cur || 'EUR').toUpperCase();
+  var key = priceCacheKey('STOCK:' + s, c);
+  var cached = null;
+  try { cached = priceCache[key] || null; } catch (e) { cached = null; }
+  function cachedOrNull() {
+    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+    return null;
+  }
+  var p = Number(price);
+  var nat = String(native || 'USD').toUpperCase();
+  if (!isFinite(p) || p <= 0) return Promise.resolve(cachedOrNull());
+  if (nat === c) {
+    priceCache[key] = { price: p, at: Date.now() };
+    return Promise.resolve(p);
+  }
+  return fetchEcbRate(todayStr(), nat, c).then(function (r) {
+    var v = p * Number(r.rate);
+    if (!isFinite(v) || v <= 0) return cachedOrNull();
+    priceCache[key] = { price: v, at: Date.now() };
+    return v;
+  }, function () { return cachedOrNull(); });
+}
+
+function fetchStockCnbc(sym, cur, fetchImpl) {
+  return fetchBatchCnbc([sym], fetchImpl).then(function (map) {
+    var q = map && map[String(sym || '').toUpperCase()];
+    if (!q) return null;
+    return convertStockQuote(sym, q.price, q.currency, cur);
+  });
+}
+
+function fetchStockYahoo(sym, cur, fetchImpl) {
+  // Yahoo chart via proxies, Stooq below. Resolves cached-or-null (never
+  // rejects) when every source misses.
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  function stooq() {
+    var sq = stooqSymbol(sym);
+    if (!sq || !f) return Promise.resolve(null);
+    var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
+    return f(url).then(function (res) {
+      if (!res || !res.ok) throw new Error('price-http-' + (res && res.status));
+      return res.text();
+    }).then(function (csv) {
+      return convertStockQuote(sym, parseStooqClose(csv), 'USD', cur);
+    }).then(null, function () { return null; });
+  }
+  if (!f) return Promise.resolve(null);
+  var yq = yahooSymbol(sym);
+  if (!yq) return stooq();
+  return fetchFirstJson(yahooProxyUrls(yq, 'interval=1d&range=5d'), f).then(function (data) {
+    var q = parseYahooQuote(data);
+    if (!q) throw new Error('no-quote');
+    return convertStockQuote(sym, q.price, q.currency, cur);
+  }).then(null, function () { return stooq(); });
+}
+
 function fetchStockPrice(symbol, vs) {
   var sym = String(symbol || '').trim().toUpperCase();
   var cur = priceDefaultVs(vs);
@@ -3162,46 +3288,11 @@ function fetchStockPrice(symbol, vs) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
-  function cachedOrNull() {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
-  }
-  // Native-currency quote into the display fiat via ECB (1:1 when equal).
-  function converted(usdOrNative, native, ecbDay) {
-    var p = Number(usdOrNative);
-    var nat = String(native || 'USD').toUpperCase();
-    if (!isFinite(p) || p <= 0) return Promise.resolve(cachedOrNull());
-    if (nat === cur) {
-      priceCache[key] = { price: p, at: Date.now() };
-      return Promise.resolve(p);
-    }
-    return fetchEcbRate(ecbDay || todayStr(), nat, cur).then(function (r) {
-      var v = p * Number(r.rate);
-      if (!isFinite(v) || v <= 0) return cachedOrNull();
-      priceCache[key] = { price: v, at: Date.now() };
-      return v;
-    }, function () { return cachedOrNull(); });
-  }
-  // Legacy Stooq quote (q/l currently 404s — kept as the fallback in case
-  // it recovers; Stooq closes are USD-denominated like before).
-  function viaStooq() {
-    var sq = stooqSymbol(sym);
-    if (!sq) return Promise.resolve(cachedOrNull());
-    var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
-    return capturedFetch(url).then(function (res) {
-      if (!res.ok) throw new Error('price-http-' + res.status);
-      return res.text();
-    }).then(function (csv) {
-      return converted(parseStooqClose(csv), 'USD');
-    }).then(null, function () { return cachedOrNull(); });
-  }
-  var yq = yahooSymbol(sym);
-  if (!yq) return viaStooq();
-  return fetchFirstJson(yahooProxyUrls(yq, 'interval=1d&range=5d'), capturedFetch).then(function (data) {
-    var q = parseYahooQuote(data);
-    if (!q) throw new Error('no-quote');
-    return converted(q.price, q.currency);
-  }).then(null, function () { return viaStooq(); });
+  // CNBC direct first (no proxy lottery), then Yahoo proxies, then Stooq.
+  return fetchStockCnbc(sym, cur, capturedFetch).then(function (p) {
+    if (isFinite(Number(p)) && Number(p) > 0) return Number(p);
+    return fetchStockYahoo(sym, cur, capturedFetch);
+  }, function () { return fetchStockYahoo(sym, cur, capturedFetch); });
 }
 
 function fetchCommodityPrice(symbol, vs) {
@@ -3551,12 +3642,27 @@ function refreshAllPrices(symbols, vs, kinds) {
       });
     }));
   }
-  stocks.forEach(function (sym) {
-    jobs.push(fetchLivePrice(sym, cur, 'stock').then(function (p) {
-      if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
-      else { out[sym] = null; errors[sym] = 'stock feed unreachable — try a manual override in Settings'; }
+  if (stocks.length) {
+    // One batched CNBC call for every stock (direct, no proxy), then the
+    // Yahoo-proxy chain per symbol that missed. Same out/errors contract.
+    var stockFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+    jobs.push(fetchBatchCnbc(stocks, stockFetch).then(function (map) {
+      var per = stocks.map(function (sym) {
+        var q = map && map[sym];
+        if (q) {
+          return convertStockQuote(sym, q.price, q.currency, cur).then(function (p) {
+            if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
+            else { out[sym] = null; errors[sym] = 'stock feed unreachable — try a manual override in Settings'; }
+          });
+        }
+        return fetchStockYahoo(sym, cur, stockFetch).then(function (p) {
+          if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
+          else { out[sym] = null; errors[sym] = 'stock feed unreachable — try a manual override in Settings'; }
+        });
+      });
+      return Promise.all(per).then(function () { /* mapped into out/errors above */ });
     }));
-  });
+  }
   commodities.forEach(function (sym) {
     jobs.push(fetchLivePrice(sym, cur, 'commodity').then(function (p) {
       if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
@@ -4375,6 +4481,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.yahooSymbol = yahooSymbol;
   window.Inoculens.parseYahooQuote = parseYahooQuote;
   window.Inoculens.parseYahooDaily = parseYahooDaily;
+  window.Inoculens.parseCnbcQuotes = parseCnbcQuotes;
+  window.Inoculens.fetchBatchCnbc = fetchBatchCnbc;
   window.Inoculens.toCoingeckoDate = toCoingeckoDate;
   window.Inoculens.roundHalfUp2 = roundHalfUp2;
   window.Inoculens.frozenExecOf = frozenExecOf;

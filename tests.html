@@ -2920,6 +2920,45 @@
         assert(P2.yahooSymbol('!!!') === null, 'bad tickers must be null');
       });
 
+      testAsync('stock live price resolves via CNBC direct, no proxy', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ FormattedQuoteResult: { FormattedQuote: [{ symbol: 'AAPL', code: 0, last: '342.96', currencyCode: 'USD' }] } }); } });
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('AAPL', 'USD', 'stock').then(function (p) {
+          restore();
+          assert(Math.abs(p - 342.96) < 1e-9, 'AAPL live wrong: ' + p);
+          assert(urls.length === 1 && urls[0].indexOf('quote.cnbc.com') !== -1, 'must hit CNBC directly: ' + urls.join(','));
+          assert(!urls.some(function (u) { return u.indexOf('allorigins') !== -1 || u.indexOf('stooq.com') !== -1; }), 'must not touch proxies on success');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('stock batch quotes many tickers in one CNBC call', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ FormattedQuoteResult: { FormattedQuote: [
+            { symbol: 'AAPL', code: 0, last: '342.96', currencyCode: 'USD' },
+            { symbol: 'SPCX', code: 0, last: '152.16', currencyCode: 'USD' }
+          ] } }); } });
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return refreshAllPrices(['AAPL', 'SPCX'], 'USD', { AAPL: 'stock', SPCX: 'stock' }).then(function (out) {
+          restore();
+          assert(Math.abs(out.AAPL - 342.96) < 1e-9 && Math.abs(out.SPCX - 152.16) < 1e-9, 'batch wrong: ' + JSON.stringify(out));
+          var cnbc = urls.filter(function (u) { return u.indexOf('quote.cnbc.com') !== -1; });
+          assert(cnbc.length === 1 && cnbc[0].indexOf('AAPL') !== -1 && cnbc[0].indexOf('SPCX') !== -1, 'one batched CNBC call expected, got ' + urls.join(','));
+        }, function (e) { restore(); throw e; });
+      });
+
       testAsync('stock live price resolves via Yahoo without Stooq', function () {
         var origFetch = window.fetch;
         var urls = [];
@@ -2927,13 +2966,16 @@
         clearPriceCache();
         window.fetch = function (url) {
           urls.push(String(url));
+          if (String(url).indexOf('quote.cnbc.com') !== -1) {
+            return Promise.resolve({ ok: false, status: 500 });
+          }
           return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ chart: { result: [{ meta: { currency: 'USD', symbol: 'AAPL', regularMarketPrice: 232.5 }, timestamp: [], indicators: { quote: [{ close: [] }] } }] } }); } });
         };
         function restore() { window.fetch = origFetch; restoreState(); }
         return fetchLivePrice('AAPL', 'USD', 'stock').then(function (p) {
           restore();
           assert(Math.abs(p - 232.5) < 1e-9, 'AAPL live wrong: ' + p);
-          assert(urls.length === 1 && urls[0].indexOf('api.allorigins.win') !== -1 && urls[0].indexOf('AAPL') !== -1, 'must hit Yahoo via proxy: ' + urls.join(','));
+          assert(urls.some(function (u) { return u.indexOf('allorigins') !== -1 && u.indexOf('AAPL') !== -1; }), 'must fall back to Yahoo: ' + urls.join(','));
           assert(!urls.some(function (u) { return u.indexOf('stooq.com') !== -1; }), 'must not touch Stooq on success');
         }, function (e) { restore(); throw e; });
       });

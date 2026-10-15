@@ -559,6 +559,160 @@ function shortTxid(txid) {
   return s.slice(0, 8) + '…' + s.slice(-6);
 }
 
+// --- Multi-recipient transfers (one on-chain tx, N recipients) ---
+// A transfer may carry `outputs`: one entry per recipient of the same tx.
+// Internal entries move into an own account ({toAccountId, qty}); external
+// entries pay someone else ({label, qty, spend}). Each row may attribute
+// part of the tx fee ({fee}, optional — blank means unattributed shared
+// fee). Row qty is always denominated in the SOURCE symbol (for a cash
+// cross-fiat row it is the sent portion; the converted arrival rides
+// {toQty, toSymbol}). Top-level qty is the total leaving the source:
+// sum(row qty) + networkFee == qty. Absent/empty outputs = legacy behavior
+// (single toAccountId, or a same-account on-chain move when no dest).
+// External rows default to spend:true (expense-like: cost books as a loss);
+// spend:false is a neutral hand-over (holdings drop, no P&L beyond the fee).
+var TRANSFER_MAX_OUTPUTS = 20;
+var TRANSFER_LABEL_MAX = 80;
+
+function isTransferOutputInternal(o) {
+  return !!o && typeof o.toAccountId === 'string' && o.toAccountId.trim() !== '';
+}
+
+function transferOutputsSum(outs) {
+  var q = 0, f = 0;
+  (outs || []).forEach(function (o) {
+    var rq = o ? Number(o.qty) : NaN;
+    if (isFinite(rq) && rq > 0) q += rq;
+    var rf = (o && o.fee !== undefined && o.fee !== null && String(o.fee).trim() !== '') ? Number(o.fee) : 0;
+    if (isFinite(rf) && rf > 0) f += rf;
+  });
+  return { qty: q, fee: f };
+}
+
+// Arrival credited to an internal destination: same-ticker rows arrive as
+// qty; a cash cross-fiat row arrives as its converted toQty.
+function transferRowArrival(o, symbol) {
+  if (!o) return 0;
+  var symU = String(symbol || '').toUpperCase();
+  var toU = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
+    ? symU : String(o.toSymbol).trim().toUpperCase();
+  if (toU !== symU) {
+    var cross = Number(o.toQty);
+    return (isFinite(cross) && cross > 0) ? cross : 0;
+  }
+  var q = Number(o.qty);
+  return (isFinite(q) && q > 0) ? q : 0;
+}
+
+// Normalized recipient list: stored outputs win; otherwise a legacy single
+// destination degrades to one row; no destination at all means a
+// same-account move (no rows — only the fee leaves).
+function transferOutputsOf(t) {
+  if (t && Array.isArray(t.outputs) && t.outputs.length) return t.outputs;
+  var hasTo = t && t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
+  if (t && t.type === 'transfer' && hasTo) {
+    var symU = String(t.symbol || '').toUpperCase();
+    var toU = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
+      ? symU : String(t.toSymbol).trim().toUpperCase();
+    if (toU !== symU) {
+      var sent = Number(t.qty);
+      var tq = Number(t.toQty);
+      var row = { toAccountId: String(t.toAccountId).trim(), qty: (isFinite(sent) && sent > 0) ? sent : 0 };
+      if (isFinite(tq) && tq > 0) { row.toQty = tq; row.toSymbol = toU; }
+      return [row];
+    }
+    var sent2 = Number(t.qty);
+    var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
+    var nf = (isFinite(nfRaw) && nfRaw >= 0) ? nfRaw : 0;
+    var recv = (isFinite(sent2) && sent2 > 0) ? sent2 - nf : NaN;
+    return [{ toAccountId: String(t.toAccountId).trim(), qty: (isFinite(recv) && recv > 0) ? recv : 0 }];
+  }
+  return [];
+}
+
+function transferDestIds(t) {
+  var seen = {};
+  var out = [];
+  function add(id) {
+    var s = String(id === undefined || id === null ? '' : id).trim();
+    if (!s || seen[s]) return;
+    seen[s] = true;
+    out.push(s);
+  }
+  if (t && Array.isArray(t.outputs)) {
+    t.outputs.forEach(function (o) { if (isTransferOutputInternal(o)) add(o.toAccountId); });
+  }
+  if (t && t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '') add(t.toAccountId);
+  return out;
+}
+
+function transferInvolvesAccount(t, id) {
+  if (!t || typeof id !== 'string' || id === '') return false;
+  if (t.accountId === id) return true;
+  return transferDestIds(t).indexOf(id) !== -1;
+}
+
+// Amount of this transfer credited to one internal destination (0 when the
+// account is not a recipient). Covers legacy single-dest trades too.
+function transferArrivalFor(t, accountId) {
+  if (!t || t.type !== 'transfer' || typeof accountId !== 'string' || accountId === '') return 0;
+  if (t.accountId === accountId) return 0;
+  var sum = 0;
+  var outs = transferOutputsOf(t);
+  for (var i = 0; i < outs.length; i++) {
+    var o = outs[i];
+    if (isTransferOutputInternal(o) && String(o.toAccountId).trim() === accountId) {
+      sum += transferRowArrival(o, t.symbol);
+    }
+  }
+  return sum;
+}
+
+// Structural check for one recipient row. accountIds (when supplied) is the
+// known-account roster; sourceId guards the no-self-payment rule.
+function isValidTransferOutput(o, symbol, sourceId, accountIds) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+  var internal = isTransferOutputInternal(o);
+  var hasLabel = o.label !== undefined && o.label !== null && String(o.label).trim() !== '';
+  if (internal === hasLabel) return false; // exactly one of account / label
+  if (internal) {
+    if (typeof o.toAccountId !== 'string') return false;
+    var id = o.toAccountId.trim();
+    if (id === '' || id === sourceId) return false;
+    if (accountIds !== undefined) {
+      if (!Array.isArray(accountIds)) return false;
+      if (accountIds.indexOf(id) === -1) return false;
+    }
+  } else {
+    if (typeof o.label !== 'string') return false;
+    var lab = o.label.trim();
+    if (lab.length < 1 || lab.length > TRANSFER_LABEL_MAX) return false;
+    if (o.spend !== undefined && o.spend !== null && typeof o.spend !== 'boolean') return false;
+  }
+  if (typeof o.qty !== 'number' && typeof o.qty !== 'string') return false;
+  var q = Number(o.qty);
+  if (!isFinite(q) || q <= 0) return false;
+  if (o.fee !== undefined && o.fee !== null && String(o.fee).trim() !== '') {
+    if (typeof o.fee !== 'number' && typeof o.fee !== 'string') return false;
+    var f = Number(o.fee);
+    if (!isFinite(f) || f < 0) return false;
+  }
+  if (o.toSymbol !== undefined && o.toSymbol !== null && String(o.toSymbol).trim() !== '') {
+    if (!isValidSymbolCode(o.toSymbol)) return false;
+    if (String(o.toSymbol).trim().toUpperCase() !== String(symbol || '').trim().toUpperCase()) {
+      if (o.toQty === undefined || o.toQty === null || String(o.toQty).trim() === '') return false;
+      if (typeof o.toQty !== 'number' && typeof o.toQty !== 'string') return false;
+      var tq = Number(o.toQty);
+      if (!isFinite(tq) || tq <= 0) return false;
+    }
+  } else if (o.toQty !== undefined && o.toQty !== null && String(o.toQty).trim() !== '') {
+    if (typeof o.toQty !== 'number' && typeof o.toQty !== 'string') return false;
+    var tq2 = Number(o.toQty);
+    if (!isFinite(tq2) || tq2 <= 0) return false;
+  }
+  return true;
+}
+
 function isValidImportTrade(t, accountIds) {
   if (!t || typeof t !== 'object' || Array.isArray(t)) return false;
   if (TRADE_TYPES.indexOf(t.type) === -1) return false;
@@ -599,9 +753,25 @@ function isValidImportTrade(t, accountIds) {
     if (t.currency !== undefined && t.currency !== null && String(t.currency).trim() !== '') {
       if (!isValidCurrencyCode(t.currency)) return false;
     }
-    // Destination is optional: without one the transfer is an on-chain move
-    // inside the same account (e.g. sweeping to a fresh address), where only
-    // the network fee is lost. With one it must be a different known account.
+    // Recipients: either the legacy single destination below, or `outputs`
+    // (one entry per recipient of the same tx). Both at once are rejected
+    // so stored records always have a single source of truth. Without either
+    // the transfer is an on-chain move inside the same account (e.g.
+    // sweeping to a fresh address), where only the network fee is lost.
+    var hasOutputs = Array.isArray(t.outputs) && t.outputs.length > 0;
+    if (hasOutputs) {
+      if (t.outputs.length > TRANSFER_MAX_OUTPUTS) return false;
+      var hasToBoth = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
+      if (hasToBoth) return false;
+      if (t.toQty !== undefined && t.toQty !== null && String(t.toQty).trim() !== '') return false;
+      if (t.toSymbol !== undefined && t.toSymbol !== null && String(t.toSymbol).trim() !== '') return false;
+      for (var oi = 0; oi < t.outputs.length; oi++) {
+        if (!isValidTransferOutput(t.outputs[oi], t.symbol, t.accountId, accountIds)) return false;
+      }
+      var sums = transferOutputsSum(t.outputs);
+      if (Math.abs(sums.qty + tnf - tq) > 1e-8) return false; // sent must equal recipients + fee
+      if (sums.fee - tnf > 1e-12) return false; // attributed row fees ride inside the tx fee
+    } else {
     // Cross-fiat cash moves carry the received amount (toQty) plus the
     // destination fiat (toSymbol); same-fiat moves derive it from the fee.
     if (t.toQty !== undefined && t.toQty !== null && String(t.toQty).trim() !== '') {
@@ -632,6 +802,7 @@ function isValidImportTrade(t, accountIds) {
       if (typeof t.accountId !== 'string' || !t.accountId) return false;
       if (hasTo && typeof t.toAccountId !== 'string') return false;
       if (hasTo && t.accountId === t.toAccountId) return false;
+    }
     }
     return true;
   }
@@ -713,6 +884,36 @@ function normalizeTradeForStore(t) {
   if (typeof c.currency === 'string' && c.currency.trim() !== '') c.currency = c.currency.trim().toUpperCase();
   if (typeof c.feeCurrency === 'string' && c.feeCurrency.trim() !== '') c.feeCurrency = c.feeCurrency.trim().toUpperCase();
   if (typeof c.txid === 'string' && c.txid.trim() !== '') c.txid = c.txid.trim();
+  // Multi-recipient transfers: normalize rows (trim labels, uppercase the
+  // arrival fiat); an empty list degrades to the legacy shape. Legacy
+  // single-dest fields never coexist with outputs (single source of truth).
+  if (c.outputs !== undefined && c.outputs !== null) {
+    if (Array.isArray(c.outputs)) {
+      var __outs = [];
+      c.outputs.forEach(function (o) {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) return;
+        var n = {};
+        if (typeof o.toAccountId === 'string' && o.toAccountId.trim() !== '') n.toAccountId = o.toAccountId.trim();
+        if (typeof o.label === 'string' && o.label.trim() !== '') n.label = o.label.trim().slice(0, TRANSFER_LABEL_MAX);
+        n.qty = o.qty;
+        if (o.fee !== undefined && o.fee !== null && String(o.fee).trim() !== '') n.fee = o.fee;
+        if (o.spend === false) n.spend = false;
+        if (typeof o.toSymbol === 'string' && o.toSymbol.trim() !== '') n.toSymbol = o.toSymbol.trim().toUpperCase();
+        if (o.toQty !== undefined && o.toQty !== null && String(o.toQty).trim() !== '') n.toQty = o.toQty;
+        __outs.push(n);
+      });
+      if (__outs.length) {
+        c.outputs = __outs;
+        try { delete c.toAccountId; } catch (e) { c.toAccountId = undefined; }
+        try { delete c.toQty; } catch (e) { c.toQty = undefined; }
+        try { delete c.toSymbol; } catch (e) { c.toSymbol = undefined; }
+      } else {
+        try { delete c.outputs; } catch (e) { c.outputs = undefined; }
+      }
+    } else {
+      try { delete c.outputs; } catch (e) { c.outputs = undefined; }
+    }
+  }
   if (c.attachment !== undefined && c.attachment !== null && isValidAttachment(c.attachment)) {
     c.attachment = { name: String(c.attachment.name).trim(), mime: String(c.attachment.mime), size: Number(c.attachment.size), hash: String(c.attachment.hash).toLowerCase() };
   } else if (c.attachment !== undefined && (c.attachment === null || !isValidAttachment(c.attachment))) {
@@ -1557,6 +1758,8 @@ function computeAverage(trades) {
       var et = bySym.get(sym);
       var fiatT = n.netMain; // all-in fiat cost (display-only fee, no drag)
       et.fees = (et.fees || 0) + n.feeMain;
+      var outsA = transferOutputsOf(t);
+      if (!outsA.length) {
       if (et.qty <= LEDGER_EPS) {
         // no inventory: cannot move, but fiat fee still lost
         if (fiatT > 0) et.realized -= fiatT;
@@ -1571,6 +1774,37 @@ function computeAverage(trades) {
       et.cost -= feeCostT;
       et.realized -= feeCostT + fiatT; // on-chain loss + fiat fee are real losses
       if (Math.abs(et.qty) < LEDGER_EPS) { et.qty = 0; et.cost = 0; }
+      } else {
+        // Multi-recipient: internal same-symbol moves cancel globally (only
+        // the fee matters); external and cross-fiat rows leave the pool.
+        if (et.qty <= LEDGER_EPS) {
+          if (fiatT > 0) et.realized -= fiatT;
+          continue;
+        }
+        var tQtyA = Math.min(qt, et.qty);
+        var scA = qt > 0 ? tQtyA / qt : 0;
+        var feeQtyA = nft * scA;
+        var avgA = et.qty > 0 ? et.cost / et.qty : 0;
+        var leaveQ = feeQtyA;
+        var leaveSpendC = 0;
+        outsA.forEach(function (o) {
+          var rq = Number(o.qty) * scA;
+          if (!isFinite(rq) || rq <= 0) return;
+          if (isTransferOutputInternal(o)) {
+            var dS = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
+              ? sym : String(o.toSymbol).trim().toUpperCase();
+            if (dS === sym) return; // cancels globally
+            return; // cross-fiat internal: leaves the pool silently
+          }
+          leaveQ += rq;
+          if (o.spend !== false) leaveSpendC += avgA * rq; // external spend books its cost
+        });
+        var feeCostA = avgA * feeQtyA;
+        et.qty -= leaveQ;
+        et.cost -= avgA * leaveQ;
+        et.realized -= feeCostA + fiatT + leaveSpendC;
+        if (Math.abs(et.qty) < LEDGER_EPS) { et.qty = 0; et.cost = 0; }
+      }
     }
   }
   bySym.forEach(function (e) {
@@ -1725,7 +1959,47 @@ function computeFifo(trades) {
       st.realized -= feeCostT + fiatT;
       // qty/cost net: gross removed, nothing re-added globally (in+out cancel except fee already accounted via qty reduction below).
       // Re-add net? No: globally out+in cancel, leaving -feeQty. Queues already removed gross; re-add net portion with original lots scaled.
-      var netQtyT = tQty - feeQtyT;
+      var outsG = transferOutputsOf(t);
+      var keepQtyT = tQty - feeQtyT;
+      if (outsG.length) {
+        // Multi-recipient: internal same-symbol slices stay in the pool;
+        // external spend slices close as expense lots; cross-fiat and
+        // neutral slices simply leave.
+        keepQtyT = 0;
+        var spendCostT = 0;
+        outsG.forEach(function (o) {
+          var rq = Number(o.qty) * scaleT;
+          if (!isFinite(rq) || rq <= LEDGER_EPS) return;
+          if (isTransferOutputInternal(o)) {
+            var dS = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
+              ? sym : String(o.toSymbol).trim().toUpperCase();
+            if (dS === sym) keepQtyT += rq;
+            return;
+          }
+          if (o.spend === false) return;
+          for (var si = 0; si < removed.length; si++) {
+            var srl = removed[si];
+            var sft = (tQty > 0) ? srl.qty * (rq / tQty) : 0;
+            if (sft <= LEDGER_EPS) continue;
+            var sfc = sft * srl.unitCost;
+            spendCostT += sfc;
+            st.lots.push({
+              openDate: srl.openDate,
+              closeDate: t.date,
+              qty: sft,
+              proceeds: 0,
+              cost: sfc,
+              gain: -sfc,
+              holdingDays: ledgerHoldingDays(srl.openDate, t.date),
+              buyId: srl.buyId || null,
+              sellId: ledgerTradeId(t),
+              kind: 'expense'
+            });
+          }
+        });
+        st.realized -= spendCostT;
+      }
+      var netQtyT = keepQtyT;
       if (netQtyT > LEDGER_EPS && tQty > 0) {
         for (var ni = 0; ni < removed.length; ni++) {
           var ol = removed[ni];
@@ -1980,11 +2254,19 @@ function computePortfolio(allTrades, live, method) {
       var from = stFor(t.accountId, sym);
       // No destination: on-chain move inside the same account (fresh address,
       // same owner) — out and in cancel, only the network fee is lost.
-      var to = (t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '')
-        ? stFor(t.toAccountId, sym)
+      // With recipients each internal row is credited at the source basis;
+      // external spend rows book their cost as a loss.
+      var outsP = transferOutputsOf(t);
+      var to = (!outsP.length && t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '')
+        ? stFor(String(t.toAccountId).trim(), sym)
         : from;
       from.touched = true;
       to.touched = true;
+      // Legacy parity: a named destination counts as active even when the
+      // source holds nothing (the run below returns early on empty source).
+      if (outsP.length === 1 && isTransferOutputInternal(outsP[0])) {
+        try { stFor(String(outsP[0].toAccountId).trim(), sym).touched = true; } catch (e) { /* ignore */ }
+      }
       var fiatT = n.netMain; // all-in fiat cost (fee display-only)
       if (isFifo) {
         var heldT = from.queue.reduce(function (s, l) { return s + l.qty; }, 0);
@@ -2025,6 +2307,7 @@ function computePortfolio(allTrades, live, method) {
         var frq = 0, frc = 0;
         from.queue.forEach(function (l) { frq += l.qty; frc += l.qty * l.unitCost; });
         from.qty = frq; from.cost = frc;
+        if (!outsP.length) {
         var netQ = tQty - feeQ;
         if (netQ > LEDGER_EPS && tQty > 0) {
           removed.forEach(function (rl) {
@@ -2035,6 +2318,46 @@ function computePortfolio(allTrades, live, method) {
           var trq = 0, trc = 0;
           to.queue.forEach(function (l) { trq += l.qty; trc += l.qty * l.unitCost; });
           to.qty = trq; to.cost = trc;
+        }
+        } else if (tQty > 0) {
+          var destSeen = {};
+          outsP.forEach(function (o) {
+            var share = Number(o.qty) * sc;
+            if (!isFinite(share) || share <= LEDGER_EPS) return;
+            if (isTransferOutputInternal(o)) {
+              var dSym = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
+                ? sym : String(o.toSymbol).trim().toUpperCase();
+              var arr = (dSym !== sym && o.toQty !== undefined && o.toQty !== null && String(o.toQty).trim() !== '')
+                ? Number(o.toQty) * sc : share;
+              if (!isFinite(arr) || arr <= 0) return;
+              var dst = stFor(String(o.toAccountId).trim(), dSym);
+              dst.touched = true;
+              removed.forEach(function (rl) {
+                var keep = rl.qty * (share / tQty);
+                if (keep > LEDGER_EPS) dst.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
+              });
+              var did = String(o.toAccountId).trim() + '|' + dSym;
+              destSeen[did] = dst;
+            } else if (o.spend !== false) {
+              removed.forEach(function (rl) {
+                var xsh = rl.qty * (share / tQty);
+                if (xsh <= LEDGER_EPS) return;
+                var xco = xsh * rl.unitCost;
+                from.lots.push({ openDate: rl.openDate, closeDate: t.date, qty: xsh, proceeds: 0, cost: xco, gain: -xco, holdingDays: ledgerHoldingDays(rl.openDate, t.date), accountId: t.accountId, symbol: sym, kind: 'expense', buyId: rl.buyId || null, sellId: ledgerTradeId(t) });
+                from.realized -= xco;
+                totals.realized -= xco;
+                totals.feesCryptoMain += xco;
+                totals.feesCryptoQty += xsh;
+              });
+            }
+          });
+          Object.keys(destSeen).forEach(function (k) {
+            var dst2 = destSeen[k];
+            dst2.queue.sort(function (a, b) { return String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0; });
+            var rq2 = 0, rc2 = 0;
+            dst2.queue.forEach(function (l) { rq2 += l.qty; rc2 += l.qty * l.unitCost; });
+            dst2.qty = rq2; dst2.cost = rc2;
+          });
         }
       } else {
         if (from.qty <= LEDGER_EPS) {
@@ -2047,7 +2370,6 @@ function computePortfolio(allTrades, live, method) {
         var aF = avgOf(from);
         var costO = aF * tQ2;
         var feeC2 = aF * feeQ2;
-        var moved = costO - feeC2;
         from.qty -= tQ2;
         from.cost -= costO;
         if (Math.abs(from.qty) < LEDGER_EPS) { from.qty = 0; from.cost = 0; }
@@ -2058,9 +2380,34 @@ function computePortfolio(allTrades, live, method) {
         totals.expensesFiat += fiatT;
         totals.feesFiat += n.feeMain;
         from.fees += n.feeMain;
+        if (!outsP.length) {
+        var moved = costO - feeC2;
         var netQ2 = tQ2 - feeQ2;
         to.qty += netQ2;
         to.cost += moved;
+        } else {
+          outsP.forEach(function (o) {
+            var share = Number(o.qty) * sc2;
+            if (!isFinite(share) || share <= LEDGER_EPS) return;
+            var shareCost = aF * share;
+            if (isTransferOutputInternal(o)) {
+              var dSym = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
+                ? sym : String(o.toSymbol).trim().toUpperCase();
+              var arr = (dSym !== sym && o.toQty !== undefined && o.toQty !== null && String(o.toQty).trim() !== '')
+                ? Number(o.toQty) * sc2 : share;
+              if (!isFinite(arr) || arr <= 0) return;
+              var dst = stFor(String(o.toAccountId).trim(), dSym);
+              dst.touched = true;
+              dst.qty += arr;
+              dst.cost += shareCost;
+            } else if (o.spend !== false) {
+              from.realized -= shareCost;
+              totals.realized -= shareCost;
+              totals.feesCryptoMain += shareCost;
+              totals.feesCryptoQty += share;
+            }
+          });
+        }
       }
     }
   });
@@ -2143,7 +2490,10 @@ function heldForAccount(allTrades, accountId, symbol) {
 // in the account fiat, converted per-flow at the frozen fxLock rate.
 // income/buy credit, expense/sell debit; transfers debit the source and
 // credit the destination (same-fiat: sent − fee; cross-fiat: stored toQty).
-function cashReceivedOf(t) {
+function cashReceivedOf(t, accountId) {
+  // Per-destination form cashReceivedOf(t, accountId) credits one internal
+  // recipient of a (possibly multi-output) transfer, 0 otherwise.
+  if (accountId !== undefined && accountId !== null) return transferArrivalFor(t, accountId);
   if (!t || t.type !== 'transfer') return 0;
   var dest = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
     ? String(t.symbol || '').toUpperCase()
@@ -2162,8 +2512,7 @@ function cashReceivedOf(t) {
 
 function cashSignedNative(t, accountId) {
   if (!t || t.accountId !== accountId) {
-    if (t && t.toAccountId === accountId) return cashReceivedOf(t);
-    return 0;
+    return transferArrivalFor(t, accountId);
   }
   var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
   if (t.type === 'income' || t.type === 'buy') return (isFinite(q) && q > 0) ? q : 0;
@@ -2213,10 +2562,10 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
   (allTrades || []).forEach(function (t) {
     if (!t) return;
     var isSrc = (t.accountId === accountId);
-    var isDest = (!isSrc && t.toAccountId === accountId);
+    var isDest = (!isSrc && transferArrivalFor(t, accountId) > 0);
     if (!isSrc && !isDest) return;
     if (isSrc && !ticker && t.symbol) ticker = String(t.symbol).toUpperCase();
-    var signed = isDest ? cashReceivedOf(t) : cashSignedNative(t, accountId);
+    var signed = isDest ? cashReceivedOf(t, accountId) : cashSignedNative(t, accountId);
     if (!isFinite(signed) || signed === 0) return;
     native += signed;
     // Realization: holdings float, spending locks. A consumed income's value
@@ -2565,17 +2914,25 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       var dstRate = (toSym === mainU) ? 1 : (t.toFxLock ? ledgerFxRate(t.toFxLock) : ledgerFxRate(t.fxLock));
       var recv = cashReceivedOf(t);
       if (!isFinite(recv) || recv < 0) recv = 0;
-      var destId = (t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '')
-        ? String(t.toAccountId).trim() : null;
+      var destIds = transferDestIds(t);
       if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
       own[code].amount = z(own[code].amount - sent * srcRate);
       own[code].count++;
-      if (destId && destId !== t.accountId && inScope[destId]) {
-        own[code].amount = z(own[code].amount + recv * dstRate);
-        own[code].count++;
-      } else if (!destId && inScope[t.accountId]) {
-        own[code].amount = z(own[code].amount + recv * dstRate);
-        own[code].count++;
+      if (!destIds.length) {
+        if (inScope[t.accountId]) {
+          own[code].amount = z(own[code].amount + recv * dstRate);
+          own[code].count++;
+        }
+      } else {
+        destIds.forEach(function (destId) {
+          if (destId !== t.accountId && inScope[destId]) {
+            var arr = transferArrivalFor(t, destId);
+            if (isFinite(arr) && arr > 0) {
+              own[code].amount = z(own[code].amount + arr * dstRate);
+              own[code].count++;
+            }
+          }
+        });
       }
       return;
     }
@@ -2722,7 +3079,23 @@ function validateTrade(t, heldQty) {
   }
   if (effType === 'transfer') {
     var hasToV = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
-    if (hasToV && t.accountId && t.toAccountId && t.accountId === t.toAccountId) return 'transfer needs two different accounts';
+    var outsV = (t.outputs !== undefined && t.outputs !== null && Array.isArray(t.outputs) && t.outputs.length) ? t.outputs : null;
+    if (outsV) {
+      if (outsV.length > TRANSFER_MAX_OUTPUTS) return 'too many recipients (max 20)';
+      if (hasToV) return 'transfer has both a destination and recipients';
+      var sumQV = 0, sumFV = 0;
+      for (var vi = 0; vi < outsV.length; vi++) {
+        if (!isValidTransferOutput(outsV[vi], t.symbol, t.accountId)) return 'recipient ' + (vi + 1) + ' is invalid';
+        sumQV += Number(outsV[vi].qty);
+        if (outsV[vi].fee !== undefined && outsV[vi].fee !== null && String(outsV[vi].fee).trim() !== '') sumFV += Number(outsV[vi].fee);
+      }
+      var qVV = Number(t.qty);
+      var nfVV = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
+      if (isFinite(qVV) && qVV > 0 && isFinite(nfVV) && nfVV >= 0) {
+        if (Math.abs(sumQV + nfVV - qVV) > 1e-8) return 'recipients + fee must equal sent';
+        if (sumFV - nfVV > 1e-12) return 'recipient fees exceed the transfer fee';
+      }
+    } else if (hasToV && t.accountId && t.toAccountId && t.accountId === t.toAccountId) return 'transfer needs two different accounts';
   }
   if (typeof t.date === 'string' && t.date.length > 0) {
     if (!isValidDateStr(t.date)) return 'date must be dd/mm/yyyy';
@@ -2752,6 +3125,12 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cashReceivedOf = cashReceivedOf;
   window.Inoculens.cashSignedNative = cashSignedNative;
   window.Inoculens.cashBalance = cashBalance;
+  window.Inoculens.transferOutputsOf = transferOutputsOf;
+  window.Inoculens.transferDestIds = transferDestIds;
+  window.Inoculens.transferArrivalFor = transferArrivalFor;
+  window.Inoculens.transferInvolvesAccount = transferInvolvesAccount;
+  window.Inoculens.transferRowArrival = transferRowArrival;
+  window.Inoculens.isValidTransferOutput = isValidTransferOutput;
   window.Inoculens.ledgerParentOf = ledgerParentOf;
   window.Inoculens.ledgerDescendantsOf = ledgerDescendantsOf;
   window.Inoculens.ledgerAccountCodes = ledgerAccountCodes;
@@ -5259,13 +5638,13 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   var cashTrades = 0;
   (dtrCash || []).forEach(function (t) {
     if (!t) return;
-    if ((t.accountId && cashVisible(t.accountId)) || (t.toAccountId && cashVisible(t.toAccountId))) cashTrades++;
+    if ((t.accountId && cashVisible(t.accountId)) || transferDestIds(t).some(function (id) { return cashVisible(id); })) cashTrades++;
   });
   var cashBalTotal = 0;
   var cashBalKnown = false;
   Object.keys(cashIdsS).forEach(function (aid) {
     if (!cashVisible(aid)) return;
-    var hasAny = (dtrCash || []).some(function (t) { return !!t && (t.accountId === aid || t.toAccountId === aid); });
+    var hasAny = (dtrCash || []).some(function (t) { return transferInvolvesAccount(t, aid); });
     if (!hasAny) return;
     var b = cashBalance(dtrCash, aid, main);
     if (isFinite(b.main)) { cashBalTotal += b.main; cashBalKnown = true; }
@@ -5699,7 +6078,7 @@ function buildAccountAction() {
       // Owned trades go; transfers pointing into the set go too — otherwise
       // the next load would silently drop the survivors' half of the move.
       s2.trades = (s2.trades || []).filter(function (t) {
-        return !t || (!inSet[t.accountId] && !inSet[t.toAccountId]);
+        return !t || (!inSet[t.accountId] && !transferDestIds(t).some(function (id) { return !!inSet[id]; }));
       });
       s2.accounts = (s2.accounts || []).filter(function (a) { return !a || !inSet[a.id]; });
       selectedAccounts = {};
@@ -5914,7 +6293,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var seenTrade = {};
   (dtrades || []).forEach(function (t) {
     if (!t) return;
-    if (!scopeSet[t.accountId] && !(t.toAccountId && scopeSet[t.toAccountId])) return;
+    if (!scopeSet[t.accountId] && !transferDestIds(t).some(function (id) { return !!scopeSet[id]; })) return;
     if (t.id) {
       if (seenTrade[t.id]) return;
       seenTrade[t.id] = true;
@@ -6877,11 +7256,22 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     }
   }
   var whatTxt = '';
-  if (t.type === 'transfer' && t.toAccountId && accountNameById) {
+  if (t.type === 'transfer' && accountNameById) {
     try {
       var fn = accountNameById(t.accountId);
-      var tn = accountNameById(t.toAccountId);
-      if (fn || tn) whatTxt = (fn || '') + ' → ' + (tn || '');
+      var outsH = transferOutputsOf(t);
+      if (outsH.length === 1 && isTransferOutputInternal(outsH[0])) {
+        var tn = accountNameById(String(outsH[0].toAccountId).trim());
+        if (fn || tn) whatTxt = (fn || '') + ' → ' + (tn || '');
+      } else if (outsH.length === 1) {
+        var lab0 = String(outsH[0].label || '').trim();
+        if (fn || lab0) whatTxt = (fn || '') + ' → ' + lab0;
+      } else if (outsH.length > 1) {
+        if (fn) whatTxt = fn + ' → ' + outsH.length + ' recipients';
+      } else if (t.toAccountId) {
+        var tn2 = accountNameById(t.toAccountId);
+        if (fn || tn2) whatTxt = (fn || '') + ' → ' + (tn2 || '');
+      }
     } catch (e) { /* ignore */ }
   }
   if (t.swapId) whatTxt += (whatTxt ? ' · ' : '') + 'swap';
@@ -6922,7 +7312,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   }
   if (t.type === 'transfer') {
     var tSym = String(t.symbol || '').toUpperCase();
-    var netQ = Number(t.qty) - xferFee;
+    var outsC = transferOutputsOf(t);
     box.appendChild(statRow('Moved', fmtQty(t.qty, tSym) + ' ' + tSym, t.qty, false));
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee, tSym) + ' ' + tSym;
@@ -6964,7 +7354,27 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       }
       box.appendChild(feeRateEl);
     }
-    box.appendChild(statRow('Received', fmtQty(netQ, tSym) + ' ' + tSym, netQ, false));
+    if (!outsC.length) {
+      var netQ = Number(t.qty) - xferFee;
+      box.appendChild(statRow('Received', fmtQty(netQ, tSym) + ' ' + tSym, netQ, false));
+    } else {
+      outsC.forEach(function (o) {
+        if (isTransferOutputInternal(o)) {
+          var nm = String(o.toAccountId).trim();
+          try { if (accountNameById) nm = accountNameById(String(o.toAccountId).trim()) || nm; } catch (e) { /* ignore */ }
+          var arr = transferRowArrival(o, t.symbol);
+          var txt = fmtQty(arr, tSym) + ' ' + tSym + ' → ' + nm;
+          var oFee = (o.fee !== undefined && o.fee !== null && String(o.fee).trim() !== '') ? Number(o.fee) : 0;
+          if (isFinite(oFee) && oFee > 0) txt += ' · fee ' + fmtQty(o.fee, tSym);
+          box.appendChild(statRow('Received', txt, arr, false));
+        } else {
+          var arr2 = Number(o.qty);
+          var lab = String(o.label || '').trim();
+          var txt2 = fmtQty(arr2, tSym) + ' ' + tSym + ' → ' + lab + ' (external)';
+          box.appendChild(statRow(o.spend === false ? 'Sent' : 'Spent', txt2, arr2, false));
+        }
+      });
+    }
     if ((Number(t.total) > 0 || Number(t.fee) > 0)) {
       box.appendChild(statRow('Fiat cost', fmtMoney(n.netMain, main), n.netMain, false));
     }
@@ -8608,7 +9018,7 @@ function accountTrades(st, accountId) {
     return accountTrades(loadState(), st);
   }
   return ((st && st.trades) || []).filter(function (t) {
-    return t && (t.accountId === accountId || t.toAccountId === accountId);
+    return transferInvolvesAccount(t, accountId);
   });
 }
 
@@ -8686,7 +9096,7 @@ function deleteAccount(id) {
     if (!accountById(s2, id)) return;
     var inSet = {};
     expandDeleteIds(s2, [id]).forEach(function (x) { inSet[x] = true; });
-    s2.trades = (s2.trades || []).filter(function (t) { return !t || (!inSet[t.accountId] && !inSet[t.toAccountId]); });
+    s2.trades = (s2.trades || []).filter(function (t) { return !t || (!inSet[t.accountId] && !transferDestIds(t).some(function (x) { return !!inSet[x]; })); });
     s2.accounts = (s2.accounts || []).filter(function (a) { return !a || !inSet[a.id]; });
     if (!saveStateGuarded(s2)) return;
     try {
@@ -9522,6 +9932,10 @@ function buildTradeForm() {
     '<select id="t-account"></select></div>' +
     '<div id="t-toaccount-row" hidden><label for="t-toaccount">To account (optional)</label>' +
     '<select id="t-toaccount"></select><p class="fld-hint" id="t-toaccount-hint">Transfer moves cost basis — only the network + fiat fees count as losses.</p></div>' +
+    '<div id="t-recipients" hidden><span class="fld-label">Recipients</span>' +
+    '<div id="t-rec-list"></div>' +
+    '<button type="button" id="t-rec-add">+ Add recipient</button>' +
+    '<p class="fld-hint" id="t-rec-hint">One transaction, many recipients — internal moves keep their cost basis, external rows spend by default.</p></div>' +
     '<div class="fld-locked" hidden><span class="fld-label">Symbol (locked to account)</span> <span id="t-symbol-locked" role="status"></span></div>' +
     '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
     '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
@@ -9603,6 +10017,8 @@ function buildTradeForm() {
   if (qtyEl) qtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var toQtyEl = document.getElementById('t-toqty');
   if (toQtyEl) toQtyEl.addEventListener('input', function () { try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
+  var recAdd = document.getElementById('t-rec-add');
+  if (recAdd) recAdd.addEventListener('click', function () { try { addRecipientRow(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var toSel = document.getElementById('t-toaccount');
   if (toSel) toSel.addEventListener('change', function () { try { syncTradeTypeUI(); } catch (e) { /* hint only */ } });
   var ccy = document.getElementById('t-currency');
@@ -9632,6 +10048,208 @@ function buildTradeForm() {
     attUiSync();
   });
   syncTradeTypeUI();
+}
+
+// --- Multi-recipient transfer rows (form) ---
+// One transaction, N recipients. Internal rows pick an own account;
+// external rows take a label (Spend on = expense-like, off = neutral).
+// The tx fee is sent − received; optional per-row fees attribute part of it.
+function clearRecipientRows() {
+  try {
+    var list = document.getElementById('t-rec-list');
+    if (list) list.innerHTML = '';
+  } catch (e) { /* ignore */ }
+}
+
+function readRecipientRows() {
+  var rows = [];
+  try {
+    var list = document.getElementById('t-rec-list');
+    if (!list) return rows;
+    var els = list.querySelectorAll ? list.querySelectorAll('.rec-row') : [];
+    for (var i = 0; i < els.length; i++) {
+      (function (row) {
+        function q(sel) { var el = row.querySelector(sel); return el ? el : null; }
+        function v(sel) { var el = q(sel); return el ? el.value : ''; }
+        var kind = v('.rec-kind') === 'external' ? 'external' : 'internal';
+        var spendEl = q('.rec-spend');
+        rows.push({
+          kind: kind,
+          accountId: v('.rec-account'),
+          label: v('.rec-label'),
+          qty: v('.rec-qty'),
+          fee: v('.rec-fee'),
+          spend: spendEl ? !!spendEl.checked : true,
+          toQty: v('.rec-toqty'),
+          toSymbol: row.getAttribute('data-tosymbol') || ''
+        });
+      })(els[i]);
+    }
+  } catch (e) { /* ignore */ }
+  return rows;
+}
+
+function syncRecipientRowMode(row) {
+  try {
+    if (!row) return;
+    var kindEl = row.querySelector('.rec-kind');
+    var kind = (kindEl && kindEl.value === 'external') ? 'external' : 'internal';
+    var accW = row.querySelector('.rec-acc-wrap');
+    var labW = row.querySelector('.rec-label-wrap');
+    var spW = row.querySelector('.rec-spend-wrap');
+    var toW = row.querySelector('.rec-toqty-wrap');
+    if (accW) accW.hidden = (kind !== 'internal');
+    if (labW) labW.hidden = (kind !== 'external');
+    if (spW) spW.hidden = (kind !== 'external');
+    // Cross-fiat arrival (cash): the received amount rides in the dest fiat.
+    var showTo = false;
+    if (kind === 'internal' && toW) {
+      try {
+        var st = loadState();
+        var fromAcc = accountById(st, uiVal('t-account', ''));
+        var pickAcc = accountById(st, (row.querySelector('.rec-account') || {}).value || '');
+        if (fromAcc && pickAcc && isCashKind(fromAcc.kind) && isCashKind(pickAcc.kind) &&
+          String(fromAcc.ticker).toUpperCase() !== String(pickAcc.ticker).toUpperCase()) {
+          showTo = true;
+          row.setAttribute('data-tosymbol', String(pickAcc.ticker).toUpperCase());
+        } else {
+          row.removeAttribute('data-tosymbol');
+        }
+      } catch (e) { showTo = false; }
+    } else {
+      try { row.removeAttribute('data-tosymbol'); } catch (e) { /* ignore */ }
+    }
+    if (toW) toW.hidden = !showTo;
+  } catch (e) { /* ignore */ }
+}
+
+// Rebuild every internal row's account dropdown: same-asset accounts for
+// crypto, every other cash account for cash (a different-fiat pick turns
+// the row into a cross-fiat arrival). The current pick is always kept so
+// edits of older records never lose their destination.
+function refreshRecipientAccounts() {
+  try {
+    var list = document.getElementById('t-rec-list');
+    if (!list || !list.querySelectorAll) return;
+    var st = loadState();
+    var fromId = uiVal('t-account', '');
+    var fromAcc = accountById(st, fromId);
+    var symU = fromAcc ? String(fromAcc.ticker || '').toUpperCase() : '';
+    var isCash = !!(fromAcc && isCashKind(fromAcc.kind));
+    var rows = list.querySelectorAll('.rec-row');
+    for (var i = 0; i < rows.length; i++) {
+      (function (row) {
+        var sel = row.querySelector('.rec-account');
+        if (!sel) return;
+        var cur = sel.value;
+        sel.innerHTML = '';
+        (st.accounts || []).forEach(function (a) {
+          if (!a || a.id === fromId) return;
+          if (isCash) {
+            if (!isCashKind(a.kind)) return;
+          } else {
+            if (isCashKind(a.kind)) return;
+            if (String(a.ticker).toUpperCase() !== symU) return;
+          }
+          var o = document.createElement('option');
+          o.value = a.id;
+          o.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
+          sel.appendChild(o);
+        });
+        var has = false;
+        for (var k = 0; k < sel.options.length; k++) if (sel.options[k].value === cur) { has = true; break; }
+        if (cur && has) sel.value = cur;
+        else if (cur && !has && accountById(st, cur)) {
+          var keep = document.createElement('option');
+          var ka = accountById(st, cur);
+          keep.value = cur;
+          keep.textContent = ka.name + ' · ' + String(ka.ticker).toUpperCase();
+          sel.appendChild(keep);
+          sel.value = cur;
+        } else if (sel.options.length) sel.selectedIndex = 0;
+        syncRecipientRowMode(row);
+      })(rows[i]);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+// Stored outputs from validated recipient rows: internal rows name the
+// account, external rows the label (spend:false only for neutral rows —
+// absent means spend). Optional per-row fees and cross-fiat arrivals ride
+// along; legacy single-dest fields are never written with outputs.
+function buildTransferOutputs(rows) {
+  var out = [];
+  (rows || []).forEach(function (r) {
+    if (!r) return;
+    var o = { qty: Number(r.qty) };
+    if (r.kind === 'internal') {
+      o.toAccountId = String(r.accountId || '').trim();
+    } else {
+      o.label = String(r.label || '').trim();
+      if (r.spend === false) o.spend = false;
+    }
+    if (String(r.fee || '').trim() !== '') o.fee = Number(r.fee);
+    if (String(r.toQty || '').trim() !== '' && r.toSymbol) {
+      o.toQty = Number(r.toQty);
+      o.toSymbol = String(r.toSymbol).toUpperCase();
+    }
+    out.push(o);
+  });
+  return out;
+}
+
+function addRecipientRow(data) {
+  data = data || {};
+  var list = document.getElementById('t-rec-list');
+  if (!list) return null;
+  var row = document.createElement('div');
+  row.className = 'rec-row';
+  row.innerHTML =
+    '<div class="rec-grid">' +
+    '<label>Kind<select class="rec-kind"><option value="internal">Internal — own account</option><option value="external">External — someone else</option></select></label>' +
+    '<label class="rec-acc-wrap">Account<select class="rec-account"></select></label>' +
+    '<label class="rec-label-wrap" hidden>Label<input class="rec-label" autocomplete="off" spellcheck="false" maxlength="80" placeholder="e.g. friend / merchant"></label>' +
+    '<label>Amount<input class="rec-qty" inputmode="decimal" placeholder="e.g. 0.1"></label>' +
+    '<label class="rec-toqty-wrap" hidden>Received (dest fiat)<input class="rec-toqty" inputmode="decimal" placeholder="e.g. 15.2"></label>' +
+    '<label>Fee share (optional)<input class="rec-fee" inputmode="decimal" placeholder="e.g. 0.0001"></label>' +
+    '</div>' +
+    '<label class="rec-spend-wrap" hidden><input type="checkbox" class="rec-spend" checked> Spend (counts as expense — untick for a neutral hand-over)</label>' +
+    '<button type="button" class="rec-remove quiet">Remove</button>';
+  list.appendChild(row);
+  function changed() { try { syncRecipientRowMode(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
+  var kind = row.querySelector('.rec-kind');
+  if (kind) kind.addEventListener('change', function () { try { refreshRecipientAccounts(); } catch (e) { /* ignore */ } changed(); });
+  ['.rec-account', '.rec-qty', '.rec-fee', '.rec-toqty', '.rec-label'].forEach(function (sel) {
+    var el = row.querySelector(sel);
+    if (el) el.addEventListener('input', changed);
+    if (el && sel === '.rec-account') el.addEventListener('change', changed);
+  });
+  var sp = row.querySelector('.rec-spend');
+  if (sp) sp.addEventListener('change', changed);
+  var rm = row.querySelector('.rec-remove');
+  if (rm) rm.addEventListener('click', function () { try { row.parentNode.removeChild(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
+  try {
+    if (data.kind === 'external' && kind) kind.value = 'external';
+    if (data.accountId) {
+      var sel0 = row.querySelector('.rec-account');
+      if (sel0) {
+        var tmp = document.createElement('option');
+        tmp.value = data.accountId;
+        tmp.textContent = data.accountId;
+        sel0.appendChild(tmp);
+        sel0.value = data.accountId;
+      }
+    }
+    if (data.label) row.querySelector('.rec-label').value = data.label;
+    if (data.qty !== undefined) row.querySelector('.rec-qty').value = data.qty;
+    if (data.fee !== undefined) row.querySelector('.rec-fee').value = data.fee;
+    if (data.toQty !== undefined && row.querySelector('.rec-toqty')) row.querySelector('.rec-toqty').value = data.toQty;
+    if (data.spend === false && sp) sp.checked = false;
+  } catch (e) { /* ignore */ }
+  try { refreshRecipientAccounts(); } catch (e) { /* ignore */ }
+  try { if (data.accountId) row.querySelector('.rec-account').value = data.accountId; } catch (e) { /* ignore */ }
+  try { syncRecipientRowMode(row); } catch (e) { /* ignore */ }
+  return row;
 }
 
 function syncTradeTypeUI() {
@@ -9680,11 +10298,12 @@ function syncTradeTypeUI() {
   var isIncome = type === 'income';
   var isExpense = type === 'expense';
   var isBuySell = type === 'buy' || type === 'sell';
-  setHidden('t-toaccount-row', !(isTransfer || isSwap));
+  setHidden('t-toaccount-row', !isSwap);
   // Attachments ride single-leg records; swaps create two linked legs, so
   // files attach by editing the resulting buy/sell instead.
   setHidden('t-attach-row', isSwap);
-  setHidden('t-toqty-row', !(isSwap || isTransfer));
+  setHidden('t-toqty-row', !isSwap);
+  setHidden('t-recipients', !isTransfer);
   setHidden('t-networkfee-row', !(isTransfer));
   // Transfers carry no fiat of their own: the network fee IS the fee, valued
   // in fiat at the frozen historical rate. Fiat fee + total + currency stay
@@ -9699,10 +10318,9 @@ function syncTradeTypeUI() {
     if (clabT) clabT.hidden = true;
   }
   if (isTransfer) {
-    setLabel('t-qty-label', 'You send');
-    setLabel('t-toqty-label', 'You receive');
+    setLabel('t-qty-label', 'You send (total)');
+    setLabel('t-qty-hint', 'Total leaving the source — recipients + fee must equal this.');
     setLabel('t-total-label', 'Fiat fee value (optional, leave 0)');
-    setLabel('t-qty-hint', 'Amount leaving the source (before any fee).');
     setLabel('t-total-hint', 'Optional cash fee on top — leave empty when the fee is crypto-only.');
   } else if (isSwap) {
     setLabel('t-qty-label', 'From quantity (you send)');
@@ -9787,69 +10405,33 @@ function syncTradeTypeUI() {
       if (clabR) clabR.hidden = !needCustom;
     } catch (e) { /* ignore */ }
   }
-  // Rebuild to-account options: transfer = same ticker only, swap = any other account.
+  // Rebuild to-account options for swaps (any other account). Transfers use
+  // the recipients list below instead of this single select.
   try {
     var st = loadState();
     var fromId = uiVal('t-account', '');
     var fromAcc = accountById(st, fromId);
     var toSel = document.getElementById('t-toaccount');
     var hint = document.getElementById('t-toaccount-hint');
-    if (toSel && (isTransfer || isSwap)) {
+    if (toSel && isSwap) {
       var cur = toSel.value;
       toSel.innerHTML = '';
       var curKept = false;
-      var eligible = 0;
-      if (isTransfer) {
-        // No destination: plain on-chain move inside this account (new address,
-        // same owner) — only the network fee is recorded as lost.
-        var sameOpt = document.createElement('option');
-        sameOpt.value = '';
-        sameOpt.textContent = 'Same account — on-chain move';
-        toSel.appendChild(sameOpt);
-      }
       (st.accounts || []).forEach(function (a) {
         if (a.id === fromId) return;
-        if (isTransfer && fromAcc && !isCashKind(fromAcc.kind) && String(a.ticker).toUpperCase() !== String(fromAcc.ticker).toUpperCase()) return; // same asset only (non-cash)
-        if (isTransfer && fromAcc && isCashKind(fromAcc.kind) && !isCashKind(a.kind)) return; // cash moves only between cash accounts
         var o = document.createElement('option');
         o.value = a.id;
         o.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
         toSel.appendChild(o);
-        eligible++;
         if (a.id === cur) curKept = true;
       });
-      // Keep the previous pick only if still eligible; otherwise park on the
-      // first entry (the on-chain move for transfers).
       if (cur && curKept) toSel.value = cur;
       else if (toSel.options.length) toSel.selectedIndex = 0;
-      // Cross-fiat cash move: the received amount is in the destination
-      // fiat, converted at the trade-date rate — not a same-unit fee.
-      var crossFiat = false;
-      try {
-        var toAccPick = accountById(st, toSel.value);
-        crossFiat = !!(isTransfer && isCash && toAccPick && isCashKind(toAccPick.kind) &&
-          String(toAccPick.ticker).toUpperCase() !== cashTicker);
-      } catch (e) { crossFiat = false; }
-      if (isTransfer && isCash) {
-        setLabel('t-qty-label', 'You send (in ' + cashTicker + ')');
-        if (crossFiat) {
-          var destTick = '';
-          try { destTick = String(accountById(st, toSel.value).ticker).toUpperCase(); } catch (e) { destTick = ''; }
-          setLabel('t-toqty-label', 'You receive (in ' + destTick + ')');
-        }
-      }
-      if (hint) {
-        if (isTransfer && eligible === 0) {
-          var need = fromAcc ? String(fromAcc.ticker).toUpperCase() : 'this asset';
-          hint.textContent = isCash
-            ? 'No other cash account — create one to move money between accounts.'
-            : 'No other ' + need + ' account — recording as an on-chain move in this account.';
-        } else if (isTransfer && crossFiat) {
-          hint.textContent = 'Converts at the trade-date rate — enter what arrives in the destination fiat.';
-        } else {
-          hint.textContent = 'Transfer moves cost basis — only the network + fiat fees count as losses.';
-        }
-      }
+      if (hint) hint.textContent = 'Transfer moves cost basis — only the network + fiat fees count as losses.';
+    }
+    if (isTransfer) {
+      try { refreshRecipientAccounts(); } catch (e) { /* ignore */ }
+      if (isCash) setLabel('t-qty-label', 'You send (total, in ' + cashTicker + ')');
     }
   } catch (e) { /* ignore */ }
   void isBuySell; void isIncome; void isExpense;
@@ -9879,40 +10461,69 @@ function transferFeeFrom(sentRaw, recvRaw) {
 function syncTransferFeePreview() {
   var sideEl = document.getElementById('t-side');
   if (!sideEl || sideEl.value !== 'transfer') return;
-  var hint = document.getElementById('t-toqty-hint');
+  var hint = document.getElementById('t-rec-hint');
   var feeInput = document.getElementById('t-networkfee');
-  // Cross-fiat cash move: received is a converted amount, not sent − fee.
-  try {
-    var stx = loadState();
-    var fromX = accountById(stx, uiVal('t-account', ''));
-    var toX = accountById(stx, uiVal('t-toaccount', ''));
-    if (fromX && toX && isCashKind(fromX.kind) && isCashKind(toX.kind) &&
-      String(fromX.ticker).toUpperCase() !== String(toX.ticker).toUpperCase()) {
-      if (feeInput) feeInput.value = '0';
-      if (hint) hint.textContent = 'Converted at the trade-date rate — enter what arrives.';
-      return;
-    }
-  } catch (e) { /* same-unit path below */ }
-  var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-toqty', ''));
+  var rows = readRecipientRows();
+  var sent = Number(uiVal('t-qty', ''));
+  var sentOk = isFinite(sent) && sent > 0;
   var sym = '';
   try {
     var acc = accountById(loadState(), uiVal('t-account', ''));
     if (acc) sym = ' ' + String(acc.ticker).toUpperCase();
   } catch (e) { sym = ''; }
-  if (!r) {
-    var recvTxt = String(uiVal('t-toqty', '')).trim();
-    if (hint) {
-      if (recvTxt === '') hint.textContent = 'Enter what arrived — the fee below fills in itself.';
-      else hint.textContent = 'Received must be > 0 and at most what you sent.';
-    }
-    if (feeInput) feeInput.value = '';
+  if (!feeInput) return;
+  if (!rows.length) {
+    // No recipients: on-chain move inside this account — the fee is entered
+    // directly under Details instead of being derived.
+    try { feeInput.removeAttribute('readonly'); } catch (e) { /* ignore */ }
+    if (hint) hint.textContent = 'No recipients — on-chain move inside this account. Enter the miner fee under Details.';
     return;
   }
-  if (feeInput) feeInput.value = String(r.fee);
+  try { feeInput.setAttribute('readonly', ''); } catch (e) { /* ignore */ }
+  // Single cross-fiat row: the arrival is a converted amount, not sent − fee.
+  if (rows.length === 1 && rows[0].kind === 'internal' && rows[0].toSymbol) {
+    feeInput.value = '0';
+    if (hint) hint.textContent = 'Converted at the trade-date rate — enter what arrives in the destination fiat.';
+    return;
+  }
+  var sum = 0, ok = true, feeSum = 0;
+  rows.forEach(function (r) {
+    var q = Number(r.qty);
+    if (!isFinite(q) || q <= 0) ok = false;
+    else sum += q;
+    if (String(r.fee || '').trim() !== '') {
+      var f = Number(r.fee);
+      if (!isFinite(f) || f < 0) ok = false;
+      else feeSum += f;
+    }
+  });
+  sum = roundQty8(sum);
+  if (!sentOk) {
+    feeInput.value = '';
+    if (hint) hint.textContent = 'Enter how much you sent first — the fee below fills in itself.';
+    return;
+  }
+  if (!ok) {
+    feeInput.value = '';
+    if (hint) hint.textContent = 'Each recipient needs an amount > 0.';
+    return;
+  }
+  var fee = roundQty8(sent - sum);
+  if (!(fee >= 0)) {
+    feeInput.value = '';
+    if (hint) hint.textContent = 'Recipients exceed sent — lower an amount.';
+    return;
+  }
+  feeInput.value = String(fee);
   if (hint) {
-    hint.textContent = r.fee === 0
-      ? 'No fee — received equals sent.'
-      : 'Fee ' + String(r.fee) + sym + ' will be recorded as the loss.';
+    var n = rows.length + (rows.length === 1 ? ' recipient' : ' recipients');
+    if (feeSum - fee > 1e-12) {
+      hint.textContent = 'Row fees exceed the tx fee (' + fee + sym + ') — lower a fee share.';
+    } else {
+      hint.textContent = fee === 0
+        ? 'No fee — received equals sent across ' + n + '.'
+        : 'Fee ' + fee + sym + ' shared across ' + n + (feeSum > 0 ? ' (' + roundQty8(feeSum) + ' attributed per row).' : '.');
+    }
   }
 }
 
@@ -10005,6 +10616,7 @@ function resetTradeForm() {
   uiSetVal('t-side', 'buy');
   uiSetVal('t-qty', '');
   uiSetVal('t-toqty', '');
+  clearRecipientRows();
   uiSetVal('t-total', '');
   var ccy = document.getElementById('t-currency');
   if (ccy) ccy.value = 'EUR';
@@ -10136,14 +10748,43 @@ function openEditTrade(tradeId) {
   uiSetVal('t-txid', tr.txid !== undefined && tr.txid !== null ? String(tr.txid) : '');
   uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
   if (tr.type === 'transfer') {
-    var trQty = Number(tr.qty);
-    var trNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
-    if (tr.toQty !== undefined && tr.toQty !== null && String(tr.toQty).trim() !== '' && isFinite(Number(tr.toQty))) {
-      uiSetVal('t-toqty', String(Number(tr.toQty))); // cross-fiat cash move
-    } else if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
-      var recv = roundQty8(trQty - trNf);
-      uiSetVal('t-toqty', String(recv));
+    // Recipients replace the old single-destination inputs: stored outputs
+    // repopulate row-for-row; legacy records migrate to one row on open.
+    clearRecipientRows();
+    var erows = [];
+    if (Array.isArray(tr.outputs) && tr.outputs.length) {
+      tr.outputs.forEach(function (o) {
+        if (isTransferOutputInternal(o)) {
+          erows.push({
+            kind: 'internal',
+            accountId: String(o.toAccountId).trim(),
+            qty: String(o.qty),
+            fee: (o.fee !== undefined && o.fee !== null) ? String(o.fee) : '',
+            toQty: (o.toQty !== undefined && o.toQty !== null) ? String(o.toQty) : ''
+          });
+        } else if (o && typeof o === 'object') {
+          erows.push({
+            kind: 'external',
+            label: String(o.label || ''),
+            qty: String(o.qty),
+            fee: (o.fee !== undefined && o.fee !== null) ? String(o.fee) : '',
+            spend: o.spend !== false
+          });
+        }
+      });
+    } else if (tr.toAccountId) {
+      var trQty = Number(tr.qty);
+      var trNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
+      var crossSym = (tr.toSymbol !== undefined && tr.toSymbol !== null && String(tr.toSymbol).trim() !== '')
+        ? String(tr.toSymbol).trim().toUpperCase() : String(tr.symbol || '').toUpperCase();
+      if (crossSym !== String(tr.symbol || '').toUpperCase()) {
+        erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(tr.qty), fee: '', toQty: (tr.toQty !== undefined && tr.toQty !== null) ? String(tr.toQty) : '' });
+      } else if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
+        erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(roundQty8(trQty - trNf)), fee: '' });
+      }
     }
+    erows.forEach(function (r) { try { addRecipientRow(r); } catch (e) { /* ignore */ } });
+    if (!erows.length) uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
   }
   // Manual fields reflect their persistent state, like every other input:
   // the FX rate lives on in the trade's manual fxLock, the price in the
@@ -10169,7 +10810,7 @@ function openEditTrade(tradeId) {
   uiSetVal('t-manual-price', manualPx);
   try {
     var toSel = document.getElementById('t-toaccount');
-    if (toSel && tr.toAccountId) {
+    if (toSel && tr.toAccountId && tr.type === 'swap') {
       // ensure options exist for transfer/swap
       syncTradeTypeUI();
       toSel.value = tr.toAccountId;
@@ -10452,34 +11093,86 @@ function onTradeSubmit(ev) {
   var feeCurrency = currency; // one fiat per trade: fee follows Currency
   var netRaw = uiVal('t-networkfee', '');
   var networkFee = (netRaw === undefined || netRaw === null || String(netRaw).trim() === '') ? 0 : Number(netRaw);
-  var toQtyRaw = uiVal('t-toqty', '');
-  // Send + receive mode: the fee is always the difference (exchange +
-  // network fee), recorded as the loss — e.g. exchange → self-custody or
-  // wallet → wallet. Received is required; the fee field is computed-only.
-  // Cross-fiat cash moves are the exception: received is a converted amount
-  // in the destination fiat (trade-date rate), with no network fee.
-  var toAccId = uiVal('t-toaccount', '');
-  var toAccCash = accountById(st0, toAccId);
-  var isCrossFiat = !!(isCashAcc && side === 'transfer' && toAccCash && isCashKind(toAccCash.kind) &&
-    String(toAccCash.ticker).toUpperCase() !== symbol);
+  // Recipients: one transaction, N outputs. The tx fee is sent − received
+  // (computed); optional per-row fees attribute part of it. A lone
+  // cross-fiat cash row carries the converted arrival instead of a fee.
+  // transferRowsBuilt feeds the save paths below so both agree exactly.
+  var transferRowsBuilt = null;
+  var toAccId = (side === 'swap') ? uiVal('t-toaccount', '') : '';
+  var toAccCash = null;
+  var isCrossFiat = false;
   if (side === 'transfer') {
-    if (isCrossFiat) {
-      var sentX = Number(qtyRaw);
-      var recvX = Number(toQtyRaw);
-      if (!isFinite(sentX) || sentX <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
-      if (!isFinite(recvX) || recvX <= 0) { tradeFormError('Enter what arrives in the destination fiat (> 0).'); return; }
-      networkFee = 0;
-      uiSetVal('t-networkfee', '0');
-    } else {
-    if (String(toQtyRaw).trim() === '') { tradeFormError('Enter what you received (> 0).'); return; }
+    var recRows = readRecipientRows();
     var sentChk = Number(qtyRaw);
-    var recvChk = Number(toQtyRaw);
     if (!isFinite(sentChk) || sentChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
-    if (!isFinite(recvChk) || recvChk <= 0) { tradeFormError('Received must be > 0.'); return; }
-    if (recvChk > sentChk) { tradeFormError('Received cannot exceed sent — the fee cannot be negative.'); return; }
-    networkFee = roundQty8(sentChk - recvChk);
-    uiSetVal('t-networkfee', String(networkFee));
+    if (recRows.length > TRANSFER_MAX_OUTPUTS) { tradeFormError('Too many recipients (max 20).'); return; }
+    var seenAcc = {};
+    var sumQ = 0, sumF = 0, crossN = 0, crossOne = null;
+    var rowErr = null;
+    for (var ri = 0; ri < recRows.length && !rowErr; ri++) {
+      (function (rr, idx) {
+        var label = 'Recipient ' + (idx + 1);
+        function fail(m) { rowErr = m; }
+        if (rr.kind === 'internal') {
+          var accPick = accountById(st0, rr.accountId);
+          if (!accPick) return fail(label + ' account not found.');
+          if (accPick.id === accountId) return fail(label + ' must differ from the source.');
+          if (seenAcc[accPick.id]) return fail('Pick each account once — merge the amounts instead.');
+          seenAcc[accPick.id] = true;
+          var pickTick = String(accPick.ticker).toUpperCase();
+          if (!isCashAcc && (isCashKind(accPick.kind) || pickTick !== symbol)) return fail(label + ' needs the same asset in both accounts — use Swap for different assets.');
+          if (isCashAcc && !isCashKind(accPick.kind)) return fail('Cash moves only between cash accounts.');
+          var rf0 = (String(rr.fee || '').trim() === '') ? 0 : Number(rr.fee);
+          if (!isFinite(rf0) || rf0 < 0) return fail(label + ' fee must be >= 0.');
+          sumF += rf0;
+          if (isCashAcc && isCashKind(accPick.kind) && pickTick !== symbol) {
+            crossN++;
+            crossOne = { row: rr, acc: accPick };
+          } else {
+            var rq0 = Number(rr.qty);
+            if (!isFinite(rq0) || rq0 <= 0) return fail(label + ' needs an amount > 0.');
+            sumQ += rq0;
+          }
+        } else {
+          var rq = Number(rr.qty);
+          if (!isFinite(rq) || rq <= 0) return fail(label + ' needs an amount > 0.');
+          var rf = (String(rr.fee || '').trim() === '') ? 0 : Number(rr.fee);
+          if (!isFinite(rf) || rf < 0) return fail(label + ' fee must be >= 0.');
+          if (String(rr.label || '').trim() === '') return fail(label + ' needs a label.');
+          if (String(rr.label).trim().length > TRANSFER_LABEL_MAX) return fail(label + ' label is too long.');
+          sumQ += rq;
+          sumF += rf;
+        }
+      })(recRows[ri], ri);
     }
+    if (rowErr) { tradeFormError(rowErr); return; }
+    if (crossN > 0 && recRows.length > 1) { tradeFormError('Cross-fiat moves stay single-recipient — split the same-fiat rows into their own record.'); return; }
+    if (crossN === 1 && recRows.length === 1) {
+      var rx = Number(crossOne.row.toQty);
+      if (!isFinite(rx) || rx <= 0) { tradeFormError('Enter what arrives in ' + String(crossOne.acc.ticker).toUpperCase() + ' (> 0).'); return; }
+      crossOne.row.qty = String(sentChk);
+      crossOne.row.toSymbol = String(crossOne.acc.ticker).toUpperCase();
+      crossOne.row.fee = '';
+      sumQ = sentChk;
+      sumF = 0;
+      networkFee = 0;
+      toAccCash = crossOne.acc;
+      isCrossFiat = true;
+    } else {
+      sumQ = roundQty8(sumQ);
+      networkFee = roundQty8(sentChk - sumQ);
+      if (!(networkFee >= 0)) { tradeFormError('Recipients exceed sent — lower an amount.'); return; }
+      if (sumF - networkFee > 1e-12) { tradeFormError('Recipient fees exceed the transfer fee (' + networkFee + ').'); return; }
+    }
+    if (!recRows.length) {
+      // No recipients: on-chain move inside this account — the fee is typed.
+      var manFee = Number(netRaw);
+      if (!isFinite(manFee) || manFee < 0 || manFee >= sentChk) { tradeFormError('Enter the miner fee (>= 0 and < sent).'); return; }
+      networkFee = roundQty8(manFee);
+    }
+    if (!isFinite(networkFee) || networkFee < 0 || networkFee >= sentChk) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
+    uiSetVal('t-networkfee', String(networkFee));
+    transferRowsBuilt = recRows;
   }
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
   if (!isFinite(fee) || fee < 0) { tradeFormError('Fee must be >= 0.'); return; }
@@ -10508,16 +11201,8 @@ function onTradeSubmit(ev) {
   } else if (side === 'transfer') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
     if (!isFinite(networkFee) || networkFee < 0 || networkFee >= qty) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
-    // No destination: on-chain move inside this account (fresh address, same
-    // owner). With one: it must be a different account with the same asset.
-    var toAccT = toAccId ? accountById(st0, toAccId) : null;
-    if (toAccId && !toAccT) { tradeFormError('Destination account not found.'); return; }
-    if (toAccT) {
-      if (toAccT.id === accountId) { tradeFormError('Transfer needs two different accounts.'); return; }
-      var toTick = String(toAccT.ticker).toUpperCase();
-      var crossOk = isCashAcc && isCashKind(toAccT.kind) && toTick !== symbol;
-      if (!crossOk && toTick !== symbol) { tradeFormError('Transfer needs the same asset in both accounts — use Swap for different assets.'); return; }
-    }
+    // Recipients were validated row-by-row above (accounts exist, tickers
+    // eligible, label present, sums balance); nothing left to check here.
   } else if (side === 'income') {
     if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
     // Cash derives from the account fiat alone (total/currency rows hide):
@@ -10643,7 +11328,14 @@ function onTradeSubmit(ev) {
       } else {
         try { delete trade.execLock; } catch (e) { /* ignore */ }
       }
-      if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
+      if (side === 'transfer') {
+        trade.networkFee = networkFee;
+        var outsEdit = buildTransferOutputs(transferRowsBuilt);
+        if (outsEdit.length) trade.outputs = outsEdit;
+        try { delete trade.toAccountId; } catch (e) { trade.toAccountId = undefined; }
+        try { delete trade.toQty; } catch (e) { trade.toQty = undefined; }
+        try { delete trade.toSymbol; } catch (e) { trade.toSymbol = undefined; }
+      }
       else if (side === 'expense' && qty === null) { delete trade.qty; }
       // Bookkeeping: ledger rides income/expense records — required on cash,
       // optional on asset accounts while the global switch is on.
@@ -10655,10 +11347,9 @@ function onTradeSubmit(ev) {
           try { delete trade.ledgerLabel; } catch (e) { trade.ledgerLabel = undefined; }
         }
       }
-      // Cross-fiat cash move: the converted arrival, in destination fiat.
+      // Cross-fiat cash move: the converted arrival rides the single row
+      // (the trade-level lock below still converts the arrival leg).
       if (isCrossFiat) {
-        trade.toQty = Number(toQtyRaw);
-        trade.toSymbol = String(toAccCash.ticker).toUpperCase();
         if (destLockForTrade) trade.toFxLock = destLockForTrade;
       }
       // Cash transfers freeze both fiat legs (source + arrival); the
@@ -10717,7 +11408,11 @@ function onTradeSubmit(ev) {
       if (pendingAttachResolved) trade.attachment = pendingAttachResolved;
       else { try { delete trade.attachment; } catch (e) { trade.attachment = undefined; } }
     }
-    if (side === 'transfer') { if (toAccId) trade.toAccountId = toAccId; trade.networkFee = networkFee; }
+    if (side === 'transfer') {
+      trade.networkFee = networkFee;
+      var outsNew = buildTransferOutputs(transferRowsBuilt);
+      if (outsNew.length) trade.outputs = outsNew;
+    }
     if (side === 'expense' && qty === null) { delete trade.qty; }
     // Bookkeeping: ledger rides income/expense records — required on cash,
     // optional on asset accounts while the global switch is on.
@@ -10729,10 +11424,9 @@ function onTradeSubmit(ev) {
         try { delete trade.ledgerLabel; } catch (e) { trade.ledgerLabel = undefined; }
       }
     }
-    // Cross-fiat cash move: the converted arrival, in destination fiat.
+    // Cross-fiat cash move: the converted arrival rides the single row
+    // (the trade-level lock below still converts the arrival leg).
     if (isCrossFiat) {
-      trade.toQty = Number(toQtyRaw);
-      trade.toSymbol = String(toAccCash.ticker).toUpperCase();
       if (destLockForTrade) trade.toFxLock = destLockForTrade;
     }
     // Cash transfers freeze both fiat legs (source + arrival); the
@@ -10783,7 +11477,7 @@ function onTradeSubmit(ev) {
     lockSubmit(false, 'Add record');
     refreshPrices(); // recompute + render when fresh prices land (renders sync too)
     try { tradePageByAccount[accountId] = 0; } catch (e) { /* ignore */ }
-    try { if (toAccId) tradePageByAccount[toAccId] = 0; } catch (e) { /* ignore */ }
+    try { transferDestIds(trade).forEach(function (id) { tradePageByAccount[id] = 0; }); } catch (e) { /* ignore */ }
     navTo(side === 'transfer' ? accountId : accountId);
     render(); // route() picks up the URL: the trade's account page shows the new rows
     closeDialog('trade-dialog');
@@ -11727,6 +12421,22 @@ function downloadTextFile(name, text, mime) {
   }, 1000);
 }
 
+// One-line destination summary for CSV export: legacy name, or every
+// recipient joined (internal `name:qty`, external `label:qty (external)`).
+function transferCsvDest(t, accName) {
+  if (!t || t.type !== 'transfer') return '';
+  var outs = transferOutputsOf(t);
+  if (!outs.length) return '';
+  return outs.map(function (o) {
+    if (isTransferOutputInternal(o)) {
+      var id = String(o.toAccountId).trim();
+      var nm = (accName && accName[id]) || id;
+      return nm + ':' + String(transferRowArrival(o, t.symbol));
+    }
+    return String(o.label || '').trim() + ':' + String(Number(o.qty)) + ' (external)';
+  }).join('; ');
+}
+
 function downloadTradesCsv() {
   var st = loadState();
   var accName = {};
@@ -11740,7 +12450,7 @@ function downloadTradesCsv() {
       t.currency || '', t.fee !== undefined && t.fee !== null ? t.fee : '',
       t.feeCurrency || '', t.networkFee !== undefined && t.networkFee !== null ? t.networkFee : '',
       { text: accName[t.accountId] || t.accountId || '' },
-      { text: (t.toAccountId ? (accName[t.toAccountId] || t.toAccountId) : '') },
+      { text: transferCsvDest(t, accName) },
       { text: t.note || '' },
       { text: t.txid || '' },
       (t.fxLock && t.fxLock.rate) || '',
@@ -11818,7 +12528,7 @@ function allocationData(st, dtrades, visibleIds) {
     var dAll = dtrades || [];
     Object.keys(cIds).forEach(function (aid) {
       if (visibleIds && visibleIds.indexOf(aid) === -1) return;
-      var hasAny = dAll.some(function (t) { return !!t && (t.accountId === aid || t.toAccountId === aid); });
+      var hasAny = dAll.some(function (t) { return transferInvolvesAccount(t, aid); });
       if (!hasAny) return;
       var cb = cashBalance(dAll, aid, st.settings.mainCurrency);
       var key = String(cb.ticker || '').toUpperCase();

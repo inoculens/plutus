@@ -1407,6 +1407,19 @@ select {
 #trade-form button.primary, #account-dialog-body button.primary, #ledger-dialog-body button.primary, #group-dialog-body button.primary { width: 100%; margin-top: 1.4rem; margin-bottom: 0.5rem; min-height: 3.1rem; font-size: 1rem; }
 .fld-locked { margin-top: 1rem; padding: 0.7rem 0.85rem; background: rgba(227,197,124,0.06); border: 1px dashed var(--hairline-gold); border-radius: var(--radius); font-size: 0.9rem; color: var(--muted); }
 .fld-label { color: var(--muted); }
+/* Multi-recipient transfer rows: one tx, N outputs. Fixed box, fluid rows —
+   amounts truncate inside their own row, never resizing the dialog. */
+#t-recipients { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
+#t-rec-list { display: grid; gap: 0.6rem; }
+.rec-row { display: grid; gap: 0.4rem; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); background: rgba(255,255,255,0.015); }
+.rec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; }
+.rec-grid label { display: grid; gap: 0.2rem; font-size: 0.8rem; color: var(--muted); min-width: 0; }
+.rec-grid input, .rec-grid select { min-width: 0; }
+.rec-spend-wrap { display: flex; flex-direction: row; align-items: center; gap: 0.45rem; font-size: 0.85rem; color: var(--muted); }
+.rec-spend-wrap input { width: auto; }
+.rec-remove { justify-self: start; }
+#t-rec-add { justify-self: start; }
+@media (max-width: 560px) { .rec-grid { grid-template-columns: 1fr; } }
 #t-symbol-locked { color: var(--gold); font-weight: 700; }
 details.adv, details.opt { margin-top: 1.1rem; border: 1px solid var(--border); border-radius: var(--radius); padding: 0.65rem 0.9rem; background: rgba(255,255,255,0.015); }
 details.adv summary, details.opt summary { color: var(--muted); font-size: 0.88rem; font-weight: 600; cursor: pointer; min-height: 2rem; line-height: 2rem; }

@@ -4211,7 +4211,7 @@ function fetchHistoricalStockStooq(sym, wantDay, cur) {
       return attempt(prev, back + 1);
     });
   }
-  return attempt(dateStr.slice(0, 10), 0).then(function (r) { return r; }, function () { return null; });
+  return attempt(wantDay, 0).then(function (r) { return r; }, function () { return null; });
 }
 
 function fetchHistoricalCommodityPrice(symbol, dateStr, vs) {

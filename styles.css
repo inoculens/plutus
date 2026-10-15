@@ -1722,6 +1722,10 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   #landing:not([hidden]) { display: grid; }
   #landing {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    /* The card stretches to fill an empty page — without this the rows
+       stretch with it and the centered art sinks toward the container
+       bottom. Rows hug content so the art centers on pill-top..divider. */
+    align-content: start;
     /* Step/CTAs/restore-link stack in the left column right under the body
        text; the art cell spans eyebrow..alt so the coin cluster centers
        across the full block, from the top down to the feats divider

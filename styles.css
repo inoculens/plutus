@@ -1657,6 +1657,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   line-height: 1.7;
   max-width: 38rem;
 }
+.landing-sub .nowrap { white-space: nowrap; }
 .landing-ctas { display: flex; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .landing-ctas button { min-height: 3.2rem; padding: 0.8rem 2rem; font-size: 1.02rem; }
 .landing-step {

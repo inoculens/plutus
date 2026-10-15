@@ -3490,7 +3490,7 @@ function refreshAllPrices(symbols, vs, kinds) {
     var kd = (typeof kindFor(sym) === 'string') ? kindFor(sym).trim().toLowerCase() : '';
     if (kd === 'stock') { stocks.push(sym); return; }
     if (kd === 'commodity') {
-      if (!stooqCommoditySymbol(sym)) {
+      if (!hasCommoditySource(sym)) {
         out[sym] = null;
         errors[sym] = 'no live source mapped — add a manual override in Settings';
         return;
@@ -4414,6 +4414,65 @@ var APP_VERSION = '35056ef (#140)';
 
 var uiBooted = false;
 var livePrices = {}; // SYM (uppercased) -> number|null, latest known live price
+var priceLoading = {}; // SYM -> true while the current refresh generation is still fetching it
+var PRICE_LOADING_TEXT = '…';
+var PRICE_LOADING_TITLE = 'Fetching live price — no error yet';
+
+// A symbol whose price comes from a live source (a set manual override
+// counts): only these can be "loading" or "unreachable". Cash/custom kinds
+// and sourceless tickers are manual-by-design and show the plain unknown
+// placeholder instead — never a spinner, never a banner.
+function hasCommoditySource(sym) {
+  try { if (stooqCommoditySymbol(sym)) return true; } catch (e) { /* fall through */ }
+  try { if (goldApiSymbol(sym)) return true; } catch (e) { /* fall through */ }
+  return false;
+}
+
+function isActionablePriceSymbol(s, kinds) {
+  var up = String(s || '').toUpperCase();
+  try { if (priceOverrideEntry(up) !== null) return true; } catch (e) { /* fall through */ }
+  var kd = null;
+  try {
+    if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
+    else if (kinds) {
+      var ks = Object.keys(kinds);
+      for (var i = 0; i < ks.length; i++) {
+        if (String(ks[i]).toUpperCase() === up) { kd = kinds[ks[i]]; break; }
+      }
+    }
+  } catch (e) { kd = null; }
+  var kdl = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
+  if (kdl === 'cash' || kdl === 'custom') return false;
+  if (kdl === 'stock') return true;
+  if (kdl === 'commodity') return hasCommoditySource(up);
+  try { if (SYMBOL_MAP && SYMBOL_MAP[up]) return true; } catch (e) { /* fall through */ }
+  return false;
+}
+
+function isPriceLoading(sym) {
+  try { return !!priceLoading[String(sym || '').toUpperCase()]; } catch (e) { return false; }
+}
+
+function anyPriceLoading() {
+  try { return Object.keys(priceLoading).length > 0; } catch (e) { return false; }
+}
+
+// Paint a value element into/out of the loading state. Same box, same
+// layout — only the text, a pulse class and an honest tooltip change.
+function paintLoading(el, on, label) {
+  try {
+    if (!el || !el.classList) return;
+    if (on) {
+      el.classList.add('is-loading');
+      el.setAttribute('aria-label', String(label || 'Price') + ' is loading');
+      el.title = PRICE_LOADING_TITLE;
+    } else {
+      el.classList.remove('is-loading');
+      el.removeAttribute('aria-label');
+      el.removeAttribute('title');
+    }
+  } catch (e) { /* decorative only */ }
+}
 var moneyFmtCache = {};
 
 function todayStr() {
@@ -4894,7 +4953,7 @@ function plClass(n) {
   return v > 0 ? 'gain' : 'loss';
 }
 
-function statCard(label, text, raw) {
+function statCard(label, text, raw, loading) {
   var d = document.createElement('div');
   d.className = 'card';
   d.setAttribute('data-label', label);
@@ -4908,6 +4967,7 @@ function statCard(label, text, raw) {
     d.setAttribute('data-value', String(Number(raw)));
     v.setAttribute('data-value', String(Number(raw)));
   }
+  if (loading) paintLoading(v, true, label);
   d.appendChild(l);
   d.appendChild(v);
   return d;
@@ -5044,11 +5104,14 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
     return;
   }
   var ret = lifetime > 0 ? ((un + rz) / lifetime) * 100 : null;
-  [['Value', mvKnown ? fmtMoney(mv, main) : '—', mvKnown ? mv : null],
-   ['Unrealized', unKnown ? fmtMoney(un, main) : '—', unKnown ? un : null],
-   ['Realized', fmtMoney(rz, main), rz],
-   ['Return', ret !== null ? fmtPct(ret) : '—', ret]].forEach(function (c) {
-    var cardEl = statCard(c[0], c[1], c[2]);
+  // Unknown aggregates show the loading placeholder while a live fetch is
+  // still in flight (never an error); manual-by-design unknowns keep '—'.
+  var loadAny = anyPriceLoading();
+  [['Value', mvKnown ? fmtMoney(mv, main) : (loadAny ? PRICE_LOADING_TEXT : '—'), mvKnown ? mv : null, (!mvKnown && loadAny)],
+   ['Unrealized', unKnown ? fmtMoney(un, main) : (loadAny ? PRICE_LOADING_TEXT : '—'), unKnown ? un : null, (!unKnown && loadAny)],
+   ['Realized', fmtMoney(rz, main), rz, false],
+   ['Return', ret !== null ? fmtPct(ret) : (loadAny ? PRICE_LOADING_TEXT : '—'), ret, (ret === null && loadAny)]].forEach(function (c) {
+    var cardEl = statCard(c[0], c[1], c[2], c[3]);
     if (c[0] !== 'Value') {
       var sc = plClass(c[2]);
       if (sc) cardEl.querySelector('.card-value').classList.add(sc);
@@ -5060,9 +5123,11 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   try { hvn = document.getElementById('hero-value-num'); } catch (e0) { hvn = null; }
   var hvTarget = hvn || hv;
   if (hvTarget) {
-    hvTarget.textContent = anyContent ? (mvKnown ? fmtMoney(mv, main) : '—') : '—';
+    var heroLoading = !!(anyContent && !mvKnown && anyPriceLoading());
+    hvTarget.textContent = anyContent ? (mvKnown ? fmtMoney(mv, main) : (heroLoading ? PRICE_LOADING_TEXT : '—')) : '—';
+    paintLoading(hvTarget, heroLoading, 'Total balance');
   }
-  if (hv) hv.title = hvTarget ? hvTarget.textContent : '';
+  if (hv && (!hvTarget || !hvTarget.classList.contains('is-loading'))) hv.title = hvTarget ? hvTarget.textContent : '';
   fitHeroValue();
   // Invested amount: lifetime gross in (every buy + valued income at its
   // locked historical rate) — never reduced by sells, fees or transfers.
@@ -5652,7 +5717,10 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var valv = document.createElement('span');
   valv.className = 'acct-value';
   var plv = document.createElement('span');
-  valv.textContent = valKnown ? fmtMoney(valNum, main) : (scopeTrades ? '—' : 'New');
+  var accTick = String(acc.ticker || '').toUpperCase();
+  var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick);
+  valv.textContent = valKnown ? fmtMoney(valNum, main) : (scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
+  paintLoading(valv, accLoading, acc.name + ' value');
   if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
   var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
   if (hasKnownPl) {
@@ -5674,7 +5742,9 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     }
   } else {
     plv.className = 'acct-pl';
-    plv.textContent = scopeTrades ? '—' : 'New';
+    var plLoading = !!scopeTrades && isPriceLoading(accTick);
+    plv.textContent = scopeTrades ? (plLoading ? PRICE_LOADING_TEXT : '—') : 'New';
+    paintLoading(plv, plLoading, acc.name + ' profit');
   }
   figs.appendChild(valv);
   figs.appendChild(plv);
@@ -7903,10 +7973,11 @@ function renderAccountDetail(st, id) {
   var lvRaw = (tickSym && typeof livePrices !== 'undefined' && livePrices) ? livePrices[tickSym] : null;
   var lvNum = Number(lvRaw);
   var liveShow = pos ? pos.livePrice : ((isFinite(lvNum) && lvNum > 0) ? lvNum : null);
-  stats.appendChild(statCard('Value', mvKnown ? fmtMoney(mv, main) : '—', mvKnown ? mv : null));
-  stats.appendChild(statCard('Live price', liveShow !== null ? fmtMoney(liveShow, main) : '—', liveShow));
+  var detLoading = isPriceLoading(tickSym);
+  stats.appendChild(statCard('Value', mvKnown ? fmtMoney(mv, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), mvKnown ? mv : null, !mvKnown && detLoading));
+  stats.appendChild(statCard('Live price', liveShow !== null ? fmtMoney(liveShow, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), liveShow, liveShow === null && detLoading));
   stats.appendChild(statCard('Average entry', (pos && !closed) ? fmtMoney(pos.avgEntry, main) : '—', (pos && !closed) ? pos.avgEntry : null));
-  stats.appendChild(statCard('Unrealized', unKnown ? fmtMoney(un, main) : '—', unKnown ? un : null));
+  stats.appendChild(statCard('Unrealized', unKnown ? fmtMoney(un, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), unKnown ? un : null, !unKnown && detLoading));
   stats.appendChild(statCard('Realized', fmtMoney(rz, main), rz));
   if (pos) {
     var tplCard = statCard('Total P&L', fmtMoney(pos.totalPL, main), pos.totalPL);
@@ -10930,6 +11001,7 @@ function buildTopbar() {
       if (!saveStateGuarded(st)) return;
       clearBanner();
       livePrices = {}; // stale prices are in the old currency — clear before repaint
+      priceLoading = {}; // refreshPrices() re-marks what is still missing
       render(); // instant paint, then historical pairs fill in + repaint
       refreshPrices(); // live valuation re-fetched in the new currency
     });
@@ -11662,6 +11734,7 @@ function clearAllData() {
   confirmAction('Clear everything', 'Delete all accounts, trades, overrides and settings? This cannot be undone.', 'Delete everything', true).then(function (ok) {
     if (!ok) return;
     livePrices = {};
+    priceLoading = {};
     if (!saveStateGuarded(defaultState())) return;
     clearBanner();
     render();
@@ -11690,7 +11763,7 @@ function refreshPrices() {
       if (a.kind) kinds[t] = a.kind;
     }
   });
-  // Trade symbols inherit their account's kind (stock accounts fetch via Stooq).
+  // Trade symbols inherit their account's kind (stock/commodity accounts fetch live).
   (st.trades || []).forEach(function (tr) {
     if (!tr || !tr.symbol || !tr.accountId) return;
     var s = String(tr.symbol).toUpperCase();
@@ -11699,6 +11772,7 @@ function refreshPrices() {
     if (a && a.kind) kinds[s] = a.kind;
   });
   if (!syms.length) {
+    priceLoading = {};
     render();
     return Promise.resolve({});
   }
@@ -11708,36 +11782,32 @@ function refreshPrices() {
     try { return loadState().settings.mainCurrency === mainNow; }
     catch (e) { return false; }
   }
+  // Loading paint: actionable symbols with no known price yet show the
+  // loading placeholder (never an error) until this generation settles.
+  // Painted synchronously so even slow proxy chains show "loading" at once.
+  var loadingSyms = syms.filter(function (s) {
+    if (isFinite(Number(livePrices[s])) && Number(livePrices[s]) > 0) return false;
+    return isActionablePriceSymbol(s, kinds);
+  });
+  var loadingTouched = false;
+  Object.keys(priceLoading).forEach(function (k) {
+    if (loadingSyms.indexOf(k) === -1) { delete priceLoading[k]; loadingTouched = true; }
+  });
+  loadingSyms.forEach(function (s) {
+    if (!priceLoading[s]) { priceLoading[s] = true; loadingTouched = true; }
+  });
+  if (loadingTouched) render();
   return refreshAllPrices(syms, mainNow, kinds).then(function (out) {
     if (!isCurrent()) return out; // stale: newer refresh owns livePrices + paint
     Object.keys(out).forEach(function (k) {
       var v = out[k];
-      if (isFinite(Number(v)) && Number(v) > 0) livePrices[k] = Number(v);
+      if (isFinite(Number(v)) && Number(v) > 0) { livePrices[k] = Number(v); delete priceLoading[k]; }
     });
     // Only symbols with a real live source can be "unreachable". Cash /
     // custom kinds and unmapped tickers are manual-by-design: they stay
     // unknown (—) without ever raising the price banner. An override that
     // is set yet still missing failed conversion, so it stays actionable.
-    function isActionable(s) {
-      var up = String(s || '').toUpperCase();
-      try { if (priceOverrideEntry(up) !== null) return true; } catch (e) { /* fall through */ }
-      var kd = null;
-      try {
-        if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
-        else if (kinds) {
-          var ks = Object.keys(kinds);
-          for (var i = 0; i < ks.length; i++) {
-            if (String(ks[i]).toUpperCase() === up) { kd = kinds[ks[i]]; break; }
-          }
-        }
-      } catch (e) { kd = null; }
-      var kdl = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
-      if (kdl === 'cash' || kdl === 'custom') return false;
-      if (kdl === 'stock') return true;
-      if (kdl === 'commodity') { try { return !!stooqCommoditySymbol(up); } catch (e) { return false; } }
-      try { if (SYMBOL_MAP && SYMBOL_MAP[up]) return true; } catch (e) { /* fall through */ }
-      return false;
-    }
+    function isActionable(s) { return isActionablePriceSymbol(s, kinds); }
     var missing = syms.filter(function (s) { return !(isFinite(Number(livePrices[s])) && Number(livePrices[s]) > 0); });
     var actionable = missing.filter(isActionable);
     if (!actionable.length) {
@@ -11757,6 +11827,9 @@ function refreshPrices() {
         var v = out2[k];
         if (isFinite(Number(v)) && Number(v) > 0) livePrices[k] = Number(v);
       });
+      // Generation settled: nothing is "loading" anymore. Still-missing
+      // actionable symbols become failed (placeholder + banner below).
+      syms.forEach(function (s) { delete priceLoading[s]; });
       var stillMissing = syms.filter(function (s) { return !(isFinite(Number(livePrices[s])) && Number(livePrices[s]) > 0); });
       var actionableStill = stillMissing.filter(isActionable);
       if (actionableStill.length) {
@@ -11937,6 +12010,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.init = init;
   window.Inoculens.render = render;
   window.Inoculens.refreshPrices = refreshPrices;
+  window.Inoculens.isPriceLoading = isPriceLoading;
+  window.Inoculens.anyPriceLoading = anyPriceLoading;
   window.Inoculens.getLivePrices = function () { return livePrices; };
   window.Inoculens.fxBadgeText = fxBadgeText;
   window.Inoculens.TRADE_CCY_OPTIONS = TRADE_CCY_OPTIONS;

@@ -530,6 +530,21 @@ section h2, aside h2 {
   text-overflow: ellipsis;
 }
 
+/* Live-price loading state: same box, same layout — a pulsing placeholder
+   that says "fetching, no error yet". Unknown-by-design values keep the
+   plain '—' and never pulse. */
+.card-value.is-loading, .acct-value.is-loading, .acct-pl.is-loading,
+#hero-value.is-loading, #hero-value-num.is-loading {
+  opacity: 0.85;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .is-loading { animation: price-pulse 1.4s ease-in-out infinite; }
+  @keyframes price-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 1; }
+  }
+}
+
 #summary-cards > p {
   grid-column: 1 / -1;
   padding: 1.1rem 1.25rem;

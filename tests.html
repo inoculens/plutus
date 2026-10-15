@@ -2958,6 +2958,80 @@
         }, function (e) { restore(); throw e; });
       });
 
+      testAsync('refreshPrices marks loading until prices land', function () {
+        var origFetch = window.fetch;
+        var L = window.Inoculens;
+        try { navHome(); } catch (e) { /* ignore */ }
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' },
+          accounts: [{ id: 'a-load', name: 'Space', ticker: 'SPCX', kind: 'stock', createdAt: '2026-10-06T00:00:00.000Z' }],
+          trades: [], priceOverrides: {} });
+        clearPriceCache();
+        try {
+          var lp = (L.getLivePrices && L.getLivePrices()) || {};
+          Object.keys(lp).forEach(function (k) { delete lp[k]; });
+        } catch (e) { /* ignore */ }
+        var release = null;
+        window.fetch = function () {
+          return new Promise(function (resolve) {
+            release = function () {
+              resolve({ ok: true, json: function () { return Promise.resolve({ chart: { result: [{ meta: { currency: 'USD', symbol: 'SPCX', regularMarketPrice: 152.16 }, timestamp: [], indicators: { quote: [{ close: [] }] } }] } }); } });
+            };
+          });
+        };
+        function restore() { window.fetch = origFetch; restoreState(); try { navHome(); } catch (e) { /* ignore */ } }
+        var done = refreshPrices(); // marks loading + paints synchronously
+        assert(L.isPriceLoading('SPCX') === true, 'SPCX must be loading while the fetch is in flight');
+        var loadEl = document.querySelector('#accounts .acct-value.is-loading');
+        assert(loadEl && loadEl.textContent === '…', 'account card must show the loading placeholder, got ' + (loadEl && loadEl.textContent));
+        assert(document.getElementById('banner').hidden !== false, 'no error banner while loading');
+        release();
+        return done.then(function () {
+          restore();
+          assert(L.isPriceLoading('SPCX') === false, 'loading must clear once the price lands');
+          var lp2 = (L.getLivePrices && L.getLivePrices()) || {};
+          assert(Math.abs(lp2.SPCX - 152.16) < 1e-9, 'SPCX must be priced after load, got ' + lp2.SPCX);
+          var valEl = document.querySelector('#accounts .acct-value');
+          assert(valEl && valEl.textContent.indexOf('152') !== -1 && !valEl.classList.contains('is-loading'), 'card must show the value after load, got ' + (valEl && valEl.textContent));
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('manual kinds never show loading', function () {
+        var origFetch = window.fetch;
+        var L = window.Inoculens;
+        try { navHome(); } catch (e) { /* ignore */ }
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' },
+          accounts: [{ id: 'a-man', name: 'Mine', ticker: 'MINE', kind: 'custom', createdAt: '2026-10-06T00:00:00.000Z' }],
+          trades: [], priceOverrides: {} });
+        clearPriceCache();
+        try {
+          var lp = (L.getLivePrices && L.getLivePrices()) || {};
+          Object.keys(lp).forEach(function (k) { delete lp[k]; });
+        } catch (e) { /* ignore */ }
+        window.fetch = function () { return new Promise(function () { /* never resolves */ }); };
+        function restore() { window.fetch = origFetch; restoreState(); try { navHome(); } catch (e) { /* ignore */ } }
+        var done = refreshPrices();
+        assert(L.isPriceLoading('MINE') === false, 'manual kinds must never be loading');
+        var el = document.querySelector('#accounts .acct-value');
+        assert(el && el.textContent === '—' && !el.classList.contains('is-loading'), 'manual unknowns keep the plain placeholder, got ' + (el && el.textContent));
+        return done.then(function () { restore(); }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('commodity COPPER resolves via the gold-api alias', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          if (String(url).indexOf('gold-api') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ price: 5.5, currency: 'USD', symbol: 'HG' }); } });
+          }
+          return Promise.reject(new Error('unexpected ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return refreshAllPrices(['COPPER'], 'USD', { COPPER: 'commodity' }).then(function (out) {
+          restore();
+          assert(Math.abs(out.COPPER - 5.5) < 1e-9, 'COPPER must resolve via HG, got ' + JSON.stringify(out));
+        }, function (e) { restore(); throw e; });
+      });
       testAsync('stock tries the second proxy when the first fails', function () {
         var origFetch = window.fetch;
         var urls = [];

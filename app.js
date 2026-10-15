@@ -11975,6 +11975,7 @@ function clearAllData() {
     if (!saveStateGuarded(defaultState())) return;
     clearBanner();
     render();
+    closeDialog('settings-dialog');
   });
 }
 

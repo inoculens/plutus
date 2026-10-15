@@ -1709,7 +1709,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     mask-image: linear-gradient(90deg, transparent 0, #000 45%);
   }
   .landing-coins .coin-btc { height: 150px; }
-  .landing-coins .coin-usd { height: 104px; margin-right: -58px; }
+  .landing-coins .coin-usd { height: 104px; position: relative; left: 58px; }
   .landing-coins .coin-eur { height: 104px; margin-left: -58px; }
   .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
@@ -1744,8 +1744,8 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 }
 .landing-coins .coin { display: block; width: auto; filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5)); }
 .landing-coins .coin-btc { height: 228px; z-index: 1; opacity: 0.94; }
-.landing-coins .coin-usd { height: 158px; z-index: 2; margin-right: -36px; }
-.landing-coins .coin-eur { height: 158px; z-index: 3; margin-left: -36px; }
+.landing-coins .coin-usd { height: 158px; z-index: 2; position: relative; left: 56px; }
+.landing-coins .coin-eur { height: 158px; z-index: 3; margin-left: -56px; }
 @media (max-width: 720px) {
   #landing { padding: 2.25rem 1.4rem 1.6rem; }
   .landing-ctas { flex-direction: column; align-items: stretch; }

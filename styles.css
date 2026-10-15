@@ -1691,6 +1691,28 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   display: none;
   pointer-events: none;
 }
+/* Phones/tablets: coins become an ambient backdrop — bleeding off the
+   right edge (clipped by the card), faded into the text, softly blurred.
+   `translate` (not `transform`) centers vertically so the per-coin float
+   animation still composes. Copy stays above via z-index. */
+@media (max-width: 1023.98px) {
+  .landing-coins {
+    display: flex;
+    position: absolute;
+    top: 50%;
+    right: -84px;
+    translate: 0 -50%;
+    align-items: flex-end;
+    opacity: 0.5;
+    filter: blur(2px);
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 45%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 45%);
+  }
+  .landing-coins .coin-btc { height: 150px; }
+  .landing-coins .coin-usd { height: 104px; }
+  .landing-coins .coin-eur { height: 104px; }
+  .landing-copy, .landing-feats { position: relative; z-index: 1; }
+}
 @media (min-width: 1024px) {
   #landing:not([hidden]) { display: grid; }
   #landing {

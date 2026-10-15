@@ -1701,6 +1701,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   .landing-feats { grid-area: feats; }
   .landing-coins {
     grid-area: art;
+    align-self: center;
     display: flex;
     align-items: flex-end;
     justify-content: space-evenly;

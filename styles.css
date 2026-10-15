@@ -1321,6 +1321,15 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 /* Rate rows read like every other value (same typeface/weight/size); the
    muted gray stays as the "automatic" cue. */
 .trade-block .rate-line .stat-val { font-family: var(--font-display); font-size: inherit; font-weight: 550; }
+/* Multi-recipient transfers share one Received row: bound it like Note and
+   Rate so a long recipient list trims with … instead of pushing the strip
+   (and the card) off-screen. Tap/ⓘ opens the full list. */
+.trade-block .stat-row[data-label="Received"] {
+  flex: 0 1 auto;
+  max-width: 18rem;
+  min-width: 0;
+  overflow: hidden;
+}
 .trade-block .stat-row[data-label="Note"] .stat-val {
   display: block;
   white-space: nowrap;

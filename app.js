@@ -7354,9 +7354,15 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       }
       box.appendChild(feeRateEl);
     }
+    // One Received row for every arrival: the inline line trims with …
+    // (capped like Note/Rate so a long recipient list can never push the
+    // strip — or the card — off-screen) and the ⓘ/tap opens the full list.
+    var recLines = [];
+    var recTotal = 0;
     if (!outsC.length) {
       var netQ = Number(t.qty) - xferFee;
-      box.appendChild(statRow('Received', fmtQty(netQ, tSym) + ' ' + tSym, netQ, false));
+      recLines.push(fmtQty(netQ, tSym) + ' ' + tSym);
+      recTotal = (isFinite(netQ) && netQ > 0) ? netQ : 0;
     } else {
       outsC.forEach(function (o) {
         if (isTransferOutputInternal(o)) {
@@ -7366,15 +7372,40 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
           var txt = fmtQty(arr, tSym) + ' ' + tSym + ' → ' + nm;
           var oFee = (o.fee !== undefined && o.fee !== null && String(o.fee).trim() !== '') ? Number(o.fee) : 0;
           if (isFinite(oFee) && oFee > 0) txt += ' · fee ' + fmtQty(o.fee, tSym);
-          box.appendChild(statRow('Received', txt, arr, false));
+          recLines.push(txt);
+          if (isFinite(arr) && arr > 0) recTotal += arr;
         } else {
           var arr2 = Number(o.qty);
           var lab = String(o.label || '').trim();
-          var txt2 = fmtQty(arr2, tSym) + ' ' + tSym + ' → ' + lab + ' (external)';
-          box.appendChild(statRow(o.spend === false ? 'Sent' : 'Spent', txt2, arr2, false));
+          recLines.push(fmtQty(arr2, tSym) + ' ' + tSym + ' → ' + lab + ' (external)');
+          if (isFinite(arr2) && arr2 > 0) recTotal += arr2;
         }
       });
     }
+    var recRow = statRow('Received', recLines.join(', '), recTotal, false);
+    (function (row, lines) {
+      var recVal = row.querySelector('.stat-val');
+      var recLab = row.querySelector('.stat-label');
+      function openRecips() {
+        // Popup only when the text actually overflows the row.
+        if (!recVal || recVal.scrollWidth <= recVal.clientWidth + 2) return;
+        openNoteDialog(lines.join('\n'), 'Received');
+      }
+      if (recVal) {
+        recVal.setAttribute('role', 'button');
+        recVal.setAttribute('tabindex', '0');
+        recVal.setAttribute('aria-label', 'Show all recipients');
+        recVal.addEventListener('click', openRecips);
+        recVal.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openRecips();
+          }
+        });
+      }
+      if (recLab) infoDot(recLab, openRecips, recVal);
+    })(recRow, recLines);
+    box.appendChild(recRow);
     if ((Number(t.total) > 0 || Number(t.fee) > 0)) {
       box.appendChild(statRow('Fiat cost', fmtMoney(n.netMain, main), n.netMain, false));
     }

@@ -7828,6 +7828,36 @@
         try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
         navHome();
       });
+      test('multi-recipient card shows one truncating Received row with full popup', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'TYest', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'General Investment', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' },
+            { id: 'a3', name: 'BTC1', ticker: 'BTC', createdAt: '2026-10-06T00:00:02.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: FX, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'm1', type: 'transfer', symbol: 'BTC', qty: 0.6, total: 0, currency: 'EUR', date: '2026-10-15', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0.1, fxLock: FX, outputs: [{ toAccountId: 'a2', qty: 0.3, fee: 0.000001 }, { toAccountId: 'a3', qty: 0.1 }, { label: 'Arodoe', qty: 0.1 }], createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        var block = document.querySelector('[data-trade="m1"]');
+        assert(block !== null, 'transfer block must render');
+        var recs = block.querySelectorAll('[data-label="Received"]');
+        assert(recs.length === 1, 'one Received row expected, got ' + recs.length);
+        var val = recs[0].querySelector('.stat-val');
+        assert(val !== null && val.textContent.indexOf('General Investment') !== -1, 'row must lead with the recipients');
+        val.click();
+        var txt = document.getElementById('note-dialog-text').textContent;
+        assert(txt.indexOf('General Investment') !== -1 && txt.indexOf('BTC1') !== -1 && txt.indexOf('Arodoe') !== -1, 'popup must list every recipient, got ' + txt);
+        try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        navHome();
+      });
     })();
 
     renderResults();

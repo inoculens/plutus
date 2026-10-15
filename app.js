@@ -2953,8 +2953,8 @@ function histKindFor(kd) {
 
 // Live metals via gold-api.com (free, no key, CORS-open): XAU/XAG/XPT/XPD
 // spot per troy ounce + HG copper, quoted in USD. COPPER is an alias for
-// HG. Energy (WTI/BRENT/NG) has no key-free source and stays on the Stooq
-// attempt below, with the manual override as fallback.
+// HG. Energy (WTI/BRENT/NG) rides Yahoo front-month futures via
+// YAHOO_COMMODITY_MAP below, with Stooq as the last resort.
 var GOLD_API_METALS = ['XAU', 'XAG', 'XPT', 'XPD', 'HG'];
 function goldApiSymbol(sym) {
   var s = String(sym || '').trim().toUpperCase();
@@ -2981,6 +2981,47 @@ function fetchGoldApiUsd(sym, fetchImpl) {
       return null;
     }).then(null, function () { return null; });
   } catch (e) { return Promise.resolve(null); }
+}
+
+// Energy futures via Yahoo (same proxy chain as stocks): WTI/Brent/gas
+// have no key-free spot API; front-month futures track them closely.
+// Units stay native (USD per barrel), converted via ECB like everything else.
+var YAHOO_COMMODITY_MAP = {
+  WTI: 'CL=F',
+  USOIL: 'CL=F',
+  OIL: 'CL=F',
+  BRENT: 'BZ=F',
+  UKOIL: 'BZ=F',
+  BRENTOIL: 'BZ=F',
+  NG: 'NG=F',
+  NATGAS: 'NG=F'
+};
+
+// Yahoo daily history for any Yahoo code (stocks, futures): one 12-day
+// window ending the day after wantDay; the newest candle at or before
+// wantDay wins (walked back = interpolated). Resolves
+// {price, interpolated, day} or rejects — the caller picks the fallback.
+function fetchYahooHistory(yahooSym, wantDay, cur, fetchImpl) {
+  var endSec = Math.floor(Date.UTC(Number(wantDay.slice(0, 4)), Number(wantDay.slice(5, 7)) - 1, Number(wantDay.slice(8, 10))) / 1000) + 86400;
+  if (!isFinite(endSec) || endSec <= 0) return Promise.reject(new Error('no-window'));
+  var startSec = endSec - 12 * 86400;
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.reject(new Error('no-fetch'));
+  return fetchFirstJson(yahooProxyUrls(yahooSym, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d'), f).then(function (data) {
+    var r = data && data.chart && data.chart.result && data.chart.result[0];
+    if (!r) throw new Error('no-quotes');
+    var nat = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var candles = parseYahooDaily(data).filter(function (c) { return c.day <= wantDay; });
+    if (!candles.length) throw new Error('no-fixing');
+    var pick = candles[candles.length - 1];
+    var back = (pick.day !== wantDay);
+    if (nat === cur) return { price: pick.close, interpolated: back, day: pick.day };
+    return fetchEcbRate(pick.day, nat, cur).then(function (fx) {
+      var v = pick.close * Number(fx.rate);
+      if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
+      return { price: v, interpolated: back || !!fx.interpolated, day: pick.day };
+    });
+  });
 }
 
 var PRICE_CACHE_TTL_MS = 60000;
@@ -3086,6 +3127,60 @@ function yahooProxyUrls(sym, query) {
     encodeURIComponent(sym) + '?' + query;
   return ['https://api.allorigins.win/raw?url=' + encodeURIComponent(base),
     'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(base)];
+}
+
+// Crypto live fallbacks when CoinGecko is rate-limited: Kraken then
+// Coinbase (both free, no key, CORS-open — the same hosts the history path
+// already uses). USD spot only; the caller bridges into the display fiat.
+// Never throw: null on any miss, and non-listed majors cost zero network.
+function fetchKrakenLiveUsd(sym, fetchImpl) {
+  var s = String(sym || '').trim().toUpperCase();
+  if (KRAKEN_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  var url = 'https://api.kraken.com/0/public/Ticker?pair=' + encodeURIComponent(s + 'USD');
+  try {
+    return f(url).then(function (res) {
+      if (!res || !res.ok) throw new Error('kraken-http-' + (res && res.status));
+      return res.json();
+    }).then(function (data) {
+      var result = data && data.result;
+      if (!result || typeof result !== 'object') return null;
+      var keys = Object.keys(result);
+      for (var i = 0; i < keys.length; i++) {
+        if (keys[i] === 'last') continue;
+        var c = result[keys[i]] && result[keys[i]].c;
+        var p = (c && c.length) ? Number(c[0]) : NaN;
+        if (isFinite(p) && p > 0) return p;
+      }
+      return null;
+    }).then(null, function () { return null; });
+  } catch (e) { return Promise.resolve(null); }
+}
+
+function fetchCoinbaseLiveUsd(sym, fetchImpl) {
+  var s = String(sym || '').trim().toUpperCase();
+  if (COINBASE_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  var url = 'https://api.exchange.coinbase.com/products/' + encodeURIComponent(s + '-USD') + '/ticker';
+  try {
+    return f(url).then(function (res) {
+      if (!res || !res.ok) throw new Error('coinbase-http-' + (res && res.status));
+      return res.json();
+    }).then(function (data) {
+      var p = data ? Number(data.price) : NaN;
+      if (isFinite(p) && p > 0) return p;
+      return null;
+    }).then(null, function () { return null; });
+  } catch (e) { return Promise.resolve(null); }
+}
+
+function fetchCryptoFallbackUsd(sym, fetchImpl) {
+  return fetchKrakenLiveUsd(sym, fetchImpl).then(function (p) {
+    if (isFinite(Number(p)) && Number(p) > 0) return Number(p);
+    return fetchCoinbaseLiveUsd(sym, fetchImpl);
+  }, function () { return fetchCoinbaseLiveUsd(sym, fetchImpl); });
 }
 
 // First URL that answers ok + parses as JSON; rejects when all fail.
@@ -3315,24 +3410,25 @@ function fetchCommodityPrice(symbol, vs) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
     return null;
   }
-  // Shared USD->display-fiat bridge (same ECB source the stock path uses).
-  function bridged(usd) {
-    usd = Number(usd);
-    if (!isFinite(usd) || usd <= 0) return Promise.resolve(cachedOrNull());
-    if (cur === 'USD') {
-      priceCache[key] = { price: usd, at: Date.now() };
-      return Promise.resolve(usd);
+  // Shared native->display-fiat bridge (same ECB source the stock path uses).
+  function bridged(amount, native) {
+    var p = Number(amount);
+    var nat = String(native || 'USD').toUpperCase();
+    if (!isFinite(p) || p <= 0) return Promise.resolve(cachedOrNull());
+    if (nat === cur) {
+      priceCache[key] = { price: p, at: Date.now() };
+      return Promise.resolve(p);
     }
-    return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
-      var v = usd * Number(r.rate);
+    return fetchEcbRate(todayStr(), nat, cur).then(function (r) {
+      var v = p * Number(r.rate);
       if (!isFinite(v) || v <= 0) return cachedOrNull();
       priceCache[key] = { price: v, at: Date.now() };
       return v;
     }, function () { return cachedOrNull(); });
   }
-  // Legacy Stooq quote (kept as the energy path + metals fallback — the
-  // q/l endpoint currently answers 404, so a miss here resolves null and
-  // the row keeps its honest "feed unreachable" error + override fallback).
+  // Legacy Stooq quote (kept as the last resort — the q/l endpoint
+  // currently answers 404, so a miss here resolves null and the row keeps
+  // its honest "feed unreachable" error + override fallback).
   function viaStooq() {
     var sq = stooqCommoditySymbol(sym);
     if (!sq) return Promise.resolve(cachedOrNull());
@@ -3341,16 +3437,25 @@ function fetchCommodityPrice(symbol, vs) {
       if (!res.ok) throw new Error('price-http-' + res.status);
       return res.text();
     }).then(function (csv) {
-      return bridged(parseStooqClose(csv));
+      return bridged(parseStooqClose(csv), 'USD');
     }).then(null, function () { return cachedOrNull(); });
+  }
+  // Energy futures via Yahoo (same proxy chain as stocks).
+  function viaEnergy(ySym) {
+    return fetchFirstJson(yahooProxyUrls(ySym, 'interval=1d&range=5d'), capturedFetch).then(function (data) {
+      var q = parseYahooQuote(data);
+      if (!q) throw new Error('no-quote');
+      return bridged(q.price, q.currency);
+    }).then(null, function () { return viaStooq(); });
   }
   // Metals first: gold-api.com is free, key-free and CORS-open.
   if (goldApiSymbol(sym)) {
     return fetchGoldApiUsd(sym, capturedFetch).then(function (usd) {
-      if (isFinite(Number(usd)) && Number(usd) > 0) return bridged(usd);
+      if (isFinite(Number(usd)) && Number(usd) > 0) return bridged(usd, 'USD');
       return viaStooq();
     }, function () { return viaStooq(); });
   }
+  if (Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) return viaEnergy(YAHOO_COMMODITY_MAP[sym]);
   return viaStooq();
 }
 
@@ -3533,9 +3638,31 @@ function fetchLivePrice(symbol, vs, kind) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
     return null;
   }).then(null, function () {
-    // Network error / 429 / bad payload: last cached or null, never throw.
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
+    // CoinGecko error / 429 / bad payload: exchange fallbacks for majors
+    // (Kraken, then Coinbase), then last cached or null. Never throws.
+    return fetchCryptoFallbackUsd(sym, capturedFetch).then(function (fu) {
+      fu = Number(fu);
+      if (!isFinite(fu) || fu <= 0) {
+        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+        return null;
+      }
+      if (curLow === 'usd') {
+        priceCache[key] = { price: fu, at: Date.now() };
+        return fu;
+      }
+      return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
+        var v = fu * Number(r.rate);
+        if (!isFinite(v) || v <= 0) {
+          if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+          return null;
+        }
+        priceCache[key] = { price: v, at: Date.now() };
+        return v;
+      }, function () {
+        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+        return null;
+      });
+    });
   });
 }
 
@@ -3855,7 +3982,7 @@ function freezeExecLock(tradeId, symbol, date, mainU, kind) {
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   if (!tradeId || !sym || !isValidDateStr(day)) return;
   if (kd === 'custom' || kd === 'cash') return;
-  if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return; }
+  if (kd === 'commodity') { if (!hasCommoditySource(sym)) return; }
   else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
   function patch(price, vs, source) {
     if (!(isFinite(Number(price)) && Number(price) > 0)) return;
@@ -3937,7 +4064,7 @@ function feeRateWhy(t, kind) {
   var kd = String(kind || '').trim().toLowerCase();
   if (kd === 'custom' || kd === 'cash') return 'No market history for this account kind — tap to retry anyway';
   var sym = t ? String(t.symbol || '').toUpperCase() : '';
-  if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return 'No market history for this asset — tap to retry anyway'; }
+  if (kd === 'commodity') { if (!hasCommoditySource(sym)) return 'No market history for this asset — tap to retry anyway'; }
   else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return 'No market history for this asset — tap to retry anyway';
   return 'Tap to retry the rate lookup';
 }
@@ -3979,7 +4106,7 @@ function retryFeeRate(tradeId) {
     if (a && typeof a.kind === 'string') kd = a.kind.trim().toLowerCase();
   } catch (e) { kd = ''; }
   if (kd === 'custom' || kd === 'cash') return;
-  if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return; }
+  if (kd === 'commodity') { if (!hasCommoditySource(sym)) return; }
   else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
   var kk = histKindFor(kd);
   var key = sym + '|' + day + '|' + mainU + '|' + kk;
@@ -4262,27 +4389,7 @@ function fetchHistoricalStockPrice(symbol, dateStr, vs) {
   function stooqFallback() { return fetchHistoricalStockStooq(sym, wantDay, cur); }
   var yq = yahooSymbol(sym);
   if (!yq) return stooqFallback();
-  // One 12-day window ending the day after `wantDay`: pick the newest
-  // candle at or before it (weekends/holidays resolve to the previous
-  // close, flagged interpolated — same contract as the Stooq walk-back).
-  var endSec = Math.floor(Date.UTC(Number(wantDay.slice(0, 4)), Number(wantDay.slice(5, 7)) - 1, Number(wantDay.slice(8, 10))) / 1000) + 86400;
-  if (!isFinite(endSec) || endSec <= 0) return stooqFallback();
-  var startSec = endSec - 12 * 86400;
-  return fetchFirstJson(yahooProxyUrls(yq, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d'), capturedFetch).then(function (data) {
-    var r = data && data.chart && data.chart.result && data.chart.result[0];
-    if (!r) throw new Error('no-quotes');
-    var nat = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
-    var candles = parseYahooDaily(data).filter(function (c) { return c.day <= wantDay; });
-    if (!candles.length) throw new Error('no-fixing');
-    var pick = candles[candles.length - 1];
-    var back = (pick.day !== wantDay);
-    if (nat === cur) return { price: pick.close, interpolated: back, day: pick.day };
-    return fetchEcbRate(pick.day, nat, cur).then(function (fx) {
-      var v = pick.close * Number(fx.rate);
-      if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
-      return { price: v, interpolated: back || !!fx.interpolated, day: pick.day };
-    });
-  }).then(function (r) { return r; }, function () { return stooqFallback(); });
+  return fetchYahooHistory(yq, wantDay, cur, capturedFetch).then(function (r) { return r; }, function () { return stooqFallback(); });
 }
 
 // Legacy Stooq daily closes with up to 5-day walk-back (kept as the stock
@@ -4323,10 +4430,20 @@ function fetchHistoricalStockStooq(sym, wantDay, cur) {
 function fetchHistoricalCommodityPrice(symbol, dateStr, vs) {
   var sym = String(symbol || '').trim().toUpperCase();
   var cur = String(priceDefaultVs(vs)).trim().toUpperCase();
-  var sq = stooqCommoditySymbol(sym);
-  if (!sq || !isValidDateStr(dateStr)) return Promise.resolve(null);
+  if (!isValidDateStr(dateStr)) return Promise.resolve(null);
+  var wantDay = dateStr.slice(0, 10);
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) return Promise.resolve(null);
+  var sq = stooqCommoditySymbol(sym);
+  function stooqFallback() {
+    if (!sq) return Promise.resolve(null);
+    return attempt(wantDay, 0).then(function (r) { return r; }, function () { return null; });
+  }
+  // Energy futures share the Yahoo history window with stocks.
+  if (Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) {
+    return fetchYahooHistory(YAHOO_COMMODITY_MAP[sym], wantDay, cur, capturedFetch).then(function (r) { return r; }, function () { return stooqFallback(); });
+  }
+  if (!sq) return Promise.resolve(null);
   // Walk back up to 5 days for weekends/holidays (same window as stocks/FX).
   function attempt(day, back) {
     var compact = toStooqDay(day);
@@ -4351,7 +4468,7 @@ function fetchHistoricalCommodityPrice(symbol, dateStr, vs) {
       return attempt(prev, back + 1);
     });
   }
-  return attempt(dateStr.slice(0, 10), 0).then(function (r) { return r; }, function () { return null; });
+  return attempt(wantDay, 0).then(function (r) { return r; }, function () { return null; });
 }
 
 function fetchHistoricalPrice(symbol, dateStr, vs, kind) {
@@ -4420,7 +4537,7 @@ function ensureHistoricalExec(trades, main, kinds) {
     if (!sym || !isValidDateStr(day) || isFutureDateStr(day)) return;
     var kd = (typeof kindFor(sym) === 'string') ? kindFor(sym).trim().toLowerCase() : '';
     if (kd === 'custom' || kd === 'cash') return;
-    if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return; }
+    if (kd === 'commodity') { if (!hasCommoditySource(sym)) return; }
     else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
     var kk = histKindFor(kd);
     var key = sym + '|' + day + '|' + m + '|' + kk;
@@ -4464,6 +4581,11 @@ if (typeof window !== 'undefined') {
   window.Inoculens.stooqCommoditySymbol = stooqCommoditySymbol;
   window.Inoculens.goldApiSymbol = goldApiSymbol;
   window.Inoculens.fetchGoldApiUsd = fetchGoldApiUsd;
+  window.Inoculens.YAHOO_COMMODITY_MAP = YAHOO_COMMODITY_MAP;
+  window.Inoculens.fetchYahooHistory = fetchYahooHistory;
+  window.Inoculens.hasCommoditySource = hasCommoditySource;
+  window.Inoculens.fetchKrakenLiveUsd = fetchKrakenLiveUsd;
+  window.Inoculens.fetchCoinbaseLiveUsd = fetchCoinbaseLiveUsd;
   window.Inoculens.fetchCommodityPrice = fetchCommodityPrice;
   window.Inoculens.fetchHistoricalCommodityPrice = fetchHistoricalCommodityPrice;
   window.Inoculens.PRICE_CACHE_TTL_MS = PRICE_CACHE_TTL_MS;

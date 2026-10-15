@@ -3058,6 +3058,72 @@
         return done.then(function () { restore(); }, function (e) { restore(); throw e; });
       });
 
+      testAsync('crypto falls back to Kraken when CoinGecko is rate-limited', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('coingecko') !== -1) {
+            return Promise.resolve({ ok: false, status: 429 });
+          }
+          if (String(url).indexOf('kraken') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ error: [], result: { XXBTZUSD: { c: ['80792.5', '0.002'] } } }); } });
+          }
+          return Promise.reject(new Error('unexpected ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('BTC', 'USD').then(function (p) {
+          restore();
+          assert(Math.abs(p - 80792.5) < 1e-9, 'Kraken fallback wrong: ' + p);
+          assert(urls.some(function (u) { return u.indexOf('kraken') !== -1; }), 'must try Kraken: ' + urls.join(','));
+          assert(!urls.some(function (u) { return u.indexOf('coinbase') !== -1; }), 'must stop at the first working rung');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('crypto falls through to Coinbase when Kraken misses', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('coingecko') !== -1) {
+            return Promise.resolve({ ok: false, status: 429 });
+          }
+          if (String(url).indexOf('kraken') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ error: [], result: {} }); } });
+          }
+          if (String(url).indexOf('coinbase') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ price: '80816.77' }); } });
+          }
+          return Promise.reject(new Error('unexpected ' + url));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('BTC', 'USD').then(function (p) {
+          restore();
+          assert(Math.abs(p - 80816.77) < 1e-9, 'Coinbase rung wrong: ' + p);
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('energy WTI resolves via Yahoo futures', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ chart: { result: [{ meta: { currency: 'USD', symbol: 'CL=F', regularMarketPrice: 95.15 }, timestamp: [], indicators: { quote: [{ close: [] }] } }] } }); } });
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return refreshAllPrices(['WTI'], 'USD', { WTI: 'commodity' }).then(function (out) {
+          restore();
+          assert(Math.abs(out.WTI - 95.15) < 1e-9, 'WTI wrong: ' + JSON.stringify(out));
+          assert(urls.some(function (u) { return u.indexOf('allorigins') !== -1; }), 'must use the Yahoo proxy chain: ' + urls.join(','));
+        }, function (e) { restore(); throw e; });
+      });
+
       testAsync('commodity COPPER resolves via the gold-api alias', function () {
         var origFetch = window.fetch;
         setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
@@ -3368,6 +3434,31 @@
           var price = (r && typeof r === 'object') ? r.price : r;
           assert(Math.abs(price - 3600) < 1e-9, 'walked-back commodity history wrong: ' + JSON.stringify(r));
           assert(r && r.interpolated === true, 'walk-back must flag interpolated');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('historical energy resolves via Yahoo futures + historical FX', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        try { H.clearHistCache(); } catch (e) { /* ignore */ }
+        var t1 = Date.UTC(2026, 0, 2, 14, 30) / 1000;
+        window.fetch = function (url) {
+          var u = String(url);
+          if (u.indexOf('allorigins') !== -1 || u.indexOf('codetabs') !== -1) {
+            assert(u.indexOf('CL') !== -1, 'must request the WTI future chart: ' + u);
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ chart: { result: [{ meta: { currency: 'USD', symbol: 'CL=F' }, timestamp: [t1], indicators: { quote: [{ close: [95] }] } }] } }); } });
+          }
+          if (u.indexOf('frankfurter') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ date: '2026-01-02', rates: { EUR: 0.9 } }); } });
+          }
+          return Promise.reject(new Error('unexpected ' + u));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return H.fetchHistoricalPrice('WTI', '2026-01-04', 'EUR', 'commodity').then(function (r) {
+          restore();
+          var price = (r && typeof r === 'object') ? r.price : r;
+          assert(Math.abs(price - 85.5) < 1e-9, 'WTI history wrong: ' + JSON.stringify(r));
+          assert(r && r.interpolated === true && r.day === '2026-01-02', 'Sunday must walk back to Friday: ' + JSON.stringify(r));
         }, function (e) { restore(); throw e; });
       });
 

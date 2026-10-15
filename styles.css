@@ -1679,25 +1679,38 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 .landing-feats li { display: flex; flex-direction: column; gap: 0.25rem; }
 .landing-feats strong { font-size: 0.93rem; font-weight: 650; }
 .landing-feats span { font-size: 0.83rem; color: var(--muted); }
-/* Floating glass coins (welcome card): decorative medallions filling the
-   empty upper-right — BTC tucked behind, EUR and Dollar overlapped in
-   front. One shared drift so all three move together; absolute layer, so
-   text boxes never shift. Hidden on narrow screens. */
+/* Floating glass coins (welcome card): Dollar left, Bitcoin tall in the
+   middle behind, Euro right — shared baseline, interlaced. Each coin hovers
+   on its own rhythm (separate durations + phases). On wide screens the card
+   is a two-column grid so the cluster fills the right space evenly with
+   safe margins; text can never collide. Hidden on narrow screens. */
+#landing[hidden] { display: none !important; }
+.landing-copy { min-width: 0; }
 .landing-coins {
-  position: absolute;
-  top: 2rem;
-  right: 2.25rem;
-  display: flex;
-  align-items: center;
+  display: none;
   pointer-events: none;
 }
-.landing-coins .coin { display: block; width: auto; filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5)); }
-.landing-coins .coin-btc { height: 132px; z-index: 1; opacity: 0.94; margin-top: 26px; }
-.landing-coins .coin-eur { height: 154px; z-index: 2; margin-left: -30px; margin-top: -14px; }
-.landing-coins .coin-usd { height: 140px; z-index: 3; margin-left: -26px; margin-top: 30px; }
-@media (max-width: 899px) {
-  .landing-coins { display: none; }
+@media (min-width: 1024px) {
+  #landing:not([hidden]) { display: grid; }
+  #landing {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-areas: "copy art" "feats feats";
+    column-gap: 2.5rem;
+  }
+  .landing-copy { grid-area: copy; }
+  .landing-feats { grid-area: feats; }
+  .landing-coins {
+    grid-area: art;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-evenly;
+    min-width: 0;
+  }
 }
+.landing-coins .coin { display: block; width: auto; filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5)); }
+.landing-coins .coin-btc { height: 228px; z-index: 1; opacity: 0.94; }
+.landing-coins .coin-usd { height: 158px; z-index: 2; margin-right: -36px; }
+.landing-coins .coin-eur { height: 158px; z-index: 3; margin-left: -36px; }
 @media (max-width: 720px) {
   #landing { padding: 2.25rem 1.4rem 1.6rem; }
   .landing-ctas { flex-direction: column; align-items: stretch; }
@@ -1958,7 +1971,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     to { opacity: 1; transform: none; }
   }
   .account-card, button { transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
-  .landing-coins { animation: coin-float 6s ease-in-out infinite; }
+  .landing-coins .coin-btc { animation: coin-float 7s ease-in-out -2s infinite; }
+  .landing-coins .coin-usd { animation: coin-float 5.4s ease-in-out -1s infinite; }
+  .landing-coins .coin-eur { animation: coin-float 6.2s ease-in-out -4s infinite; }
   @keyframes coin-float {
     0%, 100% { transform: translateY(-10px); }
     50% { transform: translateY(10px); }

@@ -73,7 +73,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/styles.css?v=304">
+  <link rel="stylesheet" href="/styles.css?v=305">
 
   <script type="application/ld+json">
   {
@@ -189,60 +189,9 @@
     <div id="view-home">
       <section id="landing" aria-label="Welcome" hidden>
         <div class="landing-coins" aria-hidden="true">
-          <svg class="coin coin-btc" viewBox="0 0 120 120" focusable="false">
-            <defs>
-              <radialGradient id="glass-btc" cx="35%" cy="28%" r="85%">
-                <stop offset="0%" stop-color="#55617d"/>
-                <stop offset="55%" stop-color="#252d40"/>
-                <stop offset="100%" stop-color="#0f131c"/>
-              </radialGradient>
-              <linearGradient id="shine-btc" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#fff" stop-opacity=".5"/>
-                <stop offset="45%" stop-color="#fff" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <circle cx="60" cy="60" r="54" fill="url(#glass-btc)"/>
-            <circle cx="60" cy="60" r="54" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="3"/>
-            <circle cx="60" cy="60" r="46" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1.5"/>
-            <ellipse cx="43" cy="33" rx="27" ry="13" fill="url(#shine-btc)" transform="rotate(-18 43 33)"/>
-            <svg x="32" y="32" width="56" height="56" viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M42 10 V90"/><path d="M56 10 V90"/><path d="M62 20 V80"/><path d="M62 20 H70 C84 20 84 48 70 48 H62"/><path d="M62 48 H74 C90 48 90 80 74 80 H62"/></svg>
-          </svg>
-          <svg class="coin coin-eur" viewBox="0 0 120 120" focusable="false">
-            <defs>
-              <radialGradient id="glass-eur" cx="35%" cy="28%" r="85%">
-                <stop offset="0%" stop-color="#5a6a8c"/>
-                <stop offset="55%" stop-color="#28324a"/>
-                <stop offset="100%" stop-color="#111722"/>
-              </radialGradient>
-              <linearGradient id="shine-eur" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#fff" stop-opacity=".55"/>
-                <stop offset="45%" stop-color="#fff" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <circle cx="60" cy="60" r="54" fill="url(#glass-eur)"/>
-            <circle cx="60" cy="60" r="54" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3"/>
-            <circle cx="60" cy="60" r="46" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="1.5"/>
-            <ellipse cx="43" cy="33" rx="27" ry="13" fill="url(#shine-eur)" transform="rotate(-18 43 33)"/>
-            <svg x="30" y="30" width="60" height="60" viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M78 30 C70 20 58 15 46 15 C28 15 18 30 18 50 C18 70 28 85 46 85 C58 85 70 80 78 70"/><path d="M14 41 H64"/><path d="M14 59 H64"/></svg>
-          </svg>
-          <svg class="coin coin-usd" viewBox="0 0 120 120" focusable="false">
-            <defs>
-              <radialGradient id="glass-usd" cx="35%" cy="28%" r="85%">
-                <stop offset="0%" stop-color="#525f7a"/>
-                <stop offset="55%" stop-color="#242c3f"/>
-                <stop offset="100%" stop-color="#0f141d"/>
-              </radialGradient>
-              <linearGradient id="shine-usd" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#fff" stop-opacity=".55"/>
-                <stop offset="45%" stop-color="#fff" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <circle cx="60" cy="60" r="54" fill="url(#glass-usd)"/>
-            <circle cx="60" cy="60" r="54" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3"/>
-            <circle cx="60" cy="60" r="46" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="1.5"/>
-            <ellipse cx="43" cy="33" rx="27" ry="13" fill="url(#shine-usd)" transform="rotate(-18 43 33)"/>
-            <svg x="30" y="30" width="60" height="60" viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M70 26 C70 16 60 13 50 13 C35 13 27 23 27 33 C27 55 73 45 73 67 C73 77 63 87 48 87 C38 87 30 84 25 79"/><path d="M50 5 V95"/></svg>
-          </svg>
+          <img class="coin coin-btc" src="/icons/coin-btc.png" alt="" draggable="false">
+          <img class="coin coin-eur" src="/icons/coin-eur.png" alt="" draggable="false">
+          <img class="coin coin-usd" src="/icons/coin-usd.png" alt="" draggable="false">
         </div>
         <p class="landing-eyebrow">Private · No account needed</p>
         <h2 class="landing-title">Manage your business expenses and portfolio in <span class="crayon">one place</span>.</h2>

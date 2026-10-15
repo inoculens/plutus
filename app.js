@@ -9950,16 +9950,16 @@ function buildTradeForm() {
     '<select id="t-currency">' + ccyOptions('EUR') + '</select></div>' +
     '<label for="t-custom-ccy" id="t-custom-ccy-label" hidden>Custom currency code</label>' +
     '<input id="t-custom-ccy" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY" hidden>' +
+    '<label for="t-date">Date</label>' +
+    '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" maxlength="10">' +
+    '<p class="fld-hint">Format dd/mm/yyyy.</p>' +
+    '<details class="adv"><summary>Details</summary>' +
     '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger (optional)</label>' +
     '<input id="t-ledger" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24" list="t-ledger-codes">' +
     '<datalist id="t-ledger-codes"></datalist>' +
     '<label for="t-ledger-label">Ledger label (optional)</label>' +
     '<input id="t-ledger-label" autocomplete="off" spellcheck="false" placeholder="e.g. Income from X" maxlength="80">' +
     '<p class="fld-hint" id="t-ledger-hint">Bookkeeping code for this record — subledgers nest by prefix (1110 under 1100 under 1000).</p></div>' +
-    '<label for="t-date">Date</label>' +
-    '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" maxlength="10">' +
-    '<p class="fld-hint">Format dd/mm/yyyy.</p>' +
-    '<details class="adv"><summary>Details</summary>' +
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
     '<p class="fld-hint" id="t-networkfee-hint">Fee calculated automatically from the send and received inputs above.</p></div>' +

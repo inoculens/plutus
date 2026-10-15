@@ -1671,12 +1671,13 @@ main, footer, #banner { position: relative; z-index: 1; }
 }
 .landing-top {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem 1rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
   margin-bottom: 1.5rem;
 }
+.landing-ticker { align-self: center; }
+.landing-eyebrow { align-self: flex-start; }
 .landing-eyebrow {
   margin: 0;
   display: inline-flex;
@@ -1771,11 +1772,12 @@ main, footer, #banner { position: relative; z-index: 1; }
   grid-template-columns: repeat(3, 1fr);
   gap: 1.4rem;
 }
-.landing-feats li { display: flex; flex-direction: column; gap: 0.25rem; }
-.feat-head { display: flex; align-items: center; gap: 0.5rem; }
-.feat-ico { display: inline-flex; flex-shrink: 0; color: var(--gold); }
-.landing-feats strong { font-family: var(--font-display); font-size: 0.93rem; font-weight: 650; }
-.landing-feats span { font-size: 0.83rem; color: var(--muted); }
+/* Feat rows are a two-column grid: the icon owns column 1, so the title
+   and its description share column 2 and their text lines up exactly. */
+.landing-feats li { display: grid; grid-template-columns: auto 1fr; column-gap: 0.5rem; row-gap: 0.15rem; align-items: center; }
+.landing-feats .feat-ico { grid-column: 1; grid-row: 1; display: inline-flex; flex-shrink: 0; color: var(--gold); }
+.landing-feats strong { grid-column: 2; grid-row: 1; font-family: var(--font-display); font-size: 0.93rem; font-weight: 650; }
+.feat-sub { grid-column: 2; grid-row: 2; font-size: 0.83rem; color: var(--muted); }
 /* Floating glass symbols (welcome card): Dollar left, Bitcoin tall in the
    middle behind, Euro right — shared baseline, lightly interlaced. Each
    wrapper hovers on its own rhythm (separate durations + phases). No shadows
@@ -1878,7 +1880,6 @@ main, footer, #banner { position: relative; z-index: 1; }
   .landing-ctas { flex-direction: column; align-items: stretch; }
   .landing-ctas button { width: 100%; }
   #landing-restore { width: auto; align-self: center; min-height: 2.75rem; }
-  .landing-top { flex-direction: column; align-items: stretch; }
   .landing-ticker { justify-content: space-between; width: 100%; }
   .landing-feats { grid-template-columns: 1fr; gap: 1rem; }
 }

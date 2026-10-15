@@ -12915,6 +12915,14 @@ function render() {
   syncTopbar(st);
   var ver = document.getElementById('app-ver');
   if (ver) ver.textContent = APP_VERSION;
+  // Footer GitHub link points at the actual deployed commit: the short hash
+  // is read from the stamped version string (bottom-right number), so every
+  // deploy links its own commit. Falls back to the repo root pre-stamp.
+  try {
+    var gh = document.getElementById('gh-link');
+    var ghm = /([0-9a-f]{7,40})/i.exec(String(APP_VERSION || ''));
+    if (gh && ghm) gh.href = 'https://github.com/inoculens/plutus/commit/' + ghm[1].toLowerCase();
+  } catch (e) { /* static repo link stays */ }
   route(); // show home or the routed account page
   refreshDisplayRates(st); // fill missing historical pairs, then repaint once
   try { syncInfoDots(); } catch (e) { /* hide decorative ⓘ where nothing overflows */ }

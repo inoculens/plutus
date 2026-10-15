@@ -1714,7 +1714,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   /* Higher specificity than the later base coin rules, which would
      otherwise win on source order and render desktop sizes here. */
   #landing .landing-coins .coin-btc { height: 230px; }
-  #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 78px; }
+  #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 83px; }
   #landing .landing-coins .coin-eur { height: 148px; margin-left: -78px; }
   .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
@@ -1747,9 +1747,11 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     min-width: 0;
   }
   /* Sides tuck slightly behind Bitcoin's edges — a light overlap, clearly
-     less than the deep mobile bleed (78px). Negative margins (not relative
-     offsets) keep the centered cluster deterministic at any width. */
-  .landing-coins .coin-float-usd { margin-right: -64px; }
+     less than the deep mobile bleed (83px). Negative margins (not relative
+     offsets) keep the centered cluster deterministic at any width. The left
+     tuck is deeper (-71px): the USD canvas grew wider with symmetric
+     padding, so this restores the exact ink interlock. */
+  .landing-coins .coin-float-usd { margin-right: -71px; }
   .landing-coins .coin-float-eur { margin-left: -64px; }
 }
 /* No shadows or filters anywhere near the animated cluster: any filter

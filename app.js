@@ -8823,7 +8823,7 @@ function buildGuidePanel() {
   box.setAttribute('aria-label', 'Next step');
   var step = document.createElement('p');
   step.className = 'guide-step';
-  step.textContent = 'Step 2 of 3';
+  step.textContent = 'Step 2 of 2';
   box.appendChild(step);
   var title = document.createElement('h2');
   title.className = 'guide-title';

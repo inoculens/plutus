@@ -1535,7 +1535,7 @@ body.has-no-trades .tb-field,
 body.has-no-trades .segmented,
 body.has-no-trades #tb-account { display: none; }
 
-/* ————— Guide panel (Step 2 of 3) ————— */
+/* ————— Guide panel (Step 2 of 2) ————— */
 .guide-panel {
   position: relative;
   overflow: hidden;

@@ -1734,14 +1734,14 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   .landing-eyebrow { align-self: flex-start; }
   .landing-herotext { min-width: 0; }
   .landing-feats { flex: 1 1 100%; }
-  /* Right art column: stretches to the text height, cluster centered in it
-     (ends at the feats divider, never the card bottom). */
+  /* Right art column: stretches to the text height; the row is pinned to
+     the top of the block (beside pill + headline), never centered. */
   .landing-coins {
     flex: 1 1 0;
     min-width: 0;
     align-self: stretch;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     /* Nudge the whole cluster 5px left of center. `translate` (not
        `left`) so it composes with the children's float animation;

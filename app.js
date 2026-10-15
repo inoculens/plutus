@@ -64,7 +64,7 @@ function isValidAccount(a) {
   if (!/^[A-Z0-9._-]{1,12}$/.test(tk)) return false;
   if (a.kind !== undefined && a.kind !== null && String(a.kind).trim() !== '') {
     var kd = String(a.kind).trim().toLowerCase();
-    if (kd !== 'crypto' && kd !== 'stock' && kd !== 'custom' && kd !== 'cash') return false;
+    if (kd !== 'crypto' && kd !== 'stock' && kd !== 'commodity' && kd !== 'custom' && kd !== 'cash') return false;
   }
   return true;
 }
@@ -73,7 +73,7 @@ function normalizeAccount(a) {
   var tk = String(a.ticker || '').trim().toUpperCase();
   var nm = String(a.name == null ? '' : a.name).trim() || tk;
   var kd = (a && typeof a.kind === 'string') ? a.kind.trim().toLowerCase() : 'crypto';
-  if (kd !== 'crypto' && kd !== 'stock' && kd !== 'custom' && kd !== 'cash') kd = 'crypto';
+  if (kd !== 'crypto' && kd !== 'stock' && kd !== 'commodity' && kd !== 'custom' && kd !== 'cash') kd = 'crypto';
   var out = {
     id: a.id,
     name: nm,
@@ -2904,6 +2904,53 @@ var SYMBOL_MAP = {
   ORCA: 'orca'
 };
 
+// Commodities / precious metals / energy, quoted in USD on Stooq (spot for
+// metals, front-month futures for energy/materials). Keys are the account
+// tickers users type; values are Stooq codes (lowercase). Tickers containing
+// a dot (e.g. GC.F) bypass the map and are used as Stooq codes directly so
+// new instruments work without a code change. Units: metals per troy ounce,
+// oil per barrel — converted into the display main via ECB like stocks.
+var COMMODITY_MAP = {
+  XAU: 'xauusd',
+  XAG: 'xagusd',
+  XPT: 'xptusd',
+  XPD: 'xpdusd',
+  WTI: 'cl.f',
+  USOIL: 'cl.f',
+  OIL: 'cl.f',
+  BRENT: 'cb.f',
+  UKOIL: 'cb.f',
+  BRENTOIL: 'cb.f',
+  NG: 'ng.f',
+  NATGAS: 'ng.f',
+  COPPER: 'hg.f',
+  HG: 'hg.f',
+  GC: 'gc.f',
+  SI: 'si.f',
+  PL: 'pl.f',
+  PA: 'pa.f'
+};
+
+function isStooqKind(kd) {
+  var k = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
+  return k === 'stock' || k === 'commodity';
+}
+
+function stooqCommoditySymbol(sym) {
+  var s = String(sym || '').trim().toUpperCase();
+  if (!/^[A-Z0-9._-]{1,12}$/.test(s)) return null;
+  if (Object.prototype.hasOwnProperty.call(COMMODITY_MAP, s)) return COMMODITY_MAP[s];
+  if (s.indexOf('.') !== -1) return s.toLowerCase();
+  return null;
+}
+
+function histKindFor(kd) {
+  var k = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
+  if (k === 'stock') return 'stock';
+  if (k === 'commodity') return 'commodity';
+  return 'crypto';
+}
+
 var PRICE_CACHE_TTL_MS = 60000;
 var priceCache = {}; // key "SYM:VS" (uppercased) -> {price, at}
 
@@ -2994,6 +3041,56 @@ function fetchStockPrice(symbol, vs) {
     return Promise.resolve(Number(cached.price));
   }
   var sq = stooqSymbol(sym);
+  if (!sq) return Promise.resolve(cached && cached.price > 0 ? Number(cached.price) : null);
+  var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  if (!capturedFetch) {
+    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
+    return Promise.resolve(null);
+  }
+  return capturedFetch(url).then(function (res) {
+    if (!res.ok) throw new Error('price-http-' + res.status);
+    return res.text();
+  }).then(function (csv) {
+    var usd = parseStooqClose(csv);
+    if (!isFinite(usd) || usd <= 0) {
+      if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+      return null;
+    }
+    if (cur === 'USD') {
+      priceCache[key] = { price: usd, at: Date.now() };
+      return usd;
+    }
+    return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
+      var v = usd * Number(r.rate);
+      if (!isFinite(v) || v <= 0) {
+        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+        return null;
+      }
+      priceCache[key] = { price: v, at: Date.now() };
+      return v;
+    }, function () {
+      if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+      return null;
+    });
+  }).then(null, function () {
+    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+    return null;
+  });
+}
+
+function fetchCommodityPrice(symbol, vs) {
+  var sym = String(symbol || '').trim().toUpperCase();
+  var cur = priceDefaultVs(vs);
+  cur = String(cur).trim().toUpperCase();
+  if (MAIN_CURRENCIES.indexOf(cur) === -1) cur = 'EUR';
+  var key = priceCacheKey('COMMODITY:' + sym, cur);
+  var now = Date.now();
+  var cached = priceCache[key];
+  if (cached && (now - cached.at) < PRICE_CACHE_TTL_MS && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
+    return Promise.resolve(Number(cached.price));
+  }
+  var sq = stooqCommoditySymbol(sym);
   if (!sq) return Promise.resolve(cached && cached.price > 0 ? Number(cached.price) : null);
   var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
@@ -3154,6 +3251,7 @@ function fetchLivePrice(symbol, vs, kind) {
   }
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   if (kd === 'stock') return fetchStockPrice(sym, cur);
+  if (kd === 'commodity') return fetchCommodityPrice(sym, cur);
   // Cash in the display fiat is worth 1 by definition — no network, no
   // override needed (a manual override above still wins when set).
   if (kd === 'cash' && sym === cur) {
@@ -3241,6 +3339,7 @@ function refreshAllPrices(symbols, vs, kinds) {
   var errors = {};
   var crypto = [];
   var stocks = [];
+  var commodities = [];
   var ovConvJobs = [];
   uniq.forEach(function (sym) {
     // Manual override wins — no market network. Legacy bare numbers are
@@ -3256,6 +3355,15 @@ function refreshAllPrices(symbols, vs, kinds) {
     }
     var kd = (typeof kindFor(sym) === 'string') ? kindFor(sym).trim().toLowerCase() : '';
     if (kd === 'stock') { stocks.push(sym); return; }
+    if (kd === 'commodity') {
+      if (!stooqCommoditySymbol(sym)) {
+        out[sym] = null;
+        errors[sym] = 'no live source mapped — add a manual override in Settings';
+        return;
+      }
+      commodities.push(sym);
+      return;
+    }
     // Cash in the display fiat is worth 1 by definition — no network, no
     // override needed (an override above already won when set).
     if (kd === 'cash' && sym === String(cur).toUpperCase()) { out[sym] = 1; return; }
@@ -3315,6 +3423,12 @@ function refreshAllPrices(symbols, vs, kinds) {
       else { out[sym] = null; errors[sym] = 'stock feed unreachable — try a manual override in Settings'; }
     }));
   });
+  commodities.forEach(function (sym) {
+    jobs.push(fetchLivePrice(sym, cur, 'commodity').then(function (p) {
+      if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
+      else { out[sym] = null; errors[sym] = 'commodity feed unreachable — try a manual override in Settings'; }
+    }));
+  });
   return Promise.all(jobs).then(function () { lastPriceErrors = errors; return out; });
 }
 
@@ -3324,7 +3438,8 @@ function refreshAllPrices(symbols, vs, kinds) {
 // execLock (stamped once at save time, converted to the display main at the
 // historical ECB rate — never refetched), (3) cached historical price for
 // (symbol, trade date, main), (4) network history — CoinGecko /history
-// (DD-MM-YYYY) for mapped crypto, Stooq daily closes for stock accounts with
+// (DD-MM-YYYY) for mapped crypto, Stooq daily closes for stock and
+// commodity accounts with
 // up to 5-day walk-back for weekends/holidays — converted into the display
 // main at the HISTORICAL ECB rate of the fixing date (never today's rate),
 // (5) null when unknown (row shows "—", never 0). Never throws to the UI.
@@ -3404,7 +3519,7 @@ function histRetryLater(key) {
       try { hit = getHistCached(parts[0], parts[1], parts[2], parts[3]); } catch (e) { hit = null; }
       if (hit) { try { delete histFailKeys[key]; } catch (e) { /* ignore */ } return; }
       histInflight[key] = true;
-      fetchHistoricalPrice(parts[0], parts[1], parts[2], parts[3] === 'stock' ? 'stock' : undefined).then(function (r) {
+      fetchHistoricalPrice(parts[0], parts[1], parts[2], (parts[3] === 'stock' || parts[3] === 'commodity') ? parts[3] : undefined).then(function (r) {
         delete histInflight[key];
         var price = (r && typeof r === 'object') ? r.price : r;
         if (isFinite(Number(price)) && Number(price) > 0) {
@@ -3500,7 +3615,8 @@ function freezeExecLock(tradeId, symbol, date, mainU, kind) {
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   if (!tradeId || !sym || !isValidDateStr(day)) return;
   if (kd === 'custom' || kd === 'cash') return;
-  if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
+  if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return; }
+  else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
   function patch(price, vs, source) {
     if (!(isFinite(Number(price)) && Number(price) > 0)) return;
     if (!/^[A-Z]{2,10}$/.test(String(vs || ''))) return;
@@ -3520,7 +3636,7 @@ function freezeExecLock(tradeId, symbol, date, mainU, kind) {
   // A live global override already serves this trade's Exec row: never stamp
   // a live price as a historical quote.
   try { if (priceOverrideEntry(sym) !== null) return; } catch (e) { /* fall through */ }
-  var kk = kd === 'stock' ? 'stock' : 'crypto';
+  var kk = histKindFor(kd);
   var ckey = sym + '|' + day + '|' + m + '|' + kk;
   // Already known (e.g. the first paint filled it while saving): freeze with
   // zero network.
@@ -3581,7 +3697,8 @@ function feeRateWhy(t, kind) {
   var kd = String(kind || '').trim().toLowerCase();
   if (kd === 'custom' || kd === 'cash') return 'No market history for this account kind — tap to retry anyway';
   var sym = t ? String(t.symbol || '').toUpperCase() : '';
-  if (kd !== 'stock' && !SYMBOL_MAP[sym]) return 'No market history for this asset — tap to retry anyway';
+  if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return 'No market history for this asset — tap to retry anyway'; }
+  else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return 'No market history for this asset — tap to retry anyway';
   return 'Tap to retry the rate lookup';
 }
 // Point the row's tooltip at new text without repainting (a full render
@@ -3622,8 +3739,9 @@ function retryFeeRate(tradeId) {
     if (a && typeof a.kind === 'string') kd = a.kind.trim().toLowerCase();
   } catch (e) { kd = ''; }
   if (kd === 'custom' || kd === 'cash') return;
-  if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
-  var kk = kd === 'stock' ? 'stock' : 'crypto';
+  if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return; }
+  else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
+  var kk = histKindFor(kd);
   var key = sym + '|' + day + '|' + mainU + '|' + kk;
   try { delete histFailKeys[key]; } catch (e) { /* ignore */ }
   if (histInflight[key]) return;
@@ -3928,6 +4046,40 @@ function fetchHistoricalStockPrice(symbol, dateStr, vs) {
   return attempt(dateStr.slice(0, 10), 0).then(function (r) { return r; }, function () { return null; });
 }
 
+function fetchHistoricalCommodityPrice(symbol, dateStr, vs) {
+  var sym = String(symbol || '').trim().toUpperCase();
+  var cur = String(priceDefaultVs(vs)).trim().toUpperCase();
+  var sq = stooqCommoditySymbol(sym);
+  if (!sq || !isValidDateStr(dateStr)) return Promise.resolve(null);
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  if (!capturedFetch) return Promise.resolve(null);
+  // Walk back up to 5 days for weekends/holidays (same window as stocks/FX).
+  function attempt(day, back) {
+    var compact = toStooqDay(day);
+    var url = 'https://stooq.com/q/d/l/?s=' + encodeURIComponent(sq) +
+      '&d1=' + encodeURIComponent(compact) + '&d2=' + encodeURIComponent(compact) + '&i=d';
+    return capturedFetch(url).then(function (res) {
+      if (!res.ok) throw new Error('price-http-' + res.status);
+      return res.text();
+    }).then(function (csv) {
+      var usd = parseStooqDaily(csv, compact);
+      if (isFinite(usd) && usd > 0) {
+        if (cur === 'USD') return { price: usd, interpolated: back > 0, day: day };
+        return fetchEcbRate(day, 'USD', cur).then(function (r) {
+          var v = usd * Number(r.rate);
+          if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
+          return { price: v, interpolated: back > 0 || !!r.interpolated, day: day };
+        });
+      }
+      if (back >= 5) throw new Error('no-fixing');
+      var prev = fxShiftDate(day, -1);
+      if (!prev) throw new Error('no-fixing');
+      return attempt(prev, back + 1);
+    });
+  }
+  return attempt(dateStr.slice(0, 10), 0).then(function (r) { return r; }, function () { return null; });
+}
+
 function fetchHistoricalPrice(symbol, dateStr, vs, kind) {
   var sym = String(symbol || '').trim().toUpperCase();
   var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
@@ -3949,6 +4101,7 @@ function fetchHistoricalPrice(symbol, dateStr, vs, kind) {
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   if (kd === 'custom' || kd === 'cash') return Promise.resolve(null);
   if (kd === 'stock') return fetchHistoricalStockPrice(sym, day, cur);
+  if (kd === 'commodity') return fetchHistoricalCommodityPrice(sym, day, cur);
   if (!SYMBOL_MAP[sym]) return Promise.resolve(null);
   return fetchHistoricalCryptoPrice(sym, day, cur);
 }
@@ -3963,7 +4116,7 @@ function getHistoricalExec(symbol, dateStr, vs, kind) {
   try { ov = priceOverrideFor(sym); } catch (e) { ov = null; }
   if (ov !== null) return { price: ov, source: 'manual', interpolated: false };
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
-  var hit = getHistCached(sym, day, cur, kd === 'stock' ? 'stock' : 'crypto');
+  var hit = getHistCached(sym, day, cur, histKindFor(kd));
   if (hit) return hit;
   return null;
 }
@@ -3993,8 +4146,9 @@ function ensureHistoricalExec(trades, main, kinds) {
     if (!sym || !isValidDateStr(day) || isFutureDateStr(day)) return;
     var kd = (typeof kindFor(sym) === 'string') ? kindFor(sym).trim().toLowerCase() : '';
     if (kd === 'custom' || kd === 'cash') return;
-    if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
-    var kk = (kd === 'stock' ? 'stock' : 'crypto');
+    if (kd === 'commodity') { if (!stooqCommoditySymbol(sym)) return; }
+    else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;
+    var kk = histKindFor(kd);
     var key = sym + '|' + day + '|' + m + '|' + kk;
     if (t.id) { (idsByKey[key] = idsByKey[key] || []).push(t.id); }
     if (seen[key]) return;
@@ -4032,6 +4186,10 @@ function ensureHistoricalExec(trades, main, kinds) {
 if (typeof window !== 'undefined') {
   window.Inoculens = window.Inoculens || {};
   window.Inoculens.SYMBOL_MAP = SYMBOL_MAP;
+  window.Inoculens.COMMODITY_MAP = COMMODITY_MAP;
+  window.Inoculens.stooqCommoditySymbol = stooqCommoditySymbol;
+  window.Inoculens.fetchCommodityPrice = fetchCommodityPrice;
+  window.Inoculens.fetchHistoricalCommodityPrice = fetchHistoricalCommodityPrice;
   window.Inoculens.PRICE_CACHE_TTL_MS = PRICE_CACHE_TTL_MS;
   window.Inoculens.priceCache = priceCache;
   window.Inoculens.fetchLivePrice = fetchLivePrice;
@@ -8005,7 +8163,7 @@ function createAccount(name, ticker, kind, extra) {
   if (!/^[A-Z0-9._-]{1,12}$/.test(tk)) { showBanner('Ticker looks invalid — letters/numbers, up to 12 chars.'); return null; }
   if (!nm) nm = tk; // name defaults to ticker
   var kd = (typeof kind === 'string' && kind) ? kind.trim().toLowerCase() : 'crypto';
-  if (kd !== 'crypto' && kd !== 'stock' && kd !== 'custom' && kd !== 'cash') kd = 'crypto';
+  if (kd !== 'crypto' && kd !== 'stock' && kd !== 'commodity' && kd !== 'custom' && kd !== 'cash') kd = 'crypto';
   var acc = { id: uid(), name: nm, ticker: tk, kind: kd, createdAt: new Date().toISOString() };
   if (extra && typeof extra === 'object') {
     if (typeof extra.address === 'string' && extra.address.trim() !== '') acc.address = extra.address.trim().slice(0, 128);
@@ -8786,7 +8944,7 @@ function buildAccountDialog() {
     '<label for="na-name">Account name</label>' +
     '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cold wallet">' +
     '<label for="na-kind">Asset type</label>' +
-    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
+    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="commodity">Commodity / Metal (live via Stooq)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
     '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
     '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<div id="na-fiat-row" hidden><label for="na-fiat">Currency</label>' +
@@ -11403,6 +11561,7 @@ function refreshPrices() {
       var kdl = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
       if (kdl === 'cash' || kdl === 'custom') return false;
       if (kdl === 'stock') return true;
+      if (kdl === 'commodity') { try { return !!stooqCommoditySymbol(up); } catch (e) { return false; } }
       try { if (SYMBOL_MAP && SYMBOL_MAP[up]) return true; } catch (e) { /* fall through */ }
       return false;
     }

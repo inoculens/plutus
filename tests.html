@@ -2830,6 +2830,68 @@
         }, function (e) { restore(); throw e; });
       });
 
+      test('COMMODITY_MAP covers metals + energy', function () {
+        var CM = P.COMMODITY_MAP;
+        assert(CM && CM['XAU'] === 'xauusd', 'XAU should map to xauusd');
+        assert(CM['XAG'] === 'xagusd', 'XAG should map to xagusd');
+        assert(CM['XPT'] === 'xptusd', 'XPT should map to xptusd');
+        assert(CM['WTI'] === 'cl.f', 'WTI should map to cl.f');
+        assert(CM['BRENT'] === 'cb.f', 'BRENT should map to cb.f');
+        assert(P.stooqCommoditySymbol('XAU') === 'xauusd', 'resolver must map XAU');
+        assert(P.stooqCommoditySymbol('GC.F') === 'gc.f', 'dotted tickers pass through as Stooq codes');
+        assert(P.stooqCommoditySymbol('FOO') === null, 'unmapped non-dotted tickers must be null');
+      });
+
+      testAsync('commodity live price resolves via Stooq without CoinGecko', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Symbol,Date,Time,Open,High,Low,Close,Volume\nXAUUSD,2026-10-14,23:00,4120,4130,4115,4127.3,100\n'); } });
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('XAU', 'USD', 'commodity').then(function (p) {
+          restore();
+          assert(Math.abs(p - 4127.3) < 1e-9, 'XAU live wrong: ' + p);
+          assert(urls.length === 1 && urls[0].indexOf('stooq.com') !== -1 && urls[0].indexOf('xauusd') !== -1, 'must hit Stooq xauusd: ' + urls.join(','));
+          assert(!urls.some(function (u) { return u.indexOf('coingecko') !== -1; }), 'must not touch CoinGecko');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('commodity refreshAllPrices routes by account kind', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          var u = String(url);
+          if (u.indexOf('xauusd') !== -1) {
+            return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Symbol,Date,Time,Open,High,Low,Close,Volume\nXAUUSD,2026-10-14,23:00,4120,4130,4115,4127.3,100\n'); } });
+          }
+          return Promise.reject(new Error('unexpected ' + u));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return refreshAllPrices(['XAU'], 'USD', { XAU: 'commodity' }).then(function (out) {
+          restore();
+          assert(Math.abs(out.XAU - 4127.3) < 1e-9, 'refreshAllPrices XAU wrong: ' + JSON.stringify(out));
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('unmapped commodity returns null without network', function () {
+        var origFetch = window.fetch;
+        var called = 0;
+        setState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function () { called++; return Promise.reject(new Error('must not fetch')); };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('FOO', 'EUR', 'commodity').then(function (p) {
+          restore();
+          assert(p === null, 'unmapped commodity should be null, got ' + p);
+          assert(called === 0, 'unmapped commodity must not hit network');
+        }, function (e) { restore(); throw e; });
+      });
+
       testAsync('overlapping refreshes: stale fiat results are discarded', function () {
         // EUR->RON switch while the EUR batch is still in flight: the late
         // EUR response must not overwrite the fresh RON live price (it used
@@ -3048,6 +3110,33 @@
           restore();
           var price = (r && typeof r === 'object') ? r.price : r;
           assert(Math.abs(price - 180.45) < 1e-9, 'walked-back stock history wrong: ' + JSON.stringify(r));
+          assert(r && r.interpolated === true, 'walk-back must flag interpolated');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('historical commodity walks back over shut days + historical FX', function () {
+        var origFetch = window.fetch;
+        setState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        try { H.clearHistCache(); } catch (e) { /* ignore */ }
+        window.fetch = function (url) {
+          var u = String(url);
+          if (u.indexOf('stooq.com') !== -1) {
+            assert(u.indexOf('xauusd') !== -1, 'must hit Stooq xauusd: ' + u);
+            if (u.indexOf('d1=20260106') !== -1) {
+              return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Date,Open,High,Low,Close,Volume\n'); } });
+            }
+            return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Date,Open,High,Low,Close,Volume\n2026-01-03,4000,4010,3990,4000,500\n'); } });
+          }
+          if (u.indexOf('frankfurter') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ date: '2026-01-03', rates: { EUR: 0.9 } }); } });
+          }
+          return Promise.reject(new Error('unexpected ' + u));
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return H.fetchHistoricalPrice('XAU', '2026-01-06', 'EUR', 'commodity').then(function (r) {
+          restore();
+          var price = (r && typeof r === 'object') ? r.price : r;
+          assert(Math.abs(price - 3600) < 1e-9, 'walked-back commodity history wrong: ' + JSON.stringify(r));
           assert(r && r.interpolated === true, 'walk-back must flag interpolated');
         }, function (e) { restore(); throw e; });
       });

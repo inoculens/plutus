@@ -7858,6 +7858,33 @@
         try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
         navHome();
       });
+      test('full transfer card never overflows its own box', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'TYest', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'General Investment Fund Account', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' },
+            { id: 'a3', name: 'BTC1 Long Term Vault', ticker: 'BTC', createdAt: '2026-10-06T00:00:02.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: FX, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'm1', type: 'transfer', symbol: 'BTC', qty: 0.6, total: 0, currency: 'EUR', date: '2026-10-15', fee: 0, feeCurrency: 'EUR', note: 'quarterly rebalance into cold storage', accountId: 'a1', networkFee: 0.1, fxLock: FX, ledger: '100', ledgerLabel: 'Test', txid: '23ba77800116b6a23ba77800116b6a23ba77800116b6a23ba77800116b6a', outputs: [{ toAccountId: 'a2', qty: 0.3, fee: 0.000001 }, { toAccountId: 'a3', qty: 0.1 }, { label: 'Arodoeexternalwallet', qty: 0.1 }], createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        var block = document.querySelector('[data-trade="m1"]');
+        assert(block !== null, 'transfer block must render');
+        var edge = block.getBoundingClientRect ? block.getBoundingClientRect().right : 0;
+        assert(edge <= document.documentElement.clientWidth + 2, 'card must not spill past the viewport, right edge at ' + edge);
+        var facts = block.querySelector('.trade-facts');
+        assert(facts !== null, 'facts strip must render');
+        assert(facts.scrollWidth <= facts.clientWidth + 2, 'facts must not overflow the strip, got ' + facts.scrollWidth + ' vs ' + facts.clientWidth);
+        navHome();
+      });
     })();
 
     renderResults();

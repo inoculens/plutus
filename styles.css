@@ -380,7 +380,7 @@ main {
   min-width: 0;
 }
 
-section, aside { background: transparent; border: none; padding: 0; }
+section, aside { background: transparent; border: none; padding: 0; min-width: 0; }
 section h2, aside h2 {
   margin: 0 0 0.8rem;
   font-family: var(--font-display);
@@ -1326,7 +1326,7 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
    (and the card) off-screen. Tap/ⓘ opens the full list. */
 .trade-block .stat-row[data-label="Received"] {
   flex: 0 1 auto;
-  max-width: 18rem;
+  max-width: 12rem;
   min-width: 0;
   overflow: hidden;
 }

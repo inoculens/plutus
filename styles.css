@@ -1704,7 +1704,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     column-gap: 2.5rem;
   }
   .landing-copy { display: contents; }
-  .landing-eyebrow { grid-area: eyebrow; }
+  .landing-eyebrow { grid-area: eyebrow; justify-self: start; }
   .landing-herotext { grid-area: herotext; min-width: 0; }
   .landing-step { grid-area: step; }
   .landing-ctas { grid-area: ctas; }

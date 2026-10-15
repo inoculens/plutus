@@ -1745,6 +1745,10 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     align-items: flex-end;
     justify-content: center;
     min-width: 0;
+    /* Nudge the whole cluster 5px left of center. `translate` (not
+       `left`) so it composes with the children's float animation;
+       the mobile query already resets it with `translate: none`. */
+    translate: -5px 0;
   }
   /* Sides tuck slightly behind Bitcoin's edges — a light overlap, clearly
      less than the deep mobile bleed (83px). Negative margins (not relative
@@ -1760,9 +1764,9 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
    transform-only layers (translate3d + will-change) so a GPU compositor
    moves them for free. */
 .landing-coins .coin { display: block; width: auto; }
-.landing-coins .coin-btc { height: 300px; opacity: 0.94; }
-.landing-coins .coin-usd { height: 204px; }
-.landing-coins .coin-eur { height: 204px; }
+.landing-coins .coin-btc { height: 310px; opacity: 0.94; }
+.landing-coins .coin-usd { height: 214px; }
+.landing-coins .coin-eur { height: 214px; }
 .coin-float { display: flex; align-items: flex-end; will-change: transform; backface-visibility: hidden; }
 .coin-float-btc { z-index: 1; }
 .coin-float-usd { z-index: 2; }

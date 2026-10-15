@@ -2842,21 +2842,41 @@
         assert(P.stooqCommoditySymbol('FOO') === null, 'unmapped non-dotted tickers must be null');
       });
 
-      testAsync('commodity live price resolves via Stooq without CoinGecko', function () {
+      testAsync('commodity live price resolves via gold-api without CoinGecko', function () {
         var origFetch = window.fetch;
         var urls = [];
         setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
         clearPriceCache();
         window.fetch = function (url) {
           urls.push(String(url));
-          return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Symbol,Date,Time,Open,High,Low,Close,Volume\nXAUUSD,2026-10-14,23:00,4120,4130,4115,4127.3,100\n'); } });
+          return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ price: 4127.3, currency: 'USD', symbol: 'XAU' }); } });
         };
         function restore() { window.fetch = origFetch; restoreState(); }
         return fetchLivePrice('XAU', 'USD', 'commodity').then(function (p) {
           restore();
           assert(Math.abs(p - 4127.3) < 1e-9, 'XAU live wrong: ' + p);
-          assert(urls.length === 1 && urls[0].indexOf('stooq.com') !== -1 && urls[0].indexOf('xauusd') !== -1, 'must hit Stooq xauusd: ' + urls.join(','));
+          assert(urls.length === 1 && urls[0].indexOf('api.gold-api.com/price/XAU') !== -1, 'must hit gold-api XAU: ' + urls.join(','));
           assert(!urls.some(function (u) { return u.indexOf('coingecko') !== -1; }), 'must not touch CoinGecko');
+        }, function (e) { restore(); throw e; });
+      });
+
+      testAsync('commodity falls back to Stooq when gold-api fails', function () {
+        var origFetch = window.fetch;
+        var urls = [];
+        setState({ settings: { mainCurrency: 'USD', costMethod: 'average' }, trades: [], priceOverrides: {} });
+        clearPriceCache();
+        window.fetch = function (url) {
+          urls.push(String(url));
+          if (String(url).indexOf('gold-api') !== -1) {
+            return Promise.resolve({ ok: false, status: 500 });
+          }
+          return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Symbol,Date,Time,Open,High,Low,Close,Volume\nXAUUSD,2026-10-14,23:00,4120,4130,4115,4000,100\n'); } });
+        };
+        function restore() { window.fetch = origFetch; restoreState(); }
+        return fetchLivePrice('XAU', 'USD', 'commodity').then(function (p) {
+          restore();
+          assert(Math.abs(p - 4000) < 1e-9, 'Stooq fallback wrong: ' + p);
+          assert(urls.some(function (u) { return u.indexOf('stooq.com') !== -1 && u.indexOf('xauusd') !== -1; }), 'must fall back to Stooq xauusd: ' + urls.join(','));
         }, function (e) { restore(); throw e; });
       });
 
@@ -2866,8 +2886,8 @@
         clearPriceCache();
         window.fetch = function (url) {
           var u = String(url);
-          if (u.indexOf('xauusd') !== -1) {
-            return Promise.resolve({ ok: true, text: function () { return Promise.resolve('Symbol,Date,Time,Open,High,Low,Close,Volume\nXAUUSD,2026-10-14,23:00,4120,4130,4115,4127.3,100\n'); } });
+          if (u.indexOf('gold-api') !== -1) {
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ price: 4127.3, currency: 'USD', symbol: 'XAU' }); } });
           }
           return Promise.reject(new Error('unexpected ' + u));
         };

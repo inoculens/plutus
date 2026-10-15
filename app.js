@@ -2951,6 +2951,38 @@ function histKindFor(kd) {
   return 'crypto';
 }
 
+// Live metals via gold-api.com (free, no key, CORS-open): XAU/XAG/XPT/XPD
+// spot per troy ounce + HG copper, quoted in USD. COPPER is an alias for
+// HG. Energy (WTI/BRENT/NG) has no key-free source and stays on the Stooq
+// attempt below, with the manual override as fallback.
+var GOLD_API_METALS = ['XAU', 'XAG', 'XPT', 'XPD', 'HG'];
+function goldApiSymbol(sym) {
+  var s = String(sym || '').trim().toUpperCase();
+  if (s === 'COPPER') return 'HG';
+  if (GOLD_API_METALS.indexOf(s) !== -1) return s;
+  return null;
+}
+
+// USD spot from gold-api.com. Resolves a positive number or null — never
+// throws, never caches (the caller bridges + caches into the display fiat).
+function fetchGoldApiUsd(sym, fetchImpl) {
+  var s = goldApiSymbol(sym);
+  if (!s) return Promise.resolve(null);
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  var url = 'https://api.gold-api.com/price/' + encodeURIComponent(s);
+  try {
+    return f(url).then(function (res) {
+      if (!res || !res.ok) throw new Error('goldapi-http-' + (res && res.status));
+      return res.json();
+    }).then(function (data) {
+      var p = data ? Number(data.price) : NaN;
+      if (isFinite(p) && p > 0) return p;
+      return null;
+    }).then(null, function () { return null; });
+  } catch (e) { return Promise.resolve(null); }
+}
+
 var PRICE_CACHE_TTL_MS = 60000;
 var priceCache = {}; // key "SYM:VS" (uppercased) -> {price, at}
 
@@ -3090,43 +3122,52 @@ function fetchCommodityPrice(symbol, vs) {
   if (cached && (now - cached.at) < PRICE_CACHE_TTL_MS && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
     return Promise.resolve(Number(cached.price));
   }
-  var sq = stooqCommoditySymbol(sym);
-  if (!sq) return Promise.resolve(cached && cached.price > 0 ? Number(cached.price) : null);
-  var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
-  return capturedFetch(url).then(function (res) {
-    if (!res.ok) throw new Error('price-http-' + res.status);
-    return res.text();
-  }).then(function (csv) {
-    var usd = parseStooqClose(csv);
-    if (!isFinite(usd) || usd <= 0) {
-      if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-      return null;
-    }
+  function cachedOrNull() {
+    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+    return null;
+  }
+  // Shared USD->display-fiat bridge (same ECB source the stock path uses).
+  function bridged(usd) {
+    usd = Number(usd);
+    if (!isFinite(usd) || usd <= 0) return Promise.resolve(cachedOrNull());
     if (cur === 'USD') {
       priceCache[key] = { price: usd, at: Date.now() };
-      return usd;
+      return Promise.resolve(usd);
     }
     return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
       var v = usd * Number(r.rate);
-      if (!isFinite(v) || v <= 0) {
-        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-        return null;
-      }
+      if (!isFinite(v) || v <= 0) return cachedOrNull();
       priceCache[key] = { price: v, at: Date.now() };
       return v;
-    }, function () {
-      if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-      return null;
-    });
-  }).then(null, function () {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
-  });
+    }, function () { return cachedOrNull(); });
+  }
+  // Legacy Stooq quote (kept as the energy path + metals fallback — the
+  // q/l endpoint currently answers 404, so a miss here resolves null and
+  // the row keeps its honest "feed unreachable" error + override fallback).
+  function viaStooq() {
+    var sq = stooqCommoditySymbol(sym);
+    if (!sq) return Promise.resolve(cachedOrNull());
+    var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
+    return capturedFetch(url).then(function (res) {
+      if (!res.ok) throw new Error('price-http-' + res.status);
+      return res.text();
+    }).then(function (csv) {
+      return bridged(parseStooqClose(csv));
+    }).then(null, function () { return cachedOrNull(); });
+  }
+  // Metals first: gold-api.com is free, key-free and CORS-open.
+  if (goldApiSymbol(sym)) {
+    return fetchGoldApiUsd(sym, capturedFetch).then(function (usd) {
+      if (isFinite(Number(usd)) && Number(usd) > 0) return bridged(usd);
+      return viaStooq();
+    }, function () { return viaStooq(); });
+  }
+  return viaStooq();
 }
 
 var lastPriceErrors = {}; // sym -> short reason for the latest refreshAllPrices run (feeds the error-details popup)
@@ -4188,6 +4229,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.SYMBOL_MAP = SYMBOL_MAP;
   window.Inoculens.COMMODITY_MAP = COMMODITY_MAP;
   window.Inoculens.stooqCommoditySymbol = stooqCommoditySymbol;
+  window.Inoculens.goldApiSymbol = goldApiSymbol;
+  window.Inoculens.fetchGoldApiUsd = fetchGoldApiUsd;
   window.Inoculens.fetchCommodityPrice = fetchCommodityPrice;
   window.Inoculens.fetchHistoricalCommodityPrice = fetchHistoricalCommodityPrice;
   window.Inoculens.PRICE_CACHE_TTL_MS = PRICE_CACHE_TTL_MS;
@@ -8944,7 +8987,7 @@ function buildAccountDialog() {
     '<label for="na-name">Account name</label>' +
     '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cold wallet">' +
     '<label for="na-kind">Asset type</label>' +
-    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="commodity">Commodity / Metal (live via Stooq)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
+    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live via Stooq)</option><option value="commodity">Commodity / Metal (live prices)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
     '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
     '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<div id="na-fiat-row" hidden><label for="na-fiat">Currency</label>' +

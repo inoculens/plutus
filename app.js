@@ -9301,6 +9301,45 @@ function wireLanding() {
       openDialog('settings-dialog');
     });
   }
+  refreshLandingTicker();
+}
+
+// Landing ticker: live sample prices for BTC (crypto), XAU (commodity) and
+// SPCX (stock) in the current main fiat. Display-only: unknown stays '—'
+// (never 0) and failures stay silent — no banner, the empty state has no
+// data to protect. Throttled to one fetch per 60s per fiat.
+var landingTickAt = 0;
+var landingTickCur = '';
+function refreshLandingTicker() {
+  var main = 'EUR';
+  try { main = String(loadState().settings.mainCurrency || 'EUR').toUpperCase(); } catch (e) { main = 'EUR'; }
+  var syms = ['BTC', 'XAU', 'SPCX'];
+  var ids = ['tick-btc', 'tick-xau', 'tick-spcx'];
+  var now = Date.now();
+  if (main === landingTickCur && (now - landingTickAt) < 60000) return;
+  landingTickCur = main;
+  landingTickAt = now;
+  syms.forEach(function (s, i) {
+    var el = document.getElementById(ids[i]);
+    if (el) { el.textContent = '…'; paintLoading(el, true, s); }
+  });
+  // refreshAllPrices records the run in lastPriceErrors: save/restore it so
+  // the ticker never disturbs the portfolio error state.
+  var prevErr = null;
+  try { prevErr = lastPriceErrors; } catch (e) { prevErr = null; }
+  refreshAllPrices(syms, main, { BTC: 'crypto', XAU: 'commodity', SPCX: 'stock' }).then(function (out) {
+    try { lastPriceErrors = prevErr; } catch (e) { /* keep */ }
+    var curNow = 'EUR';
+    try { curNow = String(loadState().settings.mainCurrency || 'EUR').toUpperCase(); } catch (e) { curNow = 'EUR'; }
+    if (curNow !== main) return; // fiat moved mid-fetch: a newer run owns the paint
+    syms.forEach(function (s, i) {
+      var el = document.getElementById(ids[i]);
+      if (!el) return;
+      var v = out ? out[s] : null;
+      paintLoading(el, false);
+      el.textContent = (isFinite(Number(v)) && Number(v) > 0) ? fmtMoney(Number(v), main) : '—';
+    });
+  });
 }
 
 function buildAccounts() {

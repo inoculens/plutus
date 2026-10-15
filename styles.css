@@ -1627,6 +1627,29 @@ button.linklike {
 
 button.linklike:hover { color: var(--text); background: none; border-color: transparent; }
 
+/* Frontpage backdrop: subtle 40px grid + soft central glow.
+   Fixed pseudo-layers sit behind content and never intercept input. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 30%, rgba(227, 197, 124, 0.07) 0%, rgba(0, 240, 255, 0.02) 35%, transparent 70%);
+}
+main, footer, #banner { position: relative; z-index: 1; }
+
 /* ————— Landing ————— */
 #landing {
   position: relative;
@@ -1646,9 +1669,19 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--hairline-gold), transparent);
 }
+.landing-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
 .landing-eyebrow {
-  margin: 0 0 1rem;
-  display: inline-block;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -1659,6 +1692,35 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   border-radius: 999px;
   padding: 0.3rem 0.85rem;
 }
+.landing-eyebrow svg { flex-shrink: 0; }
+/* Live sample-price ribbon: fixed pill box, fluid values — prices truncate
+   inside their slots and never push the card wider. */
+.landing-ticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  background: rgba(7, 8, 11, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 1rem;
+}
+.tick { display: inline-flex; align-items: baseline; gap: 0.45rem; min-width: 0; overflow: hidden; }
+.tick-sym { color: var(--muted); font-weight: 600; }
+.tick-val {
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 4.2rem;
+  max-width: 9rem;
+}
+.tick-sep { color: var(--muted-2); }
 .landing-title {
   margin: 0 0 1rem;
   font-family: var(--font-display);
@@ -1684,16 +1746,22 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   max-width: 38rem;
 }
 .landing-sub .nowrap { white-space: nowrap; }
-.landing-ctas { display: flex; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.landing-ctas { display: flex; align-items: center; gap: 0.8rem 1.25rem; flex-wrap: wrap; margin-bottom: 2rem; }
 .landing-ctas button { min-height: 3.2rem; padding: 0.8rem 2rem; font-size: 1.02rem; }
+#landing-create { display: inline-flex; align-items: center; justify-content: center; gap: 0.6rem; }
+#landing-create svg { flex-shrink: 0; }
+/* Restore keeps the quiet link look inside the CTA row: generous tap height,
+   no box — the id selector beats the generic .landing-ctas button padding. */
+#landing-restore { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.8rem 0.25rem; }
+#landing-restore svg { flex-shrink: 0; }
 .landing-step {
-  margin: 0 0 1.4rem;
+  margin: 0 0 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--muted);
-  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.08em;
 }
-.landing-alt { margin: 0 0 2rem; }
 .landing-feats {
   list-style: none;
   margin: 0;
@@ -1704,7 +1772,9 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   gap: 1.4rem;
 }
 .landing-feats li { display: flex; flex-direction: column; gap: 0.25rem; }
-.landing-feats strong { font-size: 0.93rem; font-weight: 650; }
+.feat-head { display: flex; align-items: center; gap: 0.5rem; }
+.feat-ico { display: inline-flex; flex-shrink: 0; color: var(--gold); }
+.landing-feats strong { font-family: var(--font-display); font-size: 0.93rem; font-weight: 650; }
 .landing-feats span { font-size: 0.83rem; color: var(--muted); }
 /* Floating glass symbols (welcome card): Dollar left, Bitcoin tall in the
    middle behind, Euro right — shared baseline, lightly interlaced. Each
@@ -1742,7 +1812,7 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   #landing .landing-coins .coin-btc { height: 230px; }
   #landing .landing-coins .coin-usd { height: 148px; position: relative; left: 83px; }
   #landing .landing-coins .coin-eur { height: 148px; margin-left: -78px; }
-  .landing-copy, .landing-feats { position: relative; z-index: 1; }
+  .landing-top, .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
 @media (min-width: 1024px) {
   #landing:not([hidden]) { display: flex; }
@@ -1754,10 +1824,11 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     align-content: start;
     column-gap: 2.5rem;
   }
-  /* Left text column: eyebrow, headline, step, actions, restore-link stack
-     in flow. No grid areas, no display:contents — plain flow next to art. */
+  /* Left text column: headline, step, actions stack in flow. The ticker
+     row (.landing-top) and feats each take a full row. No grid areas, no
+     display:contents — plain flow next to art. */
+  .landing-top { flex: 1 1 100%; }
   .landing-copy { display: flex; flex-direction: column; align-items: flex-start; flex: 1.15 1 0; min-width: 0; }
-  .landing-eyebrow { align-self: flex-start; }
   .landing-herotext { min-width: 0; }
   .landing-feats { flex: 1 1 100%; }
   /* Right art column: stretches to the text height; the row is pinned to
@@ -1806,6 +1877,9 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   .landing-sub .ls-a, .landing-sub .ls-b, .landing-sub .ls-free { display: block; }
   .landing-ctas { flex-direction: column; align-items: stretch; }
   .landing-ctas button { width: 100%; }
+  #landing-restore { width: auto; align-self: center; min-height: 2.75rem; }
+  .landing-top { flex-direction: column; align-items: stretch; }
+  .landing-ticker { justify-content: space-between; width: 100%; }
   .landing-feats { grid-template-columns: 1fr; gap: 1rem; }
 }
 
@@ -1852,6 +1926,11 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
 .foot-tag { margin: 0; color: var(--muted); font-size: 0.8rem; }
 .foot-link { color: var(--muted); font-size: 0.8rem; text-decoration: underline; text-underline-offset: 3px; }
 .foot-link:hover { color: var(--text); }
+/* GitHub repo link: same hover brightening as the other footer links, but
+   never underlined. The element + class selector beats .foot-link. */
+a.foot-gh { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }
+a.foot-gh:hover { text-decoration: none; }
+.foot-gh img { width: 0.9rem; height: 0.9rem; display: block; }
 .foot-ver { margin: 0 0 0 auto; font-size: 0.79rem; color: var(--muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 720px) {
   /* Brand, tagline and version each take a full row; Privacy + Credits
@@ -2047,6 +2126,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 /* Very small phones (≤380px): type + spacing tighten, structure unchanged. */
 @media (max-width: 380px) {
   main { padding-left: 0.7rem; padding-right: 0.7rem; }
+  .landing-ticker { gap: 0.5rem; padding: 0.4rem 0.75rem; }
+  .tick { gap: 0.3rem; }
+  .tick-val { min-width: 0; }
   .card-value { font-size: 0.98rem; }
   .trade-block .stat-row { flex-basis: 100%; }
   .swatches { grid-template-columns: 1fr; }
@@ -2078,6 +2160,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 
 @media print {
   body { background: #fff; color: #000; }
+  body::before, body::after { display: none !important; }
   header.brand, #fab-trade, .menu, dialog { display: none !important; }
   .cards, .account-card, .trade-block, .ledger-list, #hero, #landing { border: 1px solid #ccc; background: none; box-shadow: none; }
 }

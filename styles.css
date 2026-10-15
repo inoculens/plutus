@@ -1723,10 +1723,11 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   #landing {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     /* Step/CTAs/restore-link stack in the left column right under the body
-       text; the art cell spans those rows so the tall coin cluster never
-       pushes the actions down. Feats stay a full-width footer strip. */
+       text; the art cell spans eyebrow..alt so the coin cluster centers
+       across the full block, from the top down to the feats divider
+       (not the card bottom). Feats stay a full-width footer strip. */
     grid-template-areas:
-      "eyebrow eyebrow"
+      "eyebrow art"
       "herotext art"
       "step art"
       "ctas art"

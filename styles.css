@@ -1568,7 +1568,9 @@ body.has-no-trades #tb-account { display: none; }
   border: 1px solid var(--hairline-gold);
   background: var(--gold-soft);
   border-radius: 999px;
-  padding: 0.35rem 0.8rem;
+  /* Optical centering for all-caps: cap glyphs leave dead descent space
+     below the baseline, so the top padding runs thicker than the bottom. */
+  padding: 0.42rem 0.8rem 0.28rem;
 }
 
 .guide-title {

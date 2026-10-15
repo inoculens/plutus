@@ -1708,9 +1708,11 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
     -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 45%);
     mask-image: linear-gradient(90deg, transparent 0, #000 45%);
   }
-  .landing-coins .coin-btc { height: 150px; }
-  .landing-coins .coin-usd { height: 104px; position: relative; left: 58px; }
-  .landing-coins .coin-eur { height: 104px; margin-left: -58px; }
+  /* Higher specificity than the later base coin rules, which would
+     otherwise win on source order and render desktop sizes here. */
+  #landing .landing-coins .coin-btc { height: 150px; }
+  #landing .landing-coins .coin-usd { height: 104px; position: relative; left: 58px; }
+  #landing .landing-coins .coin-eur { height: 104px; margin-left: -58px; }
   .landing-copy, .landing-feats { position: relative; z-index: 1; }
 }
 @media (min-width: 1024px) {

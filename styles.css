@@ -23,6 +23,7 @@
   --radius-lg: 18px;
   --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --max: 1280px;
   --shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
 }
@@ -1697,7 +1698,7 @@ main, footer, #banner { position: relative; z-index: 1; }
   align-items: center;
   gap: 0.7rem;
   max-width: 100%;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   letter-spacing: 0.02em;
   background: rgba(7, 8, 11, 0.8);
@@ -1745,15 +1746,15 @@ main, footer, #banner { position: relative; z-index: 1; }
 .landing-sub .nowrap { white-space: nowrap; }
 .landing-ctas { display: flex; align-items: center; gap: 0.8rem 1.25rem; flex-wrap: wrap; margin-bottom: 2rem; }
 .landing-ctas button { min-height: 3.2rem; padding: 0.8rem 2rem; font-size: 1.02rem; }
-#landing-create { display: inline-flex; align-items: center; justify-content: center; gap: 0.6rem; }
+#landing-create { display: inline-flex; align-items: center; justify-content: center; gap: 0.6rem; font-family: var(--font-display); font-weight: 600; }
 #landing-create svg { flex-shrink: 0; }
 /* Restore keeps the quiet link look inside the CTA row: generous tap height,
    no box — the id selector beats the generic .landing-ctas button padding. */
-#landing-restore { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.8rem 0.25rem; }
+#landing-restore { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.8rem 0.25rem; font-family: var(--font-ui); font-weight: 400; font-size: 0.825rem; }
 #landing-restore svg { flex-shrink: 0; }
 .landing-step {
   margin: 0 0 1rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--gold);

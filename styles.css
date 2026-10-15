@@ -1800,6 +1800,10 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 .coin-float-eur { z-index: 3; }
 @media (max-width: 720px) {
   #landing { padding: 2.25rem 1.4rem 1.6rem; }
+  /* Mobile tagline breaks: line 1 = ledgers, line 2 = commodities.,
+     line 3 = FREE. Desktop keeps its own single break (hidden here). */
+  .landing-sub .br-desktop { display: none; }
+  .landing-sub .ls-a, .landing-sub .ls-b, .landing-sub .ls-free { display: block; }
   .landing-ctas { flex-direction: column; align-items: stretch; }
   .landing-ctas button { width: 100%; }
   .landing-feats { grid-template-columns: 1fr; gap: 1rem; }

@@ -1755,10 +1755,12 @@ main, footer, #banner { position: relative; z-index: 1; }
 .landing-step {
   margin: 0 0 1rem;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 500;
   color: #e5c07b;
-  letter-spacing: 0.08em;
+  letter-spacing: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 .landing-feats {
   list-style: none;

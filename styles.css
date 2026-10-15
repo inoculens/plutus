@@ -1870,15 +1870,16 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
   .trade-head { flex: 1 1 100%; flex-wrap: wrap; row-gap: 0.4rem; }
   /* Record head on phones: date + type left with edit/delete pinned
-     top-right, now-worth pill on its own second row — the long pill must
-     never shove the actions a line down (see trade-head DOM order). */
+     top-right, long pills (now-worth, swap/what) wrap below, and the FIFO
+     record # takes its own row underneath — it must never shove the
+     actions a line down (see trade-head DOM order). */
   .trade-head .trade-when { order: 1; }
-  .trade-head .trade-id { order: 2; }
-  .trade-head .side { order: 3; }
-  .trade-head .trade-edit, .trade-head .trade-del { order: 4; }
+  .trade-head .side { order: 2; }
+  .trade-head .trade-edit, .trade-head .trade-del { order: 3; }
   .trade-head .trade-edit { margin-left: auto; }
-  .trade-head .trade-now { order: 5; }
-  .trade-head .trade-what { order: 6; }
+  .trade-head .trade-now { order: 4; }
+  .trade-head .trade-what { order: 5; }
+  .trade-head .trade-id { order: 6; flex-basis: 100%; }
   .trade-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
   .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }
   .trade-block .stat-row[data-label="Note"] { flex-basis: 100%; max-width: none; }

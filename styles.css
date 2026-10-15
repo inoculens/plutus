@@ -1679,22 +1679,22 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 .landing-feats li { display: flex; flex-direction: column; gap: 0.25rem; }
 .landing-feats strong { font-size: 0.93rem; font-weight: 650; }
 .landing-feats span { font-size: 0.83rem; color: var(--muted); }
-/* Floating currency trio (welcome card): decorative white glyphs filling
-   the empty upper-right. One shared drift so all three move together;
-   absolute layer, so text boxes never shift. Hidden on narrow screens. */
+/* Floating glass coins (welcome card): decorative medallions filling the
+   empty upper-right — BTC tucked behind, EUR and Dollar overlapped in
+   front. One shared drift so all three move together; absolute layer, so
+   text boxes never shift. Hidden on narrow screens. */
 .landing-coins {
   position: absolute;
-  top: 2.2rem;
+  top: 2rem;
   right: 2.25rem;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
   pointer-events: none;
 }
-.landing-coins .coin { display: block; filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.28)); }
-.landing-coins .coin-eur { width: 104px; height: 104px; }
-.landing-coins .coin-usd { width: 82px; height: 82px; }
-.landing-coins .coin-btc { width: 96px; height: 96px; }
+.landing-coins .coin { display: block; filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.5)); }
+.landing-coins .coin-btc { width: 118px; height: 118px; z-index: 1; opacity: 0.94; margin-top: 26px; }
+.landing-coins .coin-eur { width: 138px; height: 138px; z-index: 2; margin-left: -38px; margin-top: -14px; }
+.landing-coins .coin-usd { width: 126px; height: 126px; z-index: 3; margin-left: -34px; margin-top: 30px; }
 @media (max-width: 899px) {
   .landing-coins { display: none; }
 }

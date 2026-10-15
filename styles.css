@@ -1694,10 +1694,21 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   #landing:not([hidden]) { display: grid; }
   #landing {
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-    grid-template-areas: "copy art" "feats feats";
+    grid-template-areas:
+      "eyebrow eyebrow"
+      "herotext art"
+      "step step"
+      "ctas ctas"
+      "alt alt"
+      "feats feats";
     column-gap: 2.5rem;
   }
-  .landing-copy { grid-area: copy; }
+  .landing-copy { display: contents; }
+  .landing-eyebrow { grid-area: eyebrow; }
+  .landing-herotext { grid-area: herotext; min-width: 0; }
+  .landing-step { grid-area: step; }
+  .landing-ctas { grid-area: ctas; }
+  .landing-alt { grid-area: alt; }
   .landing-feats { grid-area: feats; }
   .landing-coins {
     grid-area: art;

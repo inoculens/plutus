@@ -3163,6 +3163,26 @@
         }, function (e) { restore(); throw e; });
       });
 
+      test('account dialog ticker hint follows the asset kind', function () {
+        buildAccountDialog();
+        var kind = document.getElementById('na-kind');
+        var tick = document.getElementById('na-ticker');
+        assert(kind && tick, 'account dialog must exist');
+        function pick(v) {
+          kind.value = v;
+          var ev = null;
+          try { ev = new Event('change', { bubbles: true }); } catch (e) { ev = document.createEvent('Event'); ev.initEvent('change', true, true); }
+          kind.dispatchEvent(ev);
+        }
+        pick('crypto');
+        assert(tick.placeholder === 'e.g. BTC', 'crypto hint wrong: ' + tick.placeholder);
+        pick('stock');
+        assert(tick.placeholder === 'e.g. SPCX', 'stock hint wrong: ' + tick.placeholder);
+        pick('commodity');
+        assert(tick.placeholder === 'e.g. XAU', 'commodity hint wrong: ' + tick.placeholder);
+        pick('crypto');
+      });
+
       testAsync('overlapping refreshes: stale fiat results are discarded', function () {
         // EUR->RON switch while the EUR batch is still in flight: the late
         // EUR response must not overwrite the fresh RON live price (it used

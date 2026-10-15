@@ -9431,9 +9431,16 @@ function buildAccountDialog() {
     '<button id="na-create" class="primary" type="button">Create account</button>';
   host.appendChild(wrap);
   function syncAccountKindUI() {
-    var isCash = uiVal('na-kind', 'crypto') === 'cash';
+    var kindNow = uiVal('na-kind', 'crypto');
+    var isCash = kindNow === 'cash';
     var tRow = document.getElementById('na-ticker-row');
     if (tRow) tRow.hidden = isCash;
+    // Ticker hint follows the asset kind so the example is always relevant.
+    var tick = document.getElementById('na-ticker');
+    if (tick) {
+      tick.placeholder = kindNow === 'stock' ? 'e.g. SPCX'
+        : (kindNow === 'commodity' ? 'e.g. XAU' : 'e.g. BTC');
+    }
     var fRow = document.getElementById('na-fiat-row');
     if (fRow) fRow.hidden = !isCash;
     var fcRow = document.getElementById('na-fiatcode-row');

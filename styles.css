@@ -1682,8 +1682,9 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
 .landing-feats span { font-size: 0.83rem; color: var(--muted); }
 /* Floating glass symbols (welcome card): Dollar left, Bitcoin tall in the
    middle behind, Euro right — shared baseline, lightly interlaced. Each
-   wrapper hovers on its own rhythm (separate durations + phases) while the
-   <img> inside keeps a static drop-shadow (see perf note below). On wide
+   wrapper hovers on its own rhythm (separate durations + phases) while a
+   baked ground shadow under each symbol provides the depth (see perf note
+   below: no filters inside the animated cluster). On wide
    screens the card is a two-column grid with the cluster centered in the
    right cell; text can never collide. On narrow screens the cluster becomes
    an ambient backdrop (see below). */
@@ -1751,15 +1752,27 @@ button.linklike:hover { color: var(--text); background: none; border-color: tran
   .landing-coins .coin-float-usd { margin-right: -64px; }
   .landing-coins .coin-float-eur { margin-left: -64px; }
 }
-/* The drop-shadow lives on the static <img> while the .coin-float wrapper
-   carries the hover animation: animating the same element that owns a
-   filter forces Firefox to re-filter every frame (choppy hover), whereas a
-   transforming parent just re-composites the cached layer. */
-.landing-coins .coin { display: block; width: auto; filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.5)); }
+/* No filter anywhere inside the animated cluster: even a static
+   drop-shadow on the <img> makes Firefox re-run the filter for every frame
+   of the wrapper's transform animation. Depth comes from a baked ground
+   shadow (::after) that rides the composited layer for free. */
+.landing-coins .coin { display: block; width: auto; position: relative; z-index: 1; }
 .landing-coins .coin-btc { height: 300px; opacity: 0.94; }
 .landing-coins .coin-usd { height: 204px; }
 .landing-coins .coin-eur { height: 204px; }
-.coin-float { display: flex; align-items: flex-end; will-change: transform; backface-visibility: hidden; }
+.coin-float { position: relative; display: flex; align-items: flex-end; will-change: transform; backface-visibility: hidden; }
+/* Static ellipse under each symbol: painted once into the wrapper's layer,
+   so the float animation moves it with zero per-frame filter cost. */
+.coin-float::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 62%;
+  height: 20px;
+  translate: -50% 0;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.5), transparent 70%);
+}
 .coin-float-btc { z-index: 1; }
 .coin-float-usd { z-index: 2; }
 .coin-float-eur { z-index: 3; }

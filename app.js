@@ -8091,6 +8091,7 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
   });
   wrap.addEventListener('click', function (e) {
     if (!e || !e.target || !e.target.closest) return;
+    if (suppressCardClick) { suppressCardClick = false; return; } // just finished a sub drag
     if (selectionMode) {
       var scard = e.target.closest('.account-card');
       if (scard && scard.getAttribute('data-account')) {
@@ -8113,6 +8114,7 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
     }
   });
   host.appendChild(wrap);
+  try { wireGroupSubsDnD(wrap); } catch (e) { /* subs render without drag */ }
 }
 
 // Standalone asset accounts with the global switch on: their labeled
@@ -9868,6 +9870,160 @@ function wireAccountDnD() {
   }
   host.addEventListener('pointerup', acctFinishDrop);
   host.addEventListener('pointercancel', function () { acctDragCleanup(); });
+}
+
+// --- Sub-account drag-and-drop reorder (group mains) ---
+// Same dice-grip pattern as the home list, scoped to one group's member
+// cards. Order is the accounts array itself, so a sub reorder persists
+// exactly like a home reorder (members stay hidden on home, so the home
+// order is unaffected). Drags start from the grip only; card clicks still
+// open the sub-account.
+var subDrag = null; // {id,startX,startY,started,ghost,overId,after}
+
+function subDragCleanup(wrap) {
+  if (subDrag && subDrag.ghost && subDrag.ghost.parentNode) {
+    try { subDrag.ghost.parentNode.removeChild(subDrag.ghost); } catch (e) {}
+  }
+  try {
+    if (typeof document !== 'undefined' && document.body && document.body.style) document.body.style.userSelect = '';
+  } catch (e) {}
+  try {
+    var scope = (wrap && wrap.querySelectorAll) ? wrap : ((typeof document !== 'undefined') ? document.getElementById('account-detail') : null);
+    if (scope && scope.querySelectorAll) {
+      Array.prototype.forEach.call(scope.querySelectorAll('.account-card.drag-src,.account-card.drop-before,.account-card.drop-after'), function (el) {
+        el.classList.remove('drag-src', 'drop-before', 'drop-after');
+      });
+    }
+  } catch (e) {}
+  subDrag = null;
+}
+
+function subStartDrag(wrap, src) {
+  var r = null;
+  try { r = src.getBoundingClientRect(); } catch (e) { r = null; }
+  var ghost = null;
+  try {
+    ghost = src.cloneNode(true);
+    ghost.classList.remove('drop-before', 'drop-after', 'drag-src');
+    ghost.classList.add('drag-ghost');
+    ghost.removeAttribute('id');
+    ghost.style.width = (r && r.width ? r.width : 320) + 'px';
+    ghost.style.left = (r ? r.left : 0) + 'px';
+    ghost.style.top = (r ? r.top : 0) + 'px';
+    if (typeof document !== 'undefined' && document.body) document.body.appendChild(ghost);
+    else ghost = null;
+  } catch (e) { ghost = null; }
+  subDrag.started = true;
+  subDrag.ghost = ghost;
+  suppressCardClick = true;
+  try {
+    if (typeof document !== 'undefined' && document.body && document.body.style) document.body.style.userSelect = 'none';
+  } catch (e) {}
+  try {
+    var cur = wrap && wrap.querySelector ? wrap.querySelector('[data-account="' + String(subDrag.id).replace(/"/g, '') + '"]') : null;
+    if (cur) cur.classList.add('drag-src');
+  } catch (e) {}
+}
+
+function subFinishDrop(wrap, e) {
+  if (!subDrag) return;
+  var wasStarted = subDrag.started;
+  var id = subDrag.id;
+  var overId = null;
+  var after = false;
+  if (wasStarted && e && typeof e.clientX === 'number') {
+    try {
+      var under = (typeof document !== 'undefined' && document.elementFromPoint) ? document.elementFromPoint(e.clientX, e.clientY) : null;
+      var card = under && under.closest ? under.closest('.group-subs .account-card') : null;
+      if (card && wrap && typeof wrap.contains === 'function' && !wrap.contains(card)) card = null;
+      if (card && card.getAttribute('data-account') !== id) {
+        var r = null;
+        try { r = card.getBoundingClientRect(); } catch (err) { r = null; }
+        after = !!(r && (e.clientY - r.top) > r.height / 2);
+        overId = card.getAttribute('data-account');
+      }
+    } catch (err2) {}
+  }
+  subDragCleanup(wrap);
+  if (!wasStarted) return; // plain click: the wrap handler opens the card
+  if (!overId) return; // released over nothing meaningful: snap back
+  var st = null;
+  try { st = loadState(); } catch (e2) { return; }
+  var draggedAcc = accountById(st, id);
+  var targetAcc = accountById(st, overId);
+  var mainId = draggedAcc && typeof draggedAcc.groupId === 'string' ? draggedAcc.groupId : '';
+  if (!draggedAcc || !targetAcc || !mainId || targetAcc.groupId !== mainId) return;
+  var before = groupMembers(st, mainId).map(function (m) { return m.id; });
+  if (before.indexOf(id) === -1 || before.indexOf(overId) === -1) return;
+  var from = -1;
+  for (var fi = 0; fi < st.accounts.length; fi++) {
+    if (st.accounts[fi] && st.accounts[fi].id === id) { from = fi; break; }
+  }
+  if (from === -1) return;
+  var moved = st.accounts.splice(from, 1)[0];
+  var to = -1;
+  for (var ti = 0; ti < st.accounts.length; ti++) {
+    if (st.accounts[ti] && st.accounts[ti].id === overId) { to = ti; break; }
+  }
+  if (to === -1) return;
+  if (after) to++;
+  st.accounts.splice(to, 0, moved);
+  var afterOrder = groupMembers(st, mainId).map(function (m) { return m.id; });
+  var changed = afterOrder.length !== before.length ||
+    afterOrder.some(function (mid, i) { return mid !== before[i]; });
+  if (!changed) return; // adjacent no-op: visuals already match
+  if (!saveStateGuarded(st)) { render(); return; }
+  clearBanner();
+  render();
+}
+
+function wireGroupSubsDnD(wrap) {
+  if (!wrap || wrap.getAttribute('data-dnd-wired')) return;
+  wrap.setAttribute('data-dnd-wired', '1');
+  wrap.addEventListener('pointerdown', function (e) {
+    var grip = e.target && e.target.closest ? e.target.closest('.drag-handle') : null;
+    if (!grip) return;
+    var card = grip.closest('.account-card');
+    if (!card || !card.getAttribute('data-account')) return;
+    if (e.pointerType === 'mouse' && e.button !== undefined && e.button !== 0) return;
+    if (typeof e.clientX !== 'number') return;
+    subDrag = { id: card.getAttribute('data-account'), startX: e.clientX, startY: e.clientY, started: false, ghost: null, overId: null, after: false };
+    try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  wrap.addEventListener('pointermove', function (e) {
+    if (!subDrag || !e || typeof e.clientX !== 'number') return;
+    var dx = e.clientX - subDrag.startX;
+    var dy = e.clientY - subDrag.startY;
+    if (!subDrag.started) {
+      if (dx * dx + dy * dy < 49) return;
+      var src = null;
+      try { src = wrap.querySelector('[data-account="' + String(subDrag.id).replace(/"/g, '') + '"]'); } catch (e2) { src = null; }
+      if (!src) { subDragCleanup(wrap); return; }
+      subStartDrag(wrap, src);
+    }
+    if (subDrag.ghost) {
+      subDrag.ghost.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    }
+    Array.prototype.forEach.call(wrap.querySelectorAll('.account-card.drop-before,.account-card.drop-after'), function (el) {
+      el.classList.remove('drop-before', 'drop-after');
+    });
+    var under = null;
+    try {
+      under = (typeof document !== 'undefined' && document.elementFromPoint) ? document.elementFromPoint(e.clientX, e.clientY) : null;
+    } catch (err) { under = null; }
+    var card = under && under.closest ? under.closest('.group-subs .account-card') : null;
+    if (card && typeof wrap.contains === 'function' && !wrap.contains(card)) card = null;
+    subDrag.overId = null;
+    if (card && card.getAttribute('data-account') !== subDrag.id) {
+      var r = null;
+      try { r = card.getBoundingClientRect(); } catch (err2) { r = null; }
+      subDrag.after = !!(r && (e.clientY - r.top) > r.height / 2);
+      subDrag.overId = card.getAttribute('data-account');
+      card.classList.add(subDrag.after ? 'drop-after' : 'drop-before');
+    }
+  });
+  wrap.addEventListener('pointerup', function (e) { subFinishDrop(wrap, e); });
+  wrap.addEventListener('pointercancel', function () { subDragCleanup(wrap); });
 }
 
 // --- New-account dialog ---

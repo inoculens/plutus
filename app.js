@@ -7914,7 +7914,11 @@ function buildCashDetailStats(st, acc, dtrades, main, stats, host, opts) {
   ladd.addEventListener('click', function () { openLedgerDialog(acc.id); });
   sec.appendChild(ladd);
   host.appendChild(sec);
-  if (!tree.roots.length && !tree.unassignedCount) {
+  // Empty or not, a created chart always shows: tree.roots carries chart
+  // codes with zero of their own, so an empty 1000 still renders its row.
+  // Unlabeled buckets never render alone — without roots there is no table,
+  // only the note below (never an Unlabeled-only table for no reason).
+  if (!tree.roots.length) {
     var noneNote = document.createElement('p');
     noneNote.className = 'muted';
     noneNote.textContent = 'No ledgers yet — add a parent code like 1000, then post to subledgers.';
@@ -7935,14 +7939,16 @@ function groupLedgerCurrency(st, mainAcc) {
   return defaultGroupCurrency(st, mainAcc);
 }
 
-// Visibility gate: the Ledgers panel (and every Unlabeled bucket) shows
-// only when at least one in-scope record actually carries a ledger code.
+// Visibility gate: the Ledgers panel shows when there is something to
+// show — a chart code or at least one in-scope record carrying a ledger
+// code (income/expense/buy/sell plus labeled transfers, which also post
+// tree rows). Unlabeled buckets alone never open the panel.
 function groupHasLabels(allTrades, ids) {
   var set = {};
   (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') set[id] = true; });
   return (allTrades || []).some(function (t) {
     if (!t || !set[t.accountId]) return false;
-    if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell') return false;
+    if (t.type !== 'income' && t.type !== 'expense' && t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer') return false;
     return String(t.ledger || '').trim() !== '';
   });
 }
@@ -8006,7 +8012,9 @@ function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
     kinds[id] = (a && typeof a.kind === 'string') ? a.kind : '';
   });
   var tree = ledgerTreeMulti(gdtrades, ids, gCcy, ledgerChartFor(st, mainAcc.id), kinds);
-  if (!tree.roots.length && !tree.unassignedCount && !(tree.unassignedAssetsCount || 0)) {
+  // Roots carry chart codes (even empty) plus posted codes: an Unlabeled
+  // bucket alone never renders a table.
+  if (!tree.roots.length) {
     var noneNote = document.createElement('p');
     noneNote.className = 'muted';
     noneNote.textContent = 'No labeled records yet — post records with ledger codes in the sub-accounts.';
@@ -8109,14 +8117,17 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
 
 // Standalone asset accounts with the global switch on: their labeled
 // income/expense rolls into a Ledgers section (same rows as cash); the
-// unlabeled rest pools into Unlabeled assets. The panel — buckets included —
-// shows only when at least one record actually carries a ledger code.
+// unlabeled rest pools into Unlabeled assets. The panel shows as soon as
+// anything is created — a chart code (even empty, e.g. 1000 with no
+// records) or a posted code — and never as an Unlabeled-only table: with
+// no roots there is no section at all (the Trades head keeps the
+// + Ledger bootstrap instead).
 function buildAssetLedgers(st, acc, dtrades, main, host) {
   var ids = [acc.id];
-  if (!groupHasLabels(st.trades, ids)) return false;
   var kinds = {};
   kinds[acc.id] = (acc && typeof acc.kind === 'string') ? acc.kind : '';
   var tree = ledgerTreeMulti(dtrades, ids, main, ledgerChartFor(st, acc.id), kinds);
+  if (!tree.roots.length) return false;
   var sec = document.createElement('div');
   sec.className = 'section-head ledgers-head';
   var h = document.createElement('h2');
@@ -8131,13 +8142,6 @@ function buildAssetLedgers(st, acc, dtrades, main, host) {
   ladd.addEventListener('click', function () { openLedgerDialog(acc.id); });
   sec.appendChild(ladd);
   host.appendChild(sec);
-  if (!tree.roots.length && !tree.unassignedCount && !(tree.unassignedAssetsCount || 0)) {
-    var noneNote = document.createElement('p');
-    noneNote.className = 'muted';
-    noneNote.textContent = 'No labeled records yet — add a ledger code on a record.';
-    host.appendChild(noneNote);
-    return true;
-  }
   appendLedgerList(host, tree, main, { key: acc.id, chartId: acc.id, scope: ids });
   try { appendLedgerWarn(host, ledgerViolations(st, acc.id)); } catch (e) { /* ignore */ }
   return true;

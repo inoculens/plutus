@@ -1797,6 +1797,10 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 .trade-facts { display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: stretch; gap: 0 1.25rem; min-width: 0; flex: 1 1 100%; max-width: 100%; overflow: hidden; }
 .trade-foot { display: flex; justify-content: flex-end; padding: 0.5rem 0 0.35rem; }
 .trade-del { margin-left: 0.25rem; padding: 0.45rem 0.7rem; min-height: 2.5rem; font-size: 1.05rem; line-height: 1; }
+/* Phone-only ▾ that drops the extra fact rows down (see the 720px block:
+   higher specificity there reveals it). Desktop shows the full strip, so the
+   button never renders outside the phone breakpoint. */
+.trade-more { display: none; }
 
 /* ————— Dialogs ————— */
 dialog {
@@ -2484,6 +2488,18 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }
   .trade-block .stat-row[data-label="Note"] { flex-basis: 100%; max-width: none; }
   .trade-block .stat-row.rate-line { flex-basis: 100%; max-width: none; }
+  /* Collapsed record cards: pills + ✎ 🗑 + the two key numbers, with the ▾
+     riding at the end of that same amounts row; a tap anywhere (or the ▾)
+     drops every other fact down. Only this breakpoint hides rows — desktop
+     and the DOM keep every row exactly as before. The caret never joins the
+     pills/actions row: at 360–390px there is no room left for a third
+     button, and a wrapped third row would waste exactly the space this
+     whole change is about. */
+  .trade-block .trade-more { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; align-self: center; margin-left: auto; min-width: 2rem; min-height: 2.75rem; padding: 0 0.35rem; }
+  .trade-caret { display: block; font-size: 0.8rem; line-height: 1; transition: transform 0.15s ease; }
+  .trade-block.is-open .trade-caret { transform: rotate(180deg); }
+  .trade-block:not(.is-open) .trade-facts > .stat-row:not(.is-primary),
+  .trade-block:not(.is-open) .lot-links { display: none; }
   .trade-foot { flex: 1 1 100%; padding-bottom: 0.3rem; }
   .trade-edit, .trade-del { min-height: 2.75rem; min-width: 2.75rem; }
 

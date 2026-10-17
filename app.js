@@ -7206,8 +7206,48 @@ function rateRow(label, text) {
   return rate;
 }
 
+// ————— Phone-collapsed record cards —————
+// Phones (≤720px) show every record as pills + actions + the two key numbers
+// (the .is-primary rows); the stylesheet hides the rest until a tap drops
+// them down. Expanded ids live here so a re-render — live prices landing, FX
+// fills, paging, filtering — never slams an open card shut under the reader.
+// Keyed by trade id; legacy id-less records simply opt out.
+var openTradeCards = {};
+
+// Flip one card between collapsed (phone default) and expanded. Runs at any
+// width; the stylesheet only hides rows inside the phone breakpoint, so a
+// desktop toggle stays invisible. Re-gates the ⓘ dots too: rows that were
+// display:none just became measurable (and vice versa).
+function setTradeCardOpen(box, open) {
+  if (!box) return;
+  var id = '';
+  try { id = String(box.getAttribute('data-trade') || ''); } catch (e) { id = ''; }
+  if (open) {
+    try { box.classList.add('is-open'); } catch (e) { /* ignore */ }
+    if (id) openTradeCards[id] = true;
+  } else {
+    try { box.classList.remove('is-open'); } catch (e) { /* ignore */ }
+    if (id) delete openTradeCards[id];
+  }
+  var btn = null;
+  try { btn = box.querySelector('.trade-more'); } catch (e) { btn = null; }
+  if (btn) {
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Hide record details' : 'Show all record details');
+    btn.title = open ? 'Hide details' : 'Show all details';
+  }
+  try { syncInfoDots(); } catch (e) { /* the ⓘ gate never breaks a tap */ }
+}
+
 function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   var n = normalizeTrade(t);
+  // The two key numbers per type stay visible on a collapsed phone card
+  // (buy/sell: Paid + Amount; transfer: Moved + Received; income: Received +
+  // Value; expense: Lost + Fiat lost). Everything else drops down on a tap.
+  function primary(row) {
+    try { row.classList.add('is-primary'); } catch (e) { /* ignore */ }
+    return row;
+  }
   // The Converted row only earns its place when there is something to
   // convert: same-fiat views would just print the native number twice.
   var tCcy = String(t.currency || '').toUpperCase();
@@ -7300,6 +7340,30 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   del.addEventListener('click', function () { deleteTrade(del.getAttribute('data-del')); });
   head.appendChild(del);
   box.appendChild(head);
+  // Phone tap rules for the whole card surface: a collapsed card is one big
+  // "show details" button — the first tap always drops the rows down, and the
+  // capture phase suppresses an inner popup just for that tap, so expanding is
+  // never a coin toss. Once expanded, every value/ⓘ/link keeps its normal
+  // behavior and a tap on the head collapses again. ✎/🗑/links work in both
+  // states: real controls are never swallowed.
+  box.addEventListener('click', function (ev) {
+    try {
+      if (!isMobileView()) return;
+      var tgt = ev ? ev.target : null;
+      if (!tgt || !tgt.closest) return;
+      if (tgt.closest('button, a, input, select, textarea, label, summary')) return;
+      if (box.classList.contains('is-open')) {
+        if (tgt.closest('.trade-facts, .lot-links')) return;
+        setTradeCardOpen(box, false);
+        return;
+      }
+      if (tgt.closest('.stat-row')) {
+        ev.stopPropagation();
+        if (ev.preventDefault) ev.preventDefault();
+      }
+      setTradeCardOpen(box, true);
+    } catch (e) { /* a failed tap must never break the list */ }
+  }, true);
   var isXfer = t.type === 'transfer';
   // Transfer fee valuation: the network fee in fiat at the frozen tx-date
   // rate. Resolved once here and reused by the Transfer fees (≈) and Fee Fiat
@@ -7315,7 +7379,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   if (t.type === 'transfer') {
     var tSym = String(t.symbol || '').toUpperCase();
     var outsC = transferOutputsOf(t);
-    box.appendChild(statRow('Moved', fmtQty(t.qty, tSym) + ' ' + tSym, t.qty, false));
+    box.appendChild(primary(statRow('Moved', fmtQty(t.qty, tSym) + ' ' + tSym, t.qty, false)));
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee, tSym) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
@@ -7384,7 +7448,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
         }
       });
     }
-    var recRow = statRow('Received', recLines.join(', '), recTotal, false);
+    var recRow = primary(statRow('Received', recLines.join(', '), recTotal, false));
     (function (row, lines) {
       var recVal = row.querySelector('.stat-val');
       var recLab = row.querySelector('.stat-label');
@@ -7412,23 +7476,23 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       box.appendChild(statRow('Fiat cost', fmtMoney(n.netMain, main), n.netMain, false));
     }
   } else if (t.type === 'income') {
-    box.appendChild(statRow('Received', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
+    box.appendChild(primary(statRow('Received', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
     if (Number(t.total) > 0) {
-      box.appendChild(statRow('Value', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
+      box.appendChild(primary(statRow('Value', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
       if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     } else {
-      box.appendChild(statRow('Value', '— (free)', null, false));
+      box.appendChild(primary(statRow('Value', '— (free)', null, false)));
     }
   } else if (t.type === 'expense') {
     if (t.qty !== undefined && t.qty !== null && String(t.qty).trim() !== '') {
-      box.appendChild(statRow('Lost', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
+      box.appendChild(primary(statRow('Lost', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
     }
     if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
-      box.appendChild(statRow('Fiat lost', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
+      box.appendChild(primary(statRow('Fiat lost', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
       if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     }
   } else {
-    box.appendChild(statRow('Paid', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false));
+    box.appendChild(primary(statRow('Paid', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
     if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     // Real price is calculated, never quoted: the FULL all-in total converted
     // at the historical FX rate (or manual rate), divided by qty received —
@@ -7540,7 +7604,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     })(t.attachment);
   }
   if (t.type === 'buy' || t.type === 'sell') {
-    box.appendChild(statRow('Amount', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false));
+    box.appendChild(primary(statRow('Amount', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
   }
   // One true facts line: gather every fact row into a non-wrapping strip so
   // nothing ever spills to a second row — long values trim with … instead
@@ -7548,7 +7612,30 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   var facts = document.createElement('div');
   facts.className = 'trade-facts';
   Array.prototype.forEach.call(box.querySelectorAll(':scope > .stat-row'), function (r) { facts.appendChild(r); });
+  // Phone-only ▾ toggle, last item of the facts strip: it rides with the two
+  // key numbers it reveals (never squeezing the pills/actions row, which has
+  // no room left at 360–390px) and CSS hides it on desktop, where every row
+  // is always on show.
+  var more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'quiet trade-more';
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-label', 'Show all record details');
+  more.title = 'Show all details';
+  var caret = document.createElement('span');
+  caret.className = 'trade-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = '▾';
+  more.appendChild(caret);
+  more.addEventListener('click', function () {
+    if (!isMobileView()) return;
+    setTradeCardOpen(box, !(box.classList && box.classList.contains('is-open')));
+  });
+  facts.appendChild(more);
   box.appendChild(facts);
+  // A card opened before a re-render opens again in the fresh DOM (after the
+  // strip exists, so the caret and the ⓘ gate pick up the open state).
+  if (t.id && openTradeCards[String(t.id)]) setTradeCardOpen(box, true);
   // FIFO lot linkage: slices of this record closed elsewhere (buys/income)
   // or slices closed by this record (sells). Average pools cost, so there is
   // nothing truthful to link — fifoCtx is null outside FIFO mode.
@@ -8862,6 +8949,10 @@ function renderAccountDetail(st, id) {
     // Linked-record jumps: same-page targets scroll + flash in place, while
     // off-page (paged-out) targets jump to their page first, then flash.
     var flashTradeCard = function (el) {
+      // Phones: open first, then scroll — a lot-link jump should reveal the
+      // record's facts, not flash a collapsed stub. (setTradeCardOpen runs the
+      // ⓘ gate itself; desktop is untouched.)
+      try { if (isMobileView()) setTradeCardOpen(el, true); } catch (e) { /* ignore */ }
       try {
         if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
       } catch (e) { /* ignore */ }

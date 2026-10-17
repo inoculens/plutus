@@ -82,6 +82,13 @@
           <button type="button" id="confirm-ok" class="primary danger-btn">Confirm</button>
         </div>
       </dialog>
+      <dialog id="note-dialog" aria-labelledby="note-dialog-title">
+        <div class="dialog-head">
+          <h2 id="note-dialog-title">Note</h2>
+          <button type="button" data-close aria-label="Close dialog">✕</button>
+        </div>
+        <p id="note-dialog-text"></p>
+      </dialog>
     </div>
   </main>
 
@@ -117,6 +124,17 @@
       } else {
         results.push({ name: name, ok: true });
       }
+    }
+    // Phones (≤720px) show record cards collapsed: pills, actions and the two
+    // key numbers only. Tests that reach into a secondary fact row take the
+    // one tap a real thumb would first; desktop is a no-op (cards are open).
+    function openRecordCard(block) {
+      if (!block) return;
+      var narrow = false;
+      try { narrow = !!(window.matchMedia && window.matchMedia('(max-width: 720px)').matches); } catch (e) { narrow = false; }
+      if (!narrow || block.classList.contains('is-open')) return;
+      var head = block.querySelector('.trade-when');
+      if (head && head.click) head.click();
     }
     // Serial async queue for network-stubbed tests (final-review hermeticity):
     // the harness invokes all test fns synchronously, so concurrent
@@ -6401,6 +6419,7 @@
         render();
         var val = document.querySelector('[data-trade="a-xfer"] [data-label="Transfer fees"] .stat-val');
         assert(val !== null, 'fee value must render');
+        openRecordCard(document.querySelector('[data-trade="a-xfer"]'));
         val.click();
         var txt = document.getElementById('note-dialog-text').textContent;
         assert(/0[.,]36/.test(txt), 'explainer must show the ~0.36 market worth, got ' + txt);
@@ -6427,6 +6446,7 @@
         render();
         var feeLab = document.querySelector('[data-trade="a-xfer"] [data-label="Transfer fees"] .stat-label');
         assert(feeLab !== null && feeLab.querySelector('.info-dot') !== null, 'Transfer fees label must carry ⓘ');
+        openRecordCard(document.querySelector('[data-trade="a-xfer"]'));
         feeLab.click();
         var txt = document.getElementById('note-dialog-text').textContent;
         assert(txt.indexOf('transfer-day price') !== -1, 'label tap must open the explainer, got ' + txt);
@@ -6906,6 +6926,7 @@
         openLk();
         var b1 = cardFor('sc-b1');
         assert(b1 !== null, 'buy card must render');
+        openRecordCard(b1);
         var sold = b1.querySelector('[data-lot-links="sold"]');
         assert(sold !== null && sold.textContent.indexOf('partially') !== -1, 'buy must read partially');
         var list = sold.querySelector('.lot-link-list');
@@ -7852,6 +7873,7 @@
         assert(recs.length === 1, 'one Received row expected, got ' + recs.length);
         var val = recs[0].querySelector('.stat-val');
         assert(val !== null && val.textContent.indexOf('General Investment') !== -1, 'row must lead with the recipients');
+        openRecordCard(block);
         val.click();
         var txt = document.getElementById('note-dialog-text').textContent;
         assert(txt.indexOf('General Investment') !== -1 && txt.indexOf('BTC1') !== -1 && txt.indexOf('Arodoe') !== -1, 'popup must list every recipient, got ' + txt);
@@ -7883,6 +7905,207 @@
         var facts = block.querySelector('.trade-facts');
         assert(facts !== null, 'facts strip must render');
         assert(facts.scrollWidth <= facts.clientWidth + 2, 'facts must not overflow the strip, got ' + facts.scrollWidth + ' vs ' + facts.clientWidth);
+        navHome();
+      });
+    })();
+
+    // === Phone-collapsed record cards (mobile-only, display-only) ===
+    (function mobileRecordCardTests() {
+      var L = window.Inoculens || {};
+      var FXMC = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+
+      function mcSeed() {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: 'mc-acct', name: 'Mc BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: [
+            { id: 'mc-buy', type: 'buy', symbol: 'BTC', qty: 0.5, total: 25000, currency: 'EUR', date: '2026-01-05', fee: 10, feeCurrency: 'EUR', note: 'note-' + new Array(121).join('m'), accountId: 'mc-acct', fxLock: FXMC, createdAt: '2026-01-05T00:00:00.000Z' },
+            { id: 'mc-sell', type: 'sell', symbol: 'BTC', qty: 0.25, total: 14000, currency: 'EUR', date: '2026-02-05', fee: 5, feeCurrency: 'EUR', note: '', accountId: 'mc-acct', fxLock: FXMC, createdAt: '2026-02-05T00:00:00.000Z' },
+            { id: 'mc-xfer', type: 'transfer', symbol: 'BTC', qty: 0.1, total: 0, currency: 'EUR', date: '2026-03-05', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'mc-acct', networkFee: 0.0005, fxLock: FXMC, outputs: [{ label: 'Cold Vault', qty: 0.0995 }], createdAt: '2026-03-05T00:00:00.000Z' },
+            { id: 'mc-inc', type: 'income', symbol: 'BTC', qty: 0.01, total: 500, currency: 'EUR', date: '2026-04-05', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'mc-acct', fxLock: FXMC, createdAt: '2026-04-05T00:00:00.000Z' },
+            { id: 'mc-exp', type: 'expense', symbol: 'BTC', qty: 0.02, total: 900, currency: 'EUR', date: '2026-05-05', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'mc-acct', fxLock: FXMC, createdAt: '2026-05-05T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+      }
+
+      function mcOpen() {
+        if (typeof init === 'function') init();
+        navTo('mc-acct');
+        route();
+        render();
+      }
+
+      function mcCard(id) {
+        return document.querySelector('#account-detail .trade-block[data-trade="' + id + '"]');
+      }
+
+      function mcPrimary(card) {
+        return Array.prototype.map.call(card.querySelectorAll('.trade-facts > .stat-row.is-primary'), function (r) {
+          return r.getAttribute('data-label');
+        });
+      }
+
+      // Phone semantics on a desktop-sized window: only the viewport gate is
+      // stubbed, every handler and class stays exactly the shipped ones.
+      function withPhoneView(callback) {
+        var orig = window.matchMedia;
+        window.matchMedia = function (q) {
+          var s = String(q);
+          return {
+            matches: s.indexOf('max-width') !== -1, media: s,
+            addListener: function () {}, removeListener: function () {},
+            addEventListener: function () {}, removeEventListener: function () {}
+          };
+        };
+        try { callback(); } finally { window.matchMedia = orig; }
+      }
+
+      test('phone cards keep exactly their two key numbers as .is-primary', function () {
+        mcSeed();
+        mcOpen();
+        var expected = {
+          'mc-buy': ['Paid', 'Amount'],
+          'mc-sell': ['Paid', 'Amount'],
+          'mc-xfer': ['Moved', 'Received'],
+          'mc-inc': ['Received', 'Value'],
+          'mc-exp': ['Lost', 'Fiat lost']
+        };
+        Object.keys(expected).forEach(function (id) {
+          var card = mcCard(id);
+          assert(card !== null, id + ' card must render');
+          var got = mcPrimary(card);
+          assert(got.length === expected[id].length && got[0] === expected[id][0] && got[1] === expected[id][1],
+            id + ' key numbers wrong: ' + got.join(' | ') + ' (want ' + expected[id].join(' | ') + ')');
+          var more = card.querySelectorAll('.trade-facts > .trade-more');
+          assert(more.length === 1, id + ' needs exactly one ▾ toggle, got ' + more.length);
+          assert(more[0].getAttribute('aria-expanded') === 'false', id + ' must start collapsed');
+          assert(String(more[0].getAttribute('aria-label') || '').length > 0, id + ' toggle needs an aria-label');
+          assert(!card.classList.contains('is-open'), id + ' cards must start closed');
+        });
+        // Nothing left the DOM — every other fact stays one tap away.
+        assert(mcCard('mc-buy').querySelector('[data-label="Rate"]') !== null, 'Rate row must stay in the DOM');
+        assert(mcCard('mc-buy').querySelector('[data-label="Note"]') !== null, 'Note row must stay in the DOM');
+        assert(mcCard('mc-xfer').querySelector('[data-label="Transfer fees"]') !== null, 'Transfer fees must stay in the DOM');
+        navHome();
+      });
+
+      test('a phone tap drops the card open; desktop taps are inert', function () {
+        mcSeed();
+        mcOpen();
+        var card = mcCard('mc-buy');
+        var more = card.querySelector('.trade-more');
+        var narrowHarness = !!(window.matchMedia && window.matchMedia('(max-width: 720px)').matches);
+        assert(narrowHarness ? window.getComputedStyle(more).display !== 'none' : window.getComputedStyle(more).display === 'none',
+          '▾ visibility must follow the breakpoint');
+        withPhoneView(function () {
+          card.querySelector('.trade-when').click();
+          assert(card.classList.contains('is-open'), 'tap on the card must drop the details open');
+          assert(more.getAttribute('aria-expanded') === 'true', 'aria-expanded must follow the card');
+          render();
+          card = mcCard('mc-buy');
+          assert(card !== null && card.classList.contains('is-open'), 'an open card must survive a re-render');
+          assert(card.querySelector('.trade-more').getAttribute('aria-expanded') === 'true', 'the restored card must report its open state');
+          card.querySelector('.trade-when').click();
+          assert(!card.classList.contains('is-open'), 'tapping an open card must collapse it (re-render keeps it closed)');
+          more = card.querySelector('.trade-more');
+          more.click();
+          assert(card.classList.contains('is-open'), '▾ must open the card');
+          more.click();
+          assert(!card.classList.contains('is-open'), '▾ must close the card');
+          // ✎ / 🗑 keep their own jobs and never toggle the card.
+          card.querySelector('[data-edit]').click();
+          assert(!card.classList.contains('is-open'), 'edit must not toggle the card');
+          try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+          card.querySelector('[data-del]').click();
+          assert(!card.classList.contains('is-open'), 'delete must not toggle the card');
+          try { document.getElementById('confirm-cancel').click(); } catch (e) { /* ignore */ }
+        });
+        if (window.innerWidth > 720) {
+          card = mcCard('mc-buy');
+          card.querySelector('.trade-when').click();
+          assert(!card.classList.contains('is-open'), 'desktop taps must not expand or collapse cards');
+        }
+        navHome();
+      });
+
+      test('the first phone tap on a value expands instead of opening its popup', function () {
+        mcSeed();
+        mcOpen();
+        var card = mcCard('mc-buy');
+        var noteVal = card.querySelector('[data-label="Note"] .stat-val');
+        assert(noteVal !== null, 'note value must render');
+        withPhoneView(function () {
+          noteVal.click();
+          assert(card.classList.contains('is-open'), 'first tap on a value must expand the card');
+          assert(document.getElementById('note-dialog').open !== true, 'the value popup must wait for the second tap');
+          noteVal.click();
+          assert(card.classList.contains('is-open'), 'a value tap inside an open card must not collapse it');
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+          // Leave the card closed: the open state is remembered per record.
+          card.querySelector('.trade-when').click();
+        });
+        assert(!card.classList.contains('is-open'), 'the card must be closed again for later tests');
+        navHome();
+      });
+
+      test('collapsed cards hide the extra rows on phones and show all on desktop', function () {
+        mcSeed();
+        mcOpen();
+        var narrow = !!(window.matchMedia && window.matchMedia('(max-width: 720px)').matches);
+        var card = mcCard('mc-buy');
+        // A record opened by an earlier test is remembered on purpose: close it
+        // first so this check always starts from the phone default.
+        if (card.classList.contains('is-open')) {
+          withPhoneView(function () { card.querySelector('.trade-when').click(); });
+        }
+        assert(!card.classList.contains('is-open'), 'the collapse check needs a closed card');
+        var rows = card.querySelectorAll('.trade-facts > .stat-row');
+        assert(rows.length >= 6, 'facts must stay in the DOM, got ' + rows.length);
+        Array.prototype.forEach.call(rows, function (r) {
+          var visible = window.getComputedStyle(r).display !== 'none';
+          if (narrow) {
+            assert(visible === r.classList.contains('is-primary'), 'phone visibility must follow .is-primary: ' + r.getAttribute('data-label'));
+          } else {
+            assert(visible, 'desktop must show every fact: ' + r.getAttribute('data-label'));
+          }
+        });
+        if (narrow) {
+          withPhoneView(function () { card.querySelector('.trade-when').click(); });
+          Array.prototype.forEach.call(card.querySelectorAll('.trade-facts > .stat-row'), function (r) {
+            assert(window.getComputedStyle(r).display !== 'none', 'an open card must reveal ' + r.getAttribute('data-label'));
+          });
+          withPhoneView(function () { card.querySelector('.trade-when').click(); });
+        }
+        navHome();
+      });
+
+      test('a phone FIFO jump opens the card it lands on', function () {
+        L.tradePageSizeSet(25);
+        L.tradePageSetFor('mc-fifo', 0, 2);
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'fifo' },
+          accounts: [{ id: 'mc-fifo', name: 'Mc FIFO', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: [
+            { id: 'mc-b1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'mc-fifo', fxLock: FXMC, createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'mc-s1', type: 'sell', symbol: 'BTC', qty: 0.5, total: 30000, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'mc-fifo', fxLock: FXMC, createdAt: '2026-02-01T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('mc-fifo');
+        route();
+        render();
+        var buy = mcCard('mc-b1');
+        var sell = mcCard('mc-s1');
+        assert(buy !== null && sell !== null, 'both FIFO cards must render');
+        var link = sell.querySelector('[data-lot-links="closed"] [data-goto="mc-b1"]');
+        assert(link !== null, 'the sell must link back to its buy');
+        assert(!buy.classList.contains('is-open'), 'the target starts collapsed');
+        withPhoneView(function () { link.click(); });
+        assert(buy.classList.contains('is-open'), 'a phone jump must open the target card');
+        assert(sell.classList.contains('is-open') === false, 'only the target opens');
+        withPhoneView(function () { buy.querySelector('.trade-when').click(); });
         navHome();
       });
     })();

@@ -10281,6 +10281,12 @@ function buildTradeForm() {
     '<select id="t-account"></select></div>' +
     '<div id="t-toaccount-row" hidden><label for="t-toaccount">To account (optional)</label>' +
     '<select id="t-toaccount"></select><p class="fld-hint" id="t-toaccount-hint">Transfer moves cost basis — only the network + fiat fees count as losses.</p></div>' +
+    '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
+    '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
+    '<p class="fld-hint" id="t-qty-hint">Amount you received (net of any fee taken in asset).</p></div>' +
+    '<div id="t-toqty-row" hidden><label for="t-toqty" id="t-toqty-label">Received quantity</label>' +
+    '<input id="t-toqty" inputmode="decimal" placeholder="e.g. 15.2">' +
+    '<p class="fld-hint" id="t-toqty-hint"></p></div>' +
     '<div id="t-recipients" hidden><span class="fld-label">Recipients</span>' +
     '<div id="t-rec-list"></div>' +
     '<button type="button" id="t-rec-add">+ Add recipient</button>' +
@@ -10289,12 +10295,6 @@ function buildTradeForm() {
     '<input id="t-selfrecv" inputmode="decimal" placeholder="e.g. 0.99">' +
     '<p class="fld-hint" id="t-selfrecv-hint">Amount that stayed in this account — the fee below fills in itself.</p></div>' +
     '<div class="fld-locked" hidden><span class="fld-label">Symbol (locked to account)</span> <span id="t-symbol-locked" role="status"></span></div>' +
-    '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
-    '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
-    '<p class="fld-hint" id="t-qty-hint">Amount you received (net of any fee taken in asset).</p></div>' +
-    '<div id="t-toqty-row" hidden><label for="t-toqty" id="t-toqty-label">Received quantity</label>' +
-    '<input id="t-toqty" inputmode="decimal" placeholder="e.g. 15.2">' +
-    '<p class="fld-hint" id="t-toqty-hint"></p></div>' +
     '<div id="t-total-row"><label for="t-total" id="t-total-label">Total (native currency)</label>' +
     '<input id="t-total" inputmode="decimal" placeholder="e.g. 50000">' +
     '<p class="fld-hint" id="t-total-hint">Full amount paid, including the fee below.</p></div>' +

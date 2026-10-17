@@ -3367,6 +3367,79 @@
         restoreState();
       });
 
+      test('date field types through segments with auto-advance', function () {
+        var L = window.Inoculens;
+        assert(typeof L.dmyDateEdit === 'function', 'dmyDateEdit missing');
+        assert(typeof L.dmyDateBump === 'function', 'dmyDateBump missing');
+        assert(typeof L.dmySegmentRange === 'function', 'dmySegmentRange missing');
+        // Click day of 12/04/2026 (selected 0-2), type 16 → day fills, month selected.
+        var r = L.dmyDateEdit('12/04/2026', 0, 2, '1');
+        assert(r.value === '1/04/2026' && r.start === 1 && r.end === 1, 'day digit: ' + JSON.stringify(r));
+        r = L.dmyDateEdit(r.value, r.start, r.end, '6');
+        assert(r.value === '16/04/2026' && r.start === 3 && r.end === 5, 'day must advance to month: ' + JSON.stringify(r));
+        // Type the month, then the year: 04 → year selected, 2027 replaces it.
+        r = L.dmyDateEdit(r.value, r.start, r.end, '0');
+        r = L.dmyDateEdit(r.value, r.start, r.end, '4');
+        assert(r.value === '16/04/2026' && r.start === 6 && r.end === 10, 'month must advance to year: ' + JSON.stringify(r));
+        r = L.dmyDateEdit(r.value, r.start, r.end, '2');
+        ['0', '2', '7'].forEach(function (k) { r = L.dmyDateEdit(r.value, r.start, r.end, k); });
+        assert(r.value === '16/04/2027' && r.start === 10 && r.end === 10, 'year must replace: ' + JSON.stringify(r));
+        // Selecting everything and typing straight through rebuilds the date.
+        r = L.dmyDateEdit('12/04/2026', 0, 10, '1');
+        ['6', '0', '4', '2', '0', '2', '6'].forEach(function (k) { r = L.dmyDateEdit(r.value, r.start, r.end, k); });
+        assert(r.value === '16/04/2026' && r.start === 10, 'type-through rebuild: ' + JSON.stringify(r));
+        // Arrow keys hop segments; Up/Down bump the focused one, calendar-clamped.
+        r = L.dmyDateEdit('12/04/2026', 0, 2, 'ArrowRight');
+        assert(r.start === 3 && r.end === 5, 'right arrow must hop to month: ' + JSON.stringify(r));
+        r = L.dmyDateBump('12/04/2026', 0, 2, 1);
+        assert(r.value === '13/04/2026' && r.start === 0 && r.end === 2, 'day bump: ' + JSON.stringify(r));
+        r = L.dmyDateBump('31/04/2026', 0, 2, 1);
+        assert(r.value === '30/04/2026', 'day bump must clamp to April: ' + JSON.stringify(r));
+        r = L.dmyDateBump('12/12/2026', 3, 5, 1);
+        assert(r.value === '12/12/2026', 'month bump must clamp at 12: ' + JSON.stringify(r));
+        r = L.dmyDateBump('12/04/2026', 6, 10, -1);
+        assert(r.value === '12/04/2025', 'year bump: ' + JSON.stringify(r));
+        // Backspace at a segment start hops back; paste payloads normalise.
+        r = L.dmyDateEdit('16/04/2026', 3, 3, 'Backspace');
+        assert(r.value === '16/04/2026' && r.start === 0 && r.end === 2, 'backspace hop: ' + JSON.stringify(r));
+        r = L.dmyDateEdit('16/04/2026', 0, 10, 'Backspace');
+        assert(r.value === '' && r.start === 0 && r.end === 0, 'select-all backspace must clear: ' + JSON.stringify(r));
+        assert(L.dmySegmentRange('12/04/2026', 4).start === 3, 'segment under a month click must be the month');
+        var pasted = L.dmyPartsFromAny('2026-01-05');
+        assert(pasted[0] === '05' && pasted[1] === '01' && pasted[2] === '2026', 'iso paste parts wrong');
+        pasted = L.dmyPartsFromAny('5.1.2026');
+        assert(pasted[0] === '05' && pasted[1] === '01' && pasted[2] === '2026', 'dotted paste parts wrong');
+        assert(L.dmyPartsFromAny('hello') === null, 'junk paste must be ignored');
+        // The real field is wired: raw keydown events advance it like the old control.
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        L.saveState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [{ id: 'dmx-acct', name: 'Dmx', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }], trades: [], priceOverrides: {} });
+        if (typeof init === 'function') init();
+        try {
+          openPrefillTrade('dmx-acct');
+          var fld = document.getElementById('t-date');
+          fld.value = '12/04/2026';
+          fld.focus();
+          fld.setSelectionRange(0, 2);
+          fld.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true, cancelable: true }));
+          fld.dispatchEvent(new KeyboardEvent('keydown', { key: '6', bubbles: true, cancelable: true }));
+          assert(fld.value === '16/04/2026', 'wired typing must advance: ' + fld.value);
+          assert(fld.selectionStart === 3 && fld.selectionEnd === 5, 'wired month must be selected: ' + fld.selectionStart + '-' + fld.selectionEnd);
+          fld.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+          assert(fld.value === '16/05/2026', 'wired ArrowUp must bump the month: ' + fld.value);
+          // Mobile path: soft keyboards deliver text via beforeinput, not key.
+          fld.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: '4', bubbles: true, cancelable: true }));
+          assert(fld.value === '16/4/2026', 'beforeinput digit must route through the editor: ' + fld.value);
+        } finally {
+          try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+          try {
+            if (backup === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', backup);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+      });
+
       testAsync('historical override short-circuits network', function () {
         var origFetch = window.fetch;
         var called = 0;

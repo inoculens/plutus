@@ -5128,6 +5128,196 @@ function parseDateInput(s) {
   return null;
 }
 
+// Typing helpers for the record form's date field. The field is a plain text
+// input (locale-proof, see above), so these reproduce the native date
+// control's segment flow: click a segment and type — the caret advances
+// dd → mm → yyyy by itself; Up/Down bump the focused segment. Values are the
+// field's own text, partial states included; storage stays ISO and submit
+// still goes through parseDateInput.
+function dmyPartsOf(value) {
+  var s = String(value === undefined || value === null ? '' : value).trim();
+  var m = /^(\d{0,2})(?:\/(\d{0,2})(?:\/(\d{0,4}))?)?$/.exec(s);
+  if (m) return [(m[1] || '').slice(0, 2), (m[2] || '').slice(0, 2), (m[3] || '').slice(0, 4)];
+  if (/^\d{1,8}$/.test(s)) return [s.slice(0, 2), s.slice(2, 4), s.slice(4, 8)];
+  return null;
+}
+
+function dmyLayout(parts) {
+  var last = 0;
+  for (var i = 0; i < 3; i++) if (parts[i]) last = i;
+  var text = '';
+  var ranges = [];
+  for (var j = 0; j <= last; j++) {
+    ranges.push([text.length, text.length + parts[j].length]);
+    text += parts[j];
+    if (j < last) text += '/';
+  }
+  while (ranges.length < 3) ranges.push([text.length, text.length]);
+  return { text: text, ranges: ranges };
+}
+
+// Caret position → segment: inside a segment it stays there; exactly at a
+// segment's end it moves on once that segment is full (dd → mm → yyyy).
+function dmySegmentAt(parts, ranges, pos) {
+  var caps = [2, 2, 4];
+  for (var i = 0; i < 3; i++) {
+    if (pos < ranges[i][1]) return i;
+    if (pos === ranges[i][1]) return parts[i].length < caps[i] ? i : Math.min(i + 1, 2);
+  }
+  return 2;
+}
+
+function dmySegmentRange(value, pos) {
+  var parts = dmyPartsOf(value);
+  if (!parts) return null;
+  var layout = dmyLayout(parts);
+  var p = Math.max(0, Math.min(layout.text.length, Number(pos) || 0));
+  var r = layout.ranges[dmySegmentAt(parts, layout.ranges, p)];
+  return { start: r[0], end: r[1] };
+}
+
+function dmyDateEdit(value, selStart, selEnd, key) {
+  if (typeof key !== 'string' || key === '') return null;
+  var parts = dmyPartsOf(value);
+  if (!parts) {
+    // Non-date text: only a full selection + a digit can restart the field.
+    var whole = String(value === undefined || value === null ? '' : value);
+    if (/^\d$/.test(key) && Number(selStart) === 0 && Number(selEnd) === whole.length) {
+      return { value: key, start: 1, end: 1 };
+    }
+    return null;
+  }
+  var caps = [2, 2, 4];
+  var layout = dmyLayout(parts);
+  var len = layout.text.length;
+  var s = Math.max(0, Math.min(len, Number(selStart) || 0));
+  var e = Math.max(0, Math.min(len, Number(selEnd) || 0));
+  if (e < s) { var tmp = s; s = e; e = tmp; }
+  var seg = dmySegmentAt(parts, layout.ranges, s);
+  var range = layout.ranges[seg];
+
+  if (key === 'ArrowLeft' || key === 'ArrowRight') {
+    var hop = key === 'ArrowRight' ? Math.min(seg + 1, 2) : Math.max(seg - 1, 0);
+    var hr = layout.ranges[hop];
+    return { value: layout.text, start: hr[0], end: hr[1] };
+  }
+  if (key === '/') {
+    var sr = layout.ranges[Math.min(seg + 1, 2)];
+    return { value: layout.text, start: sr[0], end: sr[1] };
+  }
+  if (key === 'Backspace' || key === 'Delete') {
+    if (s === 0 && e === len && len > 0) { // select-all clears the whole field
+      var lAll = dmyLayout(['', '', '']);
+      return { value: lAll.text, start: 0, end: 0 };
+    }
+    var cur = parts[seg];
+    if (e > s) { // clear the selected span inside this segment
+      var fSel = Math.max(0, s - range[0]);
+      var tSel = Math.max(fSel, Math.min(cur.length, e - range[0]));
+      parts[seg] = cur.slice(0, fSel) + cur.slice(tSel);
+      var lSel = dmyLayout(parts);
+      var cSel = lSel.ranges[seg][0] + Math.min(fSel, parts[seg].length);
+      return { value: lSel.text, start: cSel, end: cSel };
+    }
+    var off = Math.max(0, Math.min(cur.length, s - range[0]));
+    if (key === 'Backspace') {
+      if (off === 0) { // hop back a segment, never eat a separator
+        var pb = layout.ranges[Math.max(seg - 1, 0)];
+        return { value: layout.text, start: pb[0], end: pb[1] };
+      }
+      parts[seg] = cur.slice(0, off - 1) + cur.slice(off);
+      var lB = dmyLayout(parts);
+      var cB = lB.ranges[seg][0] + (off - 1);
+      return { value: lB.text, start: cB, end: cB };
+    }
+    if (off < cur.length) {
+      parts[seg] = cur.slice(0, off) + cur.slice(off + 1);
+      var lD = dmyLayout(parts);
+      var cD = lD.ranges[seg][0] + off;
+      return { value: lD.text, start: cD, end: cD };
+    }
+    var pn = layout.ranges[Math.min(seg + 1, 2)];
+    return { value: layout.text, start: pn[0], end: pn[1] };
+  }
+  if (!/^\d$/.test(key)) return null;
+
+  // A typed digit replaces the selected span, or inserts at the caret; an
+  // already-full segment starts over (native per-segment buffer). Filling a
+  // segment selects the next one, so typing just flows dd → mm → yyyy.
+  if (s === 0 && e === len && len > 0) {
+    parts = ['', '', ''];
+    layout = dmyLayout(parts);
+    seg = 0;
+    s = 0;
+    e = 0;
+  }
+  range = layout.ranges[seg];
+  var segText = parts[seg];
+  var from = Math.max(0, Math.min(segText.length, s - range[0]));
+  var to = Math.max(from, Math.min(segText.length, e - range[0]));
+  var next;
+  if (segText.length >= caps[seg] && from >= segText.length) next = key;
+  else {
+    next = segText.slice(0, from) + key + segText.slice(to);
+    if (next.length > caps[seg]) next = next.slice(0, caps[seg]);
+  }
+  parts[seg] = next;
+  var nl = dmyLayout(parts);
+  if (next.length >= caps[seg] && seg < 2) {
+    var adv = nl.ranges[seg + 1];
+    return { value: nl.text, start: adv[0], end: adv[1] };
+  }
+  var caret = nl.ranges[seg][0] + Math.min(from + 1, next.length);
+  return { value: nl.text, start: caret, end: caret };
+}
+
+function dmyDayMax(parts) {
+  var mm = parseInt(parts[1], 10);
+  var yy = parseInt(parts[2], 10);
+  if (mm >= 1 && mm <= 12 && parts[2].length === 4 && !isNaN(yy)) {
+    return new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  }
+  return 31;
+}
+
+function dmyDateBump(value, selStart, selEnd, delta) {
+  var parts = dmyPartsOf(value);
+  if (!parts || (delta !== 1 && delta !== -1)) return null;
+  var layout = dmyLayout(parts);
+  var len = layout.text.length;
+  var s = Math.max(0, Math.min(len, Number(selStart) || 0));
+  var e = Math.max(0, Math.min(len, Number(selEnd) || 0));
+  if (e < s) { var tmp = s; s = e; e = tmp; }
+  var seg = dmySegmentAt(parts, layout.ranges, s);
+  var cur = parseInt(parts[seg], 10);
+  if (isNaN(cur)) cur = 0;
+  var val;
+  if (seg === 0) val = Math.max(1, Math.min(dmyDayMax(parts), cur + delta));
+  else if (seg === 1) val = Math.max(1, Math.min(12, cur + delta));
+  else if (!parts[2].length) val = parseInt(todayStr().slice(0, 4), 10);
+  else val = Math.max(1000, Math.min(9999, cur + delta));
+  var pad = String(val);
+  while (pad.length < (seg === 2 ? 4 : 2)) pad = '0' + pad;
+  parts[seg] = pad;
+  var nl = dmyLayout(parts);
+  var r = nl.ranges[seg];
+  return { value: nl.text, start: r[0], end: r[1] };
+}
+
+// Any pasted shape → the three d/m/y parts (ISO, dotted/dashed dmy, or an
+// 8-digit stream). Null when nothing date-like was pasted.
+function dmyPartsFromAny(s) {
+  if (typeof s !== 'string') return null;
+  var v = s.trim();
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (m) return [m[3], m[2], m[1]];
+  m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/.exec(v);
+  if (m) return [(m[1].length < 2 ? '0' + m[1] : m[1]), (m[2].length < 2 ? '0' + m[2] : m[2]), m[3]];
+  m = /^(\d{2})(\d{2})(\d{4})$/.exec(v);
+  if (m) return [m[1], m[2], m[3]];
+  return null;
+}
+
 function todayDmy() {
   return fmtDateDmy(todayStr());
 }
@@ -10340,6 +10530,8 @@ function buildTradeForm() {
   host.appendChild(wrap);
   var form = document.getElementById('trade-form');
   form.addEventListener('submit', onTradeSubmit);
+  var dateEl = document.getElementById('t-date');
+  if (dateEl) wireDmyDateInput(dateEl);
   var acctSel = document.getElementById('t-account');
   if (acctSel) {
     acctSel.addEventListener('change', function () { syncLockedSymbol(); syncTradeTypeUI(); });
@@ -10402,6 +10594,94 @@ function buildTradeForm() {
     attUiSync();
   });
   syncTradeTypeUI();
+}
+
+// --- dd/mm/yyyy typing flow (record form) ---
+// The date field is a text input to stay locale-proof, so this restores what
+// the native date control used to do: a click selects the segment under the
+// pointer, typing fills it and advances dd → mm → yyyy, arrows hop segments,
+// Up/Down bump them, digits and '/' are the only accepted characters, blur
+// pads single digits, and paste is normalised. Storage and submit stay ISO.
+function wireDmyDateInput(el) {
+  if (!el || el.getAttribute('data-dmy-wired') === '1') return;
+  el.setAttribute('data-dmy-wired', '1');
+  function apply(out) {
+    el.value = out.value;
+    try { el.setSelectionRange(out.start, out.end); } catch (err) { /* ignore */ }
+  }
+  function selectSegmentAt(pos) {
+    var seg = dmySegmentRange(el.value, pos);
+    if (seg) { try { el.setSelectionRange(seg.start, seg.end); } catch (err) { /* ignore */ } }
+  }
+  el.addEventListener('click', function () {
+    selectSegmentAt(el.selectionStart === null || el.selectionStart === undefined ? 0 : el.selectionStart);
+  });
+  el.addEventListener('focus', function () {
+    selectSegmentAt(el.selectionStart === null || el.selectionStart === undefined ? 0 : el.selectionStart);
+  });
+  el.addEventListener('keydown', function (ev) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    var start = el.selectionStart;
+    var end = el.selectionEnd;
+    if (start === null || start === undefined || end === null || end === undefined) return;
+    var key = ev.key;
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+      var b = dmyDateBump(el.value, start, end, key === 'ArrowUp' ? 1 : -1);
+      if (b) { ev.preventDefault(); apply(b); }
+      return;
+    }
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+      if (ev.shiftKey) return; // keep native selection extension
+      var h = dmyDateEdit(el.value, start, end, key);
+      if (h) { ev.preventDefault(); apply(h); }
+      return;
+    }
+    if (key === 'Backspace' || key === 'Delete' || key === '/') {
+      var d = dmyDateEdit(el.value, start, end, key);
+      if (d) { ev.preventDefault(); apply(d); }
+      return;
+    }
+    if (key.length === 1) {
+      if (/^\d$/.test(key)) {
+        var out = dmyDateEdit(el.value, start, end, key);
+        if (out) { ev.preventDefault(); apply(out); }
+      } else if (!ev.isComposing) {
+        ev.preventDefault(); // the date field takes digits and '/' only
+      }
+    }
+  });
+  // Soft keyboards often report key as 'Unidentified' on keydown; beforeinput
+  // still carries the real text and the deletion intent.
+  el.addEventListener('beforeinput', function (ev) {
+    var it = ev.inputType || '';
+    var key = null;
+    if (it === 'insertText') {
+      if (typeof ev.data !== 'string' || ev.data === '') return;
+      if (!/^\d$/.test(ev.data) && ev.data !== '/') { ev.preventDefault(); return; }
+      key = ev.data;
+    } else if (it === 'deleteContentBackward') key = 'Backspace';
+    else if (it === 'deleteContentForward') key = 'Delete';
+    else return;
+    var start = el.selectionStart;
+    var end = el.selectionEnd;
+    if (start === null || start === undefined) return;
+    var out = dmyDateEdit(el.value, start, end, key);
+    if (out) { ev.preventDefault(); apply(out); }
+  });
+  el.addEventListener('paste', function (ev) {
+    var text = '';
+    try { text = (ev.clipboardData && ev.clipboardData.getData) ? ev.clipboardData.getData('text') : ''; } catch (err) { text = ''; }
+    var parts = dmyPartsFromAny(text);
+    if (!parts) return;
+    ev.preventDefault();
+    var layout = dmyLayout(parts);
+    el.value = layout.text;
+    try { el.setSelectionRange(layout.text.length, layout.text.length); } catch (err) { /* ignore */ }
+  });
+  el.addEventListener('blur', function () {
+    var iso = parseDateInput(el.value);
+    if (iso) el.value = fmtDateDmy(iso);
+  });
 }
 
 // --- Multi-recipient transfer rows (form) ---
@@ -13400,6 +13680,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.tradeDisplayId = tradeDisplayId;
   window.Inoculens.fifoLinksFor = fifoLinksFor;
   window.Inoculens.parseDateInput = parseDateInput;
+  window.Inoculens.dmyDateEdit = dmyDateEdit;
+  window.Inoculens.dmyDateBump = dmyDateBump;
+  window.Inoculens.dmySegmentRange = dmySegmentRange;
+  window.Inoculens.dmyPartsFromAny = dmyPartsFromAny;
   window.Inoculens.todayDmy = todayDmy;
   window.Inoculens.fmtDateTimeDmy = fmtDateTimeDmy;
   window.Inoculens.todayStr = todayStr;

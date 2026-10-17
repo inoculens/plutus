@@ -7977,8 +7977,10 @@
           var got = mcPrimary(card);
           assert(got.length === expected[id].length && got[0] === expected[id][0] && got[1] === expected[id][1],
             id + ' key numbers wrong: ' + got.join(' | ') + ' (want ' + expected[id].join(' | ') + ')');
-          var more = card.querySelectorAll('.trade-facts > .trade-more');
+          var more = card.querySelectorAll('.trade-head .trade-more');
           assert(more.length === 1, id + ' needs exactly one ▾ toggle, got ' + more.length);
+          var editBtn = card.querySelector('.trade-head [data-edit]');
+          assert(editBtn !== null && more[0].nextElementSibling === editBtn, id + ' ▾ must sit immediately left of ✎');
           assert(more[0].getAttribute('aria-expanded') === 'false', id + ' must start collapsed');
           assert(String(more[0].getAttribute('aria-label') || '').length > 0, id + ' toggle needs an aria-label');
           assert(!card.classList.contains('is-open'), id + ' cards must start closed');

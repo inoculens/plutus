@@ -7323,6 +7323,28 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     what.textContent = whatTxt;
     head.appendChild(what);
   }
+  // Phone action cluster (▾ ✎ 🗑): the wrapper keeps the three together when
+  // they wrap to the next line, so the ▾ can sit immediately left of ✎ without
+  // ever leaving a lone trash behind. Desktop ignores the wrapper box
+  // (display:contents) and hides the ▾, so its head layout is untouched.
+  var actions = document.createElement('span');
+  actions.className = 'trade-actions';
+  var more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'quiet trade-more';
+  more.setAttribute('aria-expanded', 'false');
+  more.setAttribute('aria-label', 'Show all record details');
+  more.title = 'Show all details';
+  var caret = document.createElement('span');
+  caret.className = 'trade-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = '▾';
+  more.appendChild(caret);
+  more.addEventListener('click', function () {
+    if (!isMobileView()) return;
+    setTradeCardOpen(box, !(box.classList && box.classList.contains('is-open')));
+  });
+  actions.appendChild(more);
   var edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'quiet trade-edit';
@@ -7330,7 +7352,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   edit.setAttribute('data-edit', t.id || '');
   edit.setAttribute('aria-label', 'Edit record ' + String(t.symbol || '') + ' ' + fmtDateDmy(t.date || ''));
   edit.addEventListener('click', function () { openEditTrade(edit.getAttribute('data-edit')); });
-  head.appendChild(edit);
+  actions.appendChild(edit);
   var del = document.createElement('button');
   del.type = 'button';
   del.className = 'quiet danger trade-del';
@@ -7338,7 +7360,8 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   del.setAttribute('data-del', t.id || '');
   del.setAttribute('aria-label', 'Delete trade ' + String(t.symbol || '') + ' ' + fmtDateDmy(t.date || ''));
   del.addEventListener('click', function () { deleteTrade(del.getAttribute('data-del')); });
-  head.appendChild(del);
+  actions.appendChild(del);
+  head.appendChild(actions);
   box.appendChild(head);
   // Phone tap rules for the whole card surface: a collapsed card is one big
   // "show details" button — the first tap always drops the rows down, and the
@@ -7612,26 +7635,6 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   var facts = document.createElement('div');
   facts.className = 'trade-facts';
   Array.prototype.forEach.call(box.querySelectorAll(':scope > .stat-row'), function (r) { facts.appendChild(r); });
-  // Phone-only ▾ toggle, last item of the facts strip: it rides with the two
-  // key numbers it reveals (never squeezing the pills/actions row, which has
-  // no room left at 360–390px) and CSS hides it on desktop, where every row
-  // is always on show.
-  var more = document.createElement('button');
-  more.type = 'button';
-  more.className = 'quiet trade-more';
-  more.setAttribute('aria-expanded', 'false');
-  more.setAttribute('aria-label', 'Show all record details');
-  more.title = 'Show all details';
-  var caret = document.createElement('span');
-  caret.className = 'trade-caret';
-  caret.setAttribute('aria-hidden', 'true');
-  caret.textContent = '▾';
-  more.appendChild(caret);
-  more.addEventListener('click', function () {
-    if (!isMobileView()) return;
-    setTradeCardOpen(box, !(box.classList && box.classList.contains('is-open')));
-  });
-  facts.appendChild(more);
   box.appendChild(facts);
   // A card opened before a re-render opens again in the fresh DOM (after the
   // strip exists, so the caret and the ⓘ gate pick up the open state).

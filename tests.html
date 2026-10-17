@@ -3201,6 +3201,36 @@
         pick('crypto');
       });
 
+      test('account dialog name and label hints follow the asset kind', function () {
+        buildAccountDialog();
+        var kind = document.getElementById('na-kind');
+        var nm = document.getElementById('na-name');
+        var lab = document.getElementById('na-address');
+        assert(kind && nm && lab, 'account dialog must exist');
+        function pick(v) {
+          kind.value = v;
+          var ev = null;
+          try { ev = new Event('change', { bubbles: true }); } catch (e) { ev = document.createEvent('Event'); ev.initEvent('change', true, true); }
+          kind.dispatchEvent(ev);
+        }
+        pick('crypto');
+        assert(nm.placeholder === 'e.g. Cold wallet', 'crypto name hint wrong: ' + nm.placeholder);
+        assert(lab.placeholder === 'e.g. cold storage', 'crypto label hint wrong: ' + lab.placeholder);
+        pick('stock');
+        assert(nm.placeholder === 'e.g. etoro', 'stock name hint wrong: ' + nm.placeholder);
+        assert(lab.placeholder === 'e.g. brokerage account', 'stock label hint wrong: ' + lab.placeholder);
+        pick('commodity');
+        assert(nm.placeholder === 'e.g. My Vault', 'commodity name hint wrong: ' + nm.placeholder);
+        assert(lab.placeholder === 'e.g. bank vault', 'commodity label hint wrong: ' + lab.placeholder);
+        pick('custom');
+        assert(nm.placeholder === 'e.g. My wallet', 'custom name hint wrong: ' + nm.placeholder);
+        assert(lab.placeholder === 'e.g. collectible', 'custom label hint wrong: ' + lab.placeholder);
+        pick('cash');
+        assert(nm.placeholder === 'e.g. Org. Name', 'cash name hint wrong: ' + nm.placeholder);
+        assert(lab.placeholder === 'e.g. company account', 'cash label hint wrong: ' + lab.placeholder);
+        pick('crypto');
+      });
+
       testAsync('overlapping refreshes: stale fiat results are discarded', function () {
         // EUR->RON switch while the EUR batch is still in flight: the late
         // EUR response must not overwrite the fresh RON live price (it used
@@ -6604,6 +6634,7 @@
         L.startInlineLabelEdit('a1');
         var area = document.querySelector('[data-label-input]');
         assert(area && area.tagName.toLowerCase() === 'textarea', 'label editor must be multiline');
+        assert(area.getAttribute('placeholder') === 'e.g. cold storage', 'legacy account keeps the crypto label hint: ' + area.getAttribute('placeholder'));
         area.value = 'line one\nline two';
         area.dispatchEvent(new Event('change', { bubbles: true }));
         var saveBtn = document.querySelector('.label-edit-row .primary');
@@ -6619,6 +6650,24 @@
         assert(labVal.textContent.indexOf('line one') !== -1 && labVal.textContent.indexOf('line two') !== -1, 'wrapped label must show every line');
         assert(lab !== null && lab.classList.contains('detail-meta-stacked'), 'label row must stack caption above text');
         assert(lab.querySelector('.info-dot') === null, 'fully visible label must not carry ⓘ');
+        navHome();
+      });
+      test('label editor hint follows the account kind', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'cash1', name: 'Org. Name', ticker: 'EUR', kind: 'cash', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('cash1');
+        route();
+        render();
+        L.startInlineLabelEdit('cash1');
+        var area = document.querySelector('[data-label-input]');
+        assert(area && area.getAttribute('placeholder') === 'e.g. company account', 'cash label editor hint wrong: ' + (area && area.getAttribute('placeholder')));
         navHome();
       });
     })();

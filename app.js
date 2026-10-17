@@ -6688,7 +6688,7 @@ function startInlineLabelEdit(accId) {
   input.setAttribute('aria-label', 'Label for ' + acc.name);
   input.setAttribute('maxlength', '128');
   input.setAttribute('rows', '3');
-  input.setAttribute('placeholder', 'e.g. cold storage');
+  input.setAttribute('placeholder', accountKindExample(acc.kind, 'label'));
   input.setAttribute('autocomplete', 'off');
   var row = document.createElement('div');
   row.className = 'label-edit-row';
@@ -10124,6 +10124,22 @@ function wireGroupSubsDnD(wrap) {
 // Name + ticker only (story step one). Wired once; empty-state inline row
 // keeps its own acct-* ids so the two never collide.
 
+// Example copy per asset kind: the name and label hints (create dialog and
+// the detail-page label editor) adapt so nothing suggests "Cold wallet" for
+// a bank, broker or collectible account. Crypto keeps the original wording.
+var ACCOUNT_KIND_EXAMPLES = {
+  crypto: { name: 'e.g. Cold wallet', label: 'e.g. cold storage' },
+  stock: { name: 'e.g. etoro', label: 'e.g. brokerage account' },
+  commodity: { name: 'e.g. My Vault', label: 'e.g. bank vault' },
+  custom: { name: 'e.g. My wallet', label: 'e.g. collectible' },
+  cash: { name: 'e.g. Org. Name', label: 'e.g. company account' }
+};
+
+function accountKindExample(kind, field) {
+  var e = ACCOUNT_KIND_EXAMPLES[String(kind || '').toLowerCase()] || ACCOUNT_KIND_EXAMPLES.crypto;
+  return e[field] || ACCOUNT_KIND_EXAMPLES.crypto[field];
+}
+
 function naError(msg) {
   var p = document.getElementById('na-error');
   if (!p) return;
@@ -10152,7 +10168,7 @@ function buildAccountDialog() {
   var wrap = document.createElement('div');
   wrap.innerHTML =
     '<label for="na-name">Account name</label>' +
-    '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="e.g. Cold wallet">' +
+    '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('crypto', 'name') + '">' +
     '<label for="na-kind">Asset type</label>' +
     '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live prices)</option><option value="commodity">Commodity / Metal (live prices)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
     '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
@@ -10162,7 +10178,7 @@ function buildAccountDialog() {
     '<div id="na-fiatcode-row" hidden><label for="na-fiatcode">Currency code</label>' +
     '<input id="na-fiatcode" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY"></div>' +
     '<label for="na-address">Label (optional)</label>' +
-    '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="e.g. cold storage">' +
+    '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('crypto', 'label') + '">' +
     '<p id="na-error" class="banner-error" role="alert" hidden></p>' +
     '<button id="na-create" class="primary" type="button">Create account</button>';
   host.appendChild(wrap);
@@ -10177,6 +10193,11 @@ function buildAccountDialog() {
       tick.placeholder = kindNow === 'stock' ? 'e.g. SPCX'
         : (kindNow === 'commodity' ? 'e.g. XAU' : 'e.g. BTC');
     }
+    // Name + label examples follow the asset kind too.
+    var nmEl = document.getElementById('na-name');
+    if (nmEl) nmEl.setAttribute('placeholder', accountKindExample(kindNow, 'name'));
+    var labEl = document.getElementById('na-address');
+    if (labEl) labEl.setAttribute('placeholder', accountKindExample(kindNow, 'label'));
     var fRow = document.getElementById('na-fiat-row');
     if (fRow) fRow.hidden = !isCash;
     var fcRow = document.getElementById('na-fiatcode-row');
@@ -10185,6 +10206,7 @@ function buildAccountDialog() {
   }
   document.getElementById('na-kind').addEventListener('change', syncAccountKindUI);
   document.getElementById('na-fiat').addEventListener('change', syncAccountKindUI);
+  syncAccountKindUI();
   document.getElementById('na-create').addEventListener('click', function () {
     naError(null);
     var kind = uiVal('na-kind', 'crypto');

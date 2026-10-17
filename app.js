@@ -10168,9 +10168,9 @@ function buildAccountDialog() {
   var wrap = document.createElement('div');
   wrap.innerHTML =
     '<label for="na-name">Account name</label>' +
-    '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('crypto', 'name') + '">' +
+    '<input id="na-name" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('cash', 'name') + '">' +
     '<label for="na-kind">Asset type</label>' +
-    '<select id="na-kind"><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live prices)</option><option value="commodity">Commodity / Metal (live prices)</option><option value="custom">Custom (manual price only)</option><option value="cash">Cash</option></select>' +
+    '<select id="na-kind"><option value="cash">Cash</option><option value="crypto">Crypto (live via CoinGecko)</option><option value="stock">Stock / ETF (live prices)</option><option value="commodity">Commodity / Metal (live prices)</option><option value="custom">Custom (manual price only)</option></select>' +
     '<div id="na-ticker-row"><label for="na-ticker">Ticker</label>' +
     '<input id="na-ticker" autocomplete="off" spellcheck="false" placeholder="e.g. BTC"></div>' +
     '<div id="na-fiat-row" hidden><label for="na-fiat">Currency</label>' +
@@ -10178,12 +10178,13 @@ function buildAccountDialog() {
     '<div id="na-fiatcode-row" hidden><label for="na-fiatcode">Currency code</label>' +
     '<input id="na-fiatcode" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY"></div>' +
     '<label for="na-address">Label (optional)</label>' +
-    '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('crypto', 'label') + '">' +
+    '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('cash', 'label') + '">' +
     '<p id="na-error" class="banner-error" role="alert" hidden></p>' +
     '<button id="na-create" class="primary" type="button">Create account</button>';
   host.appendChild(wrap);
   function syncAccountKindUI() {
-    var kindNow = uiVal('na-kind', 'crypto');
+    // Cash is the first option, so it is the default when the dialog opens.
+    var kindNow = uiVal('na-kind', 'cash');
     var isCash = kindNow === 'cash';
     var tRow = document.getElementById('na-ticker-row');
     if (tRow) tRow.hidden = isCash;
@@ -10209,7 +10210,7 @@ function buildAccountDialog() {
   syncAccountKindUI();
   document.getElementById('na-create').addEventListener('click', function () {
     naError(null);
-    var kind = uiVal('na-kind', 'crypto');
+    var kind = uiVal('na-kind', 'cash');
     var tk;
     if (kind === 'cash') {
       var fiat = uiVal('na-fiat', 'EUR');

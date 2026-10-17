@@ -3181,6 +3181,21 @@
         }, function (e) { restore(); throw e; });
       });
 
+      test('asset type list starts with cash, same order after', function () {
+        buildAccountDialog();
+        var kind = document.getElementById('na-kind');
+        assert(kind, 'account dialog must exist');
+        var vals = Array.prototype.map.call(kind.options, function (o) { return o.value; });
+        assert(vals.join(',') === 'cash,crypto,stock,commodity,custom', 'asset type order wrong: ' + vals.join(','));
+        // Cash leads the list, so a freshly built dialog opens on Cash: the
+        // currency picker shows and the crypto hints are already gone.
+        assert(kind.value === 'cash', 'cash must be the default pick: ' + kind.value);
+        assert(document.getElementById('na-name').placeholder === 'e.g. Org. Name', 'default name hint wrong');
+        assert(document.getElementById('na-address').placeholder === 'e.g. company account', 'default label hint wrong');
+        assert(document.getElementById('na-ticker-row').hidden === true, 'ticker row must be hidden for the default cash pick');
+        assert(document.getElementById('na-fiat-row').hidden === false, 'currency row must show for the default cash pick');
+      });
+
       test('account dialog ticker hint follows the asset kind', function () {
         buildAccountDialog();
         var kind = document.getElementById('na-kind');

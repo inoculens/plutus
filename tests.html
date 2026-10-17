@@ -7985,6 +7985,23 @@
           assert(String(more[0].getAttribute('aria-label') || '').length > 0, id + ' toggle needs an aria-label');
           assert(!card.classList.contains('is-open'), id + ' cards must start closed');
         });
+        // Phone boxes: ▾ ✎ 🗑 are equal squares whose outline is on show from
+        // the first paint (quiet buttons otherwise hide it until a press, which
+        // left the ▾ a squeezed sliver with no visible box at rest).
+        if (window.matchMedia && window.matchMedia('(max-width: 720px)').matches) {
+          var trio = ['.trade-more', '.trade-edit', '.trade-del'].map(function (sel) { return mcCard('mc-buy').querySelector(sel); });
+          var firstBox = trio[0].getBoundingClientRect();
+          assert(Math.abs(firstBox.width - firstBox.height) < 1,
+            'the ▾ box must be square, got ' + firstBox.width + 'x' + firstBox.height);
+          trio.forEach(function (btn) {
+            var r = btn.getBoundingClientRect();
+            var bd = window.getComputedStyle(btn).borderTopColor;
+            assert(Math.abs(r.width - firstBox.width) < 1 && Math.abs(r.height - firstBox.height) < 1,
+              '▾ ✎ 🗑 boxes must be equal: ' + btn.className + ' is ' + r.width + 'x' + r.height + ' against ' + firstBox.width + 'x' + firstBox.height);
+            assert(bd !== 'transparent' && bd.indexOf('rgba(0, 0, 0, 0)') === -1,
+              'the box must be visible without pressing: ' + btn.className + ' border ' + bd);
+          });
+        }
         // Nothing left the DOM — every other fact stays one tap away.
         assert(mcCard('mc-buy').querySelector('[data-label="Rate"]') !== null, 'Rate row must stay in the DOM');
         assert(mcCard('mc-buy').querySelector('[data-label="Note"]') !== null, 'Note row must stay in the DOM');

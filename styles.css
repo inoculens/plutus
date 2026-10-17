@@ -2473,7 +2473,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .menu summary { min-height: 2.75rem; }
   .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; }
   .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
-  .trade-head { flex: 1 1 100%; flex-wrap: wrap; row-gap: 0.4rem; }
+  .trade-head { flex: 1 1 100%; flex-wrap: wrap; row-gap: 0.4rem; column-gap: 0.6rem; }
   /* Record head on phones: date + type left with the ▾ ✎ 🗑 cluster pinned
      top-right, long pills (now-worth, swap/what) wrap below, and the FIFO
      record # takes its own row underneath — it must never shove the
@@ -2482,8 +2482,23 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .trade-head .side { order: 2; }
   .trade-head .trade-actions { display: flex; align-items: center; order: 3; margin-left: auto; }
   .trade-head .trade-edit, .trade-head .trade-del { order: 3; }
+  /* ▾ ✎ 🗑 are three equal little squares, and their box never hides: a quiet
+     button only paints its border on hover/press, which on a phone leaves a
+     squeezed sliver that seems to appear "after pressing". 2rem keeps the trio
+     on the pills row down to 375px — narrower screens drop the whole cluster a
+     line together (see .trade-actions). */
+  .trade-head .trade-more, .trade-head .trade-edit, .trade-head .trade-del {
+    display: inline-flex; align-items: center; justify-content: center; position: relative;
+    width: 2rem; height: 2rem; min-width: 2rem; min-height: 2rem; padding: 0;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+  }
+  /* The squares stay 2rem, the thumb still gets ~44px: an invisible overlay
+     grows each hit area out into the gaps without moving a pixel. */
+  .trade-head .trade-more::after, .trade-head .trade-edit::after, .trade-head .trade-del::after {
+    content: ''; position: absolute; inset: -0.35rem -0.25rem;
+  }
   .trade-head .trade-edit { margin-left: 0; }
-  .trade-head .trade-more { display: inline-flex; align-items: center; justify-content: center; min-width: 0; padding: 0 0.2rem; margin-right: 0.15rem; }
+  .trade-head .trade-more { margin-right: 0.25rem; }
   .trade-head .trade-now { order: 4; }
   .trade-head .trade-what { order: 5; }
   .trade-head .trade-id { order: 6; flex-basis: 100%; max-width: fit-content; }
@@ -2494,12 +2509,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* Collapsed record cards: pills + the ▾ ✎ 🗑 cluster + the two key numbers;
      a tap anywhere (or the ▾) drops every other fact down. Only this
      breakpoint hides rows — desktop and the DOM keep every row as before. */
-  .trade-caret { display: block; font-size: 0.8rem; line-height: 1; transition: transform 0.15s ease; }
+  .trade-caret { display: block; font-size: 0.9rem; line-height: 1; transition: transform 0.15s ease; }
   .trade-block.is-open .trade-caret { transform: rotate(180deg); }
   .trade-block:not(.is-open) .trade-facts > .stat-row:not(.is-primary),
   .trade-block:not(.is-open) .lot-links { display: none; }
   .trade-foot { flex: 1 1 100%; padding-bottom: 0.3rem; }
-  .trade-edit, .trade-del { min-height: 2.75rem; min-width: 2.75rem; }
 
   /* — Dialogs: bottom sheets that survive the on-screen keyboard. —
      dvh/svh track the shrunken viewport (with vh fallback); the sheet is

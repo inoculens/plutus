@@ -1127,6 +1127,40 @@
           }
         });
 
+        test('sell form labels read Amount sold / Total received; buy stays put', function () {
+          var backup = null;
+          try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+          try {
+            L.saveState({
+              settings: { mainCurrency: 'EUR', costMethod: 'average' },
+              accounts: [{ id: 'sl1', name: 'Sell Form', ticker: 'BTC', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' }],
+              trades: [],
+              priceOverrides: {}
+            });
+            if (typeof init === 'function') init();
+            openPrefillTrade('sl1');
+            document.getElementById('t-side').value = 'sell';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-qty-label').textContent === 'Amount sold', 'sell qty label wrong: ' + document.getElementById('t-qty-label').textContent);
+            assert(document.getElementById('t-total-label').textContent === 'Total received (native currency)', 'sell total label wrong: ' + document.getElementById('t-total-label').textContent);
+            assert(document.getElementById('t-qty-hint').textContent.indexOf('sold') !== -1, 'sell qty hint must speak of selling: ' + document.getElementById('t-qty-hint').textContent);
+            assert(document.getElementById('t-total-hint').textContent.indexOf('received') !== -1, 'sell total hint must speak of receiving: ' + document.getElementById('t-total-hint').textContent);
+            document.getElementById('t-side').value = 'buy';
+            syncTradeTypeUI();
+            assert(document.getElementById('t-qty-label').textContent === 'Quantity', 'buy qty label wrong: ' + document.getElementById('t-qty-label').textContent);
+            assert(document.getElementById('t-total-label').textContent === 'Total (native currency)', 'buy total label wrong: ' + document.getElementById('t-total-label').textContent);
+            assert(document.getElementById('t-qty-hint').textContent.indexOf('received') !== -1, 'buy qty hint must stay about receiving: ' + document.getElementById('t-qty-hint').textContent);
+            assert(document.getElementById('t-total-hint').textContent.indexOf('paid') !== -1, 'buy total hint must stay about paying: ' + document.getElementById('t-total-hint').textContent);
+          } finally {
+            try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+            try {
+              if (backup === null) localStorage.removeItem('inoculens.v2');
+              else localStorage.setItem('inoculens.v2', backup);
+            } catch (e) { /* ignore */ }
+            try { render(); } catch (e) { /* ignore */ }
+          }
+        });
+
         test('labeled transfers post source and arrival legs', function () {
           function mv(id, from, to, qty, fee, ledger) {
             var t = { id: id, type: 'transfer', symbol: 'EUR', qty: qty, date: '2026-01-05', fee: 0, feeCurrency: 'EUR', networkFee: fee, fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1' }, accountId: from, createdAt: '2026-01-05T00:00:00.000Z' };
@@ -8103,7 +8137,7 @@
         mcOpen();
         var expected = {
           'mc-buy': ['Paid', 'Amount'],
-          'mc-sell': ['Paid', 'Amount'],
+          'mc-sell': ['Received', 'Amount sold'],
           'mc-xfer': ['Moved', 'Received'],
           'mc-inc': ['Received', 'Value'],
           'mc-exp': ['Lost', 'Fiat lost']
@@ -8122,6 +8156,12 @@
           assert(String(more[0].getAttribute('aria-label') || '').length > 0, id + ' toggle needs an aria-label');
           assert(!card.classList.contains('is-open'), id + ' cards must start closed');
         });
+        // Verbs follow the side: buys pay, sells receive; quantities are
+        // bought or sold, never the other way around.
+        assert(mcCard('mc-sell').querySelector('[data-label="Paid"]') === null, 'sell card must not read Paid');
+        assert(mcCard('mc-sell').querySelector('[data-label="Amount"]') === null, 'sell card must not read Amount');
+        assert(mcCard('mc-buy').querySelector('[data-label="Received"]') === null, 'buy card must not read Received');
+        assert(mcCard('mc-buy').querySelector('[data-label="Amount sold"]') === null, 'buy card must not read Amount sold');
         // Phone boxes: ▾ ✎ 🗑 are equal squares whose outline is on show from
         // the first paint (quiet buttons otherwise hide it until a press, which
         // left the ▾ a squeezed sliver with no visible box at rest).

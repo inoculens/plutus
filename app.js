@@ -7432,8 +7432,9 @@ function setTradeCardOpen(box, open) {
 function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   var n = normalizeTrade(t);
   // The two key numbers per type stay visible on a collapsed phone card
-  // (buy/sell: Paid + Amount; transfer: Moved + Received; income: Received +
-  // Value; expense: Lost + Fiat lost). Everything else drops down on a tap.
+  // (buy: Paid + Amount; sell: Received + Amount sold; transfer: Moved +
+  // Received; income: Received + Value; expense: Lost + Fiat lost).
+  // Everything else drops down on a tap.
   function primary(row) {
     try { row.classList.add('is-primary'); } catch (e) { /* ignore */ }
     return row;
@@ -7705,7 +7706,10 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     }
   } else {
-    box.appendChild(primary(statRow('Paid', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
+    // The verb follows the side: buys pay fiat out, sells receive it — a
+    // sale must never read like a purchase.
+    var fiatVerb = (t.type === 'sell') ? 'Received' : 'Paid';
+    box.appendChild(primary(statRow(fiatVerb, fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
     if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     // Real price is calculated, never quoted: the FULL all-in total converted
     // at the historical FX rate (or manual rate), divided by qty received —
@@ -7817,7 +7821,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     })(t.attachment);
   }
   if (t.type === 'buy' || t.type === 'sell') {
-    box.appendChild(primary(statRow('Amount', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
+    // Quantity row follows the side too: bought = Amount, sold = Amount sold.
+    var qtyVerb = (t.type === 'sell') ? 'Amount sold' : 'Amount';
+    box.appendChild(primary(statRow(qtyVerb, fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
   }
   // One true facts line: gather every fact row into a non-wrapping strip so
   // nothing ever spills to a second row — long values trim with … instead
@@ -10975,6 +10981,14 @@ function syncTradeTypeUI() {
     setLabel('t-total-label', 'Fiat lost (optional if crypto-only)');
     setLabel('t-qty-hint', isCash ? 'Money out, in the account currency.' : 'Amount you received (net of any fee taken in asset).');
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
+    setLabel('t-toqty-hint', '');
+  } else if (type === 'sell') {
+    // Selling mirrors buying: quantity leaves, fiat arrives. The verbs keep
+    // the direction obvious in both the labels and the hints.
+    setLabel('t-qty-label', 'Amount sold');
+    setLabel('t-total-label', 'Total received (native currency)');
+    setLabel('t-qty-hint', 'Amount you sold (the asset leaves this account).');
+    setLabel('t-total-hint', 'Full amount received, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else {
     setLabel('t-qty-label', 'Quantity');

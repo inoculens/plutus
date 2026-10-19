@@ -7040,9 +7040,10 @@ function tradeTypeMeta(type) {
 }
 
 // "Now worth" fun-fact pill (display-only): what this record's qty would be
-// worth today at the live price in the current main fiat. Pure math, never
-// stored, never read by the ledger — P&L/tax cannot see it. Unknown live
-// prices stay null (never 0: that would fabricate a -100% loss).
+// worth today at the live price in the current main fiat — for a buy, the
+// position it opened; for a sell, what the sold qty left behind. Pure math,
+// never stored, never read by the ledger — P&L/tax cannot see it. Unknown
+// live prices stay null (never 0: that would fabricate a -100% loss).
 function tradeNowValue(qty, livePrice) {
   var q = Number(qty);
   var p = Number(livePrice);
@@ -7062,8 +7063,14 @@ function tradeNowPct(thenMain, nowMain) {
 // Resolve the pill model for one buy/sell record, or null when no pill
 // should render (other types, bad qty, unknown live price). `t` is the
 // display (converted) trade so `then` already sits in the current main.
+// Buys read as a held position: price up = gain. Sells are the mirror — the
+// asset is gone, so a price ABOVE the proceeds is a miss (loss colour) and
+// a price below is a save (gain colour); `pct` carries that same mirror
+// sign (negated buy percent) so the number never contradicts the colour.
+// `then` stays the full proceeds (fee inside), like everywhere else.
 function tradeNowMeta(t, main, livePrice) {
   if (!t || (t.type !== 'buy' && t.type !== 'sell')) return null;
+  var isSell = t.type === 'sell';
   var q = Number(t.qty);
   if (!isFinite(q) || q <= 0) return null;
   var now = tradeNowValue(q, livePrice);
@@ -7072,30 +7079,48 @@ function tradeNowMeta(t, main, livePrice) {
   try { then = normalizeTrade(t).netMain; } catch (e) { then = null; }
   then = Number(then);
   if (!isFinite(then) || then < 0) return null;
-  var pct = tradeNowPct(then, now);
+  var rawPct = tradeNowPct(then, now);
+  // Null stays null — negating it would collapse to 0 and paint a pct.
+  var pct = (rawPct === null) ? null : (isSell ? -rawPct : rawPct);
+  // Signed "came out ahead?" amount in the record's own frame.
+  var ahead = isSell ? (then - now) : (now - then);
   var cls = 'trade-now-flat';
   // Cent-level epsilon: sub-cent drift (FX rounding) reads as flat.
   if (then <= 0) {
-    cls = now > 0 ? 'trade-now-gain' : 'trade-now-flat';
-  } else if (now - then > 0.005) {
+    // No basis: a free buy is all gain, a give-away sell all miss.
+    cls = isSell ? 'trade-now-loss' : (now > 0 ? 'trade-now-gain' : 'trade-now-flat');
+  } else if (ahead > 0.005) {
     cls = 'trade-now-gain';
-  } else if (then - now > 0.005) {
+  } else if (-ahead > 0.005) {
     cls = 'trade-now-loss';
   }
   return { now: now, then: then, pct: pct, cls: cls };
 }
 
-// Pill text: the signed change first (delta vs the record's own cost),
-// then the labelled current value with its percent, e.g.
-// "+€5.49 | Current €7.49 +200%". The sign carries the direction, so no
-// increase/decrease word, and the current value meets the percent with a
-// plain space (no · in this pill). The ▲/▼ arrow rides CSS ::before (like
-// .pill.gain/.pill.loss), so the text carries no arrow.
-// Flat or basis-free records read "Current €N" only.
-function tradeNowText(now, main, pct, then) {
-  var cur = 'Current ' + fmtMoney(now, main);
+// Pill text. Buys keep the long-standing shape: signed change first (delta
+// vs the record's own cost), then the labelled current value with its
+// percent, e.g. "+€5.49 | Current €7.49 +200%". The sign carries the
+// direction, so no increase/decrease word, and the current value meets the
+// percent with a plain space (no · in this pill).
+// Sells speak from today instead (5th argument true): "Saved €1.00 · Now
+// €1.00 +50%" when the price fell since the sale, "Missed €4.00 · Now
+// €6.00 -200%" when it rose — the amount is what the sold qty is worth
+// beyond/below the proceeds. Flat reads "Now €N" only; with no basis to
+// compare the miss is still stated (proceeds of 0 settle the direction).
+// The ▲/▼ arrow rides CSS ::before (like .pill.gain/.pill.loss), so the
+// text carries no arrow.
+function tradeNowText(now, main, pct, then, sell) {
   var p = Number(pct);
-  if (pct === null || pct === undefined || !isFinite(p)) return cur;
+  var hasPct = !(pct === null || pct === undefined) && isFinite(p);
+  if (sell) {
+    var curS = 'Now ' + fmtMoney(now, main);
+    var ahead = Number(then) - Number(now);
+    if (Math.abs(ahead) < 0.005) return curS;
+    var pctTxt = (hasPct && Math.abs(p) >= 0.005) ? ' ' + ((p > 0 ? '+' : '') + fmtPct(p)) : '';
+    return (ahead > 0 ? 'Saved ' : 'Missed ') + fmtMoney(Math.abs(ahead), main) + ' · ' + curS + pctTxt;
+  }
+  var cur = 'Current ' + fmtMoney(now, main);
+  if (!hasPct) return cur;
   if (Math.abs(p) < 0.005) return cur;
   var delta = Number(now) - Number(then);
   var signedDelta = (delta > 0 ? '+' : '') + fmtMoney(delta, main);
@@ -7467,9 +7492,11 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   }
   head.appendChild(side);
   // "Now worth" fun-fact pill: qty × live price in the current main, with the
-  // P&L percent vs the record's own historic cost. Buys and sells only;
-  // display-only (never stored, never booked). Hidden while the live price
-  // is unknown instead of printing a fictitious loss.
+  // P&L percent vs the record's own historic cost. Buys read as held
+  // gain/loss; sells read as saved/missed against the proceeds (see
+  // tradeNowMeta). Buys and sells only; display-only (never stored, never
+  // booked). Hidden while the live price is unknown instead of printing a
+  // fictitious loss.
   if (t.type === 'buy' || t.type === 'sell') {
     var nowMeta = null;
     try {
@@ -7481,7 +7508,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       var nowPill = document.createElement('span');
       nowPill.className = 'trade-now ' + nowMeta.cls;
       var nowTxt = '';
-      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then); } catch (e) { nowTxt = ''; }
+      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then, t.type === 'sell'); } catch (e) { nowTxt = ''; }
       nowPill.textContent = nowTxt;
       nowPill.title = nowTxt;
       nowPill.setAttribute('aria-label', nowTxt);

@@ -7600,10 +7600,18 @@
         assert(L.tradeNowMeta(nwTrade('nw-u2', 'buy', 1, 2), 'EUR', 0) === null, 'zero live must hide the pill');
         var gain = L.tradeNowMeta(nwTrade('nw-g', 'buy', 1, 2), 'EUR', 6);
         assert(gain !== null && gain.now === 6 && gain.then === 2 && gain.pct === 200 && gain.cls === 'trade-now-gain', 'gain meta wrong: ' + JSON.stringify(gain));
-        var loss = L.tradeNowMeta(nwTrade('nw-l', 'sell', 1, 2), 'EUR', 1);
-        assert(loss !== null && loss.now === 1 && loss.pct === -50 && loss.cls === 'trade-now-loss', 'loss meta wrong: ' + JSON.stringify(loss));
+        var loss = L.tradeNowMeta(nwTrade('nw-l', 'buy', 1, 2), 'EUR', 1);
+        assert(loss !== null && loss.now === 1 && loss.pct === -50 && loss.cls === 'trade-now-loss', 'buy loss meta wrong: ' + JSON.stringify(loss));
+        // Sells mirror the frame: the asset left, so a price above the
+        // proceeds is a miss (loss colour, negated pct) and below is a save.
+        var miss = L.tradeNowMeta(nwTrade('nw-m', 'sell', 1, 2), 'EUR', 6);
+        assert(miss !== null && miss.now === 6 && miss.then === 2 && miss.pct === -200 && miss.cls === 'trade-now-loss', 'sell miss meta wrong: ' + JSON.stringify(miss));
+        var save = L.tradeNowMeta(nwTrade('nw-s', 'sell', 1, 2), 'EUR', 1);
+        assert(save !== null && save.now === 1 && save.pct === 50 && save.cls === 'trade-now-gain', 'sell save meta wrong: ' + JSON.stringify(save));
         var flat = L.tradeNowMeta(nwTrade('nw-f', 'buy', 1, 2), 'EUR', 2);
         assert(flat !== null && flat.cls === 'trade-now-flat' && flat.pct === 0, 'flat meta wrong: ' + JSON.stringify(flat));
+        var flatSell = L.tradeNowMeta(nwTrade('nw-fs', 'sell', 1, 2), 'EUR', 2);
+        assert(flatSell !== null && flatSell.cls === 'trade-now-flat' && flatSell.pct === 0, 'flat sell meta wrong: ' + JSON.stringify(flatSell));
       });
 
       test('tradeNowText leads with the delta, then the labelled current value', function () {
@@ -7624,9 +7632,20 @@
         assert(m.indexOf('%') === -1 && m.indexOf('Current') !== -1, 'flat must be Current only, got ' + m);
         var z = L.tradeNowText(6, 'EUR', null, 2);
         assert(z.indexOf('%') === -1 && z.indexOf('Current') !== -1, 'null pct must be Current only, got ' + z);
+        // Sells speak from today: Saved / Missed + Now, inverted percent.
+        var sd = L.tradeNowText(1, 'EUR', 50, 2, true);
+        assert(sd.indexOf('Saved') === 0 && sd.indexOf('€1.00') !== -1 && sd.indexOf('Now') !== -1 && sd.indexOf('+50%') !== -1, 'sell save text wrong: ' + sd);
+        assert(sd.indexOf('Current') === -1 && sd.indexOf('|') === -1, 'sell text must speak of Now, not Current: ' + sd);
+        var sm = L.tradeNowText(6, 'EUR', -200, 2, true);
+        assert(sm.indexOf('Missed') === 0 && sm.indexOf('€4.00') !== -1 && sm.indexOf('Now') !== -1 && sm.indexOf('-200%') !== -1, 'sell miss text wrong: ' + sm);
+        assert(sm.indexOf('Current') === -1 && sm.indexOf('+') === -1, 'a sell miss must carry no plus: ' + sm);
+        var sf = L.tradeNowText(2, 'EUR', 0, 2, true);
+        assert(sf.indexOf('Saved') === -1 && sf.indexOf('Missed') === -1 && sf.indexOf('Now') !== -1 && sf.indexOf('%') === -1, 'flat sell must read Now only, got ' + sf);
+        var sn = L.tradeNowText(6, 'EUR', null, 2, true);
+        assert(sn.indexOf('Missed') === 0 && sn.indexOf('%') === -1 && sn.indexOf('Now') !== -1, 'no-basis sell must state the miss money-only, got ' + sn);
       });
 
-      testAsync('buy/sell cards render the now pill after the type pill; transfers do not', function () {
+      testAsync('buy/sell cards render the now pill after the type pill; sells mirror the sign', function () {
         var backup = null;
         try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
         function restore() {
@@ -7674,6 +7693,10 @@
             assert((cs.borderRadius || '').indexOf('999px') !== -1, 'now must be a pill, got ' + cs.borderRadius);
             var sell = document.querySelector('#account-detail .trade-block[data-trade="nw-s1"] .trade-head .trade-now');
             assert(sell !== null, 'sell card must carry the now pill too');
+            assert(sell.classList.contains('trade-now-loss'), 'a sale above its proceeds must read as a miss (red), got ' + sell.className);
+            assert(sell.textContent.indexOf('Missed') === 0 && sell.textContent.indexOf('Now') !== -1 && sell.textContent.indexOf('Current') === -1, 'sell pill text wrong: ' + sell.textContent);
+            assert(sell.textContent.indexOf('-200%') !== -1 && sell.textContent.indexOf('+') === -1, 'sell miss must carry the negated percent only: ' + sell.textContent);
+            assert(sell.scrollWidth <= sell.clientWidth + 1, 'sell pill must fit its full text, got ' + sell.textContent);
             var xfer = document.querySelector('#account-detail .trade-block[data-trade="nw-t1"] .trade-head .trade-now');
             assert(xfer === null, 'transfer cards get no now pill');
           } finally {

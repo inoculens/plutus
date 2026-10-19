@@ -59,9 +59,12 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Errors: one calm banner line + "More details" popup; never dump ticker
   lists into the banner.
 - National currencies are always called "fiat" in UI copy.
-- Account list: 6 cards per page with sliding 6-number pager; dice-grip
-  reorder and bulk selection persist across pages; totals always cover every
-  visible (filtered) account, never just the page.
+- Account list: 6 cards per page; the pager shows at most 3 numbers —
+  first, current, last, with ellipses for the gaps (1 2 … 4, 1 … 50 … 100,
+  1 … 99 100). The per-account records pager uses the same compact shape.
+  Pagers wrap, never scroll horizontally; dice-grip reorder and bulk
+  selection persist across pages; totals always cover every visible
+  (filtered) account, never just the page.
 - Accounts carry optional `color` (validated hex, avatar + border tint);
   bulk Change color offers presets, custom picker/hex, and reset.
 - Layout is fixed, content is fluid: boxes never resize with values —

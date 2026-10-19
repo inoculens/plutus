@@ -6874,15 +6874,42 @@ function renderAccounts(st) {
   pageAccounts.forEach(function (acc) {
     host.appendChild(accountCardEl(st, acc, rowsById[acc.id] || [], dtrades, main, true, [acc.id].concat(groupMembers(st, acc.id).map(function (m) { return m.id; }))));
   });
-  if (pageCount > 1) host.appendChild(buildAccountPager(pageCount));
+  if (pageCount > 1) host.appendChild(buildAccountPager(pageCount, accountPage));
   restoreAccountFilterFocus();
 }
 
-function buildAccountPager(pageCount) {
+// Compact pager shape shared by the account list and the per-account trade
+// list: at most three numeric buttons (first, current, last) with ellipses
+// standing in for the gaps. Returns 0-based page indexes, null for a gap;
+// the current page is always one of the numbers.
+function compactPagerItems(current, total) {
+  if (!isFinite(total) || total <= 0) return [];
+  current = Math.max(0, Math.min(total - 1, Number(current) || 0));
+  if (total <= 3) {
+    var all = [];
+    for (var i = 0; i < total; i++) all.push(i);
+    return all;
+  }
+  if (current <= 1) return [0, 1, null, total - 1];
+  if (current >= total - 2) return [0, null, total - 2, total - 1];
+  return [0, null, current, null, total - 1];
+}
+
+function pagerEllipsisEl() {
+  var gap = document.createElement('span');
+  gap.className = 'pager-ellipsis';
+  gap.setAttribute('aria-hidden', 'true');
+  gap.textContent = '…';
+  return gap;
+}
+
+function buildAccountPager(pageCount, current) {
   var pager = document.createElement('div');
-  pager.className = 'pager';
+  pager.className = 'pager account-pager';
   pager.setAttribute('role', 'navigation');
   pager.setAttribute('aria-label', 'Account pages');
+  if (typeof current !== 'number' || !isFinite(current)) current = accountPage;
+  current = Math.max(0, Math.min(pageCount - 1, current));
   function pgBtn(label, attrs, disabled, fn) {
     var b = document.createElement('button');
     b.type = 'button';
@@ -6895,27 +6922,19 @@ function buildAccountPager(pageCount) {
     b.addEventListener('click', fn);
     return b;
   }
-  pager.appendChild(pgBtn('‹ Prev', { 'data-page-prev': '1', 'aria-label': 'Previous account page' }, accountPage <= 0, function () {
+  pager.appendChild(pgBtn('‹ Prev', { 'data-page-prev': '1', 'aria-label': 'Previous account page' }, current <= 0, function () {
     if (accountPage > 0) { accountPage--; render(); }
   }));
-  // Sliding window: at most 6 page numbers at once (1–6, then 2–7, …).
-  var PAGER_WINDOW = 6;
-  var winStart = 0;
-  if (pageCount > PAGER_WINDOW) {
-    winStart = accountPage - 4;
-    if (winStart < 0) winStart = 0;
-    if (winStart > pageCount - PAGER_WINDOW) winStart = pageCount - PAGER_WINDOW;
-  }
-  for (var i = winStart; i < Math.min(winStart + PAGER_WINDOW, pageCount); i++) {
-    (function (p) {
-      var nb = pgBtn(String(p + 1), { 'data-page-goto': String(p), 'aria-label': 'Go to account page ' + (p + 1) }, false, function () {
-        if (accountPage !== p) { accountPage = p; render(); }
-      });
-      if (p === accountPage) nb.setAttribute('aria-current', 'page');
-      pager.appendChild(nb);
-    })(i);
-  }
-  pager.appendChild(pgBtn('Next ›', { 'data-page-next': '1', 'aria-label': 'Next account page' }, accountPage >= pageCount - 1, function () {
+  // Compact shape: first, current and last, ellipses for the gaps.
+  compactPagerItems(current, pageCount).forEach(function (p) {
+    if (p === null) { pager.appendChild(pagerEllipsisEl()); return; }
+    var nb = pgBtn(String(p + 1), { 'data-page-goto': String(p), 'aria-label': 'Go to account page ' + (p + 1) }, false, function () {
+      if (accountPage !== p) { accountPage = p; render(); }
+    });
+    if (p === current) nb.setAttribute('aria-current', 'page');
+    pager.appendChild(nb);
+  });
+  pager.appendChild(pgBtn('Next ›', { 'data-page-next': '1', 'aria-label': 'Next account page' }, current >= pageCount - 1, function () {
     if (accountPage < pageCount - 1) { accountPage++; render(); }
   }));
   return pager;
@@ -6949,23 +6968,17 @@ function buildTradePager(accountId, total, pageCount, page) {
   pager.appendChild(pgBtn('‹ Prev', { 'data-tpage-prev': '1', 'aria-label': 'Previous trade page' }, page <= 0, function () {
     if (page > 0) go(page - 1);
   }));
-  // Sliding window like the account pager: at most 6 numbers at once.
-  var PAGER_WINDOW = 6;
-  var winStart = 0;
-  if (pageCount > PAGER_WINDOW) {
-    winStart = page - 4;
-    if (winStart < 0) winStart = 0;
-    if (winStart > pageCount - PAGER_WINDOW) winStart = pageCount - PAGER_WINDOW;
-  }
-  for (var i = winStart; i < Math.min(winStart + PAGER_WINDOW, pageCount); i++) {
-    (function (p) {
-      var nb = pgBtn(String(p + 1), { 'data-tpage-goto': String(p), 'aria-label': 'Go to trade page ' + (p + 1) }, false, function () {
-        if (tradePageGet(accountId, total) !== p) go(p);
-      });
-      if (p === page) nb.setAttribute('aria-current', 'page');
-      pager.appendChild(nb);
-    })(i);
-  }
+  // Compact shape like the account pager: first, current and last, ellipses
+  // for the gaps (never more than three numbers).
+  var shown = Math.max(0, Math.min(pageCount - 1, page));
+  compactPagerItems(shown, pageCount).forEach(function (p) {
+    if (p === null) { pager.appendChild(pagerEllipsisEl()); return; }
+    var nb = pgBtn(String(p + 1), { 'data-tpage-goto': String(p), 'aria-label': 'Go to trade page ' + (p + 1) }, false, function () {
+      if (tradePageGet(accountId, total) !== p) go(p);
+    });
+    if (p === shown) nb.setAttribute('aria-current', 'page');
+    pager.appendChild(nb);
+  });
   pager.appendChild(pgBtn('Next ›', { 'data-tpage-next': '1', 'aria-label': 'Next trade page' }, page >= pageCount - 1, function () {
     if (page < pageCount - 1) go(page + 1);
   }));
@@ -14253,6 +14266,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.tradePageGet = tradePageGet;
   window.Inoculens.tradePageSetFor = tradePageSetFor;
   window.Inoculens.buildTradePager = buildTradePager;
+  window.Inoculens.buildAccountPager = buildAccountPager;
+  window.Inoculens.compactPagerItems = compactPagerItems;
   window.Inoculens.normalizeTradeTypeFilter = normalizeTradeTypeFilter;
   window.Inoculens.tradeTypeFilterFor = tradeTypeFilterFor;
   window.Inoculens.setTradeTypeFilter = setTradeTypeFilter;

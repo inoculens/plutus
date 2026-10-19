@@ -7182,6 +7182,92 @@
       });
     })();
 
+    // === Compact pagers: ≤3 numbers + ellipses (accounts and trade records) ===
+    (function compactPagerTests() {
+      var L = window.Inoculens || {};
+      var backup = null;
+      try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+      function restoreState() {
+        try {
+          if (backup === null) localStorage.removeItem('inoculens.v2');
+          else localStorage.setItem('inoculens.v2', backup);
+        } catch (e) { /* ignore */ }
+        try { render(); } catch (e) { /* ignore */ }
+      }
+      function labels(root, sel) {
+        return Array.prototype.map.call(root.querySelectorAll(sel), function (b) { return b.textContent; });
+      }
+      function gaps(root) { return root.querySelectorAll('.pager-ellipsis'); }
+      try {
+        test('compactPagerItems keeps both ends, ≤3 numbers, current visible', function () {
+          assert(typeof L.compactPagerItems === 'function', 'compactPagerItems must be exported');
+          var f = L.compactPagerItems;
+          assert(JSON.stringify(f(0, 3)) === '[0,1,2]', '3 pages show all numbers, got ' + JSON.stringify(f(0, 3)));
+          assert(JSON.stringify(f(0, 4)) === '[0,1,null,3]', 'page 1 of 4 is 1 2 … 4, got ' + JSON.stringify(f(0, 4)));
+          assert(JSON.stringify(f(1, 4)) === '[0,1,null,3]', 'page 2 of 4 is 1 2 … 4, got ' + JSON.stringify(f(1, 4)));
+          assert(JSON.stringify(f(2, 4)) === '[0,null,2,3]', 'page 3 of 4 is 1 … 3 4, got ' + JSON.stringify(f(2, 4)));
+          assert(JSON.stringify(f(3, 4)) === '[0,null,2,3]', 'page 4 of 4 is 1 … 3 4, got ' + JSON.stringify(f(3, 4)));
+          assert(JSON.stringify(f(0, 100)) === '[0,1,null,99]', 'page 1 of 100 is 1 2 … 100, got ' + JSON.stringify(f(0, 100)));
+          assert(JSON.stringify(f(49, 100)) === '[0,null,49,null,99]', 'page 50 of 100 is 1 … 50 … 100, got ' + JSON.stringify(f(49, 100)));
+          assert(JSON.stringify(f(98, 100)) === '[0,null,98,99]', 'page 99 of 100 is 1 … 99 100, got ' + JSON.stringify(f(98, 100)));
+          [3, 4, 5, 6, 10, 50, 100].forEach(function (total) {
+            for (var cur = 0; cur < total; cur++) {
+              var it = f(cur, total);
+              var nums = it.filter(function (x) { return x !== null; });
+              assert(nums.length <= 3, '≤3 numbers for ' + (cur + 1) + '/' + total + ', got ' + JSON.stringify(it));
+              assert(nums.indexOf(cur) !== -1, 'current ' + (cur + 1) + '/' + total + ' must stay visible: ' + JSON.stringify(it));
+              assert(nums.indexOf(0) !== -1 && nums.indexOf(total - 1) !== -1, 'ends must stay visible for ' + (cur + 1) + '/' + total);
+            }
+          });
+        });
+
+        test('account pager renders 1 2 … 4 and 1 … 3 4 with passive ellipses', function () {
+          assert(typeof L.buildAccountPager === 'function', 'buildAccountPager must be exported');
+          var first = L.buildAccountPager(4, 0);
+          assert(labels(first, '[data-page-goto]').join(',') === '1,2,4', '4 pages on page 1 must read 1,2,4, got ' + labels(first, '[data-page-goto]').join(','));
+          assert(gaps(first).length === 1, 'exactly one ellipsis on page 1 of 4, got ' + gaps(first).length);
+          assert(first.querySelector('[data-page-goto="0"]').getAttribute('aria-current') === 'page', 'page 1 must be aria-current');
+          assert(first.querySelector('[data-page-prev]').disabled === true, 'prev must be disabled on page 1');
+          var gap = gaps(first)[0];
+          assert(gap.tagName === 'SPAN' && !gap.hasAttribute('data-page-goto'), 'ellipsis must be a passive span');
+          assert(gap.getAttribute('aria-hidden') === 'true', 'ellipsis must be hidden from screen readers');
+          var last = L.buildAccountPager(4, 3);
+          assert(labels(last, '[data-page-goto]').join(',') === '1,3,4', '4 pages on page 4 must read 1,3,4, got ' + labels(last, '[data-page-goto]').join(','));
+          assert(gaps(last).length === 1, 'exactly one ellipsis on page 4 of 4, got ' + gaps(last).length);
+          assert(last.querySelector('[data-page-goto="3"]').getAttribute('aria-current') === 'page', 'page 4 must be aria-current');
+          assert(last.querySelector('[data-page-next]').disabled === true, 'next must be disabled on page 4');
+        });
+
+        test('trade pager renders 1 … 50 … 100 with ≤3 numbers', function () {
+          assert(typeof L.buildTradePager === 'function', 'buildTradePager must be exported');
+          var pager = L.buildTradePager('cp-acct', 2500, 100, 49);
+          assert(labels(pager, '[data-tpage-goto]').join(',') === '1,50,100', 'page 50 of 100 must read 1,50,100, got ' + labels(pager, '[data-tpage-goto]').join(','));
+          assert(gaps(pager).length === 2, 'two ellipses expected around the middle page, got ' + gaps(pager).length);
+          assert(pager.querySelector('[data-tpage-goto="49"]').getAttribute('aria-current') === 'page', 'current trade page must be aria-current');
+        });
+
+        test('accounts pager stays compact on a live page and reaches page 4', function () {
+          var accounts = [];
+          for (var i = 0; i < 24; i++) accounts.push({ id: 'cp-' + i, name: 'CP ' + i, ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' });
+          accountPage = 0; // prior tests may have flipped the in-memory page
+          L.saveState({ settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: accounts, trades: [], priceOverrides: {} });
+          init(); navHome(); render();
+          var pager = document.querySelector('#accounts .pager');
+          assert(pager !== null, 'pager must show for 24 accounts (4 pages)');
+          assert(labels(pager, '[data-page-goto]').join(',') === '1,2,4', 'live page 1 of 4 must read 1,2,4, got ' + labels(pager, '[data-page-goto]').join(','));
+          var lastBtn = pager.querySelector('[data-page-goto="3"]');
+          assert(lastBtn !== null, 'page 4 must be reachable from page 1');
+          lastBtn.click();
+          pager = document.querySelector('#accounts .pager');
+          assert(labels(pager, '[data-page-goto]').join(',') === '1,3,4', 'live page 4 must read 1,3,4, got ' + labels(pager, '[data-page-goto]').join(','));
+          assert(document.querySelectorAll('#accounts .account-card').length === 6, 'page 4 must still render 6 cards');
+          assert(pager.querySelector('[data-page-next]').disabled === true, 'next must be disabled on the last page');
+        });
+      } finally {
+        restoreState();
+      }
+    })();
+
     // === FIFO linkage tests (per-record Sold / Closed-from, id pills) ===
     (function fifoLinkageTests() {
       var L = window.Inoculens || {};

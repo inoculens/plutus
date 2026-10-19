@@ -1278,6 +1278,13 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .page-btn[disabled]:hover { background: none; border-color: var(--border); }
 .page-btn[disabled]:active { transform: none; background: none; }
 .page-btn[aria-current="page"] { color: var(--gold); border-color: var(--hairline-gold); }
+.pager-ellipsis {
+  min-width: 1.1rem;
+  text-align: center;
+  color: var(--muted);
+  user-select: none;
+  pointer-events: none;
+}
 .page-btn.hot {
   background: rgba(96, 165, 250, 0.2);
   border-color: #60a5fa;
@@ -1316,9 +1323,7 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   flex-wrap: nowrap;
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
   justify-content: center;
-  scrollbar-width: thin;
 }
 
 .trade-bottom-bar .trade-pager .page-btn { flex: 0 0 auto; }
@@ -2457,7 +2462,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .card-value { font-size: 1.05rem; }
 
   /* — Accounts: one row (grip + avatar + name + figures), figures stack
-       under the name only on very narrow cards; pager scrolls, never clips. */
+       under the name only on very narrow cards; pager wraps, never scrolls. */
   #accounts { gap: 0.55rem; }
   .section-head { flex-direction: column; align-items: stretch; gap: 0.6rem; }
   /* Trades header stays a title-left / actions-right row on phones too, so
@@ -2474,10 +2479,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .acct-figs { align-items: flex-end; text-align: right; flex-shrink: 0; max-width: 42%; }
   .acct-value { font-size: 0.95rem; }
   .acct-pl { font-size: 0.78rem; }
-  .pager { gap: 0.45rem; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; padding-bottom: 0.25rem; scrollbar-width: thin; }
+  .pager { gap: 0.45rem; flex-wrap: wrap; justify-content: center; }
   .page-btn { flex: 0 0 auto; min-width: 2.75rem; min-height: 2.75rem; }
   .trade-bottom-bar { flex-wrap: wrap; }
-  .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: center; }
+  .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: center; flex-wrap: wrap; }
   .filter-panel { position: fixed; left: 0.9rem; right: 0.9rem; top: auto; bottom: calc(0.9rem + env(safe-area-inset-bottom)); max-height: 50vh; max-height: 50dvh; }
   .account-create-row { flex-direction: column; align-items: stretch; }
   .account-create-row .fld { min-width: 0; }

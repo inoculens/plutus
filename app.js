@@ -208,6 +208,9 @@ function saveState(s) {
 }
 
 var TRADE_TYPES = ['buy', 'sell', 'transfer', 'income', 'expense'];
+// UI-only type list: swaps are stored as two linked buy/sell legs, but the
+// record list and its filter must present them as one Swap type.
+var TRADE_UI_TYPES = TRADE_TYPES.concat(['swap']);
 
 function isValidCurrencyCode(c) {
   if (typeof c !== 'string') return false;
@@ -6487,6 +6490,7 @@ function buildAccountFilter(st, tickers, effective) {
 }
 
 function tradeTypeLabel(t) {
+  if (t === 'swap') return 'Swap';
   if (t === 'sell') return 'Sell';
   if (t === 'transfer') return 'Transfer';
   if (t === 'income') return 'Income';
@@ -6526,9 +6530,13 @@ function buildTradeTypeFilter(acc, atrades) {
   panel.appendChild(title);
   var counts = {};
   (atrades || []).forEach(function (t) {
-    var k = String((t && t.type) || '').toLowerCase();
-    if (TRADE_TYPES.indexOf(k) !== -1) counts[k] = (counts[k] || 0) + 1;
+    var k = tradeUiType(t);
+    if (TRADE_UI_TYPES.indexOf(k) !== -1) counts[k] = (counts[k] || 0) + 1;
   });
+  // Swap is offered only when this account has swaps (or the current filter
+  // already targets swaps, so the checkbox stays reachable after deletion).
+  var uiTypes = TRADE_TYPES.slice();
+  if ((counts.swap || 0) > 0 || (cur && cur.indexOf('swap') !== -1)) uiTypes.push('swap');
   function optRow(labelText, checked, type) {
     var lab = document.createElement('label');
     lab.className = 'filter-opt';
@@ -6547,17 +6555,17 @@ function buildTradeTypeFilter(acc, atrades) {
         return;
       }
       var base = tradeTypeFilterFor(id);
-      var list = (base === null) ? TRADE_TYPES.slice() : base.slice();
+      var list = (base === null) ? uiTypes.slice() : base.slice();
       var ix = list.indexOf(type);
       if (cb.checked && ix === -1) list.push(type);
       if (!cb.checked && ix !== -1) list.splice(ix, 1);
-      var coversAll = TRADE_TYPES.every(function (x) { return list.indexOf(x) !== -1; });
+      var coversAll = uiTypes.every(function (x) { return list.indexOf(x) !== -1; });
       setTradeTypeFilter(id, coversAll ? null : list.sort(), type);
     });
     return lab;
   }
   panel.appendChild(optRow('All', cur === null, null));
-  TRADE_TYPES.forEach(function (x) {
+  uiTypes.forEach(function (x) {
     var n = counts[x] || 0;
     panel.appendChild(optRow(tradeTypeLabel(x) + (n ? ' · ' + n : ''), cur === null || cur.indexOf(x) !== -1, x));
   });
@@ -7169,11 +7177,76 @@ function fmtFeeAmount(t) {
 }
 
 function tradeTypeMeta(type) {
+  if (type === 'swap') return { label: 'Swap', cls: 'side-swap' };
   if (type === 'sell') return { label: 'Sell', cls: 'side-sell' };
   if (type === 'transfer') return { label: 'Transfer', cls: 'side-transfer' };
   if (type === 'income') return { label: 'Income', cls: 'side-income' };
   if (type === 'expense') return { label: 'Expense', cls: 'side-expense' };
   return { label: 'Buy', cls: 'side-buy' };
+}
+
+// The type a record presents as in the UI. Swap legs keep their real
+// buy/sell `type` for all ledger math; only the visible list/filter says
+// Swap. Empty string for unknown shapes.
+function tradeUiType(t) {
+  if (t && typeof t.swapId === 'string' && t.swapId !== '') return 'swap';
+  var k = String((t && t.type) || '').toLowerCase();
+  return TRADE_TYPES.indexOf(k) !== -1 ? k : '';
+}
+
+// Group linked swap legs once per paint: swapId -> { sell, buy, … }.
+// Presentation only; the stored shape stays two ordinary buy/sell records.
+function buildSwapPairMap(trades) {
+  var out = {};
+  (trades || []).forEach(function (t) {
+    if (!t || typeof t.swapId !== 'string' || t.swapId === '') return;
+    var g = out[t.swapId];
+    if (!g) g = out[t.swapId] = { swapId: t.swapId, sell: null, buy: null, legs: [] };
+    g.legs.push(t);
+    if (t.type === 'sell' && !g.sell) g.sell = t;
+    else if (t.type === 'buy' && !g.buy) g.buy = t;
+  });
+  Object.keys(out).forEach(function (sid) {
+    var g = out[sid];
+    var fromLeg = g.sell || g.legs[0] || null;
+    var toLeg = g.buy || g.legs[1] || null;
+    g.fromSymbol = fromLeg ? String(fromLeg.symbol || '').toUpperCase() : '';
+    g.toSymbol = toLeg ? String(toLeg.symbol || '').toUpperCase() : '';
+    g.fromAccountId = fromLeg ? fromLeg.accountId : '';
+    g.toAccountId = toLeg ? toLeg.accountId : '';
+  });
+  return out;
+}
+
+function swapPairText(info) {
+  if (!info || !info.fromSymbol || !info.toSymbol) return '';
+  return info.fromSymbol + ' → ' + info.toSymbol;
+}
+
+// Older swaps appended " [swap]" to the user's note. The Swap pill already
+// says it: show the note without the machine suffix, and stop writing it.
+function swapNoteClean(note) {
+  return String(note === undefined || note === null ? '' : note).replace(/(?:\s*\[swap\])+\s*$/i, '').trim();
+}
+
+// Find the linked sell+buy legs for a stored swap record. Null for normal
+// records or orphaned/corrupt swap data (callers fall back to single-leg
+// editing so nothing becomes uneditable).
+function swapPairForTrade(st, tr) {
+  if (!tr || typeof tr.swapId !== 'string' || tr.swapId === '') return null;
+  var legs = [];
+  ((st && st.trades) || []).forEach(function (t) {
+    if (t && typeof t.swapId === 'string' && t.swapId === tr.swapId) legs.push(t);
+  });
+  if (legs.length < 2) return null;
+  var sell = null;
+  var buy = null;
+  legs.forEach(function (t) {
+    if (t.type === 'sell' && !sell) sell = t;
+    else if (t.type === 'buy' && !buy) buy = t;
+  });
+  if (!sell || !buy) return null;
+  return { swapId: tr.swapId, sell: sell, buy: buy, legs: legs };
 }
 
 // "Now worth" fun-fact pill (display-only): what this record's qty would be
@@ -7591,7 +7664,7 @@ function setTradeCardOpen(box, open) {
   try { syncInfoDots(); } catch (e) { /* the ⓘ gate never breaks a tap */ }
 }
 
-function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
+function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   var n = normalizeTrade(t);
   // The two key numbers per type stay visible on a collapsed phone card
   // (buy: Paid + Amount; sell: Received + Amount sold; transfer: Moved +
@@ -7610,7 +7683,10 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   box.setAttribute('data-trade', t.id || '');
   var head = document.createElement('div');
   head.className = 'trade-head';
-  var meta = tradeTypeMeta(t.type);
+  var isSwap = !!(t && typeof t.swapId === 'string' && t.swapId !== '');
+  var swap = (isSwap && swapInfo) ? swapInfo[t.swapId] : null;
+  if (isSwap) { try { box.classList.add('is-swap'); } catch (e) { /* ignore */ } }
+  var meta = isSwap ? tradeTypeMeta('swap') : tradeTypeMeta(t.type);
   var side = document.createElement('span');
   side.className = 'side ' + meta.cls;
   side.textContent = meta.label;
@@ -7619,8 +7695,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   when.textContent = fmtDateDmy(t.date || '');
   head.appendChild(when);
   // Record ids matter for FIFO lot linkage, so the pill only shows in FIFO
-  // mode — Average cards stay clean.
-  if (fifoCtx) {
+  // mode — Average cards stay clean. On swaps the type/pair pills sit right
+  // after the date (DOM order below), with the FIFO id following the pair.
+  if (fifoCtx && !isSwap) {
     var rid = document.createElement('span');
     rid.className = 'trade-id';
     rid.textContent = tradeDisplayId(t);
@@ -7628,6 +7705,23 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
     head.appendChild(rid);
   }
   head.appendChild(side);
+  if (isSwap && swap) {
+    var pairTxt = swapPairText(swap);
+    if (pairTxt) {
+      var pairPill = document.createElement('span');
+      pairPill.className = 'trade-pair';
+      pairPill.textContent = pairTxt;
+      pairPill.title = 'Swapped ' + pairTxt;
+      head.appendChild(pairPill);
+    }
+  }
+  if (fifoCtx && isSwap) {
+    var ridSwap = document.createElement('span');
+    ridSwap.className = 'trade-id';
+    ridSwap.textContent = tradeDisplayId(t);
+    ridSwap.title = 'Record ' + tradeDisplayId(t);
+    head.appendChild(ridSwap);
+  }
   // "Now worth" fun-fact pill: qty × live price in the current main, with the
   // P&L percent vs the record's own historic cost. Buys read as held
   // gain/loss; sells read as saved/missed against the proceeds (see
@@ -7671,7 +7765,6 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
       }
     } catch (e) { /* ignore */ }
   }
-  if (t.swapId) whatTxt += (whatTxt ? ' · ' : '') + 'swap';
   if (whatTxt) {
     var what = document.createElement('span');
     what.className = 'trade-what';
@@ -7905,15 +7998,16 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
   var feeRow = statRow('Fee', fmtFeeAmount(t), t.fee, false);
   box.appendChild(feeRow);
   }
-  if (t.note) {
-    var noteRow = statRow('Note', String(t.note), null, false);
+  var noteTxt = isSwap ? swapNoteClean(t.note) : String(t.note || '');
+  if (noteTxt) {
+    var noteRow = statRow('Note', noteTxt, null, false);
     var noteVal = noteRow.querySelector('.stat-val');
     if (noteVal) {
       noteVal.classList.add('note-clamp');
       noteVal.setAttribute('role', 'button');
       noteVal.setAttribute('tabindex', '0');
       noteVal.setAttribute('aria-label', 'Show full note');
-      noteVal.title = String(t.note);
+      noteVal.title = noteTxt;
       (function (val, txt) {
         function open() {
           // Popup only when the text actually overflows the row.
@@ -7928,7 +8022,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx) {
           }
         });
         infoDot(noteRow.querySelector('.stat-label'), open, val);
-      })(noteVal, t.note);
+      })(noteVal, noteTxt);
     }
     box.appendChild(noteRow);
   }
@@ -8919,6 +9013,8 @@ function renderAccountDetail(st, id) {
   var main = st.settings.mainCurrency;
   var method = st.settings.costMethod;
   var dtrades = convertTrades(st.trades, main);
+  var swapInfo = {};
+  try { swapInfo = buildSwapPairMap(dtrades); } catch (e) { swapInfo = {}; }
   var isCashAccD = isCashKind(acc.kind);
   var rows = [];
   try {
@@ -9387,7 +9483,7 @@ function renderAccountDetail(st, id) {
       ? { links: fifoLinks, byId: tradeById, main: main, go: gotoTrade }
       : null;
     for (var ti = tradeStart; ti < tradeEnd; ti++) {
-      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind, fifoCtx);
+      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind, fifoCtx, swapInfo);
       if (frag) frag.appendChild(tb);
       else host.appendChild(tb);
     }
@@ -9984,7 +10080,7 @@ function normalizeTradeTypeFilter(v) {
   var out = [];
   v.forEach(function (t) {
     var s = String(t === undefined || t === null ? '' : t).trim().toLowerCase();
-    if (TRADE_TYPES.indexOf(s) === -1 || seen[s]) return;
+    if (TRADE_UI_TYPES.indexOf(s) === -1 || seen[s]) return;
     seen[s] = true;
     out.push(s);
   });
@@ -10013,7 +10109,7 @@ function setTradeTypeFilter(accountId, next, focusType) {
 function filterTradesByType(trades, filter) {
   if (!filter) return (trades || []).slice();
   return (trades || []).filter(function (t) {
-    return !!t && filter.indexOf(String(t.type || '').toLowerCase()) !== -1;
+    return !!t && filter.indexOf(tradeUiType(t)) !== -1;
   });
 }
 
@@ -10639,7 +10735,7 @@ function buildTradeForm() {
     '<select id="t-side"><option value="buy">Buy</option><option value="sell">Sell</option><option value="transfer">Transfer (self move + gas)</option><option value="income">Income (reward / airdrop)</option><option value="expense">Expense / fee</option><option value="swap">Swap (coin → coin)</option></select>' +
     '<div id="t-account-row"><label for="t-account">Account</label>' +
     '<select id="t-account"></select></div>' +
-    '<div id="t-toaccount-row" hidden><label for="t-toaccount">To account (optional)</label>' +
+    '<div id="t-toaccount-row" hidden><label for="t-toaccount" id="t-toaccount-label">To account (optional)</label>' +
     '<select id="t-toaccount"></select><p class="fld-hint" id="t-toaccount-hint">Transfer moves cost basis — only the network + fiat fees count as losses.</p></div>' +
     '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
     '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
@@ -11103,9 +11199,9 @@ function syncTradeTypeUI() {
   var isExpense = type === 'expense';
   var isBuySell = type === 'buy' || type === 'sell';
   setHidden('t-toaccount-row', !isSwap);
-  // Attachments ride single-leg records; swaps create two linked legs, so
-  // files attach by editing the resulting buy/sell instead.
-  setHidden('t-attach-row', isSwap);
+  // A swap is one record in the UI: its receipt/txid are mirrored on both
+  // linked legs, so the attachment row stays available.
+  setHidden('t-attach-row', false);
   setHidden('t-toqty-row', !isSwap);
   setHidden('t-recipients', !isTransfer);
   setHidden('t-selfrecv-row', !isTransfer);
@@ -11131,9 +11227,10 @@ function syncTradeTypeUI() {
     setLabel('t-qty-label', 'From quantity (you send)');
     setLabel('t-toqty-label', 'Received quantity');
     setLabel('t-total-label', 'Fiat value of swap (for tax, e.g. 50000)');
-    setLabel('t-qty-hint', 'Amount you received (net of any fee taken in asset).');
-    setLabel('t-total-hint', 'Full amount paid, including the fee below.');
-    setLabel('t-toqty-hint', '');
+    setLabel('t-qty-hint', 'Amount leaving the source account.');
+    setLabel('t-total-hint', 'Value carried by both swap legs, fee included.');
+    setLabel('t-toqty-hint', 'Amount arriving in the destination account.');
+    setLabel('t-toaccount-label', 'To account');
   } else if (isIncome) {
     setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : 'Quantity received');
     setLabel('t-total-label', 'Market value at receipt (optional, 0 = free)');
@@ -11240,7 +11337,7 @@ function syncTradeTypeUI() {
       });
       if (cur && curKept) toSel.value = cur;
       else if (toSel.options.length) toSel.selectedIndex = 0;
-      if (hint) hint.textContent = 'Transfer moves cost basis — only the network + fiat fees count as losses.';
+      if (hint) hint.textContent = 'Both legs belong to one swap — the pair is edited and deleted together.';
     }
     if (isTransfer) {
       try { refreshRecipientAccounts(); } catch (e) { /* ignore */ }
@@ -11440,6 +11537,8 @@ function attResolveForSave(cb) {
 // To-account row leaks into the next Buy.
 function resetTradeForm() {
   editingTradeId = null;
+  var sideReset = document.getElementById('t-side');
+  if (sideReset) sideReset.disabled = false;
   uiSetVal('t-side', 'buy');
   uiSetVal('t-qty', '');
   uiSetVal('t-toqty', '');
@@ -11523,6 +11622,10 @@ function openEditTrade(tradeId) {
   if (!accounts.length) return;
   buildTradeForm();
   editingTradeId = tradeId;
+  var swapPair = null;
+  try { swapPair = swapPairForTrade(st, tr); } catch (e) { swapPair = null; }
+  var srcTr = swapPair ? swapPair.sell : tr;
+  var dstTr = swapPair ? swapPair.buy : null;
   var sel = document.getElementById('t-account');
   if (sel) {
     sel.innerHTML = '';
@@ -11532,13 +11635,14 @@ function openEditTrade(tradeId) {
       opt.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
       sel.appendChild(opt);
     });
-    sel.value = tr.accountId || accounts[0].id;
+    sel.value = srcTr.accountId || accounts[0].id;
   }
   var row = document.getElementById('t-account-row');
   if (row) row.style.display = '';
   var sideSel = document.getElementById('t-side');
   if (sideSel) {
-    var tt = tr.type === 'buy' || tr.type === 'sell' || tr.type === 'transfer' || tr.type === 'income' || tr.type === 'expense' ? tr.type : 'buy';
+    sideSel.disabled = false;
+    var tt = swapPair ? 'swap' : (tr.type === 'buy' || tr.type === 'sell' || tr.type === 'transfer' || tr.type === 'income' || tr.type === 'expense' ? tr.type : 'buy');
     // Legacy buy/sell/swap on cash stays editable: ensure the full type
     // list exists before selecting (cash-new mode filters it).
     if ((tt === 'buy' || tt === 'sell' || tt === 'swap') && sideSel.options && sideSel.options.length !== 6) {
@@ -11553,28 +11657,31 @@ function openEditTrade(tradeId) {
       });
     }
     sideSel.value = tt;
+    // One swap is one record: the pair is edited together, never as a buy
+    // or a sell leg in isolation.
+    sideSel.disabled = !!swapPair;
   }
   syncLockedSymbol();
   syncTradeTypeUI();
-  uiSetVal('t-qty', tr.qty !== undefined && tr.qty !== null ? String(tr.qty) : '');
-  uiSetVal('t-toqty', '');
-  uiSetVal('t-total', tr.total !== undefined && tr.total !== null ? String(tr.total) : '');
+  uiSetVal('t-qty', srcTr.qty !== undefined && srcTr.qty !== null ? String(srcTr.qty) : '');
+  uiSetVal('t-toqty', dstTr && dstTr.qty !== undefined && dstTr.qty !== null ? String(dstTr.qty) : '');
+  uiSetVal('t-total', srcTr.total !== undefined && srcTr.total !== null ? String(srcTr.total) : '');
   try {
     var cSel = document.getElementById('t-currency');
-    if (cSel && tr.currency) {
-      var cu = String(tr.currency).toUpperCase();
+    if (cSel && srcTr.currency) {
+      var cu = String(srcTr.currency).toUpperCase();
       var has = Array.prototype.some.call(cSel.options, function (o) { return o.value === cu; });
       if (has) cSel.value = cu;
       else { cSel.value = 'CUSTOM'; cSel.dispatchEvent(new Event('change', { bubbles: true })); uiSetVal('t-custom-ccy', cu); }
     }
   } catch (e) { /* ignore */ }
-  uiSetVal('t-date', fmtDateDmy(tr.date || todayStr()));
-  uiSetVal('t-fee', tr.fee !== undefined && tr.fee !== null ? String(tr.fee) : '');
-  uiSetVal('t-note', tr.note || '');
-  uiSetVal('t-ledger', (tr.ledger === undefined || tr.ledger === null) ? '' : String(tr.ledger));
-  uiSetVal('t-ledger-label', (tr.ledgerLabel === undefined || tr.ledgerLabel === null) ? '' : String(tr.ledgerLabel));
-  uiSetVal('t-txid', tr.txid !== undefined && tr.txid !== null ? String(tr.txid) : '');
-  uiSetVal('t-networkfee', tr.networkFee !== undefined && tr.networkFee !== null ? String(tr.networkFee) : '');
+  uiSetVal('t-date', fmtDateDmy(srcTr.date || todayStr()));
+  uiSetVal('t-fee', srcTr.fee !== undefined && srcTr.fee !== null ? String(srcTr.fee) : '');
+  uiSetVal('t-note', swapPair ? swapNoteClean(srcTr.note || (dstTr && dstTr.note)) : (tr.note || ''));
+  uiSetVal('t-ledger', (srcTr.ledger === undefined || srcTr.ledger === null) ? '' : String(srcTr.ledger));
+  uiSetVal('t-ledger-label', (srcTr.ledgerLabel === undefined || srcTr.ledgerLabel === null) ? '' : String(srcTr.ledgerLabel));
+  uiSetVal('t-txid', srcTr.txid !== undefined && srcTr.txid !== null ? String(srcTr.txid) : (dstTr && dstTr.txid !== undefined && dstTr.txid !== null ? String(dstTr.txid) : ''));
+  uiSetVal('t-networkfee', srcTr.networkFee !== undefined && srcTr.networkFee !== null ? String(srcTr.networkFee) : '');
   if (tr.type === 'transfer') {
     // Recipients replace the old single-destination inputs: stored outputs
     // repopulate row-for-row; legacy records migrate to one row on open.
@@ -11628,37 +11735,38 @@ function openEditTrade(tradeId) {
   // Blank only when nothing is stored anywhere.
   var manualFxRate = '';
   try {
-    if (tr.fxLock && tr.fxLock.source === 'manual' && isFinite(Number(tr.fxLock.rate)) && Number(tr.fxLock.rate) > 0) {
-      manualFxRate = String(tr.fxLock.rate);
+    var fxSrc = srcTr.fxLock || (dstTr && dstTr.fxLock);
+    if (fxSrc && fxSrc.source === 'manual' && isFinite(Number(fxSrc.rate)) && Number(fxSrc.rate) > 0) {
+      manualFxRate = String(fxSrc.rate);
     }
   } catch (e) { manualFxRate = ''; }
   uiSetVal('t-manual-rate', manualFxRate);
   var manualPx = '';
   try {
-    var frMan = frozenExecOf(tr);
+    var pxTr = dstTr || tr;
+    var frMan = frozenExecOf(pxTr);
     if (frMan && String(frMan.source).toLowerCase() === 'manual') {
       manualPx = String(frMan.price);
     } else {
-      var ovMan = priceOverrideEntry(tr.symbol);
+      var ovMan = priceOverrideEntry(pxTr.symbol);
       if (ovMan !== null) manualPx = String(ovMan.price);
     }
   } catch (e) { manualPx = ''; }
   uiSetVal('t-manual-price', manualPx);
   try {
     var toSel = document.getElementById('t-toaccount');
-    if (toSel && tr.toAccountId && tr.type === 'swap') {
-      // ensure options exist for transfer/swap
-      syncTradeTypeUI();
-      toSel.value = tr.toAccountId;
+    if (toSel && swapPair) {
+      // syncTradeTypeUI rebuilt the destination list for this source.
+      toSel.value = swapPair.buy.accountId;
     }
   } catch (e) { /* ignore */ }
   try { syncTransferFeePreview(); } catch (e) { /* ignore */ }
   var submitBtn2 = document.getElementById('t-submit');
   if (submitBtn2) { submitBtn2.textContent = 'Save changes'; submitBtn2.disabled = false; }
   var titleEl2 = document.getElementById('trade-dialog-title');
-  if (titleEl2) titleEl2.textContent = 'Edit record';
+  if (titleEl2) titleEl2.textContent = swapPair ? 'Edit swap' : 'Edit record';
   tradeFormError(null);
-  attReset(tr.attachment);
+  attReset(swapPair ? (swapPair.sell.attachment || swapPair.buy.attachment) : tr.attachment);
   openDialog('trade-dialog');
 }
 
@@ -11851,7 +11959,6 @@ function onTradeSubmit(ev) {
   }
   // --- Swap: creates a linked sell+buy pair ---
   if (side === 'swap' && !isEditing) {
-    if (pendingAttachFile) { tradeFormError('Attachments ride single records — save the swap, then edit its buy/sell leg to attach the file.'); return; }
     var toAccSwap = accountById(st0, uiVal('t-toaccount', ''));
     if (!toAccSwap) { tradeFormError('Pick a destination account for the swap.'); return; }
     if (toAccSwap.id === accountId) { tradeFormError('Swap needs two different accounts.'); return; }
@@ -11880,11 +11987,33 @@ function onTradeSubmit(ev) {
       return;
     }
     lockSubmit(true, 'Saving…');
-    function proceedSwap(lock) {
+    function proceedSwapCreateWithAttachment(lock) {
+      try {
+        attResolveForSave(function (err, meta) {
+          if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
+          proceedSwapCreate(lock, meta);
+        });
+      } catch (e) {
+        tradeFormError('Could not save the attachment — record was not saved.');
+        lockSubmit(false, 'Add record');
+      }
+    }
+    function proceedSwapCreate(lock, attMeta) {
       var st = loadState();
       var swapId = uid();
-      var sellLeg = { id: uid(), type: 'sell', symbol: fromSym, qty: fromQty, total: swapTotal, currency: swapCcy, date: date, fee: feeS, feeCurrency: feeCcyS, note: (note ? note + ' ' : '') + '[swap]', fxLock: lock, accountId: accountId, swapId: swapId, createdAt: new Date().toISOString() };
-      var buyLeg = { id: uid(), type: 'buy', symbol: toSym, qty: toQty, total: swapTotal, currency: swapCcy, date: date, fee: 0, feeCurrency: swapCcy, note: (note ? note + ' ' : '') + '[swap]', fxLock: lock, accountId: toAccSwap.id, swapId: swapId, createdAt: new Date().toISOString() };
+      var createdAt = new Date().toISOString();
+      var cleanNote = swapNoteClean(note);
+      var sellLeg = { id: uid(), type: 'sell', symbol: fromSym, qty: fromQty, total: swapTotal, currency: swapCcy, date: date, fee: feeS, feeCurrency: feeCcyS, note: cleanNote, fxLock: lock, accountId: accountId, swapId: swapId, createdAt: createdAt };
+      var buyLeg = { id: uid(), type: 'buy', symbol: toSym, qty: toQty, total: swapTotal, currency: swapCcy, date: date, fee: 0, feeCurrency: swapCcy, note: cleanNote, fxLock: lock, accountId: toAccSwap.id, swapId: swapId, createdAt: createdAt };
+      // One swap record: the receipt and txid ride both linked legs.
+      if (attMeta && attMeta !== 'keep') {
+        sellLeg.attachment = attMeta;
+        buyLeg.attachment = attMeta;
+      }
+      if (txid !== '') {
+        sellLeg.txid = txid;
+        buyLeg.txid = txid;
+      }
       if (manualPrice !== null) {
         // Manual quote is for the received asset, denominated in the trade's
         // own Currency (like total and fee) — never the header display fiat.
@@ -11893,6 +12022,8 @@ function onTradeSubmit(ev) {
       }
       var e1 = validateTrade(sellLeg, 1e18); // structural; holdings are checked on the timeline
       if (e1) { tradeFormError(e1); lockSubmit(false, 'Add record'); return; }
+      var e2 = validateTrade(buyLeg, 1e18);
+      if (e2) { tradeFormError(e2); lockSubmit(false, 'Add record'); return; }
       try {
         var cSwap = heldTimelineConflict(st.trades, [sellLeg, buyLeg], null);
         if (cSwap) {
@@ -11909,6 +12040,7 @@ function onTradeSubmit(ev) {
       try { freezeExecLock(buyLeg.id, toSym, date, String(main).toUpperCase(), (toAccSwap && toAccSwap.kind) || undefined); } catch (e) { /* ignore */ }
       uiSetVal('t-qty', ''); uiSetVal('t-toqty', ''); uiSetVal('t-total', ''); uiSetVal('t-note', ''); uiSetVal('t-txid', ''); uiSetVal('t-manual-rate', ''); uiSetVal('t-manual-price', '');
       var dd = document.getElementById('t-date'); if (dd) dd.value = todayDmy();
+      attReset(attMeta && attMeta !== 'keep' ? attMeta : null);
       tradeFormError(null);
       lockSubmit(false, 'Add record');
       refreshPrices();
@@ -11936,20 +12068,227 @@ function onTradeSubmit(ev) {
         tradeFormError('ECB rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.');
       }
       if (!needTotalS) {
-        proceedSwap(lock11S(swapCcy));
+        proceedSwapCreateWithAttachment(lock11S(swapCcy));
         return;
       }
       if (manualRate !== null) {
-        proceedSwap({ pair: swapCcy + '/' + mainU, rate: manualRate, source: 'manual', interpolated: false });
+        proceedSwapCreateWithAttachment({ pair: swapCcy + '/' + mainU, rate: manualRate, source: 'manual', interpolated: false });
         return;
       }
       lockSubmit(true, 'Saving…');
       fetchEcbRate(date, swapCcy, mainU).then(function (tRes) {
         var tl = { pair: swapCcy + '/' + mainU, rate: tRes.rate, source: tRes.source, interpolated: !!tRes.interpolated };
         try { cacheRate(date, swapCcy, mainU, tRes.rate, tRes.source); saveFxCache(); } catch (e) { /* ignore */ }
-        proceedSwap(tl);
+        proceedSwapCreateWithAttachment(tl);
       }, function () {
         failSwap([swapCcy + ' → ' + mainU]);
+      });
+    })();
+    return;
+  }
+  // --- Swap edit: update the linked sell+buy pair as one record ---
+  if (side === 'swap' && isEditing) {
+    var clickedSwap = null;
+    (st0.trades || []).forEach(function (t) { if (t && t.id === editingTradeId) clickedSwap = t; });
+    var pairE = swapPairForTrade(st0, clickedSwap);
+    if (!pairE) {
+      tradeFormError('This swap\'s linked leg is missing — delete the record and re-enter the swap.');
+      return;
+    }
+    var fromAccE = accountById(st0, uiVal('t-account', '')) || accountById(st0, pairE.sell.accountId);
+    var toAccE = accountById(st0, uiVal('t-toaccount', ''));
+    if (!fromAccE || !toAccE) { tradeFormError('Pick both swap accounts.'); return; }
+    if (fromAccE.id === toAccE.id) { tradeFormError('Swap needs two different accounts.'); return; }
+    if (isCashKind(fromAccE.kind) || isCashKind(toAccE.kind)) { tradeFormError('Cash accounts do not swap — record income, expense or transfer instead.'); return; }
+    var fromSymE = String(fromAccE.ticker).toUpperCase();
+    var toSymE = String(toAccE.ticker).toUpperCase();
+    if (fromSymE === toSymE) { tradeFormError('Same asset — use Transfer instead of Swap.'); return; }
+    var fromQtyE = Number(uiVal('t-qty', ''));
+    var toQtyE = Number(uiVal('t-toqty', ''));
+    var totalE = Number(uiVal('t-total', ''));
+    var ccySelE = uiVal('t-currency', 'EUR');
+    var swapCcyE = (ccySelE === 'CUSTOM' ? uiVal('t-custom-ccy', '').trim().toUpperCase() : String(ccySelE).toUpperCase());
+    var feeRawE = uiVal('t-fee', '').trim();
+    var feeE = (feeRawE === '') ? 0 : Number(feeRawE);
+    if (!isFinite(fromQtyE) || fromQtyE <= 0) { tradeFormError('From quantity must be > 0.'); return; }
+    if (!isFinite(toQtyE) || toQtyE <= 0) { tradeFormError('Received quantity must be > 0.'); return; }
+    if (!isFinite(totalE) || totalE <= 0) { tradeFormError('Fiat value must be > 0 (for tax).'); return; }
+    if (!isValidCurrencyCode(swapCcyE)) { tradeFormError('Currency code invalid.'); return; }
+    if (!isFinite(feeE) || feeE < 0) { tradeFormError('Fee must be >= 0.'); return; }
+    var sellDraftE = { id: pairE.sell.id, type: 'sell', symbol: fromSymE, qty: fromQtyE, accountId: fromAccE.id, date: date };
+    var buyDraftE = { id: pairE.buy.id, type: 'buy', symbol: toSymE, qty: toQtyE, accountId: toAccE.id, date: date };
+    try {
+      var cSellE = heldTimelineConflict(st0.trades, sellDraftE, pairE.sell.id);
+      if (cSellE) { tradeFormError(heldConflictMessage(cSellE, [sellDraftE], st0)); return; }
+      var cBuyE = heldTimelineConflict(st0.trades, buyDraftE, pairE.buy.id);
+      if (cBuyE) { tradeFormError(heldConflictMessage(cBuyE, [buyDraftE], st0)); return; }
+    } catch (e) { /* validation continues; engine clamps anyway */ }
+    function proceedSwapEditWithAttachment(lock) {
+      lockSubmit(true, 'Saving…');
+      try {
+        attResolveForSave(function (err, meta) {
+          if (err) { tradeFormError(err); lockSubmit(false, 'Save changes'); return; }
+          proceedSwapEdit(lock, meta);
+        });
+      } catch (e) {
+        tradeFormError('Could not save the attachment — record was not saved.');
+        lockSubmit(false, 'Save changes');
+      }
+    }
+    function proceedSwapEdit(lock, attMeta) {
+      var st = loadState();
+      var sellPrev = null;
+      var buyPrev = null;
+      var sellIdx = -1;
+      var buyIdx = -1;
+      for (var ei = 0; ei < (st.trades || []).length; ei++) {
+        var et = st.trades[ei];
+        if (!et) continue;
+        if (et.id === pairE.sell.id) { sellPrev = et; sellIdx = ei; }
+        if (et.id === pairE.buy.id) { buyPrev = et; buyIdx = ei; }
+      }
+      if (!sellPrev || !buyPrev || sellPrev.swapId !== buyPrev.swapId) {
+        tradeFormError('Trade not found — it may have been deleted. Reopen the swap from the list.');
+        lockSubmit(false, 'Save changes');
+        return;
+      }
+      var nowFrom = accountById(st, fromAccE.id);
+      var nowTo = accountById(st, toAccE.id);
+      if (!nowFrom || !nowTo) {
+        tradeFormError('A swap account no longer exists — reopen the swap and pick both accounts again.');
+        lockSubmit(false, 'Save changes');
+        return;
+      }
+      var cleanNoteE = swapNoteClean(note);
+      var createdAtE = new Date().toISOString();
+      function keepExec(prev, sym, allowManual) {
+        var f = null;
+        try { f = frozenExecOf(prev); } catch (e) { f = null; }
+        if (!f) return null;
+        if (!allowManual && String(f.source).toLowerCase() === 'manual') return null;
+        if (prev.date !== date) return null;
+        if (String(prev.symbol || '').toUpperCase() !== String(sym || '').toUpperCase()) return null;
+        return { price: f.price, vs: f.vs, source: f.source };
+      }
+      var sellNew = {
+        id: sellPrev.id,
+        type: 'sell',
+        symbol: fromSymE,
+        qty: fromQtyE,
+        total: totalE,
+        currency: swapCcyE,
+        date: date,
+        fee: feeE,
+        feeCurrency: swapCcyE,
+        note: cleanNoteE,
+        fxLock: lock,
+        accountId: fromAccE.id,
+        swapId: sellPrev.swapId,
+        createdAt: sellPrev.createdAt || createdAtE
+      };
+      var buyNew = {
+        id: buyPrev.id,
+        type: 'buy',
+        symbol: toSymE,
+        qty: toQtyE,
+        total: totalE,
+        currency: swapCcyE,
+        date: date,
+        fee: 0,
+        feeCurrency: swapCcyE,
+        note: cleanNoteE,
+        fxLock: lock,
+        accountId: toAccE.id,
+        swapId: buyPrev.swapId,
+        createdAt: buyPrev.createdAt || createdAtE
+      };
+      // Preserve an existing ledger tag on either leg (swaps never create one).
+      if (sellPrev.ledger) sellNew.ledger = sellPrev.ledger;
+      if (sellPrev.ledgerLabel) sellNew.ledgerLabel = sellPrev.ledgerLabel;
+      if (buyPrev.ledger) buyNew.ledger = buyPrev.ledger;
+      if (buyPrev.ledgerLabel) buyNew.ledgerLabel = buyPrev.ledgerLabel;
+      var needFreezeSellE = false;
+      var needFreezeBuyE = false;
+      var keptSellExec = keepExec(sellPrev, fromSymE, true);
+      if (keptSellExec) sellNew.execLock = keptSellExec;
+      else needFreezeSellE = true;
+      if (manualPrice !== null) {
+        buyNew.execLock = { price: manualPrice, vs: String(swapCcyE).toUpperCase(), source: 'manual' };
+      } else {
+        var keptBuyExec = keepExec(buyPrev, toSymE, false);
+        if (keptBuyExec) buyNew.execLock = keptBuyExec;
+        else needFreezeBuyE = true;
+      }
+      function applyAttachment(dst, prev) {
+        if (attMeta && attMeta !== 'keep') { dst.attachment = attMeta; return; }
+        if (attMeta === 'keep' && prev.attachment && isValidAttachment(prev.attachment)) dst.attachment = prev.attachment;
+      }
+      applyAttachment(sellNew, sellPrev);
+      applyAttachment(buyNew, buyPrev);
+      if (txid !== '') {
+        sellNew.txid = txid;
+        buyNew.txid = txid;
+      }
+      var errSellE = validateTrade(sellNew, 1e18);
+      if (errSellE) { tradeFormError(errSellE); lockSubmit(false, 'Save changes'); return; }
+      var errBuyE = validateTrade(buyNew, 1e18);
+      if (errBuyE) { tradeFormError(errBuyE); lockSubmit(false, 'Save changes'); return; }
+      try {
+        var cSellFresh = heldTimelineConflict(st.trades, sellNew, sellPrev.id);
+        if (cSellFresh) { tradeFormError(heldConflictMessage(cSellFresh, [sellNew], st)); lockSubmit(false, 'Save changes'); return; }
+        var cBuyFresh = heldTimelineConflict(st.trades, buyNew, buyPrev.id);
+        if (cBuyFresh) { tradeFormError(heldConflictMessage(cBuyFresh, [buyNew], st)); lockSubmit(false, 'Save changes'); return; }
+      } catch (e) { /* validation continues; engine clamps anyway */ }
+      st.trades[sellIdx] = sellNew;
+      st.trades[buyIdx] = buyNew;
+      if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Save changes'); return; }
+      var mainUE = String(main).toUpperCase();
+      if (needFreezeSellE) { try { freezeExecLock(sellNew.id, fromSymE, date, mainUE, nowFrom.kind); } catch (e) { /* ignore */ } }
+      if (needFreezeBuyE) { try { freezeExecLock(buyNew.id, toSymE, date, mainUE, nowTo.kind); } catch (e) { /* ignore */ } }
+      var keptAttE = (attMeta && attMeta !== 'keep') ? attMeta
+        : (attMeta === 'keep' ? (sellPrev.attachment || buyPrev.attachment || null) : null);
+      attReset(keptAttE);
+      editingTradeId = null;
+      tradeFormError(null);
+      lockSubmit(false, 'Add record');
+      var sbE = document.getElementById('t-submit'); if (sbE) sbE.textContent = 'Add record';
+      var ttE = document.getElementById('trade-dialog-title'); if (ttE) ttE.textContent = 'Add record';
+      refreshPrices();
+      render();
+      closeDialog('trade-dialog');
+    }
+    (function resolveSwapEditFx() {
+      var mainUE = String(main).toUpperCase();
+      var needTotalE = (swapCcyE !== mainUE);
+      function lock11E(f) { return { pair: f + '/' + mainUE, rate: 1, source: '1:1', interpolated: false }; }
+      function failSwapE(pairs) {
+        lockSubmit(false, 'Save changes');
+        showBanner('FX rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.', 'error', {
+          title: 'FX error',
+          lines: [
+            'Pair: ' + pairs.join(', '),
+            'Trade date: ' + fmtDateDmy(date),
+            'Cause: no ECB fixing cached and the rate request failed (weekend gap or network).',
+            'Tip: nothing was saved yet — enter the rate manually to proceed.'
+          ]
+        });
+        tradeFormError('ECB rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.');
+      }
+      if (!needTotalE) {
+        proceedSwapEditWithAttachment(lock11E(swapCcyE));
+        return;
+      }
+      if (manualRate !== null) {
+        proceedSwapEditWithAttachment({ pair: swapCcyE + '/' + mainUE, rate: manualRate, source: 'manual', interpolated: false });
+        return;
+      }
+      lockSubmit(true, 'Saving…');
+      fetchEcbRate(date, swapCcyE, mainUE).then(function (tRes) {
+        var tlE = { pair: swapCcyE + '/' + mainUE, rate: tRes.rate, source: tRes.source, interpolated: !!tRes.interpolated };
+        try { cacheRate(date, swapCcyE, mainUE, tRes.rate, tRes.source); saveFxCache(); } catch (e) { /* ignore */ }
+        proceedSwapEditWithAttachment(tlE);
+      }, function () {
+        failSwapE([swapCcyE + ' → ' + mainUE]);
       });
     })();
     return;

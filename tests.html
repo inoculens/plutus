@@ -8360,6 +8360,202 @@
       });
     })();
 
+    // === Swap presentation + pair editing tests ===
+    (function swapRecordTests() {
+      var L = window.Inoculens || {};
+      var FXS = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+      var HASH = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+      function swapLegs() {
+        return [
+          { id: 'sw-sell', type: 'sell', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-02-01', fee: 10, feeCurrency: 'EUR', note: 'rotate [swap]', accountId: 'sw-a1', swapId: 'sw-1', fxLock: FXS, createdAt: '2026-02-01T00:00:00.000Z' },
+          { id: 'sw-buy', type: 'buy', symbol: 'ADA', qty: 10000, total: 50000, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', note: 'rotate [swap]', accountId: 'sw-a2', swapId: 'sw-1', fxLock: FXS, createdAt: '2026-02-01T00:00:00.000Z' }
+        ];
+      }
+      function seedSwap(extraTrades) {
+        var trades = (extraTrades || []).concat(swapLegs());
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'sw-a1', name: 'Source', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'sw-a2', name: 'Destination', ticker: 'ADA', createdAt: '2026-01-01T00:00:01.000Z' }
+          ],
+          trades: trades,
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+      }
+      function openSwapAccount(id) {
+        navTo(id);
+        route();
+        render();
+      }
+      function restore(backup) {
+        try { if (typeof closeDialog === 'function') closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        try { L.setTradeTypeFilter('sw-a1', null); } catch (e) { /* ignore */ }
+        try {
+          if (backup === null) localStorage.removeItem('inoculens.v2');
+          else localStorage.setItem('inoculens.v2', backup);
+        } catch (e) { /* ignore */ }
+        try { navHome(); } catch (e) { /* ignore */ }
+        try { render(); } catch (e) { /* ignore */ }
+      }
+
+      test('swap records render one Swap pill + coin pair, never Buy/Sell', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        try {
+          L.tradePageSizeSet(25);
+          seedSwap();
+          openSwapAccount('sw-a1');
+          var sell = document.querySelector('#account-detail .trade-block[data-trade="sw-sell"]');
+          assert(sell !== null, 'source leg must render');
+          assert(sell.classList.contains('is-swap'), 'swap card must carry is-swap');
+          var side = sell.querySelector('.trade-head .side');
+          assert(side !== null && side.textContent === 'Swap', 'source must read Swap, got ' + (side && side.textContent));
+          assert(side.classList.contains('side-swap'), 'Swap pill needs side-swap styling');
+          assert(sell.querySelector('.side-sell') === null && sell.querySelector('.side-buy') === null, 'swap must not render a Buy/Sell pill');
+          var pair = sell.querySelector('.trade-head .trade-pair');
+          assert(pair !== null && pair.textContent === 'BTC → ADA', 'coin pair pill wrong: ' + (pair && pair.textContent));
+          assert(sell.querySelector('.trade-what') === null, 'plain swap text must be gone');
+          var note = sell.querySelector('[data-label="Note"] .stat-val');
+          assert(note !== null && note.textContent === 'rotate', 'legacy [swap] note suffix must be hidden, got ' + (note && note.textContent));
+
+          openSwapAccount('sw-a2');
+          var buy = document.querySelector('#account-detail .trade-block[data-trade="sw-buy"]');
+          assert(buy !== null, 'destination leg must render');
+          assert(buy.querySelector('.trade-head .side').textContent === 'Swap', 'destination must read Swap');
+          var pair2 = buy.querySelector('.trade-head .trade-pair');
+          assert(pair2 !== null && pair2.textContent === 'BTC → ADA', 'destination must show the same pair');
+        } finally {
+          restore(backup);
+        }
+      });
+
+      test('swap edit opens the pair from either leg and saves both atomically', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        try {
+          L.tradePageSizeSet(25);
+          seedSwap();
+          openSwapAccount('sw-a1');
+          openEditTrade('sw-sell');
+          assert(document.getElementById('t-side').value === 'swap', 'source edit must open as Swap');
+          assert(document.getElementById('t-side').disabled === true, 'swap type must stay locked while editing a pair');
+          assert(document.getElementById('t-account').value === 'sw-a1', 'source account missing');
+          assert(document.getElementById('t-toaccount').value === 'sw-a2', 'destination account missing');
+          assert(document.getElementById('t-qty').value === '1', 'from quantity missing');
+          assert(document.getElementById('t-toqty').value === '10000', 'received quantity missing');
+          assert(document.getElementById('t-total').value === '50000', 'fiat value missing');
+          assert(document.getElementById('t-fee').value === '10', 'source fee missing');
+          assert(document.getElementById('t-note').value === 'rotate', 'edit must hide the legacy [swap] note suffix');
+          try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+
+          openSwapAccount('sw-a2');
+          openEditTrade('sw-buy');
+          assert(document.getElementById('t-side').value === 'swap', 'destination edit must also open as Swap');
+          assert(document.getElementById('t-account').value === 'sw-a1', 'destination edit must still show the source account');
+          assert(document.getElementById('t-toaccount').value === 'sw-a2', 'destination edit must keep the destination');
+          document.getElementById('t-qty').value = '0.5';
+          document.getElementById('t-toqty').value = '6000';
+          document.getElementById('t-total').value = '30000';
+          document.getElementById('t-fee').value = '7';
+          document.getElementById('t-note').value = 'edited note';
+          document.getElementById('t-txid').value = HASH;
+          onTradeSubmit({ preventDefault: function () {} });
+
+          var st = L.loadState();
+          assert(st.trades.length === 2, 'edit must keep exactly the two linked legs, got ' + st.trades.length);
+          var sell = null;
+          var buy = null;
+          st.trades.forEach(function (t) {
+            if (t.id === 'sw-sell') sell = t;
+            if (t.id === 'sw-buy') buy = t;
+          });
+          assert(sell && buy, 'both original leg ids must survive');
+          assert(sell.swapId === 'sw-1' && buy.swapId === 'sw-1', 'swapId must survive the edit');
+          assert(sell.qty === 0.5 && buy.qty === 6000, 'both quantities must update, got ' + JSON.stringify([sell.qty, buy.qty]));
+          assert(sell.total === 30000 && buy.total === 30000, 'both fiat totals must update');
+          assert(sell.fee === 7 && buy.fee === 0, 'fee must stay on the source leg only');
+          assert(sell.note === 'edited note' && buy.note === 'edited note', 'both notes must be clean and mirrored');
+          assert(sell.txid === HASH && buy.txid === HASH, 'txid must mirror on both legs');
+          assert(sell.createdAt === '2026-02-01T00:00:00.000Z', 'createdAt must survive');
+          assert(sell.accountId === 'sw-a1' && buy.accountId === 'sw-a2', 'accounts must stay in place');
+          assert(document.getElementById('t-error').hidden !== false, 'valid swap edit must not raise an error');
+        } finally {
+          restore(backup);
+        }
+      });
+
+      test('new swaps save clean notes, mirror txid, and keep the pair linked', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        try {
+          var prior = { id: 'sw-prior', type: 'buy', symbol: 'BTC', qty: 2, total: 60000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'sw-a1', fxLock: FXS, createdAt: '2026-01-01T00:00:00.000Z' };
+          L.saveState({
+            settings: { mainCurrency: 'EUR', costMethod: 'average' },
+            accounts: [
+              { id: 'sw-a1', name: 'Source', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' },
+              { id: 'sw-a2', name: 'Destination', ticker: 'ADA', createdAt: '2026-01-01T00:00:01.000Z' }
+            ],
+            trades: [prior],
+            priceOverrides: {}
+          });
+          if (typeof init === 'function') init();
+          openPrefillTrade('sw-a1', true, 'swap');
+          assert(document.getElementById('t-toqty-row').hidden === false, 'swap form must offer received quantity');
+          document.getElementById('t-toaccount').value = 'sw-a2';
+          document.getElementById('t-qty').value = '1';
+          document.getElementById('t-toqty').value = '5000';
+          document.getElementById('t-total').value = '40000';
+          document.getElementById('t-fee').value = '5';
+          document.getElementById('t-date').value = '2026-02-01';
+          document.getElementById('t-note').value = 'manual swap';
+          document.getElementById('t-txid').value = HASH;
+          onTradeSubmit({ preventDefault: function () {} });
+
+          var st = L.loadState();
+          assert(st.trades.length === 3, 'new swap must add exactly two legs, got ' + (st.trades.length - 1));
+          var legs = st.trades.filter(function (t) { return t.swapId; });
+          assert(legs.length === 2 && legs[0].swapId === legs[1].swapId, 'new legs must share one swapId');
+          legs.forEach(function (t) {
+            assert(t.note === 'manual swap', 'new swap note must not carry [swap], got ' + t.note);
+            assert(t.txid === HASH, 'txid must ride both new legs');
+          });
+          var newSell = legs[0].type === 'sell' ? legs[0] : legs[1];
+          var newBuy = legs[0].type === 'buy' ? legs[0] : legs[1];
+          assert(newSell.fee === 5 && newBuy.fee === 0, 'fee must stay on the source leg');
+          assert(newSell.symbol === 'BTC' && newBuy.symbol === 'ADA', 'leg symbols wrong');
+        } finally {
+          restore(backup);
+        }
+      });
+
+      test('swap type filter targets linked legs as Swap, not Buy/Sell', function () {
+        var backup = null;
+        try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+        try {
+          assert(JSON.stringify(L.normalizeTradeTypeFilter(['swap'])) === '["swap"]', 'swap must be a valid filter type');
+          var plainBuy = { id: 'plain-buy', type: 'buy', symbol: 'BTC', qty: 1, total: 1, currency: 'EUR', date: '2026-01-01', accountId: 'sw-a1' };
+          var legs = swapLegs();
+          assert(L.filterTradesByType([plainBuy].concat(legs), ['swap']).length === 2, 'swap filter must pick both linked legs');
+          assert(L.filterTradesByType([plainBuy].concat(legs), ['buy']).length === 1, 'buy filter must not absorb a swap buy leg');
+          L.tradePageSizeSet(25);
+          seedSwap();
+          openSwapAccount('sw-a1');
+          L.setTradeTypeFilter('sw-a1', ['swap']);
+          var blocks = document.querySelectorAll('#account-detail .trade-block[data-trade]');
+          assert(blocks.length === 1 && blocks[0].getAttribute('data-trade') === 'sw-sell', 'swap filter must show the source leg only');
+          var fbtn = document.querySelector('#account-detail .section-head [data-filter-btn]');
+          assert(fbtn && fbtn.textContent === 'Filter · 1', 'filter button must count Swap');
+          document.querySelector('#account-detail .section-head [data-filter-btn]').click();
+          var cb = document.querySelector('#account-detail [data-ttype="swap"]');
+          assert(cb !== null, 'filter panel must offer Swap when the account has swaps');
+        } finally {
+          restore(backup);
+        }
+      });
+    })();
+
     // === Multi-recipient transfer tests (one tx, N recipients) ===
     (function multiTransferTests() {
       var L = window.Inoculens || {};

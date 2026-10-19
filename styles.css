@@ -1665,6 +1665,24 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 }
 .side-buy { color: var(--gain); background: var(--gain-bg); border-color: rgba(52,211,153,0.25); }
 .side-sell { color: var(--loss); background: var(--loss-bg); border-color: rgba(248,113,113,0.25); }
+.side-swap { color: var(--gold); background: var(--gold-soft); border-color: var(--hairline-gold); }
+
+/* Swap pair pill: BTC → ADA, sitting immediately after the Swap type pill.
+   Same pill geometry as the other head chips, deliberately neutral so the
+   type stays the loudest signal. */
+.trade-pair {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 .trade-what { font-weight: 600; letter-spacing: -0.01em; }
 /* Record id pill: same geometry as the action pills, deliberately quieter
@@ -2500,6 +2518,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   }
   .trade-head .trade-edit { margin-left: 0; }
   .trade-head .trade-more { margin-right: 0.25rem; }
+  .trade-head .trade-pair { order: 3; }
+  .trade-block.is-swap .trade-head .trade-actions { order: 4; }
+  .trade-block.is-swap .trade-head .trade-now { order: 5; }
+  .trade-block.is-swap .trade-head .trade-what { order: 6; }
+  .trade-block.is-swap .trade-head .trade-id { order: 7; }
   .trade-head .trade-now { order: 4; }
   .trade-head .trade-what { order: 5; }
   .trade-head .trade-id { order: 6; flex-basis: 100%; max-width: fit-content; }

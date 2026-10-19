@@ -6249,6 +6249,140 @@
       });
     })();
 
+    // === Time-ordered holdings: retro edits + future protection ===
+    (function retroHeldTimelineTests() {
+      var L = window.Inoculens || {};
+      var backup = null;
+      try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+      function fx() { return { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }; }
+      function buy(id, acc, date, qty) {
+        return { id: id, type: 'buy', symbol: 'BTC', qty: qty, total: 50000, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', note: '', accountId: acc, fxLock: fx(), createdAt: '2026-10-06T00:00:00.000Z' };
+      }
+      function sell(id, acc, date, qty) {
+        return { id: id, type: 'sell', symbol: 'BTC', qty: qty, total: 30000, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', note: '', accountId: acc, fxLock: fx(), createdAt: '2026-10-06T00:00:01.000Z' };
+      }
+      function selfXfer(id, date, qty, nf) {
+        return { id: id, type: 'transfer', symbol: 'BTC', qty: qty, total: 0, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: nf, fxLock: fx(), createdAt: '2026-10-06T00:00:02.000Z' };
+      }
+      function seed(trades, accounts) {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: accounts || [{ id: 'a1', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' }],
+          trades: trades,
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+      }
+      function submit() { onTradeSubmit({ preventDefault: function () {} }); }
+      function cleanup() {
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        try { navHome(); } catch (e) { /* ignore */ }
+      }
+      function stored(id) {
+        var found = null;
+        L.loadState().trades.forEach(function (t) { if (t && t.id === id) found = t; });
+        return found;
+      }
+      try {
+        test('retro transfer edit uses holdings at its date, not today', function () {
+          seed([buy('b1', 'a1', '2026-01-01', 1), selfXfer('x1', '2026-02-01', 1, 0.01), sell('s1', 'a1', '2026-03-01', 0.5)]);
+          try {
+            openEditTrade('x1');
+            document.getElementById('t-note').value = 'retro note';
+            submit();
+            var err = document.getElementById('t-error');
+            assert(err && err.hidden === true, 'retro edit must save, got: ' + (err && err.textContent));
+            assert(stored('x1') && stored('x1').note === 'retro note', 'edited note must persist');
+          } finally { cleanup(); }
+        });
+
+        test('moving a retro transfer past a dependent sale is blocked', function () {
+          seed([
+            buy('b1', 'a1', '2026-01-01', 1),
+            { id: 'x1', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0, fxLock: fx(), outputs: [{ toAccountId: 'a2', qty: 1 }], createdAt: '2026-10-06T00:00:02.000Z' },
+            sell('s1', 'a2', '2026-03-01', 1)
+          ], [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ]);
+          try {
+            openEditTrade('x1');
+            document.getElementById('t-date').value = '01/04/2026';
+            submit();
+            var err = document.getElementById('t-error');
+            assert(err && err.hidden === false, 'moving the credit past its sale must be blocked');
+            assert(String(err.textContent).indexOf('Sell on') !== -1, 'error must name the broken sale, got: ' + err.textContent);
+            assert(stored('x1').date === '2026-02-01', 'blocked edit must not change the date');
+          } finally { cleanup(); }
+        });
+
+        test('reducing an internal transfer cannot break a later sale in the recipient', function () {
+          seed([
+            buy('b1', 'a1', '2026-01-01', 1),
+            { id: 'x1', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0, fxLock: fx(), outputs: [{ toAccountId: 'a2', qty: 1 }], createdAt: '2026-10-06T00:00:02.000Z' },
+            sell('s1', 'a2', '2026-03-01', 1)
+          ], [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ]);
+          try {
+            openEditTrade('x1');
+            document.getElementById('t-qty').value = '0.9';
+            var row = document.querySelector('#t-rec-list .rec-row .rec-qty');
+            assert(row !== null, 'edit must restore the recipient row');
+            row.value = '0.9';
+            submit();
+            var err = document.getElementById('t-error');
+            assert(err && err.hidden === false, 'reduction that breaks the recipient sale must be blocked');
+            assert(String(err.textContent).indexOf('Sell on') !== -1, 'error must name the broken sale, got: ' + err.textContent);
+            assert(String(err.textContent).indexOf('Cold') !== -1, 'error must name the recipient account, got: ' + err.textContent);
+            assert(Number(stored('x1').qty) === 1, 'blocked edit must not change the record');
+          } finally { cleanup(); }
+        });
+
+        test('increasing a retro transfer above what was held then is blocked', function () {
+          seed([buy('b1', 'a1', '2026-01-01', 1), selfXfer('x1', '2026-02-01', 1, 0), buy('b2', 'a1', '2026-03-01', 0.5)]);
+          try {
+            openEditTrade('x1');
+            document.getElementById('t-qty').value = '1.2';
+            document.getElementById('t-selfrecv').value = '1.2';
+            submit();
+            var err = document.getElementById('t-error');
+            assert(err && err.hidden === false, 'transfer larger than the historical balance must be blocked');
+            assert(String(err.textContent).indexOf('oversell') !== -1, 'error must report the at-date maximum, got: ' + err.textContent);
+            assert(Number(stored('x1').qty) === 1, 'blocked edit must not change the record');
+          } finally { cleanup(); }
+        });
+
+        test('editing a buy down cannot break a later sell', function () {
+          seed([buy('b1', 'a1', '2026-01-01', 1), sell('s1', 'a1', '2026-03-01', 0.5)]);
+          try {
+            openEditTrade('b1');
+            document.getElementById('t-qty').value = '0.4';
+            submit();
+            var err = document.getElementById('t-error');
+            assert(err && err.hidden === false, 'buy reduction that breaks a later sell must be blocked');
+            assert(String(err.textContent).indexOf('Sell on') !== -1, 'error must name the broken sale, got: ' + err.textContent);
+            assert(Number(stored('b1').qty) === 1, 'blocked edit must not change the record');
+          } finally { cleanup(); }
+        });
+
+        test('a pre-existing shortfall does not block a note-only edit', function () {
+          var trades = [buy('b1', 'a1', '2026-01-01', 1), sell('s1', 'a1', '2026-03-01', 2)];
+          var draft = JSON.parse(JSON.stringify(trades[0]));
+          draft.note = 'note only';
+          assert(L.heldTimelineConflict(trades, draft, 'b1') === null, 'unchanged history must stay editable');
+        });
+      } finally {
+        try {
+          if (backup === null) localStorage.removeItem('inoculens.v2');
+          else localStorage.setItem('inoculens.v2', backup);
+        } catch (e) { /* ignore */ }
+        try { render(); } catch (e) { /* ignore */ }
+        try { navHome(); } catch (e) { /* ignore */ }
+      }
+    })();
+
     // === Transaction ID tests (optional hash linked to mempool.space) ===
     (function txidTests() {
       var L = window.Inoculens || {};

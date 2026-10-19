@@ -2485,6 +2485,142 @@ function heldForAccount(allTrades, accountId, symbol) {
   return p.qtyHeld;
 }
 
+// --- Time-ordered holdings validation ---
+// A record may only spend what the account held AT THAT POINT in the ledger,
+// not what it holds today. Replaying the whole timeline also proves that a
+// change never invalidates a later sell/transfer/expense. Ordering matches
+// computePortfolio: date first, stable existing order for equal dates.
+function timelineHeldKey(accountId, symbol) {
+  return String(accountId || '') + '\u0001' + String(symbol || '').trim().toUpperCase();
+}
+
+// One pass over the timeline. Returns every outflow that could not be fully
+// funded (with engine-like proportional clamping, so a pre-existing bad
+// record does not manufacture unrelated later failures).
+function timelineOutflowShortfalls(trades) {
+  var have = new Map();
+  var out = [];
+  function get(k) { return have.get(k) || 0; }
+  function add(k, q) {
+    if (!isFinite(q) || q === 0) return;
+    have.set(k, get(k) + q);
+  }
+  function take(t, k, need) {
+    if (!isFinite(need) || need <= 0) return 1;
+    var available = get(k);
+    var moved = Math.min(need, Math.max(0, available));
+    if (need > moved + LEDGER_EPS) {
+      out.push({
+        trade: t,
+        key: k,
+        accountId: t.accountId,
+        symbol: ledgerSym(t),
+        available: available,
+        needed: need,
+        shortfall: need - moved
+      });
+    }
+    have.set(k, Math.max(0, available - moved));
+    return moved > 0 ? (moved / need) : 0;
+  }
+  ledgerSortByDate(trades).forEach(function (t) {
+    if (!t || typeof t.accountId !== 'string' || t.accountId === '') return;
+    var sym = ledgerSym(t);
+    if (!sym) return;
+    var key = timelineHeldKey(t.accountId, sym);
+    if (t.type === 'buy' || t.type === 'income') {
+      var qIn = Number(t.qty);
+      if (isFinite(qIn) && qIn > 0) add(key, qIn);
+      return;
+    }
+    if (t.type === 'sell' || (t.type === 'expense' && !(t.qty === undefined || t.qty === null || String(t.qty).trim() === ''))) {
+      var qOut = Number(t.qty);
+      if (!isFinite(qOut) || qOut <= 0) return;
+      take(t, key, qOut);
+      return;
+    }
+    if (t.type !== 'transfer') return;
+    var qSent = Number(t.qty);
+    if (!isFinite(qSent) || qSent <= 0) return;
+    var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
+    var nf = (isFinite(nfRaw) && nfRaw >= 0 && nfRaw < qSent) ? nfRaw : null;
+    if (nf === null) return; // structural validation rejects this row
+    // Source leg: the full sent amount must exist at this date (it physically
+    // leaves the account, even when the same account receives it back).
+    var scale = take(t, key, qSent);
+    var outs = transferOutputsOf(t);
+    var hasTo = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
+    if (!outs.length && !hasTo) {
+      // Same-account move: only the network fee is lost.
+      var back = (qSent - nf) * scale;
+      if (back > 0) add(key, back);
+      return;
+    }
+    outs.forEach(function (o) {
+      if (!isTransferOutputInternal(o)) return;
+      var destId = String(o.toAccountId).trim();
+      if (!destId) return;
+      var destSym = (o.toSymbol !== undefined && o.toSymbol !== null && String(o.toSymbol).trim() !== '')
+        ? String(o.toSymbol).trim().toUpperCase() : sym;
+      var arrival = 0;
+      if (destSym !== sym) {
+        var cross = Number(o.toQty);
+        arrival = (isFinite(cross) && cross > 0 ? cross : 0) * scale;
+      } else {
+        arrival = Number(o.qty) * scale;
+      }
+      if (isFinite(arrival) && arrival > 0) add(timelineHeldKey(destId, destSym), arrival);
+    });
+  });
+  return out;
+}
+
+// Substitute a draft (or a swap's two drafts) into the timeline and compare
+// against the original run. Only a newly created / worsened shortfall blocks:
+// note-only edits stay possible even in books that already contain legacy
+// inconsistencies, while any change that breaks another record is rejected.
+function heldTimelineConflict(allTrades, draftOrDrafts, editingTradeId) {
+  var drafts = Array.isArray(draftOrDrafts) ? draftOrDrafts.slice() : [draftOrDrafts];
+  var original = allTrades || [];
+  var list = [];
+  var oldTrade = null;
+  var i;
+  if (editingTradeId) {
+    for (i = 0; i < original.length; i++) {
+      if (original[i] && original[i].id === editingTradeId) {
+        oldTrade = original[i];
+        list.push(drafts[0]);
+      } else {
+        list.push(original[i]);
+      }
+    }
+  } else {
+    list = original.slice();
+  }
+  if (!oldTrade) {
+    drafts.forEach(function (d) { if (d) list.push(d); });
+  } else {
+    for (i = 1; i < drafts.length; i++) if (drafts[i]) list.push(drafts[i]);
+  }
+  var baseMap = new Map();
+  timelineOutflowShortfalls(original).forEach(function (e) {
+    var m = baseMap.get(e.trade);
+    if (!m) { m = new Map(); baseMap.set(e.trade, m); }
+    m.set(e.key, e.shortfall);
+  });
+  var next = timelineOutflowShortfalls(list);
+  for (i = 0; i < next.length; i++) {
+    var e = next[i];
+    var prevMap = (oldTrade && e.trade === drafts[0]) ? baseMap.get(oldTrade) : baseMap.get(e.trade);
+    var prevShort = prevMap ? (prevMap.get(e.key) || 0) : 0;
+    if (e.shortfall > prevShort + LEDGER_EPS) {
+      e.isDraft = drafts.indexOf(e.trade) !== -1;
+      return e;
+    }
+  }
+  return null;
+}
+
 // --- Cash bookkeeping engine (pure, no DOM) ---
 // Cash accounts are balance ledgers, not positions: balance = signed flows
 // in the account fiat, converted per-flow at the frozen fxLock rate.
@@ -3115,6 +3251,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.computePortfolio = computePortfolio;
   window.Inoculens.computeAnalytics = computeAnalytics;
   window.Inoculens.heldForAccount = heldForAccount;
+  window.Inoculens.heldTimelineConflict = heldTimelineConflict;
   window.Inoculens.isValidLedgerCode = isValidLedgerCode;
   window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
   window.Inoculens.isValidLedgerLabels = isValidLedgerLabels;
@@ -11546,6 +11683,29 @@ function tradeFormError(msg) {
   }
 }
 
+// One calm line for a timeline conflict. A draft that is itself short keeps
+// the familiar oversell wording; a record that would no longer be fundable
+// names its type/date/account so the cause is obvious without a ticker dump.
+function heldConflictMessage(conflict, draftList, state) {
+  if (!conflict) return '';
+  var drafts = Array.isArray(draftList) ? draftList : [draftList];
+  if (drafts.indexOf(conflict.trade) !== -1) {
+    return 'oversell: max sellable is ' + conflict.available;
+  }
+  var label = tradeTypeLabel(conflict.trade && conflict.trade.type);
+  var when = (conflict.trade && conflict.trade.date) ? fmtDateDmy(conflict.trade.date) : '';
+  var accName = '';
+  try {
+    var acc = accountById(state || loadState(), conflict.accountId);
+    if (acc && acc.name) accName = String(acc.name);
+  } catch (e) { accName = ''; }
+  var sym = conflict.symbol || '';
+  return 'Cannot save: the ' + label + ' on ' + when +
+    (accName ? ' in ' + accName : '') +
+    ' needs ' + fmtQty(conflict.needed, sym) + ' ' + sym +
+    ', but only ' + fmtQty(conflict.available, sym) + ' would be available.';
+}
+
 // Implicit chart of accounts: remember a ledger label the user typed so
 // the datalist and reports can reuse it. Learned into the record's own
 // account (snapshotting the default on first edit); historic trades keep
@@ -11712,9 +11872,13 @@ function onTradeSubmit(ev) {
     if (!isFinite(swapTotal) || swapTotal <= 0) { tradeFormError('Fiat value must be > 0 (for tax).'); return; }
     if (!isValidCurrencyCode(swapCcy)) { tradeFormError('Currency code invalid.'); return; }
     if (!isFinite(feeS) || feeS < 0) { tradeFormError('Fee must be >= 0.'); return; }
-    var heldFrom = 0;
-    try { heldFrom = heldForAccount(st0.trades, accountId, fromSym); } catch (e) { heldFrom = heldQtyFor(accountTrades(st0, accountId), fromSym); }
-    if (fromQty > heldFrom + LEDGER_EPS) { tradeFormError('oversell: max sellable is ' + heldFrom); return; }
+    var swapDraftSell = { type: 'sell', symbol: fromSym, qty: fromQty, accountId: accountId, date: date };
+    var swapDraftBuy = { type: 'buy', symbol: toSym, qty: toQty, accountId: toAccSwap.id, date: date };
+    var swapConflict = heldTimelineConflict(st0.trades, [swapDraftSell, swapDraftBuy], null);
+    if (swapConflict) {
+      tradeFormError(heldConflictMessage(swapConflict, [swapDraftSell, swapDraftBuy], st0));
+      return;
+    }
     lockSubmit(true, 'Saving…');
     function proceedSwap(lock) {
       var st = loadState();
@@ -11727,8 +11891,16 @@ function onTradeSubmit(ev) {
         // The sold leg freezes via history.
         buyLeg.execLock = { price: manualPrice, vs: String(swapCcy).toUpperCase(), source: 'manual' };
       }
-      var e1 = validateTrade(sellLeg, heldFrom);
+      var e1 = validateTrade(sellLeg, 1e18); // structural; holdings are checked on the timeline
       if (e1) { tradeFormError(e1); lockSubmit(false, 'Add record'); return; }
+      try {
+        var cSwap = heldTimelineConflict(st.trades, [sellLeg, buyLeg], null);
+        if (cSwap) {
+          tradeFormError(heldConflictMessage(cSwap, [sellLeg, buyLeg], st));
+          lockSubmit(false, 'Add record');
+          return;
+        }
+      } catch (e) { /* validation continues; engine clamps anyway */ }
       st.trades.push(sellLeg);
       st.trades.push(buyLeg);
       if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
@@ -11929,27 +12101,27 @@ function onTradeSubmit(ev) {
     else if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid.'); return; }
   }
   var from = currency;
-  // Held checks (directional: source holdings for sell/transfer/expense-qty).
+  // Time-ordered held check: a record may spend what was available at its
+  // date, and the replay also proves later records stay fundable. This is
+  // deliberately not "today's balance", which made retro edits impossible.
+  var heldDraft = {
+    id: editingTradeId || null,
+    type: side,
+    symbol: symbol,
+    qty: qty,
+    accountId: accountId,
+    date: date
+  };
+  if (side === 'transfer') {
+    heldDraft.networkFee = networkFee;
+    var heldOuts = buildTransferOutputs(transferRowsBuilt);
+    if (heldOuts.length) heldDraft.outputs = heldOuts;
+  }
   try {
-    if (side === 'sell' || side === 'transfer' || (side === 'expense' && qty !== null)) {
-      var heldNeed = side === 'transfer' ? qty : qty;
-      var heldHave = 0;
-      try { heldHave = heldForAccount(st0.trades, accountId, symbol); }
-      catch (e) { heldHave = heldQtyFor(accountTrades(st0, accountId), symbol); }
-      // When editing, add back the old qty if same account+symbol (so saving unchanged passes).
-      if (isEditing) {
-        var oldTr = null;
-        (st0.trades || []).forEach(function (t) { if (t && t.id === editingTradeId) oldTr = t; });
-        if (oldTr && oldTr.accountId === accountId && String(oldTr.symbol).toUpperCase() === symbol) {
-          if (oldTr.type === 'sell' || oldTr.type === 'expense') heldHave += Number(oldTr.qty) || 0;
-          else if (oldTr.type === 'buy' || oldTr.type === 'income') heldHave -= 0; // buys don't reduce held for oversell check of new qty? Actually editing a buy doesn't need held check.
-          else if (oldTr.type === 'transfer' && oldTr.accountId === accountId) heldHave += Number(oldTr.qty) || 0;
-        }
-      }
-      if (side !== 'buy' && side !== 'income' && qty !== null && qty > heldHave + LEDGER_EPS) {
-        tradeFormError('oversell: max sellable is ' + heldHave);
-        return;
-      }
+    var heldConflict = heldTimelineConflict(st0.trades, heldDraft, editingTradeId);
+    if (heldConflict) {
+      tradeFormError(heldConflictMessage(heldConflict, [heldDraft], st0));
+      return;
     }
   } catch (e) { /* validation continues; engine clamps anyway */ }
   // proceed() re-reads state so a slow ECB fetch cannot clobber newer writes.
@@ -12064,15 +12236,16 @@ function onTradeSubmit(ev) {
         if (!isCrossFiat) trade.toFxLock = srcFiatLockForTrade;
       }
       if (prev.swapId) trade.swapId = prev.swapId;
-      var errE = validateTrade(trade, 1e18); // structural only; held already checked directionally above
-      if (errE && String(errE).indexOf('oversell') === -1) { tradeFormError(errE); lockSubmit(false, 'Save changes'); return; }
-      // Re-check oversell directionally with fresh state (excluding self).
+      var errE = validateTrade(trade, 1e18); // structural; holdings are checked on the timeline
+      if (errE) { tradeFormError(errE); lockSubmit(false, 'Save changes'); return; }
+      // Fresh-state timeline replay: the edit may not create a new shortfall,
+      // now or in any later record it feeds.
       try {
-        var others = (st.trades || []).filter(function (t) { return !t || t.id !== editingTradeId; });
-        if (side === 'sell' || side === 'transfer' || (side === 'expense' && qty !== null)) {
-          var h2 = heldForAccount(others, accountId, symbol);
-          var need2 = qty;
-          if (need2 > h2 + LEDGER_EPS) { tradeFormError('oversell: max sellable is ' + h2); lockSubmit(false, 'Save changes'); return; }
+        var conflictE = heldTimelineConflict(st.trades, trade, editingTradeId);
+        if (conflictE) {
+          tradeFormError(heldConflictMessage(conflictE, [trade], st));
+          lockSubmit(false, 'Save changes');
+          return;
         }
       } catch (e2) { /* ignore */ }
       st.trades[idx] = trade;
@@ -12149,16 +12322,18 @@ function onTradeSubmit(ev) {
     } else {
       try { delete trade.execLock; } catch (e) { /* ignore */ }
     }
-    var heldForCheck = 1e18;
-    try {
-      if (side === 'sell' || side === 'transfer' || (side === 'expense' && qty !== null)) {
-        heldForCheck = heldForAccount(st.trades, accountId, symbol);
-      }
-    } catch (e3) { heldForCheck = heldQtyFor(accountTrades(st, accountId), symbol); }
-    var err = (side === 'sell' || side === 'transfer' || (side === 'expense' && qty !== null))
-      ? validateTrade(trade, heldForCheck)
-      : validateTrade(trade, 1e18);
+    var err = validateTrade(trade, 1e18); // structural; holdings are checked on the timeline
     if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
+    // New (including backdated) records run the same replay, so they cannot
+    // spend funds that were not there yet or break a later record.
+    try {
+      var conflictN = heldTimelineConflict(st.trades, trade, null);
+      if (conflictN) {
+        tradeFormError(heldConflictMessage(conflictN, [trade], st));
+        lockSubmit(false, 'Add record');
+        return;
+      }
+    } catch (e3) { /* validation continues; engine clamps anyway */ }
     st.trades.push(trade);
     learnLedgerLabel(st, trade);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }

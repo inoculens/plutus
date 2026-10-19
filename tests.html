@@ -7332,6 +7332,243 @@
         S.syncSaveConfig(c);
       }
 
+      testAsync('sync watcher pulls a newer drive copy without a reload', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var origWatch = S.syncWatchDelay();
+        var headCalls = 0;
+        var gets = 0;
+        var puts = 0;
+        var etag = 'v1';
+        var remoteText = '';
+        function headRes() {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: function (n) { return String(n).toLowerCase() === 'etag' ? '"' + etag + '"' : null; } }
+          };
+        }
+        function restoreAll() {
+          try { delete document.hidden; } catch (e) { /* ignore */ }
+          try { S.syncWatchStop(); } catch (e) { /* ignore */ }
+          try { S.syncWatchReset(); } catch (e) { /* ignore */ }
+          try { S.syncWatchDelay(origWatch); } catch (e) { /* ignore */ }
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try { closeDialog('settings-dialog'); } catch (e) { /* ignore */ }
+          try { clearBanner(); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        MODAL_IDS.forEach(function (id) { try { closeDialog(id); } catch (e) { /* ignore */ } });
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        try { S.syncWatchReset(); } catch (e) { /* ignore */ }
+        seedXd(10);
+        var st0 = L.loadState();
+        st0.priceOverrides = { BTC: 10 }; // manual price: refreshPrices never hits the network
+        L.saveState(st0);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'HEAD') { headCalls++; return Promise.resolve(headRes()); }
+          if (m === 'PUT') { puts++; return Promise.resolve({ ok: true, status: 200 }); }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          if (m === 'GET') { gets++; return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } }); }
+          return Promise.resolve({ ok: false, status: 404 });
+        };
+        var dbgTrust = '';
+        var dbgCur = '';
+        return remoteEnvFor(999).then(function (env) {
+          remoteText = env;
+          dbgTrust = S.syncLoadConfig().lastSyncedHash || '';
+          dbgCur = S.syncCurrentHash();
+          return S.syncWatchTick({ force: true });
+        }).then(function (outcome) {
+          assert(outcome === 'pulled', 'watcher must pull the newer drive copy, got ' + outcome +
+            ' (base=' + dbgTrust + ' cur=' + dbgCur + ' last=' + (S.syncLoadConfig().lastSyncedHash || '') +
+            ' total=' + L.loadState().trades[0].total + ' status=' + document.getElementById('sy-status').textContent + ')');
+          assert(puts === 0, 'watcher must never upload, PUTs=' + puts);
+          assert(L.loadState().trades[0].total === 999, 'watcher must adopt the newer copy');
+          assert(!document.getElementById('confirm-dialog').open, 'watcher must not prompt');
+          assert(document.getElementById('tb-sync').getAttribute('data-sync') === 'ok', 'cloud must settle back to ok');
+          var getsBefore = gets;
+          return S.syncWatchTick({ force: true }).then(function (same) {
+            assert(same === 'same', 'unchanged stamp must skip the full check, got ' + same);
+            assert(gets === getsBefore, 'unchanged stamp must not re-download, GETs=' + gets);
+            // A moved stamp must spin the cloud while the copy is checked.
+            etag = 'v2';
+            var release = null;
+            var getStarted = false;
+            var pending = new Promise(function (res) {
+              release = function () {
+                res({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+              };
+            });
+            var baseFetch = window.fetch;
+            window.fetch = function (url, opts) {
+              var m = (opts && opts.method) || 'GET';
+              if (m === 'HEAD') { headCalls++; return Promise.resolve(headRes()); }
+              if (m === 'GET') { getStarted = true; gets++; return pending; }
+              return baseFetch(url, opts);
+            };
+            var ticking = S.syncWatchTick({ force: true });
+            return waitFor(function () { return getStarted ? true : null; }, 5000, 'changed-stamp read').then(function () {
+              assert(document.getElementById('tb-sync').getAttribute('data-sync') === 'busy',
+                'cloud must spin while checking a moved drive stamp');
+              release();
+              return ticking;
+            }).then(function (checked) {
+              assert(checked === 'in-sync', 'same content under a new stamp must be in sync, got ' + checked);
+              assert(document.getElementById('tb-sync').getAttribute('data-sync') === 'ok',
+                'cloud must settle back to ok after the check');
+            });
+          });
+        }).then(function () {
+          // Timer: a running watcher keeps probing, and stop really stops it.
+          // A background tab reports hidden and the watcher rightly skips
+          // those, so pin visibility for the duration of this check.
+          try {
+            Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return false; } });
+          } catch (e) { /* ignore */ }
+          return S.syncWatchTick().then(function (manual) {
+            assert(manual === 'same', 'an idle tick must be a quiet same, got ' + manual +
+              ' (hidden=' + document.hidden + ' active=' + ((document.activeElement && document.activeElement.id) || '') + ')');
+            var headsBefore = headCalls;
+            S.syncWatchDelay(30);
+            assert(S.syncWatchStart() === true, 'watcher must start');
+            return waitFor(function () { return headCalls >= headsBefore + 2 ? true : null; }, 5000, 'watcher timer ticks');
+          }).then(function () {
+            S.syncWatchStop();
+            var settled = headCalls;
+            return new Promise(function (res) { setTimeout(res, 150); }).then(function () {
+              assert(headCalls === settled, 'stopped watcher must not keep probing, ' + settled + ' -> ' + headCalls);
+            });
+          });
+        }).then(function () {
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
+      testAsync('sync watcher stands down while a dialog is open', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var calls = 0;
+        function restoreAll() {
+          try { S.syncWatchReset(); } catch (e) { /* ignore */ }
+          window.fetch = origFetch;
+          try { closeDialog('settings-dialog'); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        MODAL_IDS.forEach(function (id) { try { closeDialog(id); } catch (e) { /* ignore */ } });
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        seedXd(10);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function () { calls++; return Promise.resolve({ ok: false, status: 404 }); };
+        L.openDialog('settings-dialog');
+        return S.syncWatchTick({ force: true }).then(function (outcome) {
+          assert(outcome === 'dialog', 'watcher must stand down while a dialog is open, got ' + outcome);
+          assert(calls === 0, 'a paused watcher must not touch the network, calls=' + calls);
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
+      testAsync('sync watcher never adopts over a sync point that moved mid-read', function () {
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var remoteText = '';
+        var puts = 0;
+        function restoreAll() {
+          try { S.syncWatchReset(); } catch (e) { /* ignore */ }
+          window.fetch = origFetch;
+          try { S.syncSetPendingRemote(false); } catch (e) { /* ignore */ }
+          try { closeDialog('settings-dialog'); } catch (e) { /* ignore */ }
+          try { clearBanner(); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+          try { render(); } catch (e) { /* ignore */ }
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        MODAL_IDS.forEach(function (id) { try { closeDialog(id); } catch (e) { /* ignore */ } });
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        try { S.syncWatchReset(); } catch (e) { /* ignore */ }
+        seedXd(10);
+        var st0 = L.loadState();
+        st0.priceOverrides = { BTC: 10 };
+        L.saveState(st0);
+        useForm();
+        trustWith(S.syncCurrentHash());
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'HEAD') {
+            return Promise.resolve({ ok: true, status: 200, headers: { get: function () { return '"v1"'; } } });
+          }
+          if (m === 'PUT') { puts++; return Promise.resolve({ ok: true, status: 200 }); }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          if (m === 'GET') {
+            // A push finishes while this read is still in flight.
+            var c = S.syncLoadConfig();
+            c.lastSyncedHash = 'moved-by-a-push';
+            S.syncSaveConfig(c);
+            return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(remoteText); } });
+          }
+          return Promise.resolve({ ok: false, status: 404 });
+        };
+        return remoteEnvFor(999).then(function (env) {
+          remoteText = env;
+          return S.syncWatchTick({ force: true });
+        }).then(function (outcome) {
+          assert(outcome === 'stale-check', 'a read that raced a push must stand down, got ' + outcome);
+          assert(L.loadState().trades[0].total === 10, 'raced read must not replace local data');
+          assert(puts === 0, 'raced read must not upload, PUTs=' + puts);
+          assert(!document.getElementById('confirm-dialog').open, 'raced read must not prompt');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
       test('syncDirection three-way matrix', function () {
         assert(S.syncDirection('a', 'a', 'a') === 'in-sync', 'equal hashes');
         assert(S.syncDirection('a', 'a', '') === 'in-sync', 'equal without base');

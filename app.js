@@ -12851,6 +12851,7 @@ function buildSettings() {
     '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember passphrase in this browser</label>' +
     '<p class="muted set-blurb" id="sy-fp">Key fingerprint: —</p>' +
     '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically on every change</label>' +
+    '<p class="muted set-blurb">Open devices check the drive every few seconds and pull newer changes on their own — no reload needed.</p>' +
     '<p class="muted set-blurb" id="sy-status">Not connected.</p>' +
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
@@ -13644,6 +13645,9 @@ function init() {
   render();
   refreshPrices();
   try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
+  try {
+    if (!document.getElementById('ui-fixtures')) syncWatchStart(); // tests drive ticks explicitly
+  } catch (e) { /* the watch never breaks boot */ }
 }
 
 
@@ -13821,6 +13825,14 @@ function syncEffectiveClientId(cfg) {
 }
 
 var syncBusy = false;
+// True while the background watcher is downloading + comparing the drive
+// copy. Kept separate from syncBusy so a poll can't block a manual push but
+// still paints the spinning cloud and re-arms auto-push.
+var syncChecking = false;
+var syncWatchBusy = false;
+// 'push' when a manual push arrived while a background read held the
+// connection: it runs the moment that read settles.
+var syncAfterCheck = '';
 var syncMemSecrets = { password: '', secretKey: '' };
 // True once a drive check proves the two sides disagree (drive newer or a
 // real conflict) and nothing has resolved it since. Drives the header icon
@@ -15090,6 +15102,92 @@ function syncRemoteDownload(cfg) {
   });
 }
 
+// Cheap "has the drive file moved?" probe for the background watcher: one
+// metadata request instead of a full download + PBKDF2 decrypt every tick.
+// Resolves a provider-specific stamp string, or '' when the provider cannot
+// answer cheaply (the caller then falls back to the full check). Never
+// rejects on a missing file — that resolves 'missing' so a deleted drive
+// copy is noticed too.
+function syncWebdavStamp(cfg) {
+  var auth;
+  try {
+    auth = syncWebdavAuth(cfg);
+  } catch (e) {
+    return Promise.reject(e);
+  }
+  return syncFetch(syncJoinUrl(cfg.url, cfg.filename), {
+    method: 'HEAD',
+    headers: { 'Authorization': auth }
+  }, 'the WebDAV server').then(function (res) {
+    if (res.status === 404) return 'missing';
+    if (!res.ok) return '';
+    var h = res.headers;
+    if (!h || typeof h.get !== 'function') return '';
+    var etag = h.get('ETag') || '';
+    var lastmod = h.get('Last-Modified') || '';
+    // No validator at all: treat as unknown so the caller keeps doing full
+    // checks instead of trusting a constant stamp forever.
+    if (!etag && !lastmod) return '';
+    return 'webdav|' + etag + '|' + lastmod;
+  }, function () { return ''; });
+}
+
+function syncS3Stamp(cfg) {
+  // HEAD is signed with the GET-style canonical headers (no content-type);
+  // the method itself is part of the canonical request.
+  return syncS3Sign(cfg, 'HEAD', '').then(function (s) {
+    var headers = {};
+    Object.keys(s.headers || {}).forEach(function (k) { headers[k] = s.headers[k]; });
+    return syncFetch(s.url, { method: 'HEAD', headers: headers }, 'the S3 endpoint').then(function (res) {
+      if (res.status === 404) return 'missing';
+      if (!res.ok) return '';
+      var h = res.headers;
+      if (!h || typeof h.get !== 'function') return '';
+      var etag = h.get('ETag') || '';
+      var lastmod = h.get('Last-Modified') || '';
+      if (!etag && !lastmod) return '';
+      return 's3|' + etag + '|' + lastmod;
+    }, function () { return ''; });
+  }, function () { return ''; });
+}
+
+function syncRemoteStamp(cfg) {
+  if (cfg.provider === 'webdav') return syncWebdavStamp(cfg);
+  if (cfg.provider === 'megas3') return syncS3Stamp(cfg);
+  if (cfg.provider === 'gdrive') {
+    return syncEnsureAccessToken(cfg).then(function (access) {
+      return syncDriveFolderId(access, syncNormalizeFolder(cfg.folder), false).then(function (fid) {
+        if (!fid) return 'missing';
+        return syncDriveList(access, "name = '" + String(cfg.filename).replace(/'/g, '') +
+          "' and '" + String(fid).replace(/'/g, '') + "' in parents and trashed = false").then(function (files) {
+          if (!files.length) return 'missing';
+          // modifiedTime moves on every in-place save; without it the id
+          // alone would never change, so stay unknown and keep checking.
+          if (!files[0].modifiedTime) return '';
+          return 'gdrive|' + files[0].modifiedTime;
+        });
+      });
+    }, function () { return ''; });
+  }
+  if (cfg.provider === 'dropbox') {
+    return syncEnsureAccessToken(cfg).then(function (access) {
+      return syncFetch('https://api.dropboxapi.com/2/files/get_metadata', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: syncDropboxFullPath(cfg) })
+      }, 'Dropbox').then(function (res) {
+        if (res.status === 409) return 'missing';
+        if (!res.ok) return '';
+        return res.json().then(function (d) {
+          var mark = (d && (d.rev || d.server_modified || d.content_hash)) || '';
+          return mark ? 'dropbox|' + mark : '';
+        }, function () { return ''; });
+      }, function () { return ''; });
+    }, function () { return ''; });
+  }
+  return Promise.resolve('');
+}
+
 // True when a file already lives at this destination. Auth and transport
 // failures reject (never misread as "free") so the duplicate gate below
 // can only pass on proof of absence.
@@ -15559,9 +15657,9 @@ function syncSetSyncIcon(state, label) {
 function syncRefreshHeaderIcon(st) {
   var btn = (typeof document !== 'undefined') ? document.getElementById('tb-sync') : null;
   if (!btn) return;
-  if (syncBusy) {
+  if (syncBusy || syncWatchBusy) {
     btn.hidden = false;
-    syncSetSyncIcon('busy', 'Sync: uploading…');
+    syncSetSyncIcon('busy', syncBusy ? 'Sync: uploading…' : 'Sync: pulling changes…');
     return;
   }
   var cfg = syncLoadConfig();
@@ -15599,6 +15697,7 @@ function syncScheduleAuto() {
   try {
     if (typeof setTimeout === 'undefined') return;
     if (typeof confirmSettle !== 'undefined' && confirmSettle) return; // a confirm dialog owns the user right now
+    if (typeof confirmSettle3 !== 'undefined' && confirmSettle3) return;
     var cfg = syncLoadConfig();
     if (!cfg.autoSync) return;
     // Arm the debounce even while a sync is in flight: the upload already
@@ -15614,11 +15713,18 @@ function syncScheduleAuto() {
   } catch (e) { /* ignore */ }
 }
 
+function syncCancelAuto() {
+  if (syncAutoTimer) {
+    try { clearTimeout(syncAutoTimer); } catch (e) { /* ignore */ }
+    syncAutoTimer = null;
+  }
+}
+
 function syncAutoPush() {
-  if (syncBusy) {
-    // A save landed while an earlier sync was uploading a snapshot that
-    // predates it. Keep the debounce alive: when the in-flight flow settles,
-    // the next tick pushes the current state instead of dropping the change.
+  if (syncBusy || syncChecking) {
+    // A save landed while an earlier sync (or a background drive read) held
+    // the connection. Keep the debounce alive: when it settles, the next tick
+    // pushes the current state instead of dropping the change.
     try { syncScheduleAuto(); } catch (e) { /* ignore */ }
     return;
   }
@@ -15670,6 +15776,8 @@ function syncAdoptRemote(cfg, remotePlain) {
   cfg.locV = SYNC_LOC_V;
   syncPendingRemote = false;
     syncSaveConfig(cfg);
+  // The pull just made local == drive: no follow-up auto-push is needed.
+  syncCancelAuto();
   syncRefreshSyncPanel();
   try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
   clearBanner();
@@ -15679,6 +15787,12 @@ function syncAdoptRemote(cfg, remotePlain) {
 }
 
 function syncPushFlow(opts) {  if (syncBusy) return;
+  if (syncChecking) {
+    // A background drive read owns the connection right now; run the push as
+    // soon as it settles so the newest state still goes up.
+    syncAfterCheck = (opts && opts.auto) ? 'auto' : 'push';
+    return;
+  }
   var auto = !!(opts && opts.auto);
   var rd = syncReadForm();
   var cfg = rd.cfg;
@@ -15911,6 +16025,7 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     cfg.lastIdentity = syncTrustIdentity(cfg);
     cfg.locV = SYNC_LOC_V;
         syncSaveConfig(cfg);
+    if (outcome === 'pushed') syncWatchNoteLocalSync();
     syncRefreshSyncPanel();
     try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
     clearBanner();
@@ -15943,7 +16058,7 @@ function syncPushFlow(opts) {  if (syncBusy) return;
 }
 
 function syncPullFlow() {
-  if (syncBusy) return;
+  if (syncBusy || syncChecking) return;
   var rd = syncReadForm();
   var cfg = rd.cfg;
   var pass = rd.passphrase;
@@ -16026,6 +16141,8 @@ function syncPullFlow() {
       cfg.lastIdentity = syncTrustIdentity(cfg);
       syncPendingRemote = false;
             syncSaveConfig(cfg);
+      syncWatchNoteLocalSync();
+      syncCancelAuto();
       syncRefreshSyncPanel();
       try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
       clearBanner();
@@ -16051,7 +16168,7 @@ function syncPullFlow() {
 // Resolves 'in-sync' | 'pulled' | 'local-only' | 'conflict' | 'skipped' |
 // 'unavailable' | 'unreachable' | 'unknown' | 'invalid' | 'busy'. Never rejects.
 function syncCheckRemoteNow() {
-  if (syncBusy) return Promise.resolve('busy');
+  if (syncBusy || syncChecking) return Promise.resolve('busy');
   var rd = null;
   try {
     rd = syncReadForm();
@@ -16062,9 +16179,25 @@ function syncCheckRemoteNow() {
   var pass = rd.passphrase;
   if (!syncIsConnected(cfg) || !pass) return Promise.resolve('skipped');
   if (!syncCryptoAvailable()) return Promise.resolve('unavailable');
-  return syncRemoteDownload(cfg).then(function (remoteText) {
+  syncChecking = true;
+  // A push or pull that lands while this read is in flight moves the last
+  // sync point. Adopting the older snapshot after it would silently undo the
+  // newer upload, so capture the point now and re-check before applying.
+  var baseAtStart = cfg.lastSyncedHash || '';
+  function done(outcome) {
+    syncChecking = false;
+    try { syncWatchFlush(); } catch (e) { /* ignore */ }
+    return outcome;
+  }
+  return (function () {
+    try { return syncRemoteDownload(cfg); } catch (e8) { return Promise.reject(e8); }
+  })().then(function (remoteText) {
     return syncDecryptEnvelope(remoteText, pass);
   }).then(function (remotePlain) {
+    if (syncBusy) return done('stale-check');
+    var baseNow = '';
+    try { baseNow = syncLoadConfig().lastSyncedHash || ''; } catch (e7) { baseNow = baseAtStart; }
+    if (baseNow !== baseAtStart) return done('stale-check');
     var remoteHash = syncHashOfExport(remotePlain);
     var curHash = '';
     try {
@@ -16072,7 +16205,7 @@ function syncCheckRemoteNow() {
     } catch (e) {
       curHash = '';
     }
-    if (!remoteHash || !curHash) return 'unknown';
+    if (!remoteHash || !curHash) return done('unknown');
     var dir = syncDirection(curHash, remoteHash, cfg.lastSyncedHash || '');
     if (dir === 'in-sync') {
       if (cfg.lastSyncedHash !== curHash) {
@@ -16088,7 +16221,7 @@ function syncCheckRemoteNow() {
       try {
         syncRefreshHeaderIcon();
       } catch (e1) { /* ignore */ }
-      return 'in-sync';
+      return done('in-sync');
     }
     if (dir === 'remote-only') {
       // Safe: this device holds no unsynced work, so adopting loses nothing.
@@ -16096,14 +16229,14 @@ function syncCheckRemoteNow() {
       try {
         pulled = syncAdoptRemote(cfg, remotePlain);
       } catch (e6) {
-        return 'invalid';
+        return done('invalid');
       }
-      if (pulled !== 'pulled') return pulled;
+      if (pulled !== 'pulled') return done(pulled);
       try {
         render();
       } catch (e2) { /* ignore */ }
       syncSetStatus('Pulled newer changes from ' + syncProviderLabel(cfg.provider) + '.');
-      return 'pulled';
+      return done('pulled');
     }
     if (dir === 'local-only') {
       syncPendingRemote = false;
@@ -16116,7 +16249,7 @@ function syncCheckRemoteNow() {
       try {
         syncRefreshHeaderIcon();
       } catch (e4) { /* ignore */ }
-      return 'local-only';
+      return done('local-only');
     }
     syncPendingRemote = true;
     if (!cfg.lastSyncedHash) syncSetStatus('Drive holds a copy — open Sync to resolve.');
@@ -16125,11 +16258,15 @@ function syncCheckRemoteNow() {
     try {
       syncRefreshHeaderIcon();
     } catch (e5) { /* ignore */ }
-    return 'conflict';
+    return done('conflict');
+  }).then(function (outcome) {
+    return outcome;
   }, function () {
     // Silent on a background check: offline, missing file, or a passphrase
-    // the drive file does not accept. Manual sync still reports these.
-    return 'unreachable';
+    // the drive file does not accept. Manual sync still reports these. Also
+    // funnels an unexpected throw from the branch above through done() so
+    // the in-flight flag can never stick.
+    return done('unreachable');
   });
 }
 
@@ -16158,25 +16295,211 @@ function syncCheckOnLoad() {
     }
     if (!pass || !syncCryptoAvailable()) return;
     syncCheckRemoteNow().then(function (outcome) {
-      if (outcome !== 'pulled') return;
-      var nAcc = 0;
-      var nTr = 0;
-      try {
-        var s = loadState();
-        nAcc = (s.accounts || []).length;
-        nTr = (s.trades || []).length;
-      } catch (e) { /* ignore */ }
-      try {
-        refreshPrices();
-      } catch (e2) { /* ignore */ }
-      try {
-        showBanner('Pulled newer changes from the drive — this device had no unsynced changes, so nothing was lost (' + nAcc + ' accounts, ' + nTr + ' trades).', 'info', {
-          title: 'Sync',
-          lines: ['Pulled the newer drive copy (' + nAcc + ' accounts, ' + nTr + ' trades). This device had no unsynced changes, so nothing was lost.']
-        });
-      } catch (e3) { /* ignore */ }
+      if (outcome === 'pulled') syncAnnouncePull();
     }, function () { /* silent: manual sync still reports */ });
   } catch (e) { /* never break boot */ }
+}
+
+// Shared "a newer drive copy landed here" announcement: recount, refresh
+// quotes, and show one calm info line. Used by the page-load check and the
+// background watcher.
+function syncAnnouncePull() {
+  var nAcc = 0;
+  var nTr = 0;
+  try {
+    var s = loadState();
+    nAcc = (s.accounts || []).length;
+    nTr = (s.trades || []).length;
+  } catch (e) { /* ignore */ }
+  try {
+    refreshPrices();
+  } catch (e2) { /* ignore */ }
+  try {
+    showBanner('Pulled newer changes from the drive — this device had no unsynced changes, so nothing was lost (' + nAcc + ' accounts, ' + nTr + ' trades).', 'info', {
+      title: 'Sync',
+      lines: ['Pulled the newer drive copy (' + nAcc + ' accounts, ' + nTr + ' trades). This device had no unsynced changes, so nothing was lost.']
+    });
+  } catch (e3) { /* ignore */ }
+}
+
+// --- Background watcher: an open device follows the drive without a reload ---
+// The page-load check only runs once, so a second device left open would sit
+// on stale numbers forever. Every SYNC_WATCH_MS this asks the provider for a
+// cheap change stamp (ETag / rev / modifiedTime) and only pays for a full
+// download + decrypt when that stamp moved. Pull-only and silent: a remote
+// copy is adopted only when this device has no unsynced work; local work is
+// never overwritten and conflicts just raise the stale cloud. Paused while a
+// dialog, confirm or text field owns the screen so it can never yank the UI.
+var SYNC_WATCH_MS = 10000;
+var SYNC_WATCH_UNKNOWN_EVERY = 6; // providers with no cheap stamp: full check ~1/min
+var syncWatchTimer = null;
+var syncWatchWired = false;
+var syncWatchStamp = '';
+var syncWatchSeen = false;
+var syncWatchUnknown = 0;
+var syncWatchLoc = '';
+var syncWatchQuietNext = false;
+
+function syncWatchDelay(ms) {
+  if (ms !== undefined && isFinite(Number(ms)) && Number(ms) > 0) {
+    SYNC_WATCH_MS = Number(ms);
+    if (syncWatchTimer) {
+      syncWatchStop();
+      syncWatchStart();
+    }
+  }
+  return SYNC_WATCH_MS;
+}
+
+// Our own push/pull just moved the drive. The next tick still verifies the
+// file (another device may have pushed in between) but stays quiet instead of
+// spinning the cloud for the copy we ourselves wrote.
+function syncWatchNoteLocalSync() {
+  syncWatchQuietNext = true;
+}
+
+function syncWatchInputBusy() {
+  try {
+    var el = document.activeElement;
+    if (!el) return false;
+    var tag = String(el.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable) return true;
+  } catch (e) { /* ignore */ }
+  return false;
+}
+
+function syncWatchDialogBusy() {
+  if (typeof document === 'undefined') return false;
+  try {
+    for (var i = 0; i < MODAL_IDS.length; i++) {
+      var d = document.getElementById(MODAL_IDS[i]);
+      if (d && d.open) return true;
+    }
+  } catch (e) { /* ignore */ }
+  if (typeof confirmSettle !== 'undefined' && confirmSettle) return true;
+  if (typeof confirmSettle3 !== 'undefined' && confirmSettle3) return true;
+  return false;
+}
+
+// Queued by a manual push that arrived while a background read owned the
+// connection; run right after that read settles so the newest state still
+// goes up.
+function syncWatchFlush() {
+  if (syncAfterCheck === 'push' || syncAfterCheck === 'auto') {
+    var auto = syncAfterCheck === 'auto';
+    syncAfterCheck = '';
+    try { syncPushFlow({ auto: auto }); } catch (e) { /* ignore */ }
+  }
+}
+
+function syncWatchTick(opts) {
+  var force = !!(opts && opts.force); // test hook: ignore hidden/typing, never dialogs
+  if (syncBusy || syncChecking) return Promise.resolve('busy');
+  try {
+    if (typeof document === 'undefined') return Promise.resolve('unavailable');
+    if (!force && document.hidden) return Promise.resolve('hidden');
+    if (syncWatchDialogBusy()) return Promise.resolve('dialog');
+    if (!force && syncWatchInputBusy()) return Promise.resolve('typing');
+    if (!force && typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve('offline');
+    var rd = syncReadForm();
+    var cfg = rd.cfg;
+    var pass = rd.passphrase;
+    if (!syncIsConnected(cfg) || !pass || !syncCryptoAvailable()) return Promise.resolve('skipped');
+    var locKey = syncLocationKey(cfg);
+    if (locKey !== syncWatchLoc) {
+      syncWatchLoc = locKey;
+      syncWatchStamp = '';
+      syncWatchSeen = false;
+      syncWatchUnknown = 0;
+    }
+    return syncRemoteStamp(cfg).then(function (stamp) {
+      stamp = stamp || '';
+      var have = !!stamp;
+      if (have && syncWatchSeen && stamp === syncWatchStamp) return 'same';
+      if (!have) {
+        syncWatchUnknown++;
+        // No cheap validator (odd server / provider): a full check is the
+        // only way to know, so run it on a slower cadence instead of
+        // downloading and decrypting every tick.
+        if (syncWatchSeen && (syncWatchUnknown % SYNC_WATCH_UNKNOWN_EVERY) !== 0) return 'throttled';
+      } else {
+        syncWatchUnknown = 0;
+      }
+      var hadBaseline = syncWatchSeen;
+      var quiet = syncWatchQuietNext;
+      syncWatchQuietNext = false;
+      syncWatchStamp = stamp;
+      syncWatchSeen = true;
+      // Only spin the cloud when the drive really moved, not on the first
+      // quiet baseline read of a session or right after our own upload.
+      var showBusy = have && hadBaseline && !quiet;
+      if (showBusy) {
+        syncWatchBusy = true;
+        try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+      }
+      function settle(outcome) {
+        if (showBusy) {
+          syncWatchBusy = false;
+          try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+        }
+        return outcome;
+      }
+      return syncCheckRemoteNow().then(function (outcome) {
+        if (outcome === 'pulled') syncAnnouncePull();
+        else if (outcome !== 'in-sync' && outcome !== 'local-only' && outcome !== 'conflict' && stamp !== 'missing') {
+          // Offline, raced or unreadable: forget the baseline so the next
+          // tick re-verifies instead of trusting a stamp we never checked.
+          // A file the provider confirmed missing is a real baseline (no
+          // repeated downloads until it appears).
+          syncWatchSeen = false;
+        }
+        return settle(outcome);
+      }, function () {
+        syncWatchSeen = false;
+        return settle('unreachable');
+      });
+    }, function () {
+      return 'unreachable';
+    });
+  } catch (e) {
+    return Promise.resolve('unavailable');
+  }
+}
+
+function syncWatchStart() {
+  try {
+    if (typeof setInterval === 'undefined' || typeof document === 'undefined') return false;
+    if (!syncWatchWired) {
+      syncWatchWired = true;
+      try {
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) { try { syncWatchTick(); } catch (e) { /* ignore */ } }
+        });
+      } catch (e) { /* ignore */ }
+      try {
+        window.addEventListener('focus', function () { try { syncWatchTick(); } catch (e) { /* ignore */ } });
+      } catch (e) { /* ignore */ }
+      try {
+        window.addEventListener('pageshow', function () { try { syncWatchTick(); } catch (e) { /* ignore */ } });
+      } catch (e) { /* ignore */ }
+    }
+    if (syncWatchTimer) return true;
+    syncWatchTimer = setInterval(function () {
+      try { syncWatchTick(); } catch (e) { /* a tick never breaks the page */ }
+    }, SYNC_WATCH_MS);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function syncWatchStop() {
+  if (syncWatchTimer) {
+    try { clearInterval(syncWatchTimer); } catch (e) { /* ignore */ }
+    syncWatchTimer = null;
+  }
+  return true;
 }
 
 function syncDownloadEncrypted() {
@@ -16977,6 +17300,22 @@ if (typeof window !== 'undefined') {
   window.Inoculens.syncS3Get = syncS3Get;
   window.Inoculens.syncRemoteUpload = syncRemoteUpload;
   window.Inoculens.syncRemoteDownload = syncRemoteDownload;
+  window.Inoculens.syncRemoteStamp = syncRemoteStamp;
+  window.Inoculens.syncWatchTick = syncWatchTick;
+  window.Inoculens.syncWatchStart = syncWatchStart;
+  window.Inoculens.syncWatchStop = syncWatchStop;
+  window.Inoculens.syncWatchDelay = syncWatchDelay;
+  window.Inoculens.syncWatchReset = function () {
+    syncWatchStamp = '';
+    syncWatchSeen = false;
+    syncWatchUnknown = 0;
+    syncWatchLoc = '';
+    syncWatchQuietNext = false;
+    syncChecking = false;
+    syncAfterCheck = '';
+    syncWatchBusy = false;
+    return true;
+  };
   window.Inoculens.syncLoadConfig = syncLoadConfig;
   window.Inoculens.syncSaveConfig = syncSaveConfig;
   window.Inoculens.syncReadForm = syncReadForm;

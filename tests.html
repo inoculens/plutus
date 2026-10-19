@@ -5574,6 +5574,95 @@
         });
       });
 
+      testAsync('sync change made while busy is pushed after the in-flight sync', function () {
+        var L = window.Inoculens;
+        var v2 = null, sy = null;
+        var origFetch = window.fetch;
+        var origDelay = S.syncAutoDelay();
+        var puts = 0;
+        var releaseFirst = null;
+        function restoreAll() {
+          window.fetch = origFetch;
+          try { S.syncAutoDelay(origDelay); } catch (e) { /* ignore */ }
+          try {
+            var passEl = document.getElementById('sy-pass');
+            if (passEl) passEl.value = '';
+          } catch (e) { /* ignore */ }
+          try {
+            if (v2 === null) localStorage.removeItem('inoculens.v2');
+            else localStorage.setItem('inoculens.v2', v2);
+            if (sy === null) localStorage.removeItem('inoculens.sync.v1');
+            else localStorage.setItem('inoculens.sync.v1', sy);
+          } catch (e) { /* ignore */ }
+        }
+        function waitFor(fn, ms, what) {
+          return new Promise(function (resolve, reject) {
+            var t0 = Date.now();
+            (function poll() {
+              var v = null;
+              try { v = fn(); } catch (e) { reject(e); return; }
+              if (v) resolve(v);
+              else if (Date.now() - t0 > ms) reject(new Error('timed out waiting for ' + what));
+              else setTimeout(poll, 100);
+            })();
+          });
+        }
+        try { v2 = localStorage.getItem('inoculens.v2'); } catch (e) { v2 = null; }
+        try { sy = localStorage.getItem('inoculens.sync.v1'); } catch (e) { sy = null; }
+        if (typeof init === 'function') init();
+        try { localStorage.removeItem('inoculens.sync.v1'); } catch (e) { /* ignore */ }
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: 'busy-acct', name: 'Busy BTC', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: [{ id: 'busy-t', type: 'buy', symbol: 'BTC', qty: 1, total: 10, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'busy-acct', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-01-01T00:00:00.000Z' }],
+          priceOverrides: {}
+        });
+        // Drive the real form like a user would (flows read the fields).
+        document.getElementById('sy-provider').value = 'webdav';
+        document.getElementById('sy-url').value = 'https://dav.test/r';
+        document.getElementById('sy-user').value = 'u';
+        document.getElementById('sy-passwd').value = 'p';
+        document.getElementById('sy-remember').checked = true;
+        document.getElementById('sy-filename').value = 'plutus.inoculens.com';
+        document.getElementById('sy-pass').value = 'pw';
+        document.getElementById('sy-auto').checked = true;
+        document.getElementById('sy-provider').dispatchEvent(new Event('change', { bubbles: true }));
+        window.fetch = function (url, opts) {
+          var m = (opts && opts.method) || 'GET';
+          if (m === 'PUT') {
+            puts++;
+            if (puts === 1) {
+              // Hold the first upload open so the test can edit mid-sync.
+              return new Promise(function (resolve) {
+                releaseFirst = function () { resolve({ ok: true, status: 200 }); };
+              });
+            }
+            return Promise.resolve({ ok: true, status: 200 });
+          }
+          if (m === 'MKCOL') return Promise.resolve({ ok: true, status: 201 });
+          return Promise.resolve({ ok: false, status: 404 });
+        };
+        S.syncAutoDelay(40);
+        L.saveState(L.loadState());
+        return waitFor(function () { return (puts === 1 && releaseFirst) ? true : null; }, 20000, 'first PUT in flight').then(function () {
+          assert(document.getElementById('tb-sync').getAttribute('data-sync') === 'busy', 'cloud must show busy while the first push is in flight');
+          var st = L.loadState();
+          st.priceOverrides = { BTC: 777 };
+          L.saveState(st); // the change made while the cloud is busy
+          releaseFirst();
+          return waitFor(function () {
+            var back = S.syncLoadConfig();
+            return (puts >= 2 && back.lastSyncedHash === S.syncCurrentHash()) ? true : null;
+          }, 20000, 'follow-up auto push with the change made during sync');
+        }).then(function () {
+          assert(document.getElementById('tb-sync').getAttribute('data-sync') === 'ok', 'icon must read ok after the follow-up push');
+          restoreAll();
+        }, function (e) {
+          restoreAll();
+          throw e;
+        });
+      });
+
       test('sync filename keeps a fixed extension, folders normalize', function () {
         assert(S.syncSanitizeFilename('my profile') === 'my profile.enc.json', 'ext fixed');
         assert(S.syncSanitizeFilename('my profile.enc.json') === 'my profile.enc.json', 'idempotent');

@@ -15601,7 +15601,8 @@ function syncScheduleAuto() {
     if (typeof confirmSettle !== 'undefined' && confirmSettle) return; // a confirm dialog owns the user right now
     var cfg = syncLoadConfig();
     if (!cfg.autoSync) return;
-    if (syncBusy) return;
+    // Arm the debounce even while a sync is in flight: the upload already
+    // snapshotted the state, so a change made during it needs a follow-up push.
     if (syncAutoTimer) {
       try { clearTimeout(syncAutoTimer); } catch (e) { /* ignore */ }
       syncAutoTimer = null;
@@ -15614,7 +15615,13 @@ function syncScheduleAuto() {
 }
 
 function syncAutoPush() {
-  if (syncBusy) return;
+  if (syncBusy) {
+    // A save landed while an earlier sync was uploading a snapshot that
+    // predates it. Keep the debounce alive: when the in-flight flow settles,
+    // the next tick pushes the current state instead of dropping the change.
+    try { syncScheduleAuto(); } catch (e) { /* ignore */ }
+    return;
+  }
   var cfg;
   try {
     cfg = syncLoadConfig();

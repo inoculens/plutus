@@ -6195,14 +6195,19 @@
         document.getElementById('t-selfrecv').value = '0.99';
         document.getElementById('t-selfrecv').dispatchEvent(new Event('input', { bubbles: true }));
         assert(document.getElementById('t-networkfee').value === '0.01', 'preview must compute the fee, got ' + document.getElementById('t-networkfee').value);
-        // With a recipient the received-back row hides and the rows drive it.
+        // With a recipient the received-back row stays available; its amount
+        // is part of the total, alongside the recipient rows.
         document.getElementById('t-rec-add').click();
-        assert(document.getElementById('t-selfrecv-row').hidden === true, 'received-back must hide once rows exist');
+        assert(document.getElementById('t-selfrecv-row').hidden === false, 'received-back must stay visible once rows exist');
         var prow = document.querySelector('#t-rec-list .rec-row');
         prow.querySelector('.rec-account').value = 'a2';
         prow.querySelector('.rec-account').dispatchEvent(new Event('change', { bubbles: true }));
         prow.querySelector('.rec-qty').value = '0.99';
         prow.querySelector('.rec-qty').dispatchEvent(new Event('input', { bubbles: true }));
+        // Received back still holds 0.99 from the self-only check, so the
+        // combined total would exceed sent; clear it to keep row-only math.
+        document.getElementById('t-selfrecv').value = '';
+        document.getElementById('t-selfrecv').dispatchEvent(new Event('input', { bubbles: true }));
         assert(document.getElementById('t-networkfee').value === '0.01', 'rows must drive the fee, got ' + document.getElementById('t-networkfee').value);
         // Blank row amount never saves.
         prow.querySelector('.rec-qty').value = '';
@@ -6928,7 +6933,7 @@
           trades: [
             { id: 'p-a', type: 'buy', symbol: 'BTC', qty: 1, total: 100, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' },
             { id: 'p-b', type: 'sell', symbol: 'BTC', qty: 0.4, total: 50, currency: 'EUR', date: '2026-02-01', fee: 2, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: fx, createdAt: '2026-02-01T00:00:00.000Z' },
-            { id: 'p-c', type: 'transfer', symbol: 'BTC', qty: 0.5, total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0.01, execLock: { price: 50000, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-03-01T00:00:00.000Z' },
+            { id: 'p-c', type: 'transfer', symbol: 'BTC', qty: 0.5, toAccountId: 'a2', total: 0, currency: 'EUR', date: '2026-03-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0.01, execLock: { price: 50000, vs: 'EUR', source: 'history' }, fxLock: fx, createdAt: '2026-03-01T00:00:00.000Z' },
             { id: 'p-d', type: 'buy', symbol: 'BTC', qty: 2, total: 200, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a2', fxLock: fx, createdAt: '2026-10-06T00:00:00.000Z' }
           ],
           priceOverrides: {}
@@ -6949,7 +6954,7 @@
         route();
         render();
         var det2 = document.getElementById('account-detail');
-        assert(det2.querySelector('[data-label="Spent amount"]') === null, 'buy-only a2 must show no spent pill');
+        assert(det2.querySelector('[data-label="Spent amount"]') === null, 'destination a2 must show no spent pill');
         navHome();
       });
     })();
@@ -8674,6 +8679,43 @@
         assert(!L.isValidImportTrade(multiTx({ outputs: [{ label: '', qty: 0.9 }] }), ['a1', 'a2']), 'blank label accepted');
         assert(L.isValidImportTrade(multiTx({ outputs: [] }), ['a1', 'a2']), 'empty outputs must degrade to legacy');
       });
+      test('same-account remainder balances the multi-output equation', function () {
+        var ok = multiTx({ networkFee: 0.1, selfQty: 0.4, outputs: [{ toAccountId: 'a2', qty: 0.3 }, { label: 'friend', qty: 0.2 }] });
+        assert(L.isValidImportTrade(ok, ['a1', 'a2']), 'valid same-account remainder rejected');
+        assert(Math.abs(L.transferSelfQtyOf(ok) - 0.4) < 1e-12, 'explicit selfQty helper wrong');
+        assert(Math.abs(L.transferSelfArrivalOf(ok) - 0.4) < 1e-12, 'self arrival helper wrong');
+        var short = multiTx({ networkFee: 0.1, selfQty: 0.5, outputs: [{ toAccountId: 'a2', qty: 0.3 }, { label: 'friend', qty: 0.2 }] });
+        assert(!L.isValidImportTrade(short, ['a1', 'a2']), 'unbalanced selfQty accepted');
+        var str = multiTx({ networkFee: 0.1, selfQty: '0.4', outputs: [{ toAccountId: 'a2', qty: 0.3 }, { label: 'friend', qty: 0.2 }] });
+        assert(L.isValidImportTrade(str, ['a1', 'a2']), 'string selfQty rejected');
+        var legacy = { type: 'transfer', symbol: 'BTC', qty: 1, networkFee: 0.01, date: '2026-02-01', accountId: 'a1' };
+        assert(Math.abs(L.transferSelfArrivalOf(legacy) - 0.99) < 1e-12, 'legacy self arrival wrong');
+      });
+      test('same-account remainder stays in average and FIFO pools', function () {
+        var mixed = multiTx({ networkFee: 0.1, selfQty: 0.4, outputs: [{ toAccountId: 'a2', qty: 0.3 }, { label: 'vendor', qty: 0.2 }] });
+        var tr = [buyBTC('b1', 2, 100), mixed];
+        // Global pool: 2 − external 0.2 − fee 0.1 = 1.7; the self 0.4 and
+        // internal 0.3 cancel across accounts. Realized: external 10 + fee 5.
+        var avg = L.computeAverage(tr).get('BTC');
+        assert(Math.abs(avg.qty - 1.7) < 1e-9, 'average qty wrong: ' + avg.qty);
+        assert(Math.abs(avg.realized + 15) < 1e-9, 'average realized wrong: ' + avg.realized);
+        var fifo = L.computeFifo(tr).get('BTC');
+        assert(Math.abs(fifo.qty - 1.7) < 1e-9, 'fifo qty wrong: ' + fifo.qty);
+        assert(Math.abs(fifo.realized + 15) < 1e-9, 'fifo realized wrong: ' + fifo.realized);
+      });
+      test('portfolio leaves selfQty in the source with its basis', function () {
+        var mixed = multiTx({ networkFee: 0.1, selfQty: 0.4, outputs: [{ toAccountId: 'a2', qty: 0.3 }, { label: 'vendor', qty: 0.2 }] });
+        ['average', 'fifo'].forEach(function (m) {
+          var pf = L.computePortfolio([buyBTC('b1', 2, 100), mixed], {}, m);
+          var src = pf.byAccount.a1.get('BTC');
+          var dst = pf.byAccount.a2.get('BTC');
+          assert(Math.abs(src.qtyHeld - 1.4) < 1e-9, m + ' source qty wrong: ' + src.qtyHeld);
+          assert(Math.abs(src.avgEntry - 50) < 1e-9, m + ' source basis wrong: ' + src.avgEntry);
+          assert(Math.abs(dst.qtyHeld - 0.3) < 1e-9, m + ' dest qty wrong');
+          assert(Math.abs(dst.avgEntry - 50) < 1e-9, m + ' dest basis wrong');
+          assert(Math.abs(pf.totals.realized + 15) < 1e-9, m + ' realized wrong: ' + pf.totals.realized);
+        });
+      });
       test('average books internal moves plus external spend', function () {
         var tr = [buyBTC('b1', 2, 100), multiTx()];
         var avg = L.computeAverage(tr).get('BTC');
@@ -8731,6 +8773,40 @@
         assert(L.transferArrivalFor(trades[1], 'cash2') === 40, 'arrival helper wrong');
         assert(L.transferArrivalFor(trades[1], 'cash9') === 0, 'stranger must arrive 0');
       });
+      test('cash keeps the self remainder and ledger nets external + fee', function () {
+        function inc(id, acc, qty) {
+          return { id: id, type: 'income', symbol: 'EUR', qty: qty, total: qty, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: FX, accountId: acc, createdAt: '2026-01-05T00:00:00.000Z' };
+        }
+        var mixedXfer = { id: 'm1', type: 'transfer', symbol: 'EUR', qty: 60, total: 0, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', networkFee: 5, fxLock: FX, accountId: 'cash1', ledger: '100', selfQty: 20, outputs: [{ toAccountId: 'cash2', qty: 25 }, { label: 'vendor', qty: 10 }], createdAt: '2026-01-06T00:00:00.000Z' };
+        var trades = [inc('c0', 'cash1', 100), mixedXfer];
+        var b1 = L.cashBalance(trades, 'cash1', 'EUR');
+        var b2 = L.cashBalance(trades, 'cash2', 'EUR');
+        assert(b1.native === 60, 'source must net to 100 − 60 + 20, got ' + b1.native);
+        assert(b2.native === 25, 'dest must credit its row, got ' + b2.native);
+        var solo = L.ledgerTree(trades, 'cash1', 'EUR', {});
+        assert(solo.roots.length === 1 && solo.roots[0].total === -40, 'source ledger must post 60 − 20, got ' + JSON.stringify(solo.roots[0] && solo.roots[0].total));
+        var group = L.ledgerTreeMulti(trades, ['cash1', 'cash2'], 'EUR', {}, { cash1: 'cash', cash2: 'cash' });
+        assert(group.roots.length === 1 && group.roots[0].total === -15, 'group ledger must net external 10 + fee 5, got ' + JSON.stringify(group.roots[0] && group.roots[0].total));
+        // Legacy same-account cash move: only the fee leaves the balance.
+        var legacy = [inc('c0', 'cash1', 100), { id: 's1', type: 'transfer', symbol: 'EUR', qty: 60, total: 0, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', networkFee: 5, fxLock: FX, accountId: 'cash1', ledger: '100', createdAt: '2026-01-06T00:00:00.000Z' }];
+        assert(L.cashBalance(legacy, 'cash1', 'EUR').native === 95, 'legacy self cash balance must net to the fee');
+        var legacyTree = L.ledgerTree(legacy, 'cash1', 'EUR', {});
+        assert(legacyTree.roots.length === 1 && legacyTree.roots[0].total === -5, 'legacy cash sweep must net to -5');
+      });
+      test('cross-fiat cash keeps the self remainder and converts the rest', function () {
+        var usdFx = { pair: 'USD/EUR', rate: 0.9, source: 'ecb', interpolated: false };
+        var usdInc = { id: 'u0', type: 'income', symbol: 'USD', qty: 100, total: 100, currency: 'USD', date: '2026-01-05', fee: 0, feeCurrency: 'USD', fxLock: usdFx, accountId: 'cash1', createdAt: '2026-01-05T00:00:00.000Z' };
+        var crossSelf = { id: 'u1', type: 'transfer', symbol: 'USD', qty: 100, total: 0, currency: 'USD', date: '2026-01-06', fee: 0, feeCurrency: 'USD', networkFee: 0, selfQty: 40, fxLock: usdFx, fromFxLock: usdFx, accountId: 'cash1', ledger: '100', outputs: [{ toAccountId: 'cash2', qty: 60, toQty: 54, toSymbol: 'EUR' }], createdAt: '2026-01-06T00:00:00.000Z' };
+        var trades = [usdInc, crossSelf];
+        assert(L.cashBalance(trades, 'cash1', 'EUR').native === 40, 'source must keep 40 USD');
+        assert(L.cashBalance(trades, 'cash2', 'EUR').native === 54, 'dest must receive 54 EUR');
+        var tree = L.ledgerTreeMulti(trades, ['cash1', 'cash2'], 'EUR', {}, { cash1: 'cash', cash2: 'cash' });
+        assert(tree.roots.length === 1 && tree.roots[0].total === 0, 'converted group ledger must net to zero, got ' + JSON.stringify(tree.roots[0] && tree.roots[0].total));
+      });
+      test('external-only labelled transfer posts the full outgoing amount', function () {
+        var tree = L.ledgerTree([{ id: 'x1', type: 'transfer', symbol: 'EUR', qty: 10, total: 0, currency: 'EUR', date: '2026-01-06', fee: 0, feeCurrency: 'EUR', networkFee: 1, fxLock: FX, accountId: 'cash1', ledger: '100', outputs: [{ label: 'vendor', qty: 9 }] }], 'cash1', 'EUR', {});
+        assert(tree.roots.length === 1 && tree.roots[0].total === -10, 'external-only transfer must not be credited back, got ' + JSON.stringify(tree.roots[0] && tree.roots[0].total));
+      });
       test('account history includes every internal dest', function () {
         var st = { trades: [buyBTC('b1', 2, 100), multiTx({ qty: 1, networkFee: 0.1, outputs: [{ toAccountId: 'a2', qty: 0.5 }, { toAccountId: 'a3', qty: 0.1 }, { label: 'shop', qty: 0.3 }] })] };
         assert(L.accountTrades(st, 'a2').length === 1, 'dest2 must list the transfer');
@@ -8783,6 +8859,86 @@
         assert(Math.abs(pf.byAccount.a2.get('BTC').qtyHeld - 0.6) < 1e-9, 'dest must hold 0.6');
         assert(Math.abs(pf.byAccount.a1.get('BTC').qtyHeld - 1) < 1e-9, 'source must hold 2 − 1');
         try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        navHome();
+      });
+      test('mixed transfer form saves selfQty alongside recipients and reopens it', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'Exchange', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'Cold', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 2, total: 100, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: FX, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openPrefillTrade('a1');
+        document.getElementById('t-side').value = 'transfer';
+        document.getElementById('t-side').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('t-qty').value = '1';
+        document.getElementById('t-rec-add').click();
+        document.getElementById('t-rec-add').click();
+        var rows = document.querySelectorAll('#t-rec-list .rec-row');
+        assert(rows.length === 2, 'two rows expected');
+        rows[0].querySelector('.rec-account').value = 'a2';
+        rows[0].querySelector('.rec-account').dispatchEvent(new Event('change', { bubbles: true }));
+        rows[0].querySelector('.rec-qty').value = '0.3';
+        rows[0].querySelector('.rec-qty').dispatchEvent(new Event('input', { bubbles: true }));
+        rows[1].querySelector('.rec-kind').value = 'external';
+        rows[1].querySelector('.rec-kind').dispatchEvent(new Event('change', { bubbles: true }));
+        rows[1].querySelector('.rec-label').value = 'friend';
+        rows[1].querySelector('.rec-qty').value = '0.2';
+        rows[1].querySelector('.rec-qty').dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('t-selfrecv').value = '0.4';
+        document.getElementById('t-selfrecv').dispatchEvent(new Event('input', { bubbles: true }));
+        assert(document.getElementById('t-networkfee').value === '0.1', 'fee must be 1 − 0.3 − 0.2 − 0.4, got ' + document.getElementById('t-networkfee').value);
+        document.getElementById('t-total').value = '';
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        onTradeSubmit({ preventDefault: function () {} });
+        var st = L.loadState();
+        assert(st.trades.length === 2, 'one record should save, got ' + st.trades.length);
+        var last = st.trades[st.trades.length - 1];
+        assert(Math.abs(Number(last.selfQty) - 0.4) < 1e-9, 'selfQty must save, got ' + last.selfQty);
+        assert(Array.isArray(last.outputs) && last.outputs.length === 2, 'two recipient rows must store');
+        assert(Math.abs(Number(last.networkFee) - 0.1) < 1e-9, 'fee must be 0.1, got ' + last.networkFee);
+        var pf = L.computePortfolio(st.trades, {}, 'average');
+        assert(Math.abs(pf.byAccount.a1.get('BTC').qtyHeld - 1.4) < 1e-9, 'source must keep 1.4');
+        assert(Math.abs(pf.byAccount.a2.get('BTC').qtyHeld - 0.3) < 1e-9, 'dest must get 0.3');
+        openEditTrade(last.id);
+        assert(document.querySelectorAll('#t-rec-list .rec-row').length === 2, 'edit must restore both recipients');
+        assert(document.getElementById('t-selfrecv').value === '0.4', 'edit must restore selfQty, got ' + document.getElementById('t-selfrecv').value);
+        assert(document.getElementById('t-networkfee').value === '0.1', 'edit must recompute the fee');
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        navHome();
+      });
+      test('mixed transfer card shows the same-account remainder', function () {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'a1', name: 'TYest', ticker: 'BTC', createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'a2', name: 'General Investment', ticker: 'BTC', createdAt: '2026-10-06T00:00:01.000Z' }
+          ],
+          trades: [
+            { id: 't1', type: 'buy', symbol: 'BTC', qty: 1, total: 50000, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', fxLock: FX, createdAt: '2026-10-06T00:00:00.000Z' },
+            { id: 'm1', type: 'transfer', symbol: 'BTC', qty: 0.6, total: 0, currency: 'EUR', date: '2026-10-15', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'a1', networkFee: 0.1, selfQty: 0.2, fxLock: FX, outputs: [{ toAccountId: 'a2', qty: 0.2 }, { label: 'friend', qty: 0.1 }], createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        navTo('a1');
+        route();
+        render();
+        var block = document.querySelector('[data-trade="m1"]');
+        assert(block !== null, 'transfer block must render');
+        var recs = block.querySelectorAll('[data-label="Received"]');
+        assert(recs.length === 1, 'one Received row expected, got ' + recs.length);
+        var val = recs[0].querySelector('.stat-val');
+        assert(val !== null && val.textContent.indexOf('same account') !== -1, 'Received must list the same-account remainder, got ' + (val && val.textContent));
+        var what = block.querySelector('.trade-what');
+        assert(what !== null && what.textContent.indexOf('same account') !== -1, 'header must mention the same-account remainder, got ' + (what && what.textContent));
         navHome();
       });
       test('multi-recipient card shows one truncating Received row with full popup', function () {

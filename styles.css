@@ -2120,7 +2120,10 @@ body::after {
   pointer-events: none;
   background: radial-gradient(circle at 50% 30%, rgba(227, 197, 124, 0.07) 0%, rgba(0, 240, 255, 0.02) 35%, transparent 70%);
 }
-main, footer, #banner { position: relative; z-index: 1; }
+/* main must NOT create a stacking context: the mobile bottom-sheet menus
+   (.filter-panel, fixed) have to paint above the footer and the FAB. */
+main { position: relative; }
+footer, #banner { position: relative; z-index: 1; }
 
 /* ————— Landing ————— */
 #landing {

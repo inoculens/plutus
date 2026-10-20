@@ -69,6 +69,9 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   bulk Change color offers presets, custom picker/hex, and reset.
 - Layout is fixed, content is fluid: boxes never resize with values —
   truncate, fit, or reserve space instead (hero panel is the reference).
+- `main` must never create a stacking context (`position: relative` only,
+  no `z-index`): the fixed mobile bottom-sheet menus (`.filter-panel`) must
+  paint above the footer and the FAB.
 - Commit each change separately with a clear message and push to `main`.
 
 ## Push replies — mandatory for every agent, no prompting needed

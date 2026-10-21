@@ -2500,20 +2500,40 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .menu summary { min-height: 2.75rem; }
   .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; }
   .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
-  .trade-head { flex: 1 1 100%; flex-wrap: wrap; row-gap: 0.4rem; column-gap: 0.6rem; }
+  .trade-head {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+    column-gap: 0.6rem;
+    /* Containing block for the pinned action cluster; padding-right reserves
+       the top-right corner so the ▾ ✎ 🗑 buttons never get pushed down by
+       extra pills (swap pair, now-worth PnL, from → to). */
+    position: relative;
+    padding-right: 7rem;
+  }
   /* Record head on phones: date + type left with the ▾ ✎ 🗑 cluster pinned
      top-right, long pills (now-worth, swap/what) wrap below, and the FIFO
      record # takes its own row underneath — it must never shove the
      actions a line down (see trade-head DOM order). */
   .trade-head .trade-when { order: 1; }
   .trade-head .side { order: 2; }
-  .trade-head .trade-actions { display: flex; align-items: center; order: 3; margin-left: auto; }
+  /* Pinned to the top-right corner, taken out of the wrap flow so pills can
+     never push the ▾ ✎ 🗑 cluster onto a line below. */
+  .trade-head .trade-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    margin: 0;
+    order: unset;
+  }
   .trade-head .trade-edit, .trade-head .trade-del { order: 3; }
   /* ▾ ✎ 🗑 are three equal little squares, and their box never hides: a quiet
      button only paints its border on hover/press, which on a phone leaves a
      squeezed sliver that seems to appear "after pressing". 2rem keeps the trio
-     on the pills row down to 375px — narrower screens drop the whole cluster a
-     line together (see .trade-actions). */
+     square and touch-friendly; the actions cluster is pinned top-right so it
+     never drops a line, whatever the pill count. */
   .trade-head .trade-more, .trade-head .trade-edit, .trade-head .trade-del {
     display: inline-flex; align-items: center; justify-content: center; position: relative;
     width: 2rem; height: 2rem; min-width: 2rem; min-height: 2rem; padding: 0;

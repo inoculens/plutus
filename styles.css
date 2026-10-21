@@ -995,7 +995,10 @@ section h2, aside h2 {
 }
 
 /* ————— Accounts ————— */
-#accounts { display: grid; gap: 0.6rem; padding: 0; }
+/* One implicit track. minmax(0, 1fr) is the grid-blowout backstop: a long
+   nowrap account name must never size the track wider than the phone, or
+   every card on the page starts at the right place and runs off the right. */
+#accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6rem; padding: 0; }
 
 #accounts > h2, .section-title {
   margin: 1.4rem 0 0.3rem;
@@ -1036,7 +1039,7 @@ section h2, aside h2 {
 .section-actions { display: flex; align-items: center; gap: 0.6rem; }
 
 /* Group mains: sub-accounts stack exactly like the home list. */
-.group-subs { display: grid; gap: 0.6rem; padding: 0; }
+.group-subs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6rem; padding: 0; }
 
 .ghost.select-on {
   color: var(--gold);
@@ -1228,6 +1231,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
 .account-card {
   display: flex;
   align-items: center;
+  /* Grid items default to min-width:auto; let the name/value ellipses absorb
+     a long item instead of feeding its intrinsic width back into the track. */
+  min-width: 0;
   gap: 0.85rem;
   padding: 0.6rem 0.85rem;
   background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent), var(--surface);

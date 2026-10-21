@@ -2507,8 +2507,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     column-gap: 0.6rem;
     /* Containing block for the pinned action cluster; padding-right reserves
        the top-right corner so the ▾ ✎ 🗑 buttons never get pushed down by
-       extra pills (swap pair, now-worth PnL, from → to). */
+       extra pills (swap pair, now-worth PnL, from → to). min-width: 0 lets
+       the head shrink to the card width when many nowrap pills would
+       otherwise force it wider and push the buttons off-screen. */
     position: relative;
+    min-width: 0;
     padding-right: 7rem;
   }
   /* Record head on phones: date + type left with the ▾ ✎ 🗑 cluster pinned

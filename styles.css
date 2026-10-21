@@ -1689,7 +1689,13 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   font-variant-numeric: tabular-nums;
 }
 
-.trade-what { font-weight: 600; letter-spacing: -0.01em; }
+/* Route pill: the text and its ⓘ badge share one row, so the badge always
+   reads as a continuation of the text ("A → B… ⓘ"), never on a line of its
+   own. The text is the only part that may shrink — the badge keeps its size
+   and the text gives up room instead. */
+.trade-what { font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: baseline; }
+.trade-what-text { flex: 0 1 auto; }
+.trade-what .info-dot { flex: 0 0 auto; }
 /* Record id pill: same geometry as the action pills, deliberately quieter
    (smaller, muted outline) so date + type stay primary. */
 .trade-id {
@@ -2553,15 +2559,17 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .trade-block.is-swap .trade-head .trade-actions { order: 4; }
   .trade-block.is-swap .trade-head .trade-now { order: 5; }
   .trade-block.is-swap .trade-head .trade-what { order: 6; }
-  /* The what-pill's ⓘ badge rides right behind it: same order, later in the
-     DOM, so it never jumps to the front of the head. */
-  .trade-block.is-swap .trade-head .trade-what-dot { order: 6; flex: 0 0 auto; }
   .trade-block.is-swap .trade-head .trade-id { order: 7; }
   .trade-head .trade-now { order: 4; }
   .trade-head .trade-what { order: 5; }
-  .trade-head .trade-what-dot { order: 5; flex: 0 0 auto; }
   .trade-head .trade-id { order: 6; flex-basis: 100%; max-width: fit-content; }
-  .trade-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+  /* The route pill is a mini flex row: the text trims with an ellipsis and
+     the ⓘ badge sits right after it, in continuation of the text — never on a
+     line of its own. The text is the only part that may shrink, so the
+     badge keeps its size and the text gives up room instead. */
+  .trade-what { display: flex; align-items: baseline; min-width: 0; flex: 1 1 auto; }
+  .trade-what-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+  .trade-what .info-dot { flex: 0 0 auto; }
   .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }
   .trade-block .stat-row[data-label="Note"] { flex-basis: 100%; max-width: none; }
   .trade-block .stat-row.rate-line { flex-basis: 100%; max-width: none; }

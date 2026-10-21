@@ -7744,14 +7744,14 @@ function syncInfoDots() {
         try { lab.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
       }
     }
-    // Trade what-pills (.trade-what) trim on their own; their ⓘ dot is the
-    // next sibling instead of living inside a .stat-row box.
+    // Trade what-pills (.trade-what) trim their own text box; the ⓘ dot is
+    // a child of the pill, right after the text.
     var whats = document.querySelectorAll('.trade-what[data-info-cond]');
     for (var i = 0; i < whats.length; i++) {
       var w = whats[i];
-      var dot = null;
-      try { dot = w.nextElementSibling && w.nextElementSibling.classList.contains('info-dot') ? w.nextElementSibling : null; } catch (e) { dot = null; }
-      var trimmed = isTrimmed(w);
+      var wt = w.querySelector('.trade-what-text');
+      var dot = w.querySelector('.info-dot');
+      var trimmed = isTrimmed(wt || w);
       if (dot) dot.style.display = trimmed ? 'inline' : 'none';
       try { w.style.cursor = trimmed ? 'pointer' : ''; } catch (e) { /* ignore */ }
     }
@@ -7937,18 +7937,31 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   if (whatTxt) {
     var what = document.createElement('span');
     what.className = 'trade-what';
-    what.textContent = whatTxt;
+    what.title = whatTxt;
     // Same convention as the other trimmed texts: the title carries the full
     // text for hover, the aria-label names the action.
-    what.title = whatTxt;
     what.setAttribute('aria-label', 'Show full transfer details');
     what.setAttribute('data-info-cond', '1');
     what.setAttribute('role', 'button');
     what.setAttribute('tabindex', '0');
+    // The route text lives in its own box, with the ⓘ badge right after it
+    // inside the same pill: the badge then rides in continuation of the
+    // text, and the text gives up room when the badge needs it.
+    var whatText = document.createElement('span');
+    whatText.className = 'trade-what-text';
+    whatText.textContent = whatTxt;
+    what.appendChild(whatText);
+    // Overflow-gated ⓘ badge: shows only while the text is trimmed. It sits
+    // inside the pill, so its tap bubbles up to the pill's own handler.
+    var whatDot = document.createElement('span');
+    whatDot.className = 'info-dot info-dot-gated';
+    whatDot.textContent = 'ⓘ';
+    whatDot.setAttribute('aria-hidden', 'true');
+    what.appendChild(whatDot);
     function openWhat() {
-      // Popup only when the pill is actually trimmed by ellipsis — a pill
+      // Popup only when the text is actually trimmed by ellipsis — a route
       // that fits has nothing more to show.
-      if (!isTrimmed(what)) return;
+      if (!isTrimmed(whatText)) return;
       openNoteDialog(whatTxt, 'Transfer');
     }
     what.addEventListener('click', openWhat);
@@ -7959,14 +7972,6 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       }
     });
     head.appendChild(what);
-    // Overflow-gated ⓘ badge: shows only while the what-pill is trimmed.
-    // Its own tap opens the same popup.
-    var whatDot = document.createElement('span');
-    whatDot.className = 'info-dot info-dot-gated trade-what-dot';
-    whatDot.textContent = 'ⓘ';
-    whatDot.setAttribute('aria-hidden', 'true');
-    whatDot.addEventListener('click', openWhat);
-    head.appendChild(whatDot);
   }
   // Phone action cluster (▾ ✎ 🗑): the wrapper keeps the three together when
   // they wrap to the next line, so the ▾ can sit immediately left of ✎ without
@@ -8022,10 +8027,10 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       if (tgt.closest('button, a, input, select, textarea, label, summary')) return;
       // A trimmed what-pill is a real control: its tap opens the full text,
       // so the card must not swallow it into an expand/collapse toggle.
-      var whatHit = tgt.closest('.trade-what, .trade-what-dot');
+      var whatHit = tgt.closest('.trade-what');
       if (whatHit) {
-        var whatEl = tgt.closest('.trade-what') || (whatHit.classList.contains('trade-what-dot') ? whatHit.previousElementSibling : null);
-        if (whatEl && isTrimmed(whatEl)) return;
+        var whatTxtEl = whatHit.querySelector('.trade-what-text');
+        if (isTrimmed(whatTxtEl || whatHit)) return;
       }
       if (box.classList.contains('is-open')) {
         if (tgt.closest('.trade-facts, .lot-links')) return;

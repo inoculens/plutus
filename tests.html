@@ -9178,11 +9178,19 @@
         assert((what.getAttribute('aria-label') || '').length > 0, 'the route pill needs an aria-label');
         assert((what.getAttribute('title') || '').length > 0, 'the route pill needs the full text as its title');
         assert(what.textContent.indexOf('Cold Vault') !== -1, 'the route pill must name the destination, got ' + what.textContent);
-        // A popup only exists when the pill is actually trimmed, so the
+        // The badge lives inside the pill, right after the text: it reads as
+        // a continuation of the route, never as a chip of its own.
+        var dot = what.querySelector('.info-dot');
+        assert(dot !== null, 'the route pill must carry its ⓘ badge');
+        assert(dot.parentNode === what, 'the ⓘ badge must sit inside the route pill');
+        var wt = what.querySelector('.trade-what-text');
+        assert(wt !== null, 'the route text must live in its own box');
+        assert(wt.nextElementSibling === dot, 'the ⓘ badge must follow the route text');
+        // A popup only exists when the text is actually trimmed, so the
         // harness fakes the overflow the ellipsis would produce.
         try {
-          Object.defineProperty(what, 'scrollWidth', { value: 9999, configurable: true });
-          Object.defineProperty(what, 'clientWidth', { value: 10, configurable: true });
+          Object.defineProperty(wt, 'scrollWidth', { value: 9999, configurable: true });
+          Object.defineProperty(wt, 'clientWidth', { value: 10, configurable: true });
           what.click();
           var dlg = document.getElementById('note-dialog');
           assert(dlg.open === true, 'tapping a trimmed route pill must open the popup');
@@ -9190,19 +9198,20 @@
           assert(txt.indexOf('Cold Vault') !== -1, 'the popup must carry the full route, got ' + txt);
           try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
         } finally {
-          try { delete what.scrollWidth; } catch (e) { /* ignore */ }
-          try { delete what.clientWidth; } catch (e) { /* ignore */ }
+          try { delete wt.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete wt.clientWidth; } catch (e) { /* ignore */ }
         }
         // A route that fits has nothing to show: no popup, no dead badge.
         var fits = mcCard('mc-xfer').querySelector('.trade-what');
+        var fitsText = fits.querySelector('.trade-what-text');
         try {
-          Object.defineProperty(fits, 'scrollWidth', { value: 10, configurable: true });
-          Object.defineProperty(fits, 'clientWidth', { value: 9999, configurable: true });
+          Object.defineProperty(fitsText, 'scrollWidth', { value: 10, configurable: true });
+          Object.defineProperty(fitsText, 'clientWidth', { value: 9999, configurable: true });
           fits.click();
           assert(document.getElementById('note-dialog').open !== true, 'a fitting route pill must not open a popup');
         } finally {
-          try { delete fits.scrollWidth; } catch (e) { /* ignore */ }
-          try { delete fits.clientWidth; } catch (e) { /* ignore */ }
+          try { delete fitsText.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete fitsText.clientWidth; } catch (e) { /* ignore */ }
         }
         navHome();
       });
@@ -9213,17 +9222,18 @@
         var card = mcCard('mc-xfer');
         var what = card.querySelector('.trade-what');
         assert(what !== null, 'the transfer route pill must render');
+        var wt = what.querySelector('.trade-what-text');
         withPhoneView(function () {
           try {
-            Object.defineProperty(what, 'scrollWidth', { value: 9999, configurable: true });
-            Object.defineProperty(what, 'clientWidth', { value: 10, configurable: true });
+            Object.defineProperty(wt, 'scrollWidth', { value: 9999, configurable: true });
+            Object.defineProperty(wt, 'clientWidth', { value: 10, configurable: true });
             what.click();
             assert(document.getElementById('note-dialog').open === true, 'the route popup must open on the phone too');
             assert(!card.classList.contains('is-open'), 'the route popup must not also expand the card');
             try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
           } finally {
-            try { delete what.scrollWidth; } catch (e) { /* ignore */ }
-            try { delete what.clientWidth; } catch (e) { /* ignore */ }
+            try { delete wt.scrollWidth; } catch (e) { /* ignore */ }
+            try { delete wt.clientWidth; } catch (e) { /* ignore */ }
           }
         });
         navHome();

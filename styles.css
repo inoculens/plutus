@@ -1453,6 +1453,15 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   font-size: 1.55rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  /* It also carries .account-name, whose nowrap+ellipsis is right for the
+     home card but wrong here: the account view is where the full name must
+     be readable, wrapping onto as many lines as it needs. */
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
 .menu { position: relative; margin-left: auto; }

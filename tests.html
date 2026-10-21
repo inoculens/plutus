@@ -9166,6 +9166,69 @@
         navHome();
       });
 
+      test('a trimmed transfer route opens its full text in a popup', function () {
+        mcSeed();
+        mcOpen();
+        var card = mcCard('mc-xfer');
+        assert(card !== null, 'transfer card must render');
+        var what = card.querySelector('.trade-what');
+        assert(what !== null, 'the transfer route pill must render');
+        assert(what.getAttribute('role') === 'button', 'the route pill must be tappable');
+        assert(what.getAttribute('tabindex') === '0', 'the route pill must be keyboard reachable');
+        assert((what.getAttribute('aria-label') || '').length > 0, 'the route pill needs an aria-label');
+        assert((what.getAttribute('title') || '').length > 0, 'the route pill needs the full text as its title');
+        assert(what.textContent.indexOf('Cold Vault') !== -1, 'the route pill must name the destination, got ' + what.textContent);
+        // A popup only exists when the pill is actually trimmed, so the
+        // harness fakes the overflow the ellipsis would produce.
+        try {
+          Object.defineProperty(what, 'scrollWidth', { value: 9999, configurable: true });
+          Object.defineProperty(what, 'clientWidth', { value: 10, configurable: true });
+          what.click();
+          var dlg = document.getElementById('note-dialog');
+          assert(dlg.open === true, 'tapping a trimmed route pill must open the popup');
+          var txt = document.getElementById('note-dialog-text').textContent;
+          assert(txt.indexOf('Cold Vault') !== -1, 'the popup must carry the full route, got ' + txt);
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        } finally {
+          try { delete what.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete what.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // A route that fits has nothing to show: no popup, no dead badge.
+        var fits = mcCard('mc-xfer').querySelector('.trade-what');
+        try {
+          Object.defineProperty(fits, 'scrollWidth', { value: 10, configurable: true });
+          Object.defineProperty(fits, 'clientWidth', { value: 9999, configurable: true });
+          fits.click();
+          assert(document.getElementById('note-dialog').open !== true, 'a fitting route pill must not open a popup');
+        } finally {
+          try { delete fits.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete fits.clientWidth; } catch (e) { /* ignore */ }
+        }
+        navHome();
+      });
+
+      test('a trimmed route pill wins over the card expand/collapse tap', function () {
+        mcSeed();
+        mcOpen();
+        var card = mcCard('mc-xfer');
+        var what = card.querySelector('.trade-what');
+        assert(what !== null, 'the transfer route pill must render');
+        withPhoneView(function () {
+          try {
+            Object.defineProperty(what, 'scrollWidth', { value: 9999, configurable: true });
+            Object.defineProperty(what, 'clientWidth', { value: 10, configurable: true });
+            what.click();
+            assert(document.getElementById('note-dialog').open === true, 'the route popup must open on the phone too');
+            assert(!card.classList.contains('is-open'), 'the route popup must not also expand the card');
+            try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+          } finally {
+            try { delete what.scrollWidth; } catch (e) { /* ignore */ }
+            try { delete what.clientWidth; } catch (e) { /* ignore */ }
+          }
+        });
+        navHome();
+      });
+
       test('collapsed cards hide the extra rows on phones and show all on desktop', function () {
         mcSeed();
         mcOpen();

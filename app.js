@@ -7690,6 +7690,13 @@ function openFeeExplainer(t, main, feeQty, rate) {
   openNoteDialog(lines.join('\n'), 'Transfer fees');
 }
 
+// A trimmed box tells you it is trimmed only by measuring it: the text runs
+// wider than the box it lives in. Shared by the "show full" tap handlers and
+// by the ⓘ gate, so a badge and its popup always agree on the same truth.
+function isTrimmed(el) {
+  try { return el.scrollWidth > el.clientWidth + 2; } catch (e) { return false; }
+}
+
 // Discoverability for tap-for-info rows: an ⓘ badge on the label that
 // opens the same popup as the value. Pass the value element when the popup
 // only exists on overflow — syncInfoDots then hides decorative dots whose
@@ -7736,6 +7743,17 @@ function syncInfoDots() {
       if (lab) {
         try { lab.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
       }
+    }
+    // Trade what-pills (.trade-what) trim on their own; their ⓘ dot is the
+    // next sibling instead of living inside a .stat-row box.
+    var whats = document.querySelectorAll('.trade-what[data-info-cond]');
+    for (var i = 0; i < whats.length; i++) {
+      var w = whats[i];
+      var dot = null;
+      try { dot = w.nextElementSibling && w.nextElementSibling.classList.contains('info-dot') ? w.nextElementSibling : null; } catch (e) { dot = null; }
+      var trimmed = isTrimmed(w);
+      if (dot) dot.style.display = trimmed ? 'inline' : 'none';
+      try { w.style.cursor = trimmed ? 'pointer' : ''; } catch (e) { /* ignore */ }
     }
   } catch (e) { /* ignore */ }
 }
@@ -7920,7 +7938,35 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
     var what = document.createElement('span');
     what.className = 'trade-what';
     what.textContent = whatTxt;
+    // Same convention as the other trimmed texts: the title carries the full
+    // text for hover, the aria-label names the action.
+    what.title = whatTxt;
+    what.setAttribute('aria-label', 'Show full transfer details');
+    what.setAttribute('data-info-cond', '1');
+    what.setAttribute('role', 'button');
+    what.setAttribute('tabindex', '0');
+    function openWhat() {
+      // Popup only when the pill is actually trimmed by ellipsis — a pill
+      // that fits has nothing more to show.
+      if (!isTrimmed(what)) return;
+      openNoteDialog(whatTxt, 'Transfer');
+    }
+    what.addEventListener('click', openWhat);
+    what.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openWhat();
+      }
+    });
     head.appendChild(what);
+    // Overflow-gated ⓘ badge: shows only while the what-pill is trimmed.
+    // Its own tap opens the same popup.
+    var whatDot = document.createElement('span');
+    whatDot.className = 'info-dot info-dot-gated trade-what-dot';
+    whatDot.textContent = 'ⓘ';
+    whatDot.setAttribute('aria-hidden', 'true');
+    whatDot.addEventListener('click', openWhat);
+    head.appendChild(whatDot);
   }
   // Phone action cluster (▾ ✎ 🗑): the wrapper keeps the three together when
   // they wrap to the next line, so the ▾ can sit immediately left of ✎ without
@@ -7974,6 +8020,13 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       var tgt = ev ? ev.target : null;
       if (!tgt || !tgt.closest) return;
       if (tgt.closest('button, a, input, select, textarea, label, summary')) return;
+      // A trimmed what-pill is a real control: its tap opens the full text,
+      // so the card must not swallow it into an expand/collapse toggle.
+      var whatHit = tgt.closest('.trade-what, .trade-what-dot');
+      if (whatHit) {
+        var whatEl = tgt.closest('.trade-what') || (whatHit.classList.contains('trade-what-dot') ? whatHit.previousElementSibling : null);
+        if (whatEl && isTrimmed(whatEl)) return;
+      }
       if (box.classList.contains('is-open')) {
         if (tgt.closest('.trade-facts, .lot-links')) return;
         setTradeCardOpen(box, false);

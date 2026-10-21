@@ -2553,9 +2553,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .trade-block.is-swap .trade-head .trade-actions { order: 4; }
   .trade-block.is-swap .trade-head .trade-now { order: 5; }
   .trade-block.is-swap .trade-head .trade-what { order: 6; }
+  /* The what-pill's ⓘ badge rides right behind it: same order, later in the
+     DOM, so it never jumps to the front of the head. */
+  .trade-block.is-swap .trade-head .trade-what-dot { order: 6; flex: 0 0 auto; }
   .trade-block.is-swap .trade-head .trade-id { order: 7; }
   .trade-head .trade-now { order: 4; }
   .trade-head .trade-what { order: 5; }
+  .trade-head .trade-what-dot { order: 5; flex: 0 0 auto; }
   .trade-head .trade-id { order: 6; flex-basis: 100%; max-width: fit-content; }
   .trade-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
   .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }

@@ -6693,20 +6693,8 @@ function buildTradeAction(accId) {
     openDialog('color-dialog');
   });
   panel.appendChild(col);
-  var rearrange = document.createElement('button');
-  rearrange.type = 'button';
-  rearrange.className = 'action-opt';
-  rearrange.textContent = 'Rearrange';
-  rearrange.setAttribute('aria-label', 'Rearrange selected records (same date only)');
-  rearrange.addEventListener('click', function () {
-    tradeActionOpen = false;
-    panel.hidden = true;
-    var host = document.getElementById('account-detail');
-    var tgl = host && host.querySelector ? host.querySelector('[data-trade-action-btn]') : null;
-    if (tgl) tgl.setAttribute('aria-expanded', 'false');
-    enterTradeRearrangeMode(accId);
-  });
-  panel.appendChild(rearrange);
+  // Rearranging is not a bulk action: the grip on every record card is live
+  // at all times (like the account cards), so no selection mode is needed.
   wrap.appendChild(panel);
   return wrap;
 }
@@ -8015,18 +8003,15 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   var side = document.createElement('span');
   side.className = 'side ' + meta.cls;
   side.textContent = meta.label;
-  // Drag handle for rearrange mode (dice-grip, like account cards). It sits
-  // at the very front of the head so the card's own layout never shifts.
-  // Every record of the account gets a grip while rearranging — the drag
-  // target decides which records may swap, not the selection.
-  var grip = null;
-  if (tradeRearrangeMode && tradeRearrangeAccId === t.accountId) {
-    grip = document.createElement('span');
-    grip.className = 'drag-handle';
-    grip.title = 'Drag to reorder (same date only)';
-    grip.setAttribute('aria-hidden', 'true');
-    head.appendChild(grip);
-  }
+  // Drag handle (dice-grip, like account cards): live on every record at all
+  // times — no Select trip needed before reordering. It sits at the very
+  // front of the head so the card's own layout never shifts, and the drop
+  // target decides which records may swap, not any selection.
+  var grip = document.createElement('span');
+  grip.className = 'drag-handle';
+  grip.title = 'Drag to reorder (same date only)';
+  grip.setAttribute('aria-hidden', 'true');
+  head.appendChild(grip);
   var when = document.createElement('span');
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');
@@ -9781,26 +9766,6 @@ function renderAccountDetail(st, id) {
       tHead.appendChild(buildTradeAction(acc.id));
     }
     host.appendChild(tHead);
-    // Rearrange mode: a calm one-line hint (never a ticker list) plus a Done
-    // button, so the reader always knows how to leave the mode.
-    if (tradeRearrangeMode && tradeRearrangeAccId === acc.id) {
-      var rrBar = document.createElement('div');
-      rrBar.className = 'rearrange-bar';
-      var rrHint = document.createElement('p');
-      rrHint.className = 'muted rearrange-hint';
-      rrHint.setAttribute('data-rearrange-hint', '1');
-      rrHint.textContent = 'Drag a record onto another with the same date to reorder. Records never move across dates.';
-      rrBar.appendChild(rrHint);
-      var rrDone = document.createElement('button');
-      rrDone.type = 'button';
-      rrDone.className = 'ghost';
-      rrDone.textContent = 'Done';
-      rrDone.setAttribute('data-rearrange-done', '1');
-      rrDone.setAttribute('aria-label', 'Finish rearranging records');
-      rrDone.addEventListener('click', function () { exitTradeRearrangeMode(); });
-      rrBar.appendChild(rrDone);
-      host.appendChild(rrBar);
-    }
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
     var accKind = (acc && typeof acc.kind === 'string') ? acc.kind : undefined;
     // Paged records: sort once, then build DOM only for the visible slice.
@@ -9951,10 +9916,9 @@ function renderAccountDetail(st, id) {
     }
     if (frag) host.appendChild(frag);
     host.appendChild(bottomBar);
-    // Wire trade drag-and-drop if in rearrange mode for this account
-    if (tradeRearrangeMode && tradeRearrangeAccId === acc.id) {
-      wireTradeDnD(acc.id);
-    }
+    // Record reordering lives on the always-visible grip (like account
+    // cards); wireTradeDnD wires the host listeners once, later calls no-op.
+    wireTradeDnD();
     restoreTradeTypeFilterFocus();
   } else {
     host.appendChild(tHead);
@@ -9984,16 +9948,14 @@ function route() {
   var det = document.getElementById('view-account');
   if (!home || !det) return;
   var id = accountDetailId();
-  // Record selection and the rearrange mode belong to the account page: they
-  // end when the reader leaves it (or opens another account).
-  if (tradeSelectionMode || tradeRearrangeMode) {
+  // Record selection belongs to the account page: it ends when the reader
+  // leaves it (or opens another account). A drag in flight is abandoned too.
+  if (tradeSelectionMode) {
     var leaving = !id || (lastRouteId !== null && lastRouteId !== id);
     if (leaving) {
       tradeSelectionMode = false;
       selectedTrades = {};
       tradeActionOpen = false;
-      tradeRearrangeMode = false;
-      tradeRearrangeAccId = null;
       tradeDragCleanup();
     }
   }
@@ -11009,7 +10971,8 @@ function subFinishDrop(wrap, e) {
 }
 
 // --- Trade drag-and-drop reorder (dice-grip handle, account detail) ---
-// Only available in "Rearrange" action mode. Two hard constraints:
+// Always available — every record card carries its grip at all times, like
+// the account cards on home. Two hard constraints:
 // 1. Only records of the SAME date may swap places — a record can never
 //    move across a date boundary, so the timeline order stays truthful.
 // 2. The math must still book: the reordered timeline may never leave an
@@ -11022,8 +10985,6 @@ function subFinishDrop(wrap, e) {
 // existing order for equal dates, so permuting the same-date records of an
 // account permutes exactly what the math sees.
 var tradeDrag = null; // {id,startX,startY,started,ghost,overId,after,date,accId}
-var tradeRearrangeMode = false; // true when the "Rearrange" action is active
-var tradeRearrangeAccId = null; // account being rearranged
 
 function tradeDragCleanup() {
   if (tradeDrag && tradeDrag.ghost && tradeDrag.ghost.parentNode) {
@@ -11151,25 +11112,12 @@ function applyTradeReorder(st, accId, date, newOrderIds) {
   return { ok: true, trades: rebuilt };
 }
 
-function enterTradeRearrangeMode(accId) {
-  tradeRearrangeMode = true;
-  tradeRearrangeAccId = accId;
-  render();
-}
-
-function exitTradeRearrangeMode() {
-  tradeRearrangeMode = false;
-  tradeRearrangeAccId = null;
-  tradeDragCleanup();
-  render();
-}
-
-function wireTradeDnD(accId) {
+function wireTradeDnD() {
   var host = document.getElementById('account-detail');
   if (!host) return;
   // The host element survives re-renders (only its children are replaced),
-  // so the listeners are wired ONCE and read the account from the mode
-  // flags at event time. Wiring per account would pile up listeners on
+  // so the listeners are wired ONCE and read the account from the dragged
+  // record at event time. Wiring per account would pile up listeners on
   // every navigation.
   if (!host.getAttribute('data-trade-dnd-wired')) {
     host.setAttribute('data-trade-dnd-wired', '1');
@@ -11179,8 +11127,6 @@ function wireTradeDnD(accId) {
 
 function wireTradeDnDEvents(host) {
   host.addEventListener('pointerdown', function (e) {
-    if (!tradeRearrangeMode || !tradeRearrangeAccId) return;
-    var accId = tradeRearrangeAccId;
     var grip = e.target && e.target.closest ? e.target.closest('.drag-handle') : null;
     if (!grip) return;
     var card = grip.closest('.trade-block');
@@ -11189,16 +11135,16 @@ function wireTradeDnDEvents(host) {
     if (e.pointerType === 'mouse' && e.button !== undefined && e.button !== 0) return;
     if (typeof e.clientX !== 'number') return;
     // The record's own date is the boundary: it may only swap with records
-    // that carry the very same date.
+    // that carry the very same date. The record also pins the account, so
+    // the grip decides everything — no mode flags needed.
     var st = loadState();
     var trade = findTradeById(st, tradeId);
     if (!trade) return;
-    tradeDrag = { id: tradeId, startX: e.clientX, startY: e.clientY, started: false, ghost: null, overId: null, after: false, date: trade.date, accId: accId };
+    tradeDrag = { id: tradeId, startX: e.clientX, startY: e.clientY, started: false, ghost: null, overId: null, after: false, date: trade.date, accId: trade.accountId };
     try { grip.setPointerCapture(e.pointerId); } catch (err) {}
   });
   host.addEventListener('pointermove', function (e) {
-    var accId = tradeRearrangeAccId;
-    if (!tradeDrag || tradeDrag.accId !== accId || !e || typeof e.clientX !== 'number') return;
+    if (!tradeDrag || !e || typeof e.clientX !== 'number') return;
     var dx = e.clientX - tradeDrag.startX;
     var dy = e.clientY - tradeDrag.startY;
     if (!tradeDrag.started) {
@@ -11232,8 +11178,8 @@ function wireTradeDnDEvents(host) {
     }
   });
   function tradeFinishDrop(e) {
-    var accId = tradeRearrangeAccId;
-    if (!tradeDrag || tradeDrag.accId !== accId) return;
+    if (!tradeDrag) return;
+    var accId = tradeDrag.accId;
     var wasStarted = tradeDrag.started;
     var id = tradeDrag.id;
     var date = tradeDrag.date;
@@ -11287,7 +11233,10 @@ function wireTradeDnDEvents(host) {
     st.trades = applied.trades;
     if (!saveStateGuarded(st)) { render(); return; }
     clearBanner();
-    exitTradeRearrangeMode();
+    // A done reorder is just a paint: no mode to leave, only a re-render
+    // so the list and the totals reflect the new book order.
+    tradeDragCleanup();
+    render();
   }
   host.addEventListener('pointerup', tradeFinishDrop);
   host.addEventListener('pointercancel', tradeDragCleanup);
@@ -15073,10 +15022,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.toggleTradeSelect = toggleTradeSelect;
   window.Inoculens.cancelTradeSelection = cancelTradeSelection;
   window.Inoculens.findTradeById = findTradeById;
-  window.Inoculens.enterTradeRearrangeMode = enterTradeRearrangeMode;
-  window.Inoculens.exitTradeRearrangeMode = exitTradeRearrangeMode;
   window.Inoculens.tradeSelectionMode = function () { return tradeSelectionMode; };
-  window.Inoculens.tradeRearrangeMode = function () { return tradeRearrangeMode; };
   window.Inoculens.resetTradeForm = resetTradeForm;
   window.Inoculens.syncTradeButtons = syncTradeButtons;
   window.Inoculens.syncLockedSymbol = syncLockedSymbol;

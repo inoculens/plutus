@@ -7898,6 +7898,33 @@ function syncInfoDots() {
   } catch (e) { /* ignore */ }
 }
 
+// The now-worth / pair pills cap short of the pinned ▾ ✎ 🗑 corner only while
+// they share the head's FIRST line with the buttons; once such a pill wraps
+// below, the corner is free and the pill must run the full width. Pure CSS
+// cannot see a flex wrap, so a measurement pass tags the dropped pills — the
+// same render + resize rhythm as syncInfoDots. The 2px floor swallows the
+// subpixel rounding of near-fit lines.
+function syncTradeHeadRows() {
+  try {
+    var heads = document.querySelectorAll('#account-detail .trade-head');
+    for (var i = 0; i < heads.length; i++) {
+      var head = heads[i];
+      var when = head.querySelector('.trade-when');
+      if (!when) { // no date pill: nothing to measure against
+        continue;
+      }
+      var firstTop = when.offsetTop;
+      var pills = head.querySelectorAll('.trade-now, .trade-pair');
+      for (var j = 0; j < pills.length; j++) {
+        var pill = pills[j];
+        var low = pill.offsetTop > firstTop + 2;
+        if (low) pill.classList.add('head-own-row');
+        else pill.classList.remove('head-own-row');
+      }
+    }
+  } catch (e) { /* a failed pass keeps the last tags */ }
+}
+
 function rateRow(label, text) {
   var rate = document.createElement('div');
   rate.className = 'stat-row rate-line';
@@ -10000,6 +10027,9 @@ function route() {
   // Route rebuilds rows (fresh ⓘ dots start visible): gate them now, so hash
   // navigation never flashes dots that have nothing to show.
   try { syncInfoDots(); } catch (e) { /* ignore */ }
+  // The pinned-corner caps lift for pills that wrapped under the buttons:
+  // needs a fresh measurement after every layout change.
+  try { syncTradeHeadRows(); } catch (e) { /* ignore */ }
   syncTradeButtons();
 }
 
@@ -14845,6 +14875,7 @@ function render() {
   route(); // show home or the routed account page
   refreshDisplayRates(st); // fill missing historical pairs, then repaint once
   try { syncInfoDots(); } catch (e) { /* hide decorative ⓘ where nothing overflows */ }
+  try { syncTradeHeadRows(); } catch (e) { /* pinned-corner caps follow the wrap */ }
 }
 
 // Fire-and-forget: fetch historical FX pairs AND historical execution prices
@@ -14932,7 +14963,7 @@ function init() {
     var heroRt = null;
     window.addEventListener('resize', function () {
       if (heroRt) { try { clearTimeout(heroRt); } catch (e) { /* ignore */ } }
-      heroRt = setTimeout(function () { fitHeroValue(); syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* ignore */ } }, 150);
+      heroRt = setTimeout(function () { fitHeroValue(); syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* ignore */ } try { syncTradeHeadRows(); } catch (e2) { /* wrap caps follow the width */ } }, 150);
     });
     try {
       if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
@@ -15029,6 +15060,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.syncLockedSymbol = syncLockedSymbol;
   window.Inoculens.syncTradeTypeUI = syncTradeTypeUI;
   window.Inoculens.syncInfoDots = syncInfoDots;
+  window.Inoculens.syncTradeHeadRows = syncTradeHeadRows;
   window.Inoculens.transferFeeFrom = transferFeeFrom;
   window.Inoculens.syncTransferFeePreview = syncTransferFeePreview;
   window.Inoculens.route = route;

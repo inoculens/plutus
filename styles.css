@@ -2613,19 +2613,32 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     flex-wrap: wrap;
     row-gap: 0.4rem;
     column-gap: 0.6rem;
-    /* Containing block for the pinned action cluster; padding-right reserves
-       the top-right corner so the ▾ ✎ 🗑 buttons never get pushed down by
-       extra pills (swap pair, now-worth PnL, from → to). min-width: 0 lets
-       the head shrink to the card width when many nowrap pills would
-       otherwise force it wider and push the buttons off-screen. */
+    /* Containing block for the pinned action cluster. min-width: 0 lets the
+       head shrink to the card width when many nowrap pills would otherwise
+       force it wider and push the buttons off-screen. No right padding: the
+       ▾ ✎ 🗑 corner is reserved per-pill below, and ONLY on the pills that
+       share the first line with it — wrapped rows run the full width and go
+       under the buttons. */
     position: relative;
     min-width: 0;
-    padding-right: 7rem;
   }
-  /* Record head on phones: date + type left with the ▾ ✎ 🗑 cluster pinned
-     top-right, long pills (now-worth, swap/what) wrap below, and the FIFO
-     record # takes its own row underneath — it must never shove the
-     actions a line down (see trade-head DOM order). */
+  /* Line-1 pills stop short of the pinned ▾ ✎ 🗑 corner: each caps itself at
+     head minus the corner, so a line-1 run of short pills can never slide
+     under the trio. A too-long pill wraps down instead, where the corner is
+     free. (now-worth trims via its global overflow rules.) */
+  .trade-head .trade-when { max-width: calc(100% - 7rem); }
+  .trade-head .side { max-width: calc(100% - 7rem); }
+  .trade-head .trade-now { max-width: calc(100% - 7rem); }
+  .trade-head .trade-pair {
+    max-width: calc(100% - 7rem);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Record head on phones: date + type + pair left, the ▾ ✎ 🗑 cluster
+     pinned top-right (line-1 pills self-cap short of it), and the long
+     pills — now-worth when it wraps, the swap/what route, the FIFO record #
+     — take whole rows below, running the FULL width under the buttons. */
   .trade-head .trade-when { order: 1; }
   .trade-head .side { order: 2; }
   /* Pinned to the top-right corner, taken out of the wrap flow so pills can
@@ -2668,8 +2681,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* The route pill is a mini flex row: the text trims with an ellipsis and
      the ⓘ badge sits right after it, in continuation of the text — never on a
      line of its own. The text is the only part that may shrink, so the
-     badge keeps its size and the text gives up room instead. */
-  .trade-what { display: flex; align-items: baseline; min-width: 0; flex: 1 1 auto; }
+     badge keeps its size and the text gives up room instead. Basis 100% puts
+     it on its own row under the pinned corner, so a long route reads the
+     full card width instead of stopping where the buttons sit. */
+  .trade-what { display: flex; align-items: baseline; min-width: 0; }
+  .trade-head .trade-what { flex: 1 1 100%; }
   .trade-what-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
   .trade-what .info-dot { flex: 0 0 auto; }
   .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }

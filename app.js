@@ -7903,7 +7903,11 @@ function syncInfoDots() {
 // below, the corner is free and the pill must run the full width. Pure CSS
 // cannot see a flex wrap, so a measurement pass tags the dropped pills — the
 // same render + resize rhythm as syncInfoDots. The 2px floor swallows the
-// subpixel rounding of near-fit lines.
+// subpixel rounding of near-fit lines. The same pass parks each wrapped pill
+// one normal row-gap BELOW the trio's band: the pinned squares stand 2rem but
+// row-1 pills sit shorter, so the cluster would otherwise overhang into the
+// next row and glue the pill to its bottom edge — at pill size, never by
+// growing one. Desktop never fires (no cluster box → no band).
 function syncTradeHeadRows() {
   try {
     var heads = document.querySelectorAll('#account-detail .trade-head');
@@ -7913,13 +7917,45 @@ function syncTradeHeadRows() {
       if (!when) { // no date pill: nothing to measure against
         continue;
       }
+      var pills = head.querySelectorAll('.trade-now, .trade-pair, .trade-what, .trade-id');
+      if (!pills.length) {
+        continue;
+      }
+      var band = null;
+      try {
+        var cluster = head.querySelector('.trade-actions');
+        if (cluster && typeof cluster.offsetTop === 'number' && typeof cluster.offsetHeight === 'number') {
+          band = cluster.offsetTop + cluster.offsetHeight;
+        }
+      } catch (e) { band = null; }
+      // The "safe space" is one normal row-gap: reuse the head's own gap so
+      // the clearance reads like the rest of the card, never like padding.
+      var safe = 0;
+      try {
+        var rg = parseFloat(window.getComputedStyle(head).rowGap);
+        if (isFinite(rg) && rg > 0) safe = rg;
+      } catch (e) { /* shimmed layouts keep a plain pass */ }
+      // A margin left by the previous pass would skew this measurement: drop
+      // them first so every top below is the pill's natural row position.
+      for (var k = 0; k < pills.length; k++) {
+        try { pills[k].style.marginTop = ''; } catch (e) { /* ignore */ }
+      }
       var firstTop = when.offsetTop;
-      var pills = head.querySelectorAll('.trade-now, .trade-pair');
+      var needs = [];
       for (var j = 0; j < pills.length; j++) {
         var pill = pills[j];
         var low = pill.offsetTop > firstTop + 2;
         if (low) pill.classList.add('head-own-row');
         else pill.classList.remove('head-own-row');
+        // Only wrapped pills move, and each from its own top, so a shared
+        // wrapped row still shifts as one even block.
+        var need = (band === null || !low) ? 0 : (band + safe) - pill.offsetTop;
+        needs.push(need);
+      }
+      for (var m = 0; m < pills.length; m++) {
+        if (needs[m] > 1) {
+          try { pills[m].style.marginTop = Math.round(needs[m]) + 'px'; } catch (e) { /* ignore */ }
+        }
       }
     }
   } catch (e) { /* a failed pass keeps the last tags */ }

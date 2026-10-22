@@ -7903,11 +7903,18 @@ function syncInfoDots() {
 // below, the corner is free and the pill must run the full width. Pure CSS
 // cannot see a flex wrap, so a measurement pass tags the dropped pills — the
 // same render + resize rhythm as syncInfoDots. The 2px floor swallows the
-// subpixel rounding of near-fit lines. The same pass parks each wrapped pill
-// one normal row-gap BELOW the trio's band: the pinned squares stand 2rem but
-// row-1 pills sit shorter, so the cluster would otherwise overhang into the
-// next row and glue the pill to its bottom edge — at pill size, never by
-// growing one. Desktop never fires (no cluster box → no band).
+// subpixel rounding of near-fit lines.
+//
+// The per-pill `100% - 7rem` cap reserves the corner from the head's edge,
+// but a second or third pill on the first line already starts past that
+// reservation — on some devices such pills used their whole cap yet still
+// slid UNDER the trio (record-length dependent, hence "some records"). The
+// same pass therefore reads the cluster's real left edge: any line-1 pill
+// whose uncut text would cross it takes a wrap-forcing right margin and
+// reappears on its own row, lifted and parked below the band — at pill size,
+// parked, never painted over the buttons. Every pass resets its own inline
+// corrections first and re-decides from the plain CSS layout, so repeated
+// runs are idempotent and no lift/cap seesaw can survive a paint.
 function syncTradeHeadRows() {
   try {
     var heads = document.querySelectorAll('#account-detail .trade-head');
@@ -7921,40 +7928,78 @@ function syncTradeHeadRows() {
       if (!pills.length) {
         continue;
       }
+      // Corner geometry in the head's own offset space — pills and cluster
+      // share the offsetParent, so lefts and widths compare like for like.
+      // A device with no real cluster box (desktop's display:contents, the
+      // shim) keeps the plain first-line pass. offsetHeight > 0 filters the
+      // boxless cluster out.
+      var cornerLeft = null;
       var band = null;
       try {
         var cluster = head.querySelector('.trade-actions');
-        if (cluster && typeof cluster.offsetTop === 'number' && typeof cluster.offsetHeight === 'number') {
+        if (cluster && typeof cluster.offsetLeft === 'number' && typeof cluster.offsetTop === 'number' &&
+            typeof cluster.offsetHeight === 'number' && cluster.offsetHeight > 0) {
           band = cluster.offsetTop + cluster.offsetHeight;
+          if (cluster.offsetLeft > 0) cornerLeft = cluster.offsetLeft;
         }
-      } catch (e) { band = null; }
+      } catch (e) { band = null; cornerLeft = null; }
       // The "safe space" is one normal row-gap: reuse the head's own gap so
       // the clearance reads like the rest of the card, never like padding.
-      var safe = 0;
+      var rowGap = 0;
       try {
         var rg = parseFloat(window.getComputedStyle(head).rowGap);
-        if (isFinite(rg) && rg > 0) safe = rg;
+        if (isFinite(rg) && rg > 0) rowGap = rg;
       } catch (e) { /* shimmed layouts keep a plain pass */ }
-      // A margin left by the previous pass would skew this measurement: drop
-      // them first so every top below is the pill's natural row position.
+      // Margins left by the previous pass would skew this measurement: drop
+      // them first so every read below is the pill's natural CSS position.
       for (var k = 0; k < pills.length; k++) {
         try { pills[k].style.marginTop = ''; } catch (e) { /* ignore */ }
+        try { pills[k].style.marginRight = ''; } catch (e) { /* ignore */ }
       }
       var firstTop = when.offsetTop;
-      var needs = [];
       for (var j = 0; j < pills.length; j++) {
         var pill = pills[j];
-        var low = pill.offsetTop > firstTop + 2;
+        var top = pill.offsetTop;
+        // A wrapped row starts at or below the trio's band where the band is
+        // real; the old first-line + 2px floor stays as the fallback.
+        var low = (band !== null) ? (top >= band - 2) : (top > firstTop + 2);
         if (low) pill.classList.add('head-own-row');
         else pill.classList.remove('head-own-row');
-        // Only wrapped pills move, and each from its own top, so a shared
-        // wrapped row still shifts as one even block.
-        var need = (band === null || !low) ? 0 : (band + safe) - pill.offsetTop;
-        needs.push(need);
-      }
-      for (var m = 0; m < pills.length; m++) {
-        if (needs[m] > 1) {
-          try { pills[m].style.marginTop = Math.round(needs[m]) + 'px'; } catch (e) { /* ignore */ }
+        if (!low && cornerLeft !== null) {
+          // Line 1 shares the row with the pinned corner: a pill whose uncut
+          // text would cross the cluster's left edge is wrapped to its own
+          // row instead — with a right margin bigger than whatever the line
+          // had left, the flex partition cannot keep it on line 1. scrollWidth
+          // reads the uncut text even under the cap, so the decision is
+          // content-based and stable across passes.
+          try {
+            var content = pill.scrollWidth;
+            if (isFinite(content) && (pill.offsetLeft + content) > cornerLeft) {
+              var force = null;
+              try {
+                if (typeof head.clientWidth === 'number' && head.clientWidth > 0) {
+                  force = Math.round(head.clientWidth - cornerLeft + 1);
+                }
+              } catch (e2) { force = null; }
+              if (force !== null && force > 0) {
+                pill.style.marginRight = force + 'px';
+                // The margin takes effect on the next layout: read the pill's
+                // new row (the read flushes it), then lift the cap for that
+                // row and park it band + one row-gap below the buttons.
+                var top2 = pill.offsetTop;
+                if (top2 >= band - 2) {
+                  pill.classList.add('head-own-row');
+                  var need = (band + rowGap) - top2;
+                  if (need > 1) pill.style.marginTop = Math.round(need) + 'px';
+                }
+              }
+            }
+          } catch (e3) { /* the corner net stays off this pill */ }
+        } else if (low && band !== null) {
+          // Naturally wrapped rows park the same one row-gap below the band,
+          // without growing any pill.
+          var needNat = (band + rowGap) - top;
+          if (needNat > 1) pill.style.marginTop = Math.round(needNat) + 'px';
         }
       }
     }
@@ -14998,12 +15043,15 @@ function init() {
     heroResizeWired = true;
     var heroRt = null;
     window.addEventListener('resize', function () {
+      // The corner-aware wrap decision must track width live: run it at once,
+      // then the debounced tail still covers the hero and the ⓘ dots.
+      try { syncTradeHeadRows(); } catch (e) { /* corner wrap tracks on the debounce */ }
       if (heroRt) { try { clearTimeout(heroRt); } catch (e) { /* ignore */ } }
       heroRt = setTimeout(function () { fitHeroValue(); syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* ignore */ } try { syncTradeHeadRows(); } catch (e2) { /* wrap caps follow the width */ } }, 150);
     });
     try {
       if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
-        document.fonts.ready.then(function () { syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* webfont metrics settle truncation */ } });
+        document.fonts.ready.then(function () { syncHeroAllocHeight(); try { syncInfoDots(); } catch (e) { /* webfont metrics settle truncation */ } try { syncTradeHeadRows(); } catch (e2) { /* webfont metrics re-wrap the head lines */ } });
       }
     } catch (e) { /* ignore */ }
     try {

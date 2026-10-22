@@ -1604,6 +1604,37 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
 }
 
+/* The record grip is a rail on the card's LEFT edge: the grab zone runs the
+   full card height, while the dots ride in its vertical middle (roomy space
+   above and below, as on the account cards). The card reserves the column,
+   so every record line shifts a bit right. Relative (no z-index): the card
+   holds the rail without becoming a stacking context. */
+.trade-block { position: relative; padding-left: 2.6rem; }
+.trade-block .drag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1.6rem;
+  height: auto;
+  align-self: auto;
+  background: none;
+}
+.trade-block .drag-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.5rem;
+  height: 1.75rem;
+  transform: translate(-50%, -50%);
+  border-radius: 4px;
+  background-image: radial-gradient(circle, var(--muted-2) 1.2px, transparent 1.4px);
+  background-size: 0.5rem 0.58rem;
+  background-position: center;
+  background-repeat: repeat;
+}
+
 /* Selection checkbox for trade blocks (same chip as the account cards) */
 .trade-block .card-check {
   width: 1.4rem;
@@ -2547,6 +2578,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .section-actions button { flex: 1 1 auto; min-height: 2.75rem; }
   .account-card { flex-wrap: nowrap; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; min-height: 4.2rem; }
   .drag-handle { width: 1.9rem; height: 2.75rem; flex-shrink: 0; opacity: 0.75; }
+  /* Record rails on phones: a wider column for the thumb, taller dot run. */
+  .trade-block { padding-left: 3.2rem; }
+  .trade-block .drag-handle { width: 2.3rem; }
+  .trade-block .drag-handle::before { height: 2.75rem; }
   .acct-avatar { width: 2.6rem; height: 2.6rem; }
   .acct-mid { gap: 0.05rem; }
   .account-name { font-size: 0.95rem; }

@@ -9399,6 +9399,334 @@
       });
     })();
 
+
+    // === Record selection, color and same-date rearrange ===
+    (function recordSelectionTests() {
+      var L = window.Inoculens || {};
+      var FXR = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+      var backup = null;
+      try { backup = localStorage.getItem('inoculens.v2'); } catch (e) { backup = null; }
+      function rec(id, type, date, qty, total) {
+        var t = { id: id, type: type, symbol: 'BTC', qty: qty, total: total, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', note: '', accountId: 'rs-acct', fxLock: FXR, createdAt: date + 'T00:00:00.000Z' };
+        return t;
+      }
+      function seed(trades) {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [{ id: 'rs-acct', name: 'Reorder', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' }],
+          trades: trades || [],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+      }
+      function openRec() {
+        navTo('rs-acct');
+        route();
+        render();
+      }
+      function head() { return document.querySelector('#account-detail .section-head'); }
+      function cards() { return document.querySelectorAll('#account-detail .trade-block[data-trade]'); }
+      function card(id) {
+        var cs = cards();
+        for (var i = 0; i < cs.length; i++) if (cs[i].getAttribute('data-trade') === id) return cs[i];
+        return null;
+      }
+      function cleanup() {
+        try {
+          L.cancelTradeSelection();
+          L.exitTradeRearrangeMode();
+        } catch (e) { /* ignore */ }
+        try { navHome(); } catch (e) { /* ignore */ }
+      }
+      try {
+        test('records offer a Select button in the Trades header', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          openRec();
+          var btn = head().querySelector('[data-trade-select-btn]');
+          assert(btn !== null, 'the Trades header must carry a Select button');
+          assert(btn.textContent === 'Select', 'the button must read Select, got ' + btn.textContent);
+          assert(btn.getAttribute('aria-pressed') === 'false', 'Select must start unpressed');
+          var tradeSelectBtn = btn;
+          // Select sits before the Filter, and both stay left of + Record.
+          var add = head().querySelector('.t-add');
+          var fbtn = head().querySelector('[data-filter-btn]');
+          assert(fbtn !== null && add !== null, 'Filter and + Record must both render');
+          var kids = head().children;
+          var iSel = kids.indexOf(tradeSelectBtn);
+          var iFil = kids.indexOf(fbtn.closest('.filter-wrap'));
+          var iAdd = kids.indexOf(add);
+          assert(iSel !== -1 && iFil !== -1 && iAdd !== -1, 'Select, Filter and + Record must all render');
+          assert(iSel < iFil, 'Select must sit before the Filter');
+          assert(iFil < iAdd, 'the Filter must sit before + Record');
+          cleanup();
+        });
+
+        test('Select puts a checkbox on every record card', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-02', 1, 60000)]);
+          openRec();
+          assert(cards().length === 2, 'both records must render');
+          assert(cards()[0].querySelector('[data-select-check]') === null, 'no checkbox before Select');
+          head().querySelector('[data-trade-select-btn]').click();
+          assert(cards().length === 2, 'both records must still render in Select mode');
+          var boxes = document.querySelectorAll('#account-detail .trade-block [data-select-check]');
+          assert(boxes.length === 2, 'every record must carry a checkbox, got ' + boxes.length);
+          var btn = head().querySelector('[data-trade-select-btn]');
+          assert(btn.getAttribute('aria-pressed') === 'true', 'Select must read pressed while active');
+          assert(btn.classList.contains('select-on'), 'Select must light up while active');
+          cleanup();
+        });
+
+        test('selecting records shows the count and the Action menu', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-02', 1, 60000)]);
+          openRec();
+          head().querySelector('[data-trade-select-btn]').click();
+          var count = head().querySelector('[data-trade-select-count]');
+          assert(count !== null, 'the selected count must render');
+          assert(count.hidden === true, 'the count stays hidden until something is picked');
+          var boxes = document.querySelectorAll('#account-detail .trade-block [data-select-check]');
+          boxes[0].checked = true;
+          boxes[0].dispatchEvent(new Event('change', { bubbles: true }));
+          var count2 = head().querySelector('[data-trade-select-count]');
+          assert(count2 && count2.hidden === false, 'the count must appear once a record is picked');
+          assert(count2.textContent.indexOf('1 selected') !== -1, 'the count must read "1 selected", got ' + count2.textContent);
+          var action = head().querySelector('[data-trade-action-btn]');
+          assert(action !== null, 'the Action button must appear');
+          assert(action.textContent === 'Action', 'the button must read Action');
+          // The menu offers exactly the two record actions.
+          action.click();
+          var panel = document.querySelector('#account-detail [data-trade-action-panel]');
+          assert(panel !== null && panel.hidden === false, 'the Action menu must open');
+          var opts = panel.querySelectorAll('.action-opt');
+          var labels = Array.prototype.map.call(opts, function (o) { return o.textContent; });
+          assert(labels.indexOf('Change color') !== -1, 'the menu must offer Change color, got ' + labels.join(' | '));
+          assert(labels.indexOf('Rearrange') !== -1, 'the menu must offer Rearrange, got ' + labels.join(' | '));
+          cleanup();
+        });
+
+        test('Change color paints the record borders and the card fade', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          openRec();
+          head().querySelector('[data-trade-select-btn]').click();
+          var box = document.querySelector('#account-detail .trade-block [data-select-check]');
+          box.checked = true;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+          head().querySelector('[data-trade-action-btn]').click();
+          var colorBtn = null;
+          var opts = document.querySelectorAll('#account-detail [data-trade-action-panel] .action-opt');
+          Array.prototype.forEach.call(opts, function (o) { if (o.textContent === 'Change color') colorBtn = o; });
+          assert(colorBtn !== null, 'the Change color option must exist');
+          colorBtn.click();
+          // The shared color dialog opens; pick a swatch.
+          var swatch = document.querySelector('#color-dialog [data-color-pick]');
+          assert(swatch !== null, 'the color dialog must offer swatches');
+          swatch.click();
+          var st = L.loadState();
+          var t = st.trades.filter(function (x) { return x && x.id === 'rs-b1'; })[0];
+          assert(t && t.color, 'the record must store its color');
+          assert(t.color === '#F7931A', 'the stored color must be the picked one, got ' + t.color);
+          var c = card('rs-b1');
+          assert(c !== null, 'the record must still render');
+          assert(c.getAttribute('data-colored') === '1', 'the colored card must carry the data-colored flag');
+          assert((c.style.getPropertyValue('--trade-color') || '').toUpperCase() === '#F7931A', 'the card must carry the color variable');
+          // The fade is a real background wash, not just a border tint.
+          var bg = window.getComputedStyle(c).backgroundImage || '';
+          assert(bg.indexOf('gradient') !== -1, 'the colored card must fade with a gradient, got ' + bg);
+          cleanup();
+        });
+
+        test('the record color survives export and import', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          openRec();
+          head().querySelector('[data-trade-select-btn]').click();
+          var box = document.querySelector('#account-detail .trade-block [data-select-check]');
+          box.checked = true;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+          head().querySelector('[data-trade-action-btn]').click();
+          var opts = document.querySelectorAll('#account-detail [data-trade-action-panel] .action-opt');
+          Array.prototype.forEach.call(opts, function (o) { if (o.textContent === 'Change color') o.click(); });
+          document.querySelector('#color-dialog [data-color-pick]').click();
+          var env = JSON.parse(L.exportState(L.loadState()));
+          assert(env.trades[0] && env.trades[0].color === '#F7931A', 'the export must carry the record color, got ' + JSON.stringify(env.trades[0] && env.trades[0].color));
+          // The envelope keys stay exactly the documented seven.
+          var keys = Object.keys(env).sort().join(',');
+          assert(keys === 'accounts,app,exportedAt,priceOverrides,settings,trades,version', 'the export envelope keys must not change, got ' + keys);
+          cleanup();
+        });
+
+        test('an invalid color is refused and never stored', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          openRec();
+          head().querySelector('[data-trade-select-btn]').click();
+          var box = document.querySelector('#account-detail .trade-block [data-select-check]');
+          box.checked = true;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+          L.applyTradeColorToSelection('not-a-color');
+          var st = L.loadState();
+          assert(!st.trades[0].color, 'an invalid color must never be stored, got ' + st.trades[0].color);
+          cleanup();
+        });
+
+        test('rearrange mode shows a grip on every record and a Done button', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-02', 1, 60000)]);
+          openRec();
+          head().querySelector('[data-trade-select-btn]').click();
+          var box = document.querySelector('#account-detail .trade-block [data-select-check]');
+          box.checked = true;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+          head().querySelector('[data-trade-action-btn]').click();
+          var opts = document.querySelectorAll('#account-detail [data-trade-action-panel] .action-opt');
+          Array.prototype.forEach.call(opts, function (o) { if (o.textContent === 'Rearrange') o.click(); });
+          var grips = document.querySelectorAll('#account-detail .trade-block .drag-handle');
+          assert(grips.length === 2, 'every record must get a grip in rearrange mode, got ' + grips.length);
+          var hint = document.querySelector('#account-detail [data-rearrange-hint]');
+          assert(hint !== null, 'rearrange mode must explain itself');
+          assert(hint.textContent.indexOf('same date') !== -1, 'the hint must name the same-date rule, got ' + hint.textContent);
+          var done = document.querySelector('#account-detail [data-rearrange-done]');
+          assert(done !== null, 'rearrange mode must offer a Done button');
+          done.click();
+          assert(document.querySelectorAll('#account-detail .trade-block .drag-handle').length === 0, 'Done must leave rearrange mode');
+          cleanup();
+        });
+
+        test('records of the same date can be reordered', function () {
+          // The buy funds the sell, and both land on the SAME date. Selling
+          // first would leave the sell without funds, so the order that
+          // swaps them must be refused — but the sell stays where the money
+          // allows it, and the list shows the books' order.
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-01', 0.5, 30000)]);
+          openRec();
+          L.enterTradeRearrangeMode('rs-acct');
+          // The list shows the store order within a date: buy then sell.
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the first card must be the buy');
+          assert(cards()[1].getAttribute('data-trade') === 'rs-b2', 'the second card must be the sell');
+          // Swapping them spends funds that are not there yet — refused.
+          var bad = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b2', 'rs-b1']);
+          assert(!bad.ok, 'selling before the buy on the same date must be refused');
+          // Keeping the order is accepted (a no-op reorder stays valid).
+          var same = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b1', 'rs-b2']);
+          assert(same.ok, 'the funded same-date order must be accepted');
+          assert(same.trades[0].id === 'rs-b1' && same.trades[1].id === 'rs-b2', 'the accepted order must be the funded one');
+          cleanup();
+        });
+
+        test('two records of one date can swap when the funds are already there', function () {
+          // The buy lands on an EARLIER date, so by the shared date the
+          // account already holds the crypto: the sell may move freely.
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-02', 0.5, 30000)]);
+          openRec();
+          // The sell alone is the 2026-01-02 group, so it cannot move there.
+          var cross = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-02', ['rs-b2', 'rs-b1']);
+          assert(!cross.ok, 'a record must never move across a date boundary');
+          cleanup();
+        });
+
+        test('reordering that spends funds before they arrive is refused', function () {
+          // One buy and one sell on the SAME date: the sell may only be booked
+          // after the buy, so the "sell first" order must be refused.
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-01', 1, 60000)]);
+          openRec();
+          var res = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b2', 'rs-b1']);
+          assert(!res.ok, 'spending before the funds arrive must be refused');
+          // The stored order must be untouched by the refusal.
+          var st = L.loadState();
+          assert(st.trades[0].id === 'rs-b1' && st.trades[1].id === 'rs-b2', 'a refused reorder must not change the store');
+          cleanup();
+        });
+
+        test('a reorder across dates is refused by the validator', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-02', 1, 60000)]);
+          openRec();
+          // Only the records of ONE date may be permuted: asking for the other
+          // date's record in the group is a broken order.
+          var res = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b1', 'rs-b2']);
+          assert(!res.ok, 'a reorder may never pull in a record from another date');
+          // The same-date group alone is fine.
+          var ok = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b1']);
+          assert(ok.ok, 'a one-record date group must be accepted');
+          cleanup();
+        });
+
+        test('reordering within a date keeps the books balanced', function () {
+          // Two buys and a sell on one date: the sell is funded by the buys,
+          // so the buys may swap places freely (the sell must stay last).
+          seed([
+            rec('rs-b1', 'buy', '2026-01-01', 1, 50000),
+            rec('rs-b2', 'buy', '2026-01-01', 1, 70000),
+            rec('rs-s1', 'sell', '2026-01-01', 1, 60000)
+          ]);
+          openRec();
+          var st = L.loadState();
+          // Swap the two buys, keep the sell last.
+          var res = L.applyTradeReorder(st, 'rs-acct', '2026-01-01', ['rs-b2', 'rs-b1', 'rs-s1']);
+          assert(res.ok, 'a funded same-date order must be accepted');
+          assert(res.trades[0].id === 'rs-b2' && res.trades[1].id === 'rs-b1', 'the buys must have swapped');
+          assert(res.trades[2].id === 'rs-s1', 'the sell must stay last');
+          // The engine still books the sell against real holdings.
+          var rows = L.computePositions(res.trades, {}, 'average');
+          var btc = rows[0];
+          assert(btc && Math.abs(btc.qtyHeld - 1) < 1e-9, 'the position must stay 1 BTC, got ' + (btc && btc.qtyHeld));
+          // Moving the sell before the buys starves it — refused.
+          var bad = L.applyTradeReorder(st, 'rs-acct', '2026-01-01', ['rs-s1', 'rs-b1', 'rs-b2']);
+          assert(!bad.ok, 'a sell before its buys must be refused');
+          cleanup();
+        });
+
+        test('a reorder that starves an outflow is refused', function () {
+          // A sell on the same date as the buy it spends, but the sell comes
+          // first in the proposed order: the funds are not there yet.
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-01', 2, 60000)]);
+          openRec();
+          var res = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-s1', 'rs-b1']);
+          assert(!res.ok, 'an order that starves the sell must be refused');
+          cleanup();
+        });
+
+        test('the same-date rule holds even when the funds arrive on an earlier date', function () {
+          // The buy is on an earlier date, so the sell IS funded — but a
+          // record may still never swap across a date boundary.
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-02', 1, 60000)]);
+          openRec();
+          var res = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b1', 'rs-s1']);
+          assert(!res.ok, 'a record must never move across a date boundary');
+          cleanup();
+        });
+
+        test('records of one date show in the order the books use', function () {
+          // Same date, created buy-then-sell: the list must read buy, sell —
+          // the order the engine books, so the reader's mental model and the
+          // math agree.
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-01', 1, 60000)]);
+          openRec();
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the buy must be listed first');
+          assert(cards()[1].getAttribute('data-trade') === 'rs-s1', 'the sell must be listed second');
+          cleanup();
+        });
+
+        test('leaving the account drops the record selection', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          openRec();
+          head().querySelector('[data-trade-select-btn]').click();
+          assert(L.selectedTradeCount() === 0, 'nothing is selected yet');
+          var box = document.querySelector('#account-detail .trade-block [data-select-check]');
+          box.checked = true;
+          box.dispatchEvent(new Event('change', { bubbles: true }));
+          assert(L.selectedTradeCount() === 1, 'the record must be selected');
+          cleanup();
+        });
+      } finally {
+        try {
+          L.cancelTradeSelection();
+          L.exitTradeRearrangeMode();
+        } catch (e) { /* ignore */ }
+        try {
+          if (backup === null) localStorage.removeItem('inoculens.v2');
+          else localStorage.setItem('inoculens.v2', backup);
+        } catch (e) { /* ignore */ }
+        try { navHome(); } catch (e) { /* ignore */ }
+        try { render(); } catch (e) { /* ignore */ }
+      }
+    })();
+
     renderResults();
   </script>
 </body>

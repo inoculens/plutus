@@ -1731,6 +1731,26 @@ function ledgerSortByDate(trades) {
   });
 }
 
+// Display twin of ledgerSortByDate's within-date rule: the engines walk each
+// date's store slice as execution order (first record books first), while the
+// list FEEDS the date newest-first — the latest execution on top, the day's
+// first move at the bottom. Takes an already date-grouped list (contiguous
+// equal-date runs) and reverses every run in place. Wrap the drag mapping
+// around this, never around the engines: the store keeps execution order.
+function reversePerDateBlocks(list) {
+  var src = list || [];
+  var out = [];
+  var i = 0;
+  while (i < src.length) {
+    var d = (src[i] && typeof src[i].date === 'string') ? src[i].date : '';
+    var j = i;
+    while (j < src.length && ((src[j] && typeof src[j].date === 'string') ? src[j].date : '') === d) j++;
+    for (var k = j - 1; k >= i; k--) out.push(src[k]);
+    i = j;
+  }
+  return out;
+}
+
 function ledgerHoldingDays(openDate, closeDate) {
   function toUtc(d) {
     if (!isValidDateStr(d)) return null;
@@ -9884,17 +9904,19 @@ function renderAccountDetail(st, id) {
     // totals and P&L above always cover every trade; only this list + its
     // pager follow the filter.
     var typeFilter = tradeTypeFilterFor(acc.id);
-    // Newest date first, but the records of one date keep their store order
-    // (the array order the engines walk). The list must show the order the
-    // math uses: same-date records are reorderable, and a reorder that
-    // changes the order also changes what the engines book.
-    var fullSorted = atrades.slice().sort(function (a, b) {
+    // Newest date first. Within one date the engines walk the store slice as
+    // execution order, while the list feeds it newest-execution-first: the
+    // latest move of the day sits on top, the day's first move at the bottom —
+    // a feed the reader reads top-is-latest. The drag translates the displayed
+    // order back to execution order before validating/booking (see the drop
+    // handler); the store itself is never reordered for display.
+    var fullSorted = reversePerDateBlocks(atrades.slice().sort(function (a, b) {
       var da = (a && typeof a.date === 'string') ? a.date : '';
       var db = (b && typeof b.date === 'string') ? b.date : '';
       if (da < db) return 1;
       if (da > db) return -1;
       return 0; // stable: same-date records keep their store order
-    });
+    }));
     var sortedTrades = filterTradesByType(fullSorted, typeFilter);
     var tradeTotal = sortedTrades.length;
     var tradePageCount = tradePageCountFor(tradeTotal);
@@ -11139,6 +11161,11 @@ function clearTradeCardMarks() {
 // "add funds → spend those funds" from being reordered into
 // "spend → add funds" (which would fake the spend out of existence).
 //
+// newOrderIds is EXECUTION order: the id that acted first of the day first in
+// the array. The list feeds each date newest-execution-first, so the drop
+// handler converts the displayed order (top = latest) with a reverse before
+// calling in.
+//
 // Reuses the same timeline engine the edit dialog uses, so the check and
 // the app can never disagree about what "the funds are not there yet" means.
 // Returns { ok: true } or { ok: false, reason: 'shortfall' }.
@@ -11201,8 +11228,9 @@ function validateTradeReorder(st, accId, date, newOrderIds) {
 }
 
 // Apply a validated same-date reorder to the store: the account's records of
-// that date take their slots from the new order, everything else keeps its
-// place. Returns the new trades array (or null when the order is invalid).
+// that date take their slots from the new order (execution order, same
+// contract as validateTradeReorder), everything else keeps its place.
+// Returns the new trades array (or null when the order is invalid).
 function applyTradeReorder(st, accId, date, newOrderIds) {
   var check = validateTradeReorder(st, accId, date, newOrderIds);
   if (!check || !check.ok) return { ok: false, reason: check && check.reason, shortfall: check && check.shortfall };
@@ -11318,25 +11346,29 @@ function wireTradeDnDEvents(host) {
     if (!wasStarted) return; // plain click
     if (!overId) return; // released over nothing meaningful: snap back
 
-    // Build the proposed order for this date: the account's records of that
-    // date, in store order, with the dragged one moved to the drop slot.
+    // Build the proposed order for this date in DISPLAY order: the list feeds
+    // each date newest-execution-first (top = the latest move), so a drop
+    // above the target books the record LATER in the day and a drop below
+    // books it EARLIER — which is exactly where the shortfall check must
+    // bite. The validator/engine speak execution order (store order), i.e.
+    // the displayed group read bottom-up, so reverse before applying.
     var st = loadState();
     if (!accountById(st, accId)) return;
     var dateTrades = (st.trades || []).filter(function (t) {
       return t && t.accountId === accId && t.date === date;
     });
-    var dateTradeIds = dateTrades.map(function (t) { return t.id; });
-    var fromIdx = dateTradeIds.indexOf(id);
+    var displayIds = dateTrades.map(function (t) { return t.id; }).reverse();
+    var fromIdx = displayIds.indexOf(id);
     if (fromIdx === -1) return;
-    dateTradeIds.splice(fromIdx, 1);
-    var toIdx = dateTradeIds.indexOf(overId);
+    displayIds.splice(fromIdx, 1);
+    var toIdx = displayIds.indexOf(overId);
     if (toIdx === -1) return;
     if (after) toIdx++;
-    dateTradeIds.splice(toIdx, 0, id);
+    displayIds.splice(toIdx, 0, id);
 
     // The failsafe: the reordered timeline may never leave an outflow
     // unfunded (selling before the funds arrive).
-    var applied = applyTradeReorder(st, accId, date, dateTradeIds);
+    var applied = applyTradeReorder(st, accId, date, displayIds.slice().reverse());
     if (!applied || !applied.ok) {
       showBanner('Cannot rearrange — these records share a date, and this order would spend funds that are not there yet.');
       render();

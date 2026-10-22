@@ -1626,7 +1626,7 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   top: 50%;
   left: 50%;
   width: 0.5rem;
-  height: 1.75rem;
+  height: 2.9rem;
   transform: translate(-50%, -50%);
   border-radius: 4px;
   background-image: radial-gradient(circle, var(--muted-2) 1.2px, transparent 1.4px);
@@ -2582,7 +2582,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
      column is written by this query's own .trade-block padding rule, so no
      later shorthand can take the strip back. */
   .trade-block .drag-handle { width: 3rem; }
-  .trade-block .drag-handle::before { height: 2.75rem; }
+  .trade-block .drag-handle::before { height: 4.1rem; }
   .acct-avatar { width: 2.6rem; height: 2.6rem; }
   .acct-mid { gap: 0.05rem; }
   .account-name { font-size: 0.95rem; }

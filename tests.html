@@ -9813,6 +9813,52 @@
           cleanup();
         });
 
+        test('a line-1 pill whose text crosses the corner is wrapped below', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          try {
+            var lp = L.getLivePrices();
+            if (lp) lp.BTC = 6;
+          } catch (e2) { /* offline shims keep whatever pills exist */ }
+          openRec();
+          var hdr = document.querySelector('#account-detail .trade-head');
+          var when = hdr.querySelector('.trade-when');
+          var pill = hdr.querySelector('.trade-now');
+          var cluster = hdr.querySelector('.trade-actions');
+          assert(pill !== null && cluster !== null, 'pill and pinned cluster must render');
+          // Stub the measured corner: trio pinned at 220 of a 320px head, 32px band.
+          // The pill starts at x=10 with 260px of uncut text: 10+260 crosses 220.
+          // offsetTop emulates the reflow the forcing margin causes: line-1 top
+          // while unforced, its own row below the band once the margin exists.
+          Object.defineProperty(when, 'offsetTop', { value: 0, configurable: true });
+          Object.defineProperty(hdr, 'clientWidth', { value: 320, configurable: true });
+          Object.defineProperty(cluster, 'offsetLeft', { value: 220, configurable: true });
+          Object.defineProperty(cluster, 'offsetTop', { value: 0, configurable: true });
+          Object.defineProperty(cluster, 'offsetHeight', { value: 32, configurable: true });
+          Object.defineProperty(pill, 'offsetLeft', { value: 10, configurable: true });
+          Object.defineProperty(pill, 'offsetTop', {
+            get: function () { return (pill.style.marginRight === '') ? 4 : 31; },
+            configurable: true
+          });
+          Object.defineProperty(pill, 'scrollWidth', { value: 260, configurable: true });
+          L.syncTradeHeadRows();
+          var mr = pill.style.marginRight;
+          assert(parseFloat(mr) > 0 && /px$/.test(mr), 'the crossing pill carries a wrap-forcing right margin, got ' + JSON.stringify(mr));
+          // Wrapped and lifted for the row it now owns — never painted over
+          // the buttons, and never enlarged: the cap lift works at pill size.
+          assert(pill.classList.contains('head-own-row'), 'the wrapped pill carries the lifted-cap tag');
+          // Same geometry, shorter text that stops before the corner: no
+          // forcing, no push, plain first-line pill.
+          Object.defineProperty(pill, 'scrollWidth', { value: 150, configurable: true });
+          L.syncTradeHeadRows();
+          assert(pill.style.marginRight === '', 'a pill short of the corner stays on line 1');
+          assert(pill.style.marginTop === '', 'a fit pill is never pushed down');
+          try {
+            var lp3 = L.getLivePrices();
+            if (lp3) delete lp3.BTC;
+          } catch (e4) { /* ignore */ }
+          cleanup();
+        });
+
         test('leaving the account drops the record selection', function () {
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
           openRec();

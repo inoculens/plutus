@@ -8004,14 +8004,15 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   side.className = 'side ' + meta.cls;
   side.textContent = meta.label;
   // Drag handle (dice-grip, like account cards): live on every record at all
-  // times — no Select trip needed before reordering. It sits at the very
-  // front of the head so the card's own layout never shifts, and the drop
-  // target decides which records may swap, not any selection.
+  // times — no Select trip needed before reordering. It hangs on the CARD
+  // itself as a rail along the left edge (dots ride in the rail's vertical
+  // middle; positioning lives in styles.css), and the drop target decides
+  // which records may swap, not any selection.
   var grip = document.createElement('span');
   grip.className = 'drag-handle';
   grip.title = 'Drag to reorder (same date only)';
   grip.setAttribute('aria-hidden', 'true');
-  head.appendChild(grip);
+  box.appendChild(grip);
   var when = document.createElement('span');
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');

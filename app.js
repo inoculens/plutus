@@ -5702,18 +5702,29 @@ function roundHalfUp2(n) {
 }
 
 var btcQtyFmt = null;
+var xmrQtyFmt = null;
 
 function fmtQty(n, symbol) {
   var v = Number(n);
   if (!isFinite(v)) return '—';
   // BTC always shows all 8 decimals (satoshis): 0.1 -> 0.10000000,
-  // 1 -> 1.00000000. Other assets keep trimmed display.
-  if (String(symbol || '').trim().toUpperCase() === 'BTC') {
+  // 1 -> 1.00000000. XMR always shows all 12 decimals (piconero):
+  // 0.1 -> 0.100000000000. Other assets keep trimmed display.
+  var s = String(symbol || '').trim().toUpperCase();
+  if (s === 'BTC') {
     try {
       if (!btcQtyFmt) btcQtyFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
       return btcQtyFmt.format(v);
     } catch (e) {
       return v.toFixed(8);
+    }
+  }
+  if (s === 'XMR') {
+    try {
+      if (!xmrQtyFmt) xmrQtyFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 12, maximumFractionDigits: 12 });
+      return xmrQtyFmt.format(v);
+    } catch (e) {
+      return v.toFixed(12);
     }
   }
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 8 }).format(v);
@@ -12236,19 +12247,24 @@ function syncTradeTypeUI() {
 // Transfer send/receive helper: fee = sent − received. The fee field is
 // computed-only (read-only in the form): the two amounts are the source of
 // truth, so a saved fee can never contradict them. Received is required.
-// Derived amounts are rounded to 8 decimals (the app's quantity precision):
-// raw binary subtraction leaves dust like 0.000017260000000000062.
-function roundQty8(v) {
-  var r = Math.round(Number(v) * 1e8) / 1e8;
+// Derived amounts round to the asset's quantity precision — 8 decimals
+// (satoshis) for most assets, 12 decimals (piconero) for XMR: raw binary
+// subtraction leaves dust like 0.000017260000000000062.
+function qtyDecimals(symbol) {
+  return String(symbol || '').trim().toUpperCase() === 'XMR' ? 12 : 8;
+}
+function roundQtyAt(v, decimals) {
+  var p = Number(decimals) === 12 ? 1e12 : 1e8;
+  var r = Math.round(Number(v) * p) / p;
   return (Math.abs(r) < 1e-12) ? 0 : r;
 }
-function transferFeeFrom(sentRaw, recvRaw) {
+function transferFeeFrom(sentRaw, recvRaw, symbol) {
   var sent = Number(sentRaw);
   var recv = Number(recvRaw);
   if (String(recvRaw).trim() === '') return null;
   if (!isFinite(sent) || sent <= 0) return null;
   if (!isFinite(recv) || recv <= 0 || recv > sent) return null;
-  var fee = roundQty8(sent - recv);
+  var fee = roundQtyAt(sent - recv, qtyDecimals(symbol));
   if (!(fee >= 0 && fee < sent)) return null;
   return { sent: sent, recv: recv, fee: fee };
 }
@@ -12262,11 +12278,11 @@ function syncTransferFeePreview() {
   var rows = readRecipientRows();
   var sent = Number(uiVal('t-qty', ''));
   var sentOk = isFinite(sent) && sent > 0;
-  var sym = '';
+  var sym = '', tick = '';
   try {
     var acc = accountById(loadState(), uiVal('t-account', ''));
-    if (acc) sym = ' ' + String(acc.ticker).toUpperCase();
-  } catch (e) { sym = ''; }
+    if (acc) { tick = String(acc.ticker).trim().toUpperCase(); sym = ' ' + tick; }
+  } catch (e) { sym = ''; tick = ''; }
   if (!feeInput) return;
   // The fee is always computed — the field never unlocks. Received back is
   // part of the total, so it stays visible alongside recipient rows.
@@ -12283,7 +12299,7 @@ function syncTransferFeePreview() {
     }
   }
   if (!rows.length) {
-    var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-selfrecv', ''));
+    var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-selfrecv', ''), tick);
     if (!r) {
       var recvTxt = String(uiVal('t-selfrecv', '')).trim();
       feeInput.value = '';
@@ -12329,7 +12345,7 @@ function syncTransferFeePreview() {
       else feeSum += f;
     }
   });
-  sum = roundQty8(sum);
+  sum = roundQtyAt(sum, qtyDecimals(tick));
   if (!sentOk) {
     feeInput.value = '';
     if (hint) hint.textContent = 'Enter how much you sent first — the fee below fills in itself.';
@@ -12340,7 +12356,7 @@ function syncTransferFeePreview() {
     if (hint) hint.textContent = 'Each recipient needs an amount > 0.';
     return;
   }
-  var fee = roundQty8(sent - sum - selfQty);
+  var fee = roundQtyAt(sent - sum - selfQty, qtyDecimals(tick));
   if (!(fee >= 0)) {
     feeInput.value = '';
     if (hint) hint.textContent = selfQty > 0
@@ -12357,7 +12373,7 @@ function syncTransferFeePreview() {
     } else {
       hint.textContent = fee === 0
         ? 'No fee — received equals sent across ' + n + '.' + backTxt
-        : 'Fee ' + fee + sym + ' shared across ' + n + (feeSum > 0 ? ' (' + roundQty8(feeSum) + ' attributed per row).' : '.') + backTxt;
+        : 'Fee ' + fee + sym + ' shared across ' + n + (feeSum > 0 ? ' (' + roundQtyAt(feeSum, qtyDecimals(tick)) + ' attributed per row).' : '.') + backTxt;
     }
   }
 }
@@ -12629,7 +12645,7 @@ function openEditTrade(tradeId) {
       if (crossSym !== String(tr.symbol || '').toUpperCase()) {
         erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(tr.qty), fee: '', toQty: (tr.toQty !== undefined && tr.toQty !== null) ? String(tr.toQty) : '' });
       } else if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
-        erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(roundQty8(trQty - trNf)), fee: '' });
+        erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(roundQtyAt(trQty - trNf, qtyDecimals(tr.symbol))), fee: '' });
       }
     }
     erows.forEach(function (r) { try { addRecipientRow(r); } catch (e) { /* ignore */ } });
@@ -12642,7 +12658,7 @@ function openEditTrade(tradeId) {
       var selfQty = Number(tr.qty);
       var selfNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
       if (isFinite(selfQty) && selfQty > 0 && isFinite(selfNf) && selfNf >= 0 && selfNf < selfQty) {
-        uiSetVal('t-selfrecv', String(roundQty8(selfQty - selfNf)));
+        uiSetVal('t-selfrecv', String(roundQtyAt(selfQty - selfNf, qtyDecimals(tr.symbol))));
       }
     }
   }
@@ -13285,18 +13301,18 @@ function onTradeSubmit(ev) {
       var rx = Number(crossOne.row.toQty);
       if (!isFinite(rx) || rx <= 0) { tradeFormError('Enter what arrives in ' + String(crossOne.acc.ticker).toUpperCase() + ' (> 0).'); return; }
       if (selfQtySub >= sentChk) { tradeFormError('Received back must be less than sent when another account receives funds.'); return; }
-      crossOne.row.qty = String(roundQty8(sentChk - selfQtySub));
+      crossOne.row.qty = String(roundQtyAt(sentChk - selfQtySub, qtyDecimals(symbol)));
       crossOne.row.toSymbol = String(crossOne.acc.ticker).toUpperCase();
       crossOne.row.fee = '';
-      sumQ = roundQty8(sentChk - selfQtySub);
+      sumQ = roundQtyAt(sentChk - selfQtySub, qtyDecimals(symbol));
       sumF = 0;
       networkFee = 0;
       transferSelfBuilt = selfQtySub;
       toAccCash = crossOne.acc;
       isCrossFiat = true;
     } else {
-      sumQ = roundQty8(sumQ);
-      networkFee = roundQty8(sentChk - sumQ - selfQtySub);
+      sumQ = roundQtyAt(sumQ, qtyDecimals(symbol));
+      networkFee = roundQtyAt(sentChk - sumQ - selfQtySub, qtyDecimals(symbol));
       if (!(networkFee >= 0)) { tradeFormError('Recipients + received back exceed sent — lower an amount.'); return; }
       if (sumF - networkFee > 1e-12) { tradeFormError('Recipient fees exceed the transfer fee (' + networkFee + ').'); return; }
       transferSelfBuilt = selfQtySub;

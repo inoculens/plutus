@@ -6204,6 +6204,12 @@
         assert(f('1', '0') === null, 'zero received must be null');
         var dust = f('1', '0.99998274');
         assert(dust && dust.fee === 0.00001726, 'binary subtraction dust must round to 8dp, got ' + JSON.stringify(dust));
+        var clip = f('1.000000000456', '1.000000000123');
+        assert(clip && clip.fee === 0, 'no symbol keeps 8dp default (piconero diff clipped), got ' + JSON.stringify(clip));
+        var pico = f('1.000000000456', '1.000000000123', 'XMR');
+        assert(pico && pico.fee === 0.000000000333, 'XMR fee must round to 12dp, got ' + JSON.stringify(pico));
+        var picoLow = f('1.000000000456', '1.000000000123', 'xmr');
+        assert(picoLow && picoLow.fee === 0.000000000333, 'lowercase xmr ticker must count too, got ' + JSON.stringify(picoLow));
       });
 
       test('transfer submit stores sent minus received as the fee', function () {
@@ -7574,6 +7580,14 @@
         assert(fracOf(L.fmtQty(0.1, 'ETH')) === '1', 'eth must stay trimmed: ' + L.fmtQty(0.1, 'ETH'));
         assert(L.fmtQty(1, 'ETH').indexOf('00000000') === -1, 'eth 1 must stay short: ' + L.fmtQty(1, 'ETH'));
         assert(L.fmtQty('nope') === '—', 'non-finite must stay —');
+      });
+      test('fmtQty shows 12 decimals for XMR (piconero)', function () {
+        assert(fracOf(L.fmtQty(0.1, 'XMR')) === '100000000000', 'xmr 0.1 wrong: ' + L.fmtQty(0.1, 'XMR'));
+        assert(fracOf(L.fmtQty(1, 'XMR')) === '000000000000', 'xmr 1 wrong: ' + L.fmtQty(1, 'XMR'));
+        assert(fracOf(L.fmtQty(0.000123456789, 'XMR')) === '000123456789', 'xmr piconero dust wrong: ' + L.fmtQty(0.000123456789, 'XMR'));
+        assert(fracOf(L.fmtQty(0.000000000333, 'XMR')) === '000000000333', 'xmr sub-satoshi dust wrong: ' + L.fmtQty(0.000000000333, 'XMR'));
+        assert(fracOf(L.fmtQty(1, 'xmr')) === '000000000000', 'lowercase xmr wrong');
+        assert(L.fmtQty(1, 'ETH').indexOf('000000000000') === -1, 'eth must not inherit xmr padding: ' + L.fmtQty(1, 'ETH'));
       });
       test('BTC record cards show full 8-decimal quantities', function () {
         L.tradePageSizeSet(25);

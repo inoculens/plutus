@@ -9795,10 +9795,17 @@
           Object.defineProperty(pill, 'offsetTop', { value: 0, configurable: true });
           L.syncTradeHeadRows();
           assert(!pill.classList.contains('head-own-row'), 'a first-line pill keeps the button-corner cap');
+          assert(pill.style.marginTop === '', 'a first-line pill is never pushed down');
           // Wrapped below: the corner is free, the pill may run full width.
-          Object.defineProperty(pill, 'offsetTop', { value: 80, configurable: true });
+          // 24px is a row glued under the trio's band where a real layout
+          // would push it down; shimmed layouts leave it untouched instead.
+          Object.defineProperty(pill, 'offsetTop', { value: 24, configurable: true });
           L.syncTradeHeadRows();
           assert(pill.classList.contains('head-own-row'), 'a wrapped pill must be tagged to run under the buttons');
+          // Clearance is measured where the layout knows it (real browsers);
+          // shimmed layouts without geometry leave the margin empty instead.
+          var mg = pill.style.marginTop;
+          assert(mg === '' || (parseFloat(mg) > 0 && /px$/.test(mg)), 'a wrapped pill parks clear of the buttons, got ' + JSON.stringify(mg));
           try {
             var lp2 = L.getLivePrices();
             if (lp2) delete lp2.BTC;

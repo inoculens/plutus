@@ -2667,16 +2667,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     width: 2rem; height: 2rem; min-width: 2rem; min-height: 2rem; padding: 0;
     border: 1px solid var(--border); background: rgba(255,255,255,0.03);
   }
-  /* The trio stands 2rem tall, but row-1 pills sat ~1.55rem — the pinned
-     cluster overhung into the next row and wrapped pills glued themselves to
-     its bottom edge. The date pill (always row 1) grows to the trio's
-     height, so row 1 fills the button band and every wrapped row starts a
-     clean row-gap below the buttons. */
-  .trade-head .trade-when {
-    display: inline-flex;
-    align-items: center;
-    min-height: 2rem;
-  }
   /* The squares stay 2rem, the thumb still gets ~44px: an invisible overlay
      grows each hit area out into the gaps without moving a pixel. */
   .trade-head .trade-more::after, .trade-head .trade-edit::after, .trade-head .trade-del::after {

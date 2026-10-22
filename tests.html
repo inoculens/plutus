@@ -9778,6 +9778,34 @@
           cleanup();
         });
 
+        test('a wrapped now-worth pill may run under the buttons', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
+          try {
+            var lp = L.getLivePrices();
+            if (lp) lp.BTC = 6;
+          } catch (e2) { /* offline shims keep whatever pills exist */ }
+          openRec();
+          var hdr = document.querySelector('#account-detail .trade-head');
+          assert(hdr !== null, 'the head must render');
+          var when = hdr.querySelector('.trade-when');
+          var pill = hdr.querySelector('.trade-now');
+          assert(pill !== null, 'the now-worth pill must render with a known price');
+          // Line 1, side by side with the pinned buttons: keep the cap.
+          Object.defineProperty(when, 'offsetTop', { value: 0, configurable: true });
+          Object.defineProperty(pill, 'offsetTop', { value: 0, configurable: true });
+          L.syncTradeHeadRows();
+          assert(!pill.classList.contains('head-own-row'), 'a first-line pill keeps the button-corner cap');
+          // Wrapped below: the corner is free, the pill may run full width.
+          Object.defineProperty(pill, 'offsetTop', { value: 80, configurable: true });
+          L.syncTradeHeadRows();
+          assert(pill.classList.contains('head-own-row'), 'a wrapped pill must be tagged to run under the buttons');
+          try {
+            var lp2 = L.getLivePrices();
+            if (lp2) delete lp2.BTC;
+          } catch (e3) { /* ignore */ }
+          cleanup();
+        });
+
         test('leaving the account drops the record selection', function () {
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000)]);
           openRec();

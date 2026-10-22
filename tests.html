@@ -9629,15 +9629,23 @@
         test('dragging a record swaps two same-date records without any Select trip', function () {
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'buy', '2026-01-01', 2, 60000)]);
           openRec();
-          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the list must show the books order first');
-          assert(cards()[1].getAttribute('data-trade') === 'rs-b2', 'the list must show the books order second');
-          // Flip: drag the SECOND record on top of the first, with no
-          // selection anywhere — the grip alone opens the drop.
-          dragTo(card('rs-b2'), card('rs-b1'));
+          // The list feeds the date newest-execution-first: the second buy
+          // (booked after the first) tops the day, the first move the bottom.
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b2', 'the list must feed the latest execution first');
+          assert(cards()[1].getAttribute('data-trade') === 'rs-b1', 'the earlier execution stays below');
+          // Flip: drag the TOP record BELOW the other — a drop below books the
+          // record EARLIER in the day. No selection anywhere: the grip alone
+          // opens the drop.
+          dragTo(card('rs-b2'), card('rs-b1'), true);
           var st = L.loadState();
-          assert(st.trades[0].id === 'rs-b2' && st.trades[1].id === 'rs-b1', 'the reordered order must be stored, got ' + st.trades[0].id + ',' + st.trades[1].id);
-          // The re-rendered list follows the stored order.
-          assert(cards()[0].getAttribute('data-trade') === 'rs-b2', 'the list must follow the new order');
+          assert(st.trades[0].id === 'rs-b2' && st.trades[1].id === 'rs-b1', 'the earlier-booking drop must be stored, got ' + st.trades[0].id + ',' + st.trades[1].id);
+          // The re-rendered feed follows the new book order: b2 (now booked
+          // first) sits at the bottom, b1 (now the latest execution) on top.
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the list must follow the new order');
+          // And back: dragging b1 below b2 books b1 earlier again.
+          dragTo(card('rs-b1'), card('rs-b2'), true);
+          var st2 = L.loadState();
+          assert(st2.trades[0].id === 'rs-b1' && st2.trades[1].id === 'rs-b2', 'the second drop must book in the other direction, got ' + st2.trades[0].id + ',' + st2.trades[1].id);
           cleanup();
         });
 
@@ -9653,7 +9661,10 @@
         test('a drag that would spend unseen funds is refused with the calm banner', function () {
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-01', 1, 60000)]);
           openRec();
-          dragTo(card('rs-s1'), card('rs-b1'));
+          // The feed shows the sell on top (booked after the buy); dragging it
+          // BELOW the buy books it earlier — spending before the funds are
+          // there — and that is exactly what must be refused.
+          dragTo(card('rs-s1'), card('rs-b1'), true);
           var st = L.loadState();
           assert(st.trades[0].id === 'rs-b1' && st.trades[1].id === 'rs-s1', 'a starved order must be refused, got ' + st.trades[0].id + ',' + st.trades[1].id);
           var banner = document.getElementById('banner');
@@ -9669,12 +9680,13 @@
           // The buy funds the sell, and both land on the SAME date. Selling
           // first would leave the sell without funds, so the order that
           // swaps them must be refused — but the sell stays where the money
-          // allows it, and the list shows the books' order.
+          // allows it, and the feed shows the latest execution on top.
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-01', 0.5, 30000)]);
           openRec();
-          // The list shows the store order within a date: buy then sell.
-          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the first card must be the buy');
-          assert(cards()[1].getAttribute('data-trade') === 'rs-b2', 'the second card must be the sell');
+          // The list feeds the day newest-execution-first: the sell (booked
+          // after the buy) tops it, the buy — the earlier move — sits below.
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b2', 'the first card must be the latest execution (the sell)');
+          assert(cards()[1].getAttribute('data-trade') === 'rs-b1', 'the second card must be the earlier execution (the buy)');
           // Swapping them spends funds that are not there yet — refused.
           var bad = L.applyTradeReorder(L.loadState(), 'rs-acct', '2026-01-01', ['rs-b2', 'rs-b1']);
           assert(!bad.ok, 'selling before the buy on the same date must be refused');
@@ -9767,14 +9779,16 @@
           cleanup();
         });
 
-        test('records of one date show in the order the books use', function () {
-          // Same date, created buy-then-sell: the list must read buy, sell —
-          // the order the engine books, so the reader's mental model and the
-          // math agree.
+        test('records of one date feed the latest execution on top', function () {
+          // Same date, created buy-then-sell: the feed shows the SELL on top
+          // (the latest move of the day) and the buy below — the reader reads
+          // top-is-latest while the engines walk the same day bottom-up as
+          // execution order. Mental model and math agree through the drag's
+          // display→execution translation.
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-01', 1, 60000)]);
           openRec();
-          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the buy must be listed first');
-          assert(cards()[1].getAttribute('data-trade') === 'rs-s1', 'the sell must be listed second');
+          assert(cards()[0].getAttribute('data-trade') === 'rs-s1', 'the sell (latest execution) must feed on top');
+          assert(cards()[1].getAttribute('data-trade') === 'rs-b1', 'the buy (earlier execution) must sit below');
           cleanup();
         });
 

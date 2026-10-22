@@ -7454,9 +7454,7 @@
           var idEl = h.querySelector('.trade-id');
           assert(idEl !== null && idEl.textContent.charAt(0) === '#', 'id pill missing');
           var kids = h.children;
-          // The grip leads the head row (always live, like account cards);
-          // the pills follow it: date → id → type.
-          assert(kids[0].classList.contains('drag-handle') && kids[1].classList.contains('trade-when') && kids[2].classList.contains('trade-id') && kids[3].className.indexOf('side') !== -1, 'pill order must be grip, date, id, type');
+          assert(kids[0].classList.contains('trade-when') && kids[1].classList.contains('trade-id') && kids[2].className.indexOf('side') !== -1, 'pill order must be date, id, type');
         });
         // b1 sold in full by s1; b2 partially closed by s1 + s2.
         var b1 = cardFor('lk-b1');
@@ -9585,6 +9583,11 @@
           // records render, exactly like the account cards on home.
           var grips = document.querySelectorAll('#account-detail .trade-block .drag-handle');
           assert(grips.length === 2, 'every record must carry a grip, got ' + grips.length);
+          // The grip is a rail hanging on the CARD (dots in the vertical
+          // middle via CSS), not a pill inside the head row.
+          var g0 = grips[0] ? grips[0].parentNode : null;
+          assert(g0 && g0.classList && g0.classList.contains('trade-block'), 'the grip must hang on the card itself');
+          assert(g0.querySelector('.trade-head .drag-handle') === null, 'the head row must not carry the grip');
           // The old mode chrome is gone for good.
           assert(document.querySelector('#account-detail [data-rearrange-done]') === null, 'the Done button is gone');
           assert(document.querySelector('#account-detail [data-rearrange-hint]') === null, 'the mode hint is gone');

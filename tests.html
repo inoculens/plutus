@@ -6540,9 +6540,59 @@
         assert(a !== null, 'record view must link the txid to mempool.space');
         assert(a.target === '_blank', 'mempool link must open in a new tab');
         assert(a.classList.contains('tx-link'), 'mempool link must carry tx-link so its color persists after visiting');
+        var btcBtn = a.parentElement.querySelector('button.tx-copy');
+        assert(btcBtn !== null, 'BTC record must also carry a copy button beside the link');
+        assert(btcBtn.getAttribute('data-copy') === HASH, 'BTC copy button must carry the raw hash, got ' + btcBtn.getAttribute('data-copy'));
+        assert(btcBtn.title === 'Copy transaction ID', 'copy button must advertise copying the id, got ' + btcBtn.title);
         // Edit round-trips the hash back into the field.
         openEditTrade(last.id);
         assert(document.getElementById('t-txid').value === HASH, 'edit should prefill txid, got ' + document.getElementById('t-txid').value);
+        try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
+        navHome();
+      });
+
+      test('non-BTC records show the txid shortened with a copy button, no mempool link', function () {
+        assert(typeof L.copyToClip === 'function' && typeof L.txCopyButton === 'function', 'copy helpers must be exposed');
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'x1', name: 'Vault', ticker: 'XMR', createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 'x-t1', type: 'buy', symbol: 'XMR', qty: 3, total: 500, currency: 'EUR', date: '2026-01-01', fee: 0, feeCurrency: 'EUR', note: '', accountId: 'x1', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, createdAt: '2026-10-06T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+        if (typeof init === 'function') init();
+        openPrefillTrade('x1');
+        document.getElementById('t-side').value = 'buy';
+        document.getElementById('t-qty').value = '1';
+        document.getElementById('t-total').value = '200';
+        document.getElementById('t-currency').value = 'EUR';
+        document.getElementById('t-currency').dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('t-date').value = '2026-03-01';
+        document.getElementById('t-fee').value = '';
+        document.getElementById('t-note').value = '';
+        document.getElementById('t-txid').value = HASH;
+        onTradeSubmit({ preventDefault: function () {} });
+        var st = L.loadState();
+        assert(st.trades.length === 2, 'xmr buy with txid should save, got ' + st.trades.length);
+        var last = st.trades[st.trades.length - 1];
+        assert(last.txid === HASH, 'txid must be stored, got ' + JSON.stringify(last.txid));
+        navTo('x1');
+        route();
+        var mempool = document.querySelector('#account-detail a[href*="mempool.space"]');
+        assert(mempool === null, 'non-BTC txid must never link to mempool.space');
+        var row = document.querySelector('#account-detail .stat-row[data-label="Tx"]');
+        assert(row !== null, 'xmr record must still show the tx row');
+        var val = row.querySelector('.stat-val');
+        var expectShort = L.shortTxid(HASH);
+        assert(val.textContent === expectShort, 'txid text must be exactly the shortened hash, got ' + JSON.stringify(val.textContent) + ' expected ' + expectShort);
+        assert(row.querySelector('a') === null, 'xmr tx row must contain no anchor');
+        var btn = row.querySelector('button.tx-copy');
+        assert(btn !== null, 'xmr record must carry a copy button');
+        assert(btn.getAttribute('data-copy') === HASH, 'copy button must carry the full hash, got ' + btn.getAttribute('data-copy'));
+        assert(btn.querySelector('svg') !== null, 'copy button must carry the svg glyph');
         try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
         navHome();
       });

@@ -562,6 +562,67 @@ function shortTxid(txid) {
   return s.slice(0, 8) + '…' + s.slice(-6);
 }
 
+// --- Copy to clipboard (tx hash copy on records) ---
+// The async clipboard API first (https), a hidden textarea + execCommand
+// fallback for file:// or locked-down contexts. Resolves true when the
+// value was written, false when both paths fail.
+function copyToClipLegacy(txt) {
+  var s = String(txt);
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = s;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+function copyToClip(txt) {
+  var s = String(txt);
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(s).then(function () { return true; }, function () { return copyToClipLegacy(s); });
+    }
+  } catch (e) { /* fall through to legacy */ }
+  return Promise.resolve(copyToClipLegacy(s));
+}
+
+// Circled copy glyph (feather-style rects) as an inline SVG: no asset, it
+// dims next to the value and brightens on hover / for the copied ack.
+var TX_COPY_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+function txCopyButton(txFull) {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'tx-copy';
+  btn.title = 'Copy transaction ID';
+  btn.setAttribute('aria-label', 'Copy transaction ID');
+  btn.setAttribute('data-copy', txFull);
+  btn.innerHTML = TX_COPY_SVG;
+  btn.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var b = btn;
+    Promise.resolve(copyToClip(txFull)).then(function (ok) {
+      b.classList.add(ok ? 'copied' : 'copy-fail');
+      b.title = ok ? 'Copied!' : 'Copy failed — select and copy the hash manually';
+      setTimeout(function () {
+        b.classList.remove('copied', 'copy-fail');
+        b.title = 'Copy transaction ID';
+      }, 1400);
+    });
+  });
+  return btn;
+}
+
 // --- Multi-recipient transfers (one on-chain tx, N recipients) ---
 // A transfer may carry `outputs`: one entry per recipient of the same tx.
 // Internal entries move into an own account ({toAccountId, qty}); external
@@ -8569,14 +8630,26 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
     txL.textContent = 'Tx';
     var txV = document.createElement('span');
     txV.className = 'stat-val num';
-    var txA = document.createElement('a');
-    txA.className = 'tx-link';
-    txA.href = txExplorerUrl(txFull);
-    txA.target = '_blank';
-    txA.rel = 'noopener';
-    txA.textContent = shortTxid(txFull);
-    txA.title = txFull;
-    txV.appendChild(txA);
+    // mempool.space only resolves Bitcoin hashes: other assets would get a
+    // dead link, so they show the same shortened id as plain text. BTC keeps
+    // the explorer link; every asset gets a copy button carrying the raw
+    // hash (not the browser URL).
+    if (String(t.symbol || '').trim().toUpperCase() === 'BTC') {
+      var txA = document.createElement('a');
+      txA.className = 'tx-link';
+      txA.href = txExplorerUrl(txFull);
+      txA.target = '_blank';
+      txA.rel = 'noopener';
+      txA.textContent = shortTxid(txFull);
+      txA.title = txFull;
+      txV.appendChild(txA);
+    } else {
+      var txS = document.createElement('span');
+      txS.textContent = shortTxid(txFull);
+      txS.title = txFull;
+      txV.appendChild(txS);
+    }
+    txV.appendChild(txCopyButton(txFull));
     txRow.appendChild(txL);
     txRow.appendChild(txV);
     box.appendChild(txRow);
@@ -11674,7 +11747,7 @@ function buildTradeForm() {
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
     '<label for="t-txid">Transaction ID (optional)</label>' +
     '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash">' +
-    '<p class="fld-hint">Optional — saved with the record and linked to mempool.space.</p>' +
+    '<p class="fld-hint">Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.</p>' +
     '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt (optional)</label>' +
     '<input id="t-attach" type="file" accept="application/pdf,image/png,image/jpeg">' +
     '<p class="fld-hint" id="t-attach-hint">Optional — PDF, PNG or JPG up to 10 MB. Stored on this device, synced encrypted when sync is on.</p>' +
@@ -15166,6 +15239,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.isValidTxid = isValidTxid;
   window.Inoculens.txExplorerUrl = txExplorerUrl;
   window.Inoculens.shortTxid = shortTxid;
+  window.Inoculens.copyToClip = copyToClip;
+  window.Inoculens.txCopyButton = txCopyButton;
   window.Inoculens.renderAccounts = renderAccounts;
   window.Inoculens.openAccountDialog = openAccountDialog;
   window.Inoculens.createAccount = createAccount;

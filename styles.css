@@ -1912,6 +1912,26 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 .trade-block a.tx-link:visited,
 .trade-block a.tx-link:hover,
 .trade-block a.tx-link:active { color: #7dd3fc; }
+/* Copy button beside the tx id (plain text for non-BTC, after the mempool
+   link for BTC): dim inline glyph, brightens on hover, flashes blue on a
+   successful copy and red when the clipboard refused both attempts. */
+.trade-block .tx-copy {
+  margin-left: 6px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.45;
+  cursor: pointer;
+  line-height: 0;
+  vertical-align: baseline;
+  font: inherit;
+}
+.trade-block .tx-copy:hover,
+.trade-block .tx-copy:focus-visible { opacity: 0.9; }
+.trade-block .tx-copy.copied { opacity: 1; color: #7dd3fc; }
+.trade-block .tx-copy.copy-fail { opacity: 1; color: #f87171; }
+.trade-block .tx-copy svg { display: inline-block; }
 #note-dialog-text {
   margin: 0.4rem 0 0;
   line-height: 1.65;

@@ -1932,6 +1932,14 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 .trade-block .tx-copy.copied { opacity: 1; color: #7dd3fc; }
 .trade-block .tx-copy.copy-fail { opacity: 1; color: #f87171; }
 .trade-block .tx-copy svg { display: inline-block; }
+/* The Tx value is a flex row so the copy glyph stops participating in the
+   text baseline: an inline-block button mounts on the baseline and grows
+   the line box above it, sinking the hash lower under its label than every
+   other value. As a flex row the text keeps its exact line metrics and the
+   glyph centers beside it. */
+.trade-block .stat-row[data-label="Tx"] .stat-val { display: flex; align-items: center; }
+.trade-block .stat-row[data-label="Tx"] .stat-val > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.trade-block .stat-row[data-label="Tx"] .tx-copy { flex: none; }
 #note-dialog-text {
   margin: 0.4rem 0 0;
   line-height: 1.65;

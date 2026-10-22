@@ -2635,6 +2635,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Once measured (syncTradeHeadRows) on a line below the pinned corner, the
+     cap lifts: the pill runs the full width under the ▾ ✎ 🗑 buttons. */
+  .trade-head .trade-now.head-own-row,
+  .trade-head .trade-pair.head-own-row { max-width: none; }
   /* Record head on phones: date + type + pair left, the ▾ ✎ 🗑 cluster
      pinned top-right (line-1 pills self-cap short of it), and the long
      pills — now-worth when it wraps, the swap/what route, the FIFO record #

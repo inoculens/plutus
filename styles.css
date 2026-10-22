@@ -1926,6 +1926,11 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   line-height: 0;
   vertical-align: baseline;
   font: inherit;
+  /* The global button rule sets a 44px touch-target min-height: inside the
+     value line it balloons the line box to 2 lines and sinks the hash under
+     its label. Kill it — this button carries a 13px glyph only. */
+  min-height: 0;
+  height: auto;
 }
 .trade-block .tx-copy:hover,
 .trade-block .tx-copy:focus-visible { opacity: 0.9; }

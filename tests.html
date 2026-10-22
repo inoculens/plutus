@@ -7454,7 +7454,9 @@
           var idEl = h.querySelector('.trade-id');
           assert(idEl !== null && idEl.textContent.charAt(0) === '#', 'id pill missing');
           var kids = h.children;
-          assert(kids[0].classList.contains('trade-when') && kids[1].classList.contains('trade-id') && kids[2].className.indexOf('side') !== -1, 'pill order must be date, id, type');
+          // The grip leads the head row (always live, like account cards);
+          // the pills follow it: date → id → type.
+          assert(kids[0].classList.contains('drag-handle') && kids[1].classList.contains('trade-when') && kids[2].classList.contains('trade-id') && kids[3].className.indexOf('side') !== -1, 'pill order must be grip, date, id, type');
         });
         // b1 sold in full by s1; b2 partially closed by s1 + s2.
         var b1 = cardFor('lk-b1');
@@ -9420,6 +9422,14 @@
         if (typeof init === 'function') init();
       }
       function openRec() {
+        // A clean page runs with every dialog closed; some earlier debris
+        // in this harness can leave the settings dialog open, which would
+        // mirror banners into it instead of the page. Normalize first.
+        try {
+          ['trade-dialog', 'account-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog', 'settings-dialog'].forEach(function (id) {
+            try { closeDialog(id); } catch (e) { /* ignore */ }
+          });
+        } catch (e) { /* ignore */ }
         navTo('rs-acct');
         route();
         render();
@@ -9434,7 +9444,6 @@
       function cleanup() {
         try {
           L.cancelTradeSelection();
-          L.exitTradeRearrangeMode();
         } catch (e) { /* ignore */ }
         try { navHome(); } catch (e) { /* ignore */ }
       }
@@ -9499,7 +9508,10 @@
           var opts = panel.querySelectorAll('.action-opt');
           var labels = Array.prototype.map.call(opts, function (o) { return o.textContent; });
           assert(labels.indexOf('Change color') !== -1, 'the menu must offer Change color, got ' + labels.join(' | '));
-          assert(labels.indexOf('Rearrange') !== -1, 'the menu must offer Rearrange, got ' + labels.join(' | '));
+          // Rearranging is not a bulk action: the grip on every record card
+          // is live at all times, so no selection trip is ever needed first.
+          assert(labels.indexOf('Rearrange') === -1, 'Rearrange must NOT live in the Action menu, got ' + labels.join(' | '));
+          assert(labels.length === 1, 'Change color must be the only record action, got ' + labels.join(' | '));
           cleanup();
         });
 
@@ -9566,25 +9578,87 @@
           cleanup();
         });
 
-        test('rearrange mode shows a grip on every record and a Done button', function () {
+        test('every record carries a drag grip at all times', function () {
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-02', 1, 60000)]);
           openRec();
-          head().querySelector('[data-trade-select-btn]').click();
-          var box = document.querySelector('#account-detail .trade-block [data-select-check]');
-          box.checked = true;
-          box.dispatchEvent(new Event('change', { bubbles: true }));
-          head().querySelector('[data-trade-action-btn]').click();
-          var opts = document.querySelectorAll('#account-detail [data-trade-action-panel] .action-opt');
-          Array.prototype.forEach.call(opts, function (o) { if (o.textContent === 'Rearrange') o.click(); });
+          // No Select trip, no Action menu: the grip is live the moment the
+          // records render, exactly like the account cards on home.
           var grips = document.querySelectorAll('#account-detail .trade-block .drag-handle');
-          assert(grips.length === 2, 'every record must get a grip in rearrange mode, got ' + grips.length);
-          var hint = document.querySelector('#account-detail [data-rearrange-hint]');
-          assert(hint !== null, 'rearrange mode must explain itself');
-          assert(hint.textContent.indexOf('same date') !== -1, 'the hint must name the same-date rule, got ' + hint.textContent);
-          var done = document.querySelector('#account-detail [data-rearrange-done]');
-          assert(done !== null, 'rearrange mode must offer a Done button');
-          done.click();
-          assert(document.querySelectorAll('#account-detail .trade-block .drag-handle').length === 0, 'Done must leave rearrange mode');
+          assert(grips.length === 2, 'every record must carry a grip, got ' + grips.length);
+          // The old mode chrome is gone for good.
+          assert(document.querySelector('#account-detail [data-rearrange-done]') === null, 'the Done button is gone');
+          assert(document.querySelector('#account-detail [data-rearrange-hint]') === null, 'the mode hint is gone');
+          cleanup();
+        });
+
+        // A full drag through the REAL pointer listeners: the down/moves/up
+        // are dispatched on the grip (they bubble into the host handlers).
+        // Element rects and elementFromPoint are patched per call, because a
+        // synthetic event carries no real place in the page layout.
+        function dragTo(srcCard, targetCard, belowHalf) {
+          var host = document.getElementById('account-detail');
+          var grip = srcCard.querySelector('.drag-handle');
+          assert(grip !== null, 'the dragged record must carry a grip');
+          var savedFromPoint = document.elementFromPoint;
+          var savedRect = targetCard.getBoundingClientRect;
+          document.elementFromPoint = function () { return targetCard; };
+          try {
+            var down = new Event('pointerdown', { bubbles: true });
+            down.clientX = 10; down.clientY = 10;
+            grip.dispatchEvent(down);
+            var move = new Event('pointermove', { bubbles: true });
+            move.clientX = 40; move.clientY = 40;
+            grip.dispatchEvent(move);
+            targetCard.getBoundingClientRect = function () { return { top: 0, left: 0, width: 320, height: 60, bottom: 60, right: 320 }; };
+            var y = belowHalf ? 50 : 10;
+            var move2 = new Event('pointermove', { bubbles: true });
+            move2.clientX = 40; move2.clientY = y;
+            grip.dispatchEvent(move2);
+            var up = new Event('pointerup', { bubbles: true });
+            up.clientX = 40; up.clientY = y;
+            grip.dispatchEvent(up);
+          } finally {
+            document.elementFromPoint = savedFromPoint;
+            targetCard.getBoundingClientRect = savedRect;
+          }
+        }
+
+        test('dragging a record swaps two same-date records without any Select trip', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'buy', '2026-01-01', 2, 60000)]);
+          openRec();
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the list must show the books order first');
+          assert(cards()[1].getAttribute('data-trade') === 'rs-b2', 'the list must show the books order second');
+          // Flip: drag the SECOND record on top of the first, with no
+          // selection anywhere — the grip alone opens the drop.
+          dragTo(card('rs-b2'), card('rs-b1'));
+          var st = L.loadState();
+          assert(st.trades[0].id === 'rs-b2' && st.trades[1].id === 'rs-b1', 'the reordered order must be stored, got ' + st.trades[0].id + ',' + st.trades[1].id);
+          // The re-rendered list follows the stored order.
+          assert(cards()[0].getAttribute('data-trade') === 'rs-b2', 'the list must follow the new order');
+          cleanup();
+        });
+
+        test('dragging a record onto a different date leaves the order alone', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-02', 1, 60000)]);
+          openRec();
+          dragTo(card('rs-s1'), card('rs-b1'));
+          var st = L.loadState();
+          assert(st.trades[0].id === 'rs-b1' && st.trades[1].id === 'rs-s1', 'a cross-date drop must be ignored, got ' + st.trades[0].id + ',' + st.trades[1].id);
+          cleanup();
+        });
+
+        test('a drag that would spend unseen funds is refused with the calm banner', function () {
+          seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-s1', 'sell', '2026-01-01', 1, 60000)]);
+          openRec();
+          dragTo(card('rs-s1'), card('rs-b1'));
+          var st = L.loadState();
+          assert(st.trades[0].id === 'rs-b1' && st.trades[1].id === 'rs-s1', 'a starved order must be refused, got ' + st.trades[0].id + ',' + st.trades[1].id);
+          var banner = document.getElementById('banner');
+          var btxt = document.getElementById('banner-text');
+          // The calm line lives in #banner-text when the page uses it, in
+          // #banner itself otherwise (the app writes wherever it finds).
+          var bannerMsg = btxt ? btxt.textContent : banner.textContent;
+          assert(banner && banner.hidden === false && bannerMsg.indexOf('Cannot rearrange') !== -1, 'the refusal must show the calm banner, got ' + JSON.stringify(bannerMsg));
           cleanup();
         });
 
@@ -9595,7 +9669,6 @@
           // allows it, and the list shows the books' order.
           seed([rec('rs-b1', 'buy', '2026-01-01', 1, 50000), rec('rs-b2', 'sell', '2026-01-01', 0.5, 30000)]);
           openRec();
-          L.enterTradeRearrangeMode('rs-acct');
           // The list shows the store order within a date: buy then sell.
           assert(cards()[0].getAttribute('data-trade') === 'rs-b1', 'the first card must be the buy');
           assert(cards()[1].getAttribute('data-trade') === 'rs-b2', 'the second card must be the sell');
@@ -9716,7 +9789,6 @@
       } finally {
         try {
           L.cancelTradeSelection();
-          L.exitTradeRearrangeMode();
         } catch (e) { /* ignore */ }
         try {
           if (backup === null) localStorage.removeItem('inoculens.v2');

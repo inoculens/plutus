@@ -1604,25 +1604,6 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
 }
 
-/* Drag handle for trade blocks (dice-grip, mirrors account cards). It lives
-   inside the head row so the card's own flex-wrap layout is untouched. */
-.trade-block .drag-handle {
-  width: 1rem;
-  height: 1.75rem;
-  flex-shrink: 0;
-  align-self: center;
-  border-radius: 4px;
-  cursor: grab;
-  opacity: 0.6;
-  touch-action: none;
-  background-image: radial-gradient(circle, var(--muted-2) 1.2px, transparent 1.4px);
-  background-size: 0.5rem 0.58rem;
-  background-position: center;
-  background-repeat: repeat;
-}
-.trade-block .drag-handle:hover { opacity: 1; }
-.trade-block .drag-handle:active { cursor: grabbing; }
-
 /* Selection checkbox for trade blocks (same chip as the account cards) */
 .trade-block .card-check {
   width: 1.4rem;
@@ -1639,23 +1620,6 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 .trade-block.selected {
   border-color: var(--hairline-gold);
   background: linear-gradient(180deg, rgba(227, 197, 124, 0.07), transparent), var(--surface-2);
-}
-
-/* Rearrange mode hint: one calm line, never a list of tickers. */
-.rearrange-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
-  flex-wrap: wrap;
-  margin: 0 0 0.5rem;
-}
-
-.rearrange-hint {
-  margin: 0;
-  font-size: 0.85rem;
-  flex: 1 1 14rem;
-  min-width: 0;
 }
 
 /* Recolored trade blocks — border tint + gradient fade (mirrors account cards) */

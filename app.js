@@ -976,6 +976,12 @@ function normalizeTradeForStore(t) {
   } else if (c.attachment !== undefined && (c.attachment === null || !isValidAttachment(c.attachment))) {
     try { delete c.attachment; } catch (e) { c.attachment = undefined; }
   }
+  // Record color (bulk recolor of trade cards): valid hex only, uppercase.
+  // Invalid values are dropped so a bad import can never paint a card.
+  if (c.color !== undefined && c.color !== null) {
+    if (isValidHexColor(c.color)) c.color = String(c.color).trim().toUpperCase();
+    else { try { delete c.color; } catch (e) { c.color = undefined; } }
+  }
   return c;
 }
 
@@ -6297,6 +6303,11 @@ var selectionMode = false;
 var selectedAccounts = {}; // id -> true; survives page flips and re-renders (in-memory working set)
 var accountActionOpen = false;
 
+// Trade selection (account detail view)
+var tradeSelectionMode = false;
+var selectedTrades = {}; // tradeId -> true; survives page flips and re-renders
+var tradeActionOpen = false;
+
 // View filter: null = show every asset, otherwise exactly these tickers.
 // Persisted in settings (backup/restore carry it); absent key means all.
 function selectedTickers(st) {
@@ -6400,6 +6411,58 @@ function syncSelectionUI() {
     });
     Array.prototype.forEach.call(document.querySelectorAll('[data-action-wrap]'), function (awrap) {
       awrap.hidden = !(selectionMode && n > 0);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// --- Trade selection helpers (mirrors account selection) ---
+function selectedTradeCount() {
+  return Object.keys(selectedTrades).length;
+}
+
+function cancelTradeSelection() {
+  tradeSelectionMode = false;
+  selectedTrades = {};
+  tradeActionOpen = false;
+  render();
+}
+
+function toggleTradeSelect(id) {
+  if (!id) return;
+  if (selectedTrades[id]) delete selectedTrades[id];
+  else selectedTrades[id] = true;
+  syncTradeSelectionUI();
+}
+
+function syncTradeSelectionUI() {
+  var n = selectedTradeCount();
+  try {
+    Array.prototype.forEach.call(document.querySelectorAll('.trade-block'), function (card) {
+      var id = card.getAttribute ? card.getAttribute('data-trade') : null;
+      var on = !!id && !!selectedTrades[id];
+      if (card.classList) card.classList.toggle('selected', on);
+      var cb = card.querySelector ? card.querySelector('[data-select-check]') : null;
+      if (cb) cb.checked = on;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-trade-select-count]'), function (count) {
+      count.textContent = n + ' selected';
+      count.hidden = !(tradeSelectionMode && n > 0);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-trade-action-wrap]'), function (awrap) {
+      awrap.hidden = !(tradeSelectionMode && n > 0);
+    });
+  } catch (e) { /* ignore */ }
+}
+
+function closeTradeAction() {
+  if (!tradeActionOpen) return;
+  tradeActionOpen = false;
+  try {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-trade-action-panel]'), function (panel) {
+      panel.hidden = true;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-trade-action-btn]'), function (btn) {
+      btn.setAttribute('aria-expanded', 'false');
     });
   } catch (e) { /* ignore */ }
 }
@@ -6555,6 +6618,95 @@ function buildAccountAction() {
     });
   });
   panel.appendChild(del);
+  wrap.appendChild(panel);
+  return wrap;
+}
+
+function applyTradeColorToSelection(hex) {
+  var st = loadState();
+  var ids = Object.keys(selectedTrades);
+  if (!ids.length) return;
+  if (hex !== null) {
+    if (!isValidHexColor(hex)) {
+      showBanner('Pick a valid color, e.g. #F7931A.');
+      return;
+    }
+    hex = String(hex).trim().toUpperCase();
+  }
+  ids.forEach(function (id) {
+    var t = findTradeById(st, id);
+    if (!t) return;
+    if (hex === null) {
+      try {
+        delete t.color;
+      } catch (e) {
+        t.color = undefined;
+      }
+    } else {
+      t.color = hex;
+    }
+  });
+  if (!saveStateGuarded(st)) return;
+  clearBanner();
+  closeDialog('color-dialog');
+  render(); // stay in selection mode with the set intact
+}
+
+function findTradeById(st, id) {
+  if (!id) return null;
+  return (st.trades || []).find(function (t) { return t && t.id === id; });
+}
+
+function buildTradeAction(accId) {
+  var wrap = document.createElement('div');
+  wrap.className = 'filter-wrap';
+  wrap.setAttribute('data-trade-action-wrap', '1');
+  var n = selectedTradeCount();
+  wrap.hidden = !(tradeSelectionMode && n > 0);
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost';
+  btn.setAttribute('data-trade-action-btn', '1');
+  btn.textContent = 'Action';
+  btn.setAttribute('aria-label', 'Bulk actions for selected records');
+  btn.setAttribute('aria-expanded', tradeActionOpen ? 'true' : 'false');
+  btn.addEventListener('click', function () {
+    tradeActionOpen = !tradeActionOpen;
+    render();
+  });
+  wrap.appendChild(btn);
+  var panel = document.createElement('div');
+  panel.className = 'filter-panel';
+  panel.setAttribute('data-trade-action-panel', '1');
+  panel.hidden = !tradeActionOpen;
+  var col = document.createElement('button');
+  col.type = 'button';
+  col.className = 'action-opt';
+  col.textContent = 'Change color';
+  col.setAttribute('aria-label', 'Change color of selected records');
+  col.addEventListener('click', function () {
+    tradeActionOpen = false;
+    panel.hidden = true;
+    var host = document.getElementById('account-detail');
+    var tgl = host && host.querySelector ? host.querySelector('[data-trade-action-btn]') : null;
+    if (tgl) tgl.setAttribute('aria-expanded', 'false');
+    openDialog('color-dialog');
+  });
+  panel.appendChild(col);
+  var rearrange = document.createElement('button');
+  rearrange.type = 'button';
+  rearrange.className = 'action-opt';
+  rearrange.textContent = 'Rearrange';
+  rearrange.setAttribute('aria-label', 'Rearrange selected records (same date only)');
+  rearrange.addEventListener('click', function () {
+    tradeActionOpen = false;
+    panel.hidden = true;
+    var host = document.getElementById('account-detail');
+    var tgl = host && host.querySelector ? host.querySelector('[data-trade-action-btn]') : null;
+    if (tgl) tgl.setAttribute('aria-expanded', 'false');
+    enterTradeRearrangeMode(accId);
+  });
+  panel.appendChild(rearrange);
   wrap.appendChild(panel);
   return wrap;
 }
@@ -7847,6 +7999,13 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   var box = document.createElement('article');
   box.className = 'trade-block';
   box.setAttribute('data-trade', t.id || '');
+  // Apply color if set
+  if (t.color && isValidHexColor(t.color)) {
+    box.setAttribute('data-colored', '1');
+    try {
+      box.style.setProperty('--trade-color', String(t.color).trim().toUpperCase());
+    } catch (e) { /* ignore */ }
+  }
   var head = document.createElement('div');
   head.className = 'trade-head';
   var isSwap = !!(t && typeof t.swapId === 'string' && t.swapId !== '');
@@ -7856,6 +8015,18 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   var side = document.createElement('span');
   side.className = 'side ' + meta.cls;
   side.textContent = meta.label;
+  // Drag handle for rearrange mode (dice-grip, like account cards). It sits
+  // at the very front of the head so the card's own layout never shifts.
+  // Every record of the account gets a grip while rearranging — the drag
+  // target decides which records may swap, not the selection.
+  var grip = null;
+  if (tradeRearrangeMode && tradeRearrangeAccId === t.accountId) {
+    grip = document.createElement('span');
+    grip.className = 'drag-handle';
+    grip.title = 'Drag to reorder (same date only)';
+    grip.setAttribute('aria-hidden', 'true');
+    head.appendChild(grip);
+  }
   var when = document.createElement('span');
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');
@@ -8012,6 +8183,20 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   del.addEventListener('click', function () { deleteTrade(del.getAttribute('data-del')); });
   actions.appendChild(del);
   head.appendChild(actions);
+  // Selection checkbox (mirrors account selection) — it rides at the end of
+  // the head row so the card's own layout stays intact.
+  if (tradeSelectionMode) {
+    var cbx = document.createElement('input');
+    cbx.type = 'checkbox';
+    cbx.className = 'card-check';
+    cbx.setAttribute('data-select-check', t.id);
+    cbx.checked = !!selectedTrades[t.id];
+    cbx.setAttribute('aria-label', 'Select ' + String(t.symbol || '') + ' ' + fmtDateDmy(t.date || ''));
+    cbx.addEventListener('click', function (e) { if (e && e.stopPropagation) e.stopPropagation(); });
+    cbx.addEventListener('change', function () { toggleTradeSelect(t.id); });
+    if (cbx.checked) box.classList.add('selected');
+    head.appendChild(cbx);
+  }
   box.appendChild(head);
   // Phone tap rules for the whole card surface: a collapsed card is one big
   // "show details" button — the first tap always drops the rows down, and the
@@ -8024,6 +8209,8 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       if (!isMobileView()) return;
       var tgt = ev ? ev.target : null;
       if (!tgt || !tgt.closest) return;
+      // The drag grip is a control, not a tap-to-expand surface.
+      if (tgt.closest('.drag-handle')) return;
       if (tgt.closest('button, a, input, select, textarea, label, summary')) return;
       // A trimmed what-pill is a real control: its tap opens the full text,
       // so the card must not swallow it into an expand/collapse toggle.
@@ -9549,6 +9736,21 @@ function renderAccountDetail(st, id) {
     tAdd.textContent = '+ Record';
     tAdd.setAttribute('aria-label', 'Add record to ' + acc.name);
     tAdd.addEventListener('click', function () { openPrefillTrade(acc.id, true); });
+    // Select button for trades (mirrors account selection on the home
+    // screen: Select sits before the Filter, Filter stays directly left of
+    // + Record).
+    var tradeSelectBtn = document.createElement('button');
+    tradeSelectBtn.type = 'button';
+    tradeSelectBtn.className = 'ghost' + (tradeSelectionMode ? ' select-on' : '');
+    tradeSelectBtn.setAttribute('data-trade-select-btn', '1');
+    tradeSelectBtn.textContent = 'Select';
+    tradeSelectBtn.setAttribute('aria-label', 'Select records');
+    tradeSelectBtn.setAttribute('aria-pressed', tradeSelectionMode ? 'true' : 'false');
+    tradeSelectBtn.addEventListener('click', function () {
+      if (tradeSelectionMode) cancelTradeSelection();
+      else { tradeSelectionMode = true; render(); }
+    });
+    tHead.appendChild(tradeSelectBtn);
     tHead.appendChild(buildTradeTypeFilter(acc, atrades));
     // Bootstrap: standalone asset accounts with nothing labeled yet get
     // their + Ledger here (filter … + Ledger … + Record); once the Ledgers
@@ -9568,7 +9770,37 @@ function renderAccountDetail(st, id) {
       }
     }
     tHead.appendChild(tAdd);
+    if (tradeSelectionMode) {
+      var nSel = selectedTradeCount();
+      var countEl = document.createElement('span');
+      countEl.className = 'muted select-count';
+      countEl.setAttribute('data-trade-select-count', '1');
+      countEl.textContent = nSel + ' selected';
+      countEl.hidden = nSel === 0;
+      tHead.appendChild(countEl);
+      tHead.appendChild(buildTradeAction(acc.id));
+    }
     host.appendChild(tHead);
+    // Rearrange mode: a calm one-line hint (never a ticker list) plus a Done
+    // button, so the reader always knows how to leave the mode.
+    if (tradeRearrangeMode && tradeRearrangeAccId === acc.id) {
+      var rrBar = document.createElement('div');
+      rrBar.className = 'rearrange-bar';
+      var rrHint = document.createElement('p');
+      rrHint.className = 'muted rearrange-hint';
+      rrHint.setAttribute('data-rearrange-hint', '1');
+      rrHint.textContent = 'Drag a record onto another with the same date to reorder. Records never move across dates.';
+      rrBar.appendChild(rrHint);
+      var rrDone = document.createElement('button');
+      rrDone.type = 'button';
+      rrDone.className = 'ghost';
+      rrDone.textContent = 'Done';
+      rrDone.setAttribute('data-rearrange-done', '1');
+      rrDone.setAttribute('aria-label', 'Finish rearranging records');
+      rrDone.addEventListener('click', function () { exitTradeRearrangeMode(); });
+      rrBar.appendChild(rrDone);
+      host.appendChild(rrBar);
+    }
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
     var accKind = (acc && typeof acc.kind === 'string') ? acc.kind : undefined;
     // Paged records: sort once, then build DOM only for the visible slice.
@@ -9578,7 +9810,17 @@ function renderAccountDetail(st, id) {
     // totals and P&L above always cover every trade; only this list + its
     // pager follow the filter.
     var typeFilter = tradeTypeFilterFor(acc.id);
-    var fullSorted = ledgerSortByDate(atrades).reverse();
+    // Newest date first, but the records of one date keep their store order
+    // (the array order the engines walk). The list must show the order the
+    // math uses: same-date records are reorderable, and a reorder that
+    // changes the order also changes what the engines book.
+    var fullSorted = atrades.slice().sort(function (a, b) {
+      var da = (a && typeof a.date === 'string') ? a.date : '';
+      var db = (b && typeof b.date === 'string') ? b.date : '';
+      if (da < db) return 1;
+      if (da > db) return -1;
+      return 0; // stable: same-date records keep their store order
+    });
     var sortedTrades = filterTradesByType(fullSorted, typeFilter);
     var tradeTotal = sortedTrades.length;
     var tradePageCount = tradePageCountFor(tradeTotal);
@@ -9709,6 +9951,10 @@ function renderAccountDetail(st, id) {
     }
     if (frag) host.appendChild(frag);
     host.appendChild(bottomBar);
+    // Wire trade drag-and-drop if in rearrange mode for this account
+    if (tradeRearrangeMode && tradeRearrangeAccId === acc.id) {
+      wireTradeDnD(acc.id);
+    }
     restoreTradeTypeFilterFocus();
   } else {
     host.appendChild(tHead);
@@ -9738,6 +9984,19 @@ function route() {
   var det = document.getElementById('view-account');
   if (!home || !det) return;
   var id = accountDetailId();
+  // Record selection and the rearrange mode belong to the account page: they
+  // end when the reader leaves it (or opens another account).
+  if (tradeSelectionMode || tradeRearrangeMode) {
+    var leaving = !id || (lastRouteId !== null && lastRouteId !== id);
+    if (leaving) {
+      tradeSelectionMode = false;
+      selectedTrades = {};
+      tradeActionOpen = false;
+      tradeRearrangeMode = false;
+      tradeRearrangeAccId = null;
+      tradeDragCleanup();
+    }
+  }
   if (id) {
     home.hidden = true;
     det.hidden = false;
@@ -10215,12 +10474,14 @@ function buildAccounts() {
       var t = e && e.target;
       var inF = t && t.closest && (t.closest('[data-filter-panel]') || t.closest('[data-filter-btn]'));
       var inA = t && t.closest && (t.closest('[data-action-panel]') || t.closest('[data-action-btn]'));
+      var inTA = t && t.closest && (t.closest('[data-trade-action-panel]') || t.closest('[data-trade-action-btn]'));
       if (!inF) closeAccountFilter(false);
       if (!inF) closeTradeTypeFilter(false);
       if (!inA) closeAccountAction();
+      if (!inTA) closeTradeAction();
     });
     document.addEventListener('keydown', function (e) {
-      if (e && (e.key === 'Escape' || e.key === 'Esc')) { closeAccountFilter(true); closeTradeTypeFilter(true); closeAccountAction(); }
+      if (e && (e.key === 'Escape' || e.key === 'Esc')) { closeAccountFilter(true); closeTradeTypeFilter(true); closeAccountAction(); closeTradeAction(); }
     });
   }
 }
@@ -10746,6 +11007,317 @@ function subFinishDrop(wrap, e) {
   clearBanner();
   render();
 }
+
+// --- Trade drag-and-drop reorder (dice-grip handle, account detail) ---
+// Only available in "Rearrange" action mode. Two hard constraints:
+// 1. Only records of the SAME date may swap places — a record can never
+//    move across a date boundary, so the timeline order stays truthful.
+// 2. The math must still book: the reordered timeline may never leave an
+//    outflow unfunded (selling before the funds arrive). The same timeline
+//    engine the edit dialog uses decides, so the app never disagrees with
+//    itself about what "the funds are not there yet" means.
+//
+// Order lives in the trades array itself (like the accounts array for
+// account cards): the engine walks trades in date order and keeps the
+// existing order for equal dates, so permuting the same-date records of an
+// account permutes exactly what the math sees.
+var tradeDrag = null; // {id,startX,startY,started,ghost,overId,after,date,accId}
+var tradeRearrangeMode = false; // true when the "Rearrange" action is active
+var tradeRearrangeAccId = null; // account being rearranged
+
+function tradeDragCleanup() {
+  if (tradeDrag && tradeDrag.ghost && tradeDrag.ghost.parentNode) {
+    try { tradeDrag.ghost.parentNode.removeChild(tradeDrag.ghost); } catch (e) {}
+  }
+  try {
+    if (typeof document !== 'undefined' && document.body && document.body.style) document.body.style.userSelect = '';
+  } catch (e) {}
+  try {
+    var host = document.getElementById('account-detail');
+    if (host && host.querySelectorAll) {
+      Array.prototype.forEach.call(host.querySelectorAll('.trade-block.drag-src,.trade-block.drop-before,.trade-block.drop-after'), function (el) {
+        el.classList.remove('drag-src', 'drop-before', 'drop-after');
+      });
+    }
+  } catch (e) {}
+  tradeDrag = null;
+}
+
+function tradeDragCardEl(id) {
+  var host = document.getElementById('account-detail');
+  if (!host || !host.querySelector) return null;
+  try {
+    return host.querySelector('[data-trade="' + String(id).replace(/"/g, '') + '"]');
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearTradeCardMarks() {
+  var host = document.getElementById('account-detail');
+  if (!host || !host.querySelectorAll) return;
+  Array.prototype.forEach.call(host.querySelectorAll('.trade-block.drop-before,.trade-block.drop-after'), function (el) {
+    el.classList.remove('drop-before', 'drop-after');
+  });
+}
+
+// Failsafe for the record reorder: a proposed order is only accepted when
+// the ledger timeline still books every outflow in full. This is what stops
+// "add funds → spend those funds" from being reordered into
+// "spend → add funds" (which would fake the spend out of existence).
+//
+// Reuses the same timeline engine the edit dialog uses, so the check and
+// the app can never disagree about what "the funds are not there yet" means.
+// Returns { ok: true } or { ok: false, reason: 'shortfall' }.
+function validateTradeReorder(st, accId, date, newOrderIds) {
+  var trades = st.trades || [];
+  // The proposed order must cover exactly the date's records: a missing id
+  // means the caller built a broken order, so refuse it.
+  var dateTrades = trades.filter(function (t) {
+    return t && t.accountId === accId && t.date === date;
+  });
+  var knownIds = dateTrades.map(function (t) { return t.id; });
+  if (newOrderIds.length !== knownIds.length) return { ok: false, reason: 'incomplete' };
+  for (var k = 0; k < newOrderIds.length; k++) {
+    if (knownIds.indexOf(newOrderIds[k]) === -1) return { ok: false, reason: 'unknown' };
+  }
+
+  // Rebuild the store order: the account's records of that date take their
+  // slots from the proposed order, every other record keeps its place.
+  var tradeMap = {};
+  dateTrades.forEach(function (t) { if (t && t.id) tradeMap[t.id] = t; });
+  var slots = [];
+  trades.forEach(function (t, ix) {
+    if (t && t.accountId === accId && t.date === date) slots.push(ix);
+  });
+  var rebuilt = trades.slice();
+  for (var s = 0; s < slots.length; s++) {
+    var srcTrade = tradeMap[newOrderIds[s]];
+    if (srcTrade) rebuilt[slots[s]] = srcTrade;
+  }
+
+  // Only records up to (and including) the target date matter: later
+  // records are untouched by a reorder inside this date group.
+  var upto = rebuilt.filter(function (t) {
+    return t && typeof t.date === 'string' && t.date <= date;
+  });
+  var base = trades.filter(function (t) {
+    return t && typeof t.date === 'string' && t.date <= date;
+  });
+
+  // Compare against the same timeline run before the reorder. A reorder that
+  // only reshuffles records whose outflows were already funded is fine; one
+  // that starves an outflow is not. (Legacy books that already contain an
+  // unfunded outflow are tolerated — a reorder must not make things worse.)
+  var baseMap = new Map();
+  timelineOutflowShortfalls(base).forEach(function (e) {
+    var m = baseMap.get(e.key);
+    if (!m) { m = new Map(); baseMap.set(e.key, m); }
+    m.set(e.trade, e.shortfall);
+  });
+  var next = timelineOutflowShortfalls(upto);
+  for (var i = 0; i < next.length; i++) {
+    var ev = next[i];
+    var prevMap = baseMap.get(ev.key);
+    var prevShort = prevMap ? (prevMap.get(ev.trade) || 0) : 0;
+    if (ev.shortfall > prevShort + LEDGER_EPS) {
+      return { ok: false, reason: 'shortfall', shortfall: ev };
+    }
+  }
+  return { ok: true };
+}
+
+// Apply a validated same-date reorder to the store: the account's records of
+// that date take their slots from the new order, everything else keeps its
+// place. Returns the new trades array (or null when the order is invalid).
+function applyTradeReorder(st, accId, date, newOrderIds) {
+  var check = validateTradeReorder(st, accId, date, newOrderIds);
+  if (!check || !check.ok) return { ok: false, reason: check && check.reason, shortfall: check && check.shortfall };
+  var trades = st.trades || [];
+  var dateTrades = trades.filter(function (t) {
+    return t && t.accountId === accId && t.date === date;
+  });
+  var tradeMap = {};
+  dateTrades.forEach(function (t) { if (t && t.id) tradeMap[t.id] = t; });
+  var slots = [];
+  trades.forEach(function (t, ix) {
+    if (t && t.accountId === accId && t.date === date) slots.push(ix);
+  });
+  var rebuilt = trades.slice();
+  for (var s = 0; s < slots.length; s++) {
+    var srcTrade = tradeMap[newOrderIds[s]];
+    if (srcTrade) rebuilt[slots[s]] = srcTrade;
+  }
+  return { ok: true, trades: rebuilt };
+}
+
+function enterTradeRearrangeMode(accId) {
+  tradeRearrangeMode = true;
+  tradeRearrangeAccId = accId;
+  render();
+}
+
+function exitTradeRearrangeMode() {
+  tradeRearrangeMode = false;
+  tradeRearrangeAccId = null;
+  tradeDragCleanup();
+  render();
+}
+
+function wireTradeDnD(accId) {
+  var host = document.getElementById('account-detail');
+  if (!host) return;
+  // The host element survives re-renders (only its children are replaced),
+  // so the listeners are wired ONCE and read the account from the mode
+  // flags at event time. Wiring per account would pile up listeners on
+  // every navigation.
+  if (!host.getAttribute('data-trade-dnd-wired')) {
+    host.setAttribute('data-trade-dnd-wired', '1');
+    wireTradeDnDEvents(host);
+  }
+}
+
+function wireTradeDnDEvents(host) {
+  host.addEventListener('pointerdown', function (e) {
+    if (!tradeRearrangeMode || !tradeRearrangeAccId) return;
+    var accId = tradeRearrangeAccId;
+    var grip = e.target && e.target.closest ? e.target.closest('.drag-handle') : null;
+    if (!grip) return;
+    var card = grip.closest('.trade-block');
+    if (!card || !card.getAttribute('data-trade')) return;
+    var tradeId = card.getAttribute('data-trade');
+    if (e.pointerType === 'mouse' && e.button !== undefined && e.button !== 0) return;
+    if (typeof e.clientX !== 'number') return;
+    // The record's own date is the boundary: it may only swap with records
+    // that carry the very same date.
+    var st = loadState();
+    var trade = findTradeById(st, tradeId);
+    if (!trade) return;
+    tradeDrag = { id: tradeId, startX: e.clientX, startY: e.clientY, started: false, ghost: null, overId: null, after: false, date: trade.date, accId: accId };
+    try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  host.addEventListener('pointermove', function (e) {
+    var accId = tradeRearrangeAccId;
+    if (!tradeDrag || tradeDrag.accId !== accId || !e || typeof e.clientX !== 'number') return;
+    var dx = e.clientX - tradeDrag.startX;
+    var dy = e.clientY - tradeDrag.startY;
+    if (!tradeDrag.started) {
+      if (dx * dx + dy * dy < 49) return;
+      var src = tradeDragCardEl(tradeDrag.id);
+      if (!src) { tradeDragCleanup(); return; }
+      tradeStartDrag(src);
+    }
+    if (tradeDrag.ghost) {
+      tradeDrag.ghost.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    }
+    var under = null;
+    try {
+      under = (typeof document !== 'undefined' && document.elementFromPoint) ? document.elementFromPoint(e.clientX, e.clientY) : null;
+    } catch (err) { under = null; }
+    clearTradeCardMarks();
+    var card = under && under.closest ? under.closest('.trade-block') : null;
+    tradeDrag.overId = null;
+    if (card && card.getAttribute('data-trade') !== tradeDrag.id) {
+      var targetTradeId = card.getAttribute('data-trade');
+      var st = loadState();
+      var targetTrade = findTradeById(st, targetTradeId);
+      // Same date only: a record never crosses a date boundary.
+      if (targetTrade && targetTrade.date === tradeDrag.date) {
+        var r = null;
+        try { r = card.getBoundingClientRect(); } catch (err2) { r = null; }
+        tradeDrag.after = !!(r && (e.clientY - r.top) > r.height / 2);
+        tradeDrag.overId = targetTradeId;
+        card.classList.add(tradeDrag.after ? 'drop-after' : 'drop-before');
+      }
+    }
+  });
+  function tradeFinishDrop(e) {
+    var accId = tradeRearrangeAccId;
+    if (!tradeDrag || tradeDrag.accId !== accId) return;
+    var wasStarted = tradeDrag.started;
+    var id = tradeDrag.id;
+    var date = tradeDrag.date;
+    var overId = null;
+    var after = false;
+    if (wasStarted && e && typeof e.clientX === 'number') {
+      try {
+        var under = (typeof document !== 'undefined' && document.elementFromPoint) ? document.elementFromPoint(e.clientX, e.clientY) : null;
+        var card = under && under.closest ? under.closest('.trade-block') : null;
+        if (card && card.getAttribute('data-trade') !== id) {
+          var targetTradeId = card.getAttribute('data-trade');
+          var st = loadState();
+          var targetTrade = findTradeById(st, targetTradeId);
+          if (targetTrade && targetTrade.date === date) {
+            overId = targetTradeId;
+            var r = null;
+            try { r = card.getBoundingClientRect(); } catch (err) { r = null; }
+            after = !!(r && (e.clientY - r.top) > r.height / 2);
+          }
+        }
+      } catch (err2) {}
+    }
+    tradeDragCleanup();
+    if (!wasStarted) return; // plain click
+    if (!overId) return; // released over nothing meaningful: snap back
+
+    // Build the proposed order for this date: the account's records of that
+    // date, in store order, with the dragged one moved to the drop slot.
+    var st = loadState();
+    if (!accountById(st, accId)) return;
+    var dateTrades = (st.trades || []).filter(function (t) {
+      return t && t.accountId === accId && t.date === date;
+    });
+    var dateTradeIds = dateTrades.map(function (t) { return t.id; });
+    var fromIdx = dateTradeIds.indexOf(id);
+    if (fromIdx === -1) return;
+    dateTradeIds.splice(fromIdx, 1);
+    var toIdx = dateTradeIds.indexOf(overId);
+    if (toIdx === -1) return;
+    if (after) toIdx++;
+    dateTradeIds.splice(toIdx, 0, id);
+
+    // The failsafe: the reordered timeline may never leave an outflow
+    // unfunded (selling before the funds arrive).
+    var applied = applyTradeReorder(st, accId, date, dateTradeIds);
+    if (!applied || !applied.ok) {
+      showBanner('Cannot rearrange — these records share a date, and this order would spend funds that are not there yet.');
+      render();
+      return;
+    }
+    st.trades = applied.trades;
+    if (!saveStateGuarded(st)) { render(); return; }
+    clearBanner();
+    exitTradeRearrangeMode();
+  }
+  host.addEventListener('pointerup', tradeFinishDrop);
+  host.addEventListener('pointercancel', tradeDragCleanup);
+}
+
+function tradeStartDrag(src) {
+  var r = null;
+  try { r = src.getBoundingClientRect(); } catch (e) { r = null; }
+  var ghost = null;
+  try {
+    ghost = src.cloneNode(true);
+    ghost.classList.remove('drop-before', 'drop-after', 'drag-src');
+    ghost.classList.add('drag-ghost');
+    ghost.removeAttribute('id');
+    ghost.style.width = (r && r.width ? r.width : 320) + 'px';
+    ghost.style.left = (r ? r.left : 0) + 'px';
+    ghost.style.top = (r ? r.top : 0) + 'px';
+    if (typeof document !== 'undefined' && document.body) document.body.appendChild(ghost);
+    else ghost = null;
+  } catch (e) { ghost = null; }
+  tradeDrag.started = true;
+  tradeDrag.ghost = ghost;
+  suppressCardClick = true;
+  try {
+    if (typeof document !== 'undefined' && document.body && document.body.style) document.body.style.userSelect = 'none';
+  } catch (e) {}
+  var cur = tradeDragCardEl(tradeDrag.id);
+  if (cur) cur.classList.add('drag-src');
+}
+
 
 function wireGroupSubsDnD(wrap) {
   if (!wrap || wrap.getAttribute('data-dnd-wired')) return;
@@ -13345,13 +13917,23 @@ function buildTopbar() {
   wireDialog('note-dialog');
   wireDialog('error-dialog');
   wireDialog('color-dialog');
+  // The color dialog serves both account cards and record cards: route to
+  // whichever selection is live, so "Change color" paints what the reader
+  // actually picked.
+  function applyColorTarget(hex) {
+    if (tradeSelectionMode && selectedTradeCount() > 0) {
+      applyTradeColorToSelection(hex);
+      return;
+    }
+    applyColorToSelection(hex);
+  }
   var cdlg = document.getElementById('color-dialog');
   if (cdlg && !cdlg.getAttribute('data-color-wired')) {
     cdlg.setAttribute('data-color-wired', '1');
     cdlg.addEventListener('click', function (e) {
       var pick = e.target && e.target.closest ? e.target.closest('[data-color-pick]') : null;
       if (pick) {
-        applyColorToSelection(pick.getAttribute('data-color-pick'));
+        applyColorTarget(pick.getAttribute('data-color-pick'));
         return;
       }
     });
@@ -13367,16 +13949,16 @@ function buildTopbar() {
           showBanner('Enter a hex color like #F7931A.');
           return;
         }
-        applyColorToSelection(raw);
+        applyColorTarget(raw);
         return;
       }
-      applyColorToSelection(uiVal('c-custom', '#e3c57c'));
+      applyColorTarget(uiVal('c-custom', '#e3c57c'));
     });
   }
   var cReset = document.getElementById('c-reset');
   if (cReset && !cReset.getAttribute('data-wired')) {
     cReset.setAttribute('data-wired', '1');
-    cReset.addEventListener('click', function () { applyColorToSelection(null); });
+    cReset.addEventListener('click', function () { applyColorTarget(null); });
   }
   var bclose = document.getElementById('banner-close');
   if (bclose && !bclose.getAttribute('data-wired')) {
@@ -14484,6 +15066,17 @@ if (typeof window !== 'undefined') {
   window.Inoculens.openNoteDialog = openNoteDialog;
   window.Inoculens.openErrorDialog = openErrorDialog;
   window.Inoculens.applyColorToSelection = applyColorToSelection;
+  window.Inoculens.applyTradeColorToSelection = applyTradeColorToSelection;
+  window.Inoculens.validateTradeReorder = validateTradeReorder;
+  window.Inoculens.applyTradeReorder = applyTradeReorder;
+  window.Inoculens.selectedTradeCount = selectedTradeCount;
+  window.Inoculens.toggleTradeSelect = toggleTradeSelect;
+  window.Inoculens.cancelTradeSelection = cancelTradeSelection;
+  window.Inoculens.findTradeById = findTradeById;
+  window.Inoculens.enterTradeRearrangeMode = enterTradeRearrangeMode;
+  window.Inoculens.exitTradeRearrangeMode = exitTradeRearrangeMode;
+  window.Inoculens.tradeSelectionMode = function () { return tradeSelectionMode; };
+  window.Inoculens.tradeRearrangeMode = function () { return tradeRearrangeMode; };
   window.Inoculens.resetTradeForm = resetTradeForm;
   window.Inoculens.syncTradeButtons = syncTradeButtons;
   window.Inoculens.syncLockedSymbol = syncLockedSymbol;

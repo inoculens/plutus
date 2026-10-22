@@ -1609,13 +1609,13 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
    above and below, as on the account cards). The card reserves the column,
    so every record line shifts a bit right. Relative (no z-index): the card
    holds the rail without becoming a stacking context. */
-.trade-block { position: relative; padding-left: 2.6rem; }
+.trade-block { position: relative; padding-left: 3.4rem; }
 .trade-block .drag-handle {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: 1.6rem;
+  width: 2.2rem;
   height: auto;
   align-self: auto;
   background: none;
@@ -2578,9 +2578,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .section-actions button { flex: 1 1 auto; min-height: 2.75rem; }
   .account-card { flex-wrap: nowrap; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; min-height: 4.2rem; }
   .drag-handle { width: 1.9rem; height: 2.75rem; flex-shrink: 0; opacity: 0.75; }
-  /* Record rails on phones: a wider column for the thumb, taller dot run. */
-  .trade-block { padding-left: 3.2rem; }
-  .trade-block .drag-handle { width: 2.3rem; }
+  /* Record rails on phones: a wider thumb rail, taller dot run. The reserved
+     column is written by this query's own .trade-block padding rule, so no
+     later shorthand can take the strip back. */
+  .trade-block .drag-handle { width: 3rem; }
   .trade-block .drag-handle::before { height: 2.75rem; }
   .acct-avatar { width: 2.6rem; height: 2.6rem; }
   .acct-mid { gap: 0.05rem; }
@@ -2604,7 +2605,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* Trades +Record duplicates the floating + on phones — FAB owns it. */
   #account-detail .t-add { display: none; }
   .menu summary { min-height: 2.75rem; }
-  .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; }
+  .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; padding-left: 4.2rem; }
   .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
   .trade-head {
     flex: 1 1 100%;

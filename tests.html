@@ -6188,6 +6188,42 @@
         assert(document.getElementById('banner-text').textContent === 'Stays', 'returned text mismatch');
         clearBanner();
       });
+
+      // — Notification popup: fixed top card, animated exit, instant reset —
+      test('banner is a fixed top popup, not part of the page flow (cascade guard)', function () {
+        var cs = getComputedStyle(document.getElementById('banner'));
+        assert(cs.position === 'fixed', 'banner must be position:fixed (a later rule such as "footer, #banner { position: relative }" must not override it), got ' + cs.position);
+        assert(cs.top === '0px', 'banner must sit at the viewport top, got ' + cs.top);
+        assert(parseInt(cs.zIndex, 10) >= 100, 'banner must paint above the sticky header, got z-index ' + cs.zIndex);
+      });
+      test('showBanner enters, dismissBanner exits with animation, clearBanner resets at once', function () {
+        var b = document.getElementById('banner');
+        try { closeDialog('settings-dialog'); } catch (e) { /* ignore */ }
+        clearBanner();
+        showBanner('Hello', 'error', null);
+        assert(b.hidden === false && b.classList.contains('show') && !b.classList.contains('hide'), 'a shown banner must be in the show state');
+        assert(bannerTimer !== null, 'the auto-dismiss timer must be armed');
+        dismissBanner();
+        assert(b.hidden === false && b.classList.contains('hide') && !b.classList.contains('show'), 'dismiss must start the exit animation, not hide at once');
+        showBanner('Again', 'error', null);
+        assert(b.classList.contains('show') && !b.classList.contains('hide'), 'a new message during the exit must re-enter');
+        clearBanner();
+        assert(b.hidden === true, 'clearBanner must hide synchronously');
+        assert(!b.classList.contains('show') && !b.classList.contains('hide') && !b.classList.contains('run'), 'clearBanner must drop every state class');
+        assert(bannerTimer === null && bannerOutTimer === null, 'clearBanner must cancel both timers');
+      });
+      testAsync('banner hides itself once the slide-out has finished', function () {
+        var b = document.getElementById('banner');
+        try { closeDialog('settings-dialog'); } catch (e) { /* ignore */ }
+        clearBanner();
+        showBanner('Bye', 'error', null);
+        dismissBanner();
+        return new Promise(function (resolve) { setTimeout(resolve, BANNER_OUT_MS + 250); }).then(function () {
+          assert(b.hidden === true, 'banner must be hidden after the slide-out');
+          assert(!b.classList.contains('hide'), 'the hide class must be cleared after the exit');
+          assert(bannerTimer === null && bannerOutTimer === null, 'no timer may outlive the exit');
+        });
+      });
     })();
 
     // === Transfer send/receive tests (sent − received = fee) ===

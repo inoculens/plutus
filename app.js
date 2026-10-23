@@ -6136,6 +6136,14 @@ function statCard(label, text, raw, loading) {
     v.setAttribute('data-value', String(Number(raw)));
   }
   if (loading) paintLoading(v, true, label);
+  // Summary values live in fixed cells and phone grids cut them mid-string
+  // (an XMR Quantity shows '1.1627635427…  X…' — the symbol trimmed too).
+  // The standard overflow-gated popup hands over the full string from the
+  // DOM; placeholders ('—', the '…' loading state) stay inert.
+  var cardTxt = String(text === undefined || text === null ? '' : text);
+  if (!loading && cardTxt.trim() !== '' && cardTxt.trim() !== '—') {
+    wireTruncTap(v, label, l);
+  }
   d.appendChild(l);
   d.appendChild(v);
   return d;
@@ -7513,7 +7521,8 @@ function navHome() {
 // tint gain/loss. The FX conversion always gets its own line so amounts
 // never run into their provenance.
 
-function statRow(label, text, raw, tint) {  var d = document.createElement('div');
+function statRow(label, text, raw, tint, skipPopup) {
+  var d = document.createElement('div');
   d.className = 'stat-row';
   d.setAttribute('data-label', label);
   var l = document.createElement('span');
@@ -7528,6 +7537,16 @@ function statRow(label, text, raw, tint) {  var d = document.createElement('div'
       var sc = plClass(raw);
       if (sc) v.classList.add(sc);
     }
+  }
+  // Every value here trims with CSS ellipsis, so a plain number can hide
+  // digits (long XMR/BTC quantities, deep ledger lines) with no way to read
+  // them. Rows that wire a richer popup themselves pass skipPopup (Transfer
+  // fees opens an explainer, multi-recipient Received lists one per line,
+  // Note clamps its own way); all others get the standard overflow-gated
+  // 'show full value' popup: ⓘ on the label while cut, tap anywhere opens.
+  var rowTxt = String(text === undefined || text === null ? '' : text);
+  if (!skipPopup && rowTxt.trim() !== '' && rowTxt.trim() !== '—') {
+    wireTruncTap(v, label, l);
   }
   d.appendChild(l);
   d.appendChild(v);
@@ -7951,6 +7970,37 @@ function infoDot(labelEl, openFn, valueEl) {
   }
 }
 
+// Cut values hand over their full text on tap. Every trimmed cell keeps the
+// complete string in the DOM — the ellipsis is purely visual — so a tap on an
+// actually-overflowing value opens the standard note popup (same 2px floor
+// as syncInfoDots) with exactly the string that was cut, never a re-rounded
+// number. Fitting values get no role, no keyboard stop and no hand cursor.
+// `labelEl` attaches the overflow-gated ⓘ badge; label-less values (home
+// account figures, the hero total) are tappable directly. The flag makes the
+// wiring idempotent for static elements (hero) that re-render in place.
+function wireTruncTap(valEl, title, labelEl) {
+  if (!valEl || valEl.getAttribute('data-trunc-wired') === '1') return;
+  valEl.setAttribute('data-trunc-wired', '1');
+  valEl.setAttribute('data-info-cond', '1');
+  valEl.setAttribute('role', 'button');
+  valEl.setAttribute('tabindex', '0');
+  valEl.setAttribute('aria-label', 'Show full ' + String(title || 'value').toLowerCase());
+  function open() {
+    try {
+      if (valEl.scrollWidth <= valEl.clientWidth + 2) return;
+      openNoteDialog(valEl.textContent, title);
+    } catch (e) { /* a broken tap must never break the panel */ }
+  }
+  valEl.addEventListener('click', open);
+  valEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      open();
+    }
+  });
+  if (labelEl) infoDot(labelEl, open, valEl);
+}
+
 // Overflow-gated dots mean something only when the value is actually
 // truncated: hide the decorative ones after layout settles. The pointer
 // follows the same truth — text cursor for fitting text, hand only where
@@ -7959,15 +8009,15 @@ function infoDot(labelEl, openFn, valueEl) {
 // labels never flap their dot across paints, refreshes or resizes.
 function syncInfoDots() {
   try {
-    var vals = document.querySelectorAll('.stat-val[data-info-cond], .detail-meta-val[data-info-cond], .ledger-label-text[data-info-cond]');
+    var vals = document.querySelectorAll('.stat-val[data-info-cond], .detail-meta-val[data-info-cond], .ledger-label-text[data-info-cond], .card-value[data-info-cond]');
     for (var i = 0; i < vals.length; i++) {
       var v = vals[i];
       var box = null;
-      try { box = v.closest ? v.closest('.stat-row, .detail-meta') : null; } catch (e) { box = null; }
+      try { box = v.closest ? v.closest('.stat-row, .detail-meta, .card') : null; } catch (e) { box = null; }
       if (!box) continue;
       var dot = box.querySelector('.info-dot');
       var lab = null;
-      try { lab = box.querySelector('.stat-label, .detail-meta-label'); } catch (e) { lab = null; }
+      try { lab = box.querySelector('.stat-label, .detail-meta-label, .card-label'); } catch (e) { lab = null; }
       var overflowing = false;
       try { overflowing = v.scrollWidth > v.clientWidth + 2; } catch (e) { overflowing = false; }
       if (dot) dot.style.display = overflowing ? 'inline' : 'none';
@@ -8436,7 +8486,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee, tSym) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
-      var feeRowT = statRow('Transfer fees', feeTxtT, t.networkFee, false);
+      var feeRowT = statRow('Transfer fees', feeTxtT, t.networkFee, false, true);
       // Tap explains the two numbers in plain language (market worth vs
       // booked cost) — the card stays clean, the math stays one tap away.
       var feeValT = feeRowT.querySelector('.stat-val');
@@ -8508,7 +8558,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
         recTotal += selfC;
       }
     }
-    var recRow = primary(statRow('Received', recLines.join(', '), recTotal, false));
+    var recRow = primary(statRow('Received', recLines.join(', '), recTotal, false, true));
     (function (row, lines) {
       var recVal = row.querySelector('.stat-val');
       var recLab = row.querySelector('.stat-label');
@@ -8589,7 +8639,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   }
   var noteTxt = isSwap ? swapNoteClean(t.note) : String(t.note || '');
   if (noteTxt) {
-    var noteRow = statRow('Note', noteTxt, null, false);
+    var noteRow = statRow('Note', noteTxt, null, false, true);
     var noteVal = noteRow.querySelector('.stat-val');
     if (noteVal) {
       noteVal.classList.add('note-clamp');

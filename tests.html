@@ -5246,7 +5246,9 @@
           Array.prototype.forEach.call(document.querySelectorAll('#summary-cards .card'), function (c) {
             var label = c.querySelector('.card-label');
             var val = c.querySelector('.card-value');
-            if (label && label.textContent === 'Realized' && val) realizedVal = val.getAttribute('data-value');
+            // Truncatable values carry a decorative ⓘ inside the label; the
+            // label proper is its text without that badge.
+            if (label && label.textContent.replace('ⓘ', '') === 'Realized' && val) realizedVal = val.getAttribute('data-value');
           });
           assert(realizedVal === '50', 'grand Realized card should aggregate per-account (50), got ' + realizedVal);
           var tb = document.getElementById('tb-totals');
@@ -9399,6 +9401,130 @@
             try { delete wt.clientWidth; } catch (e) { /* ignore */ }
           }
         });
+        navHome();
+      });
+
+      test('a cut record amount opens its full value in a popup', function () {
+        mcSeed();
+        mcOpen();
+        var card = mcCard('mc-buy');
+        assert(card !== null, 'the record card must render');
+        var row = card.querySelector('[data-label="Amount"]');
+        assert(row !== null, 'the Amount row must render');
+        var val = row.querySelector('.stat-val');
+        assert(val !== null, 'the Amount value must render');
+        assert(val.getAttribute('role') === 'button', 'the amount value must be tappable');
+        assert(val.getAttribute('tabindex') === '0', 'the amount value must be keyboard reachable');
+        assert((val.getAttribute('aria-label') || '').length > 0, 'the amount value needs an aria-label');
+        assert(val.getAttribute('data-info-cond') === '1', 'the amount value must be overflow-gated');
+        // Meet the reader at their width: a phone card is collapsed at first,
+        // desktop shows the rows straight away.
+        openRecordCard(card);
+        // The harness fakes the overflow the ellipsis would produce.
+        try {
+          Object.defineProperty(val, 'scrollWidth', { value: 9999, configurable: true });
+          Object.defineProperty(val, 'clientWidth', { value: 10, configurable: true });
+          val.click();
+          var dlg = document.getElementById('note-dialog');
+          assert(dlg.open === true, 'tapping a cut amount must open the popup');
+          var txt = document.getElementById('note-dialog-text').textContent;
+          assert(txt === val.textContent, 'the popup must carry the exact cut string, got ' + txt);
+          assert(txt.indexOf('BTC') !== -1, 'the popup must carry the symbol, got ' + txt);
+          var title = document.getElementById('note-dialog-title').textContent;
+          assert(title === 'Amount', 'the popup must be titled by the row label, got ' + title);
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+          // Keyboard: Enter on the focused value opens the same popup.
+          val.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+          assert(document.getElementById('note-dialog').open === true, 'Enter must open the popup');
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        } finally {
+          try { delete val.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete val.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // A fitting amount opens nothing: overflow is the only door.
+        try {
+          Object.defineProperty(val, 'scrollWidth', { value: 10, configurable: true });
+          Object.defineProperty(val, 'clientWidth', { value: 9999, configurable: true });
+          val.click();
+          assert(document.getElementById('note-dialog').open !== true, 'a fitting amount must not open a popup');
+        } finally {
+          try { delete val.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete val.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // Phone precedence: the first tap on a collapsed card expands, the
+        // second tap opens the popup — never a coin toss between the two.
+        withPhoneView(function () {
+          if (card.classList.contains('is-open')) card.querySelector('.trade-when').click();
+          assert(!card.classList.contains('is-open'), 'the card must be closed for the precedence check');
+          try {
+            Object.defineProperty(val, 'scrollWidth', { value: 9999, configurable: true });
+            Object.defineProperty(val, 'clientWidth', { value: 10, configurable: true });
+            val.click();
+            assert(card.classList.contains('is-open'), 'the first phone tap must expand the card');
+            assert(document.getElementById('note-dialog').open !== true, 'the popup must wait for the second tap');
+            val.click();
+            assert(document.getElementById('note-dialog').open === true, 'the second tap must open the popup');
+            try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+          } finally {
+            try { delete val.scrollWidth; } catch (e) { /* ignore */ }
+            try { delete val.clientWidth; } catch (e) { /* ignore */ }
+          }
+        });
+        // Leave the card closed for later tests.
+        if (card.classList.contains('is-open')) withPhoneView(function () { card.querySelector('.trade-when').click(); });
+        navHome();
+      });
+
+      test('a cut summary value opens the full card value in a popup', function () {
+        mcSeed();
+        mcOpen();
+        var qCard = document.querySelector('#account-detail .cards .card[data-label="Quantity"]');
+        assert(qCard !== null, 'the Quantity card must render');
+        var qVal = qCard.querySelector('.card-value');
+        assert(qVal !== null, 'the Quantity value must render');
+        assert(qVal.getAttribute('role') === 'button', 'the quantity value must be tappable');
+        assert(qVal.getAttribute('tabindex') === '0', 'the quantity value must be keyboard reachable');
+        var qDot = qCard.querySelector('.card-label .info-dot');
+        assert(qDot !== null, 'the Quantity label must carry its ⓘ badge');
+        // The harness fakes the overflow the ellipsis would produce.
+        try {
+          Object.defineProperty(qVal, 'scrollWidth', { value: 9999, configurable: true });
+          Object.defineProperty(qVal, 'clientWidth', { value: 10, configurable: true });
+          window.Inoculens.syncInfoDots();
+          assert(window.getComputedStyle(qDot).display === 'inline', 'a cut quantity must show its ⓘ badge');
+          qVal.click();
+          var dlg = document.getElementById('note-dialog');
+          assert(dlg.open === true, 'tapping a cut summary value must open the popup');
+          var txt = document.getElementById('note-dialog-text').textContent;
+          assert(txt === qVal.textContent, 'the popup must carry the full value, got ' + txt);
+          assert(txt.indexOf('BTC') !== -1, 'the popup must carry the symbol, got ' + txt);
+          var title = document.getElementById('note-dialog-title').textContent;
+          assert(title === 'Quantity', 'the popup must be titled by the card label, got ' + title);
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        } finally {
+          try { delete qVal.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete qVal.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // A fitting value shows no badge and opens nothing. The harness
+        // fakes the fit — every real window has its own truncation line,
+        // the test must not depend on the host viewport.
+        try {
+          Object.defineProperty(qVal, 'scrollWidth', { value: 10, configurable: true });
+          Object.defineProperty(qVal, 'clientWidth', { value: 9999, configurable: true });
+          window.Inoculens.syncInfoDots();
+          assert(window.getComputedStyle(qDot).display === 'none', 'a fitting quantity must not show its ⓘ badge');
+          qVal.click();
+          assert(document.getElementById('note-dialog').open !== true, 'a fitting summary value must not open a popup');
+        } finally {
+          try { delete qVal.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete qVal.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // Placeholders never wire a popup: with no live price the Return card
+        // renders '—' and must stay plain (no role, no badge, no tap target).
+        var rVal = document.querySelector('#account-detail .cards .card[data-label="Return"] .card-value');
+        assert(rVal !== null && rVal.textContent === '—', 'the Return card must render its placeholder, got ' + (rVal && rVal.textContent));
+        assert(rVal.getAttribute('data-trunc-wired') !== '1', 'a placeholder must not be wired');
+        assert(document.querySelector('#account-detail .cards .card[data-label="Return"] .info-dot') === null, 'a placeholder must not carry a badge');
         navHome();
       });
 

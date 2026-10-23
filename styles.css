@@ -719,57 +719,57 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   outline-offset: 2px;
 }
 
-/* ————— Banner (fixed floating popup card, visible wherever scrolled) ————— */
+/* ————— Banner: fixed top notification popup (visible wherever scrolled) ————— */
+/* Resting states are STATIC (transform set per state class) so the banner is
+   correct even where animations are disabled (prefers-reduced-motion kills
+   every animation below). Animations only decorate the move between states.
+   Durations come from JS custom properties (--banner-in/out/dwell/lead). */
 #banner {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 200;
-  width: 100%;
-  max-width: none;
   margin: 0;
-  padding: 0.85rem 1.25rem 0.55rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-2);
+  padding: calc(env(safe-area-inset-top, 0px) + 0.8rem) 0 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--surface-2);
   font-size: 0.9rem;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
-  transform: translateY(-150%) rotate(-1deg);
-  opacity: 0;
-  pointer-events: none;
-}
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  transform: translateY(-130%);
+  will-change: transform;
+  pointer-events: none;}
 
-#banner.show {
-  animation: slideInBounce 0.7s ease-out forwards;
-  pointer-events: auto;
-}
+#banner[hidden] { display: none; }
+#banner.show { transform: translateY(0); pointer-events: auto; animation: bannerIn var(--banner-in, 600ms) both; }
+#banner.hide { transform: translateY(-130%); pointer-events: none; animation: bannerOut var(--banner-out, 550ms) both; }
 
-#banner.hide {
-  animation: slideOutBounce 0.65s ease-in forwards;
-  pointer-events: none;
-}
+@keyframes bannerIn {
+  0%   { transform: translateY(-130%); animation-timing-function: ease-out; }
+  55%  { transform: translateY(8px);   animation-timing-function: ease-in-out; }
+  78%  { transform: translateY(-3px);  animation-timing-function: ease-in-out; }
+  100% { transform: translateY(0); }}
 
-@keyframes slideInBounce {
-  0% { transform: translateY(-150%) rotate(-1deg); opacity: 0; }
-  55% { transform: translateY(10%) rotate(0.5deg); opacity: 1; }
-  70% { transform: translateY(-5%) rotate(-0.2deg); }
-  85% { transform: translateY(2%) rotate(0.1deg); }
-  100% { transform: translateY(0) rotate(0); opacity: 1; }
-}
+@keyframes bannerOut {
+  0%   { transform: translateY(0);     animation-timing-function: ease-out; }
+  25%  { transform: translateY(8px);   animation-timing-function: ease-in; }
+  100% { transform: translateY(-130%); }}
 
-@keyframes slideOutBounce {
-  0% { transform: translateY(0) rotate(0); opacity: 1; }
-  18% { transform: translateY(-18px) rotate(0.3deg); }
-  35% { transform: translateY(7px) rotate(-0.15deg); }
-  50% { transform: translateY(0) rotate(0); }
-  100% { transform: translateY(-150%) rotate(-0.5deg); opacity: 0; }
-}
+/* Opaque tinted backgrounds: the card floats over page content. */
+#banner.error {
+  border-color: rgba(248, 113, 113, 0.35);
+  background: linear-gradient(rgba(248, 113, 113, 0.12), rgba(248, 113, 113, 0.12)), var(--surface-2);}
 
-/* Banner inner row */
+#banner.info {
+  border-color: var(--hairline-gold);
+  background: linear-gradient(rgba(227, 197, 124, 0.1), rgba(227, 197, 124, 0.1)), var(--surface-2);}
+
 .banner-row {
   display: flex;
   align-items: center;
@@ -777,28 +777,11 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   width: 100%;
   max-width: var(--max);
   margin: 0 auto;
-}
+  padding: 0 1.25rem;}
 
-#banner-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#banner-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
-.banner-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-#banner.error {
-  border-bottom-color: rgba(248, 113, 113, 0.35);
-  background: rgba(248, 113, 113, 0.1);
-}
-
-#banner.info {
-  border-bottom-color: var(--hairline-gold);
-  background: rgba(227, 197, 124, 0.1);
-}
-
-#banner[hidden] { display: none; }
+.banner-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
 
 #banner-close {
   min-height: 2rem;
@@ -808,8 +791,8 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--text);
   font-weight: 700;
   border-radius: 6px;
-  flex-shrink: 0;
-}
+  flex-shrink: 0;}
+
 #banner-close:hover { background: rgba(255,255,255,0.08); }
 
 #banner-details {
@@ -821,39 +804,32 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--text);
   text-decoration: underline;
   text-underline-offset: 3px;
-  border-radius: 6px;
-}
+  border-radius: 6px;}
+
 #banner-details:hover { background: rgba(255,255,255,0.06); }
 
-#banner-read-more {
-  flex-shrink: 0;
-  min-height: 2rem;
-  padding: 0.25rem 0.8rem;
-  background: none;
-  border-color: transparent;
-  color: var(--text);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  border-radius: 6px;
-  font-size: 0.86rem;
-}
-#banner-read-more:hover { background: rgba(255,255,255,0.06); }
-
-/* Progress bar */
-.banner-progress {
-  width: 100%;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.05);
-  overflow: hidden;
-}
+/* Time-remaining bar: full width along the card's bottom edge, drains
+   right-to-left over --banner-dwell once the slide-in has finished. */
+.banner-progress { width: 100%; height: 3px; background: rgba(255, 255, 255, 0.06); }
 
 #banner-progress-bar {
   height: 100%;
   width: 100%;
   background: linear-gradient(90deg, var(--gold), rgba(227, 197, 124, 0.55));
   transform: scaleX(1);
-  transform-origin: left;
-  transition: none;
+  transform-origin: left;}
+
+#banner.run #banner-progress-bar {
+  animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both;}
+
+@keyframes bannerProgress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The global reduce rule (animation:none !important) would freeze the bar
+     at full width. It is a timer, not decoration: exempt it (ID specificity
+     beats the universal selector at equal !important). */
+  #banner.run #banner-progress-bar {
+    animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both !important; }
 }
 
 .banner-error { color: var(--loss); font-weight: 600; }
@@ -2352,7 +2328,7 @@ body::after {
 /* main must NOT create a stacking context: the mobile bottom-sheet menus
    (.filter-panel, fixed) have to paint above the footer and the FAB. */
 main { position: relative; }
-footer, #banner { position: relative; z-index: 1; }
+footer { position: relative; z-index: 1; }
 
 /* ————— Landing ————— */
 #landing {
@@ -2680,7 +2656,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* — Page frame — */
   main { padding: 1rem 0.9rem 7rem; gap: 1.1rem; }
   #view-home, #view-account { gap: 1.1rem; }
-  #banner { margin: 0.7rem 0.9rem 0; font-size: 0.88rem; flex-wrap: wrap; }
+  #banner { font-size: 0.88rem; }
 
   /* Mobile hero rules live after the desktop hero section near the end of
      the file — same-specificity later rules win, so that placement is

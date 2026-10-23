@@ -6954,10 +6954,10 @@
         navTo('a1');
         route();
         render();
-        var val = document.querySelector('[data-trade="a-xfer"] [data-label="Transfer fees"] .stat-val');
-        assert(val !== null, 'fee value must render');
+        var dot = document.querySelector('[data-trade="a-xfer"] [data-label="Transfer fees"] .stat-label .info-dot');
+        assert(dot !== null, 'fee label must have an ⓘ badge');
         openRecordCard(document.querySelector('[data-trade="a-xfer"]'));
-        val.click();
+        dot.click();
         var txt = document.getElementById('note-dialog-text').textContent;
         assert(/0[.,]36/.test(txt), 'explainer must show the ~0.36 market worth, got ' + txt);
         assert(txt.indexOf('average entry') !== -1, 'explainer must name the booked cost basis, got ' + txt);
@@ -9585,6 +9585,165 @@
         assert(buy.classList.contains('is-open'), 'a phone jump must open the target card');
         assert(sell.classList.contains('is-open') === false, 'only the target opens');
         withPhoneView(function () { buy.querySelector('.trade-when').click(); });
+        navHome();
+      });
+    })();
+
+
+    // === Cut home figures + hero: overflow-gated tap popups ===
+    (function homeFigurePopupTests() {
+      var L = window.Inoculens || {};
+      var FXH = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+      function seedHome() {
+        L.saveState({
+          settings: { mainCurrency: 'EUR', costMethod: 'average' },
+          accounts: [
+            { id: 'h-cash', name: 'Pocket', ticker: 'EUR', kind: 'cash', createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'h-hold', name: 'Undermine', ticker: 'BTC', createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'h-empty', name: 'Bare', ticker: 'ETH', createdAt: '2026-01-01T00:00:00.000Z' }
+          ],
+          trades: [
+            { id: 'h-c1', type: 'income', symbol: 'EUR', qty: 100, total: 100, currency: 'EUR', date: '2026-01-05', fee: 0, feeCurrency: 'EUR', fxLock: FXH, accountId: 'h-cash', createdAt: '2026-01-05T00:00:00.000Z' },
+            { id: 'h-b1', type: 'buy', symbol: 'BTC', qty: 0.5, total: 25000, currency: 'EUR', date: '2026-01-05', fee: 10, feeCurrency: 'EUR', fxLock: FXH, accountId: 'h-hold', createdAt: '2026-01-05T00:00:00.000Z' }
+          ],
+          priceOverrides: {}
+        });
+      }
+      function openHome() {
+        if (typeof init === 'function') init();
+        navHome();
+        route();
+        render();
+      }
+
+      test('a cut home account figure opens its value in a popup', function () {
+        seedHome();
+        openHome();
+        var card = document.querySelector('#accounts .account-card[data-account="h-cash"]');
+        assert(card !== null, 'the cash account card must render');
+        var val = card.querySelector('.acct-value');
+        var pl = card.querySelector('.acct-pl');
+        assert(val !== null && pl !== null, 'the account figures must render');
+        assert(val.getAttribute('role') === 'button', 'the account value must be tappable');
+        assert(val.getAttribute('tabindex') === '0', 'the account value must be keyboard reachable');
+        assert(val.getAttribute('data-trunc-wired') === '1', 'the account value must be wired');
+        assert((val.getAttribute('aria-label') || '').length > 0, 'the account value needs an aria-label');
+        assert(pl.getAttribute('role') === 'button', 'the balance line must be tappable too');
+        // The home figures carry no ⓘ label — the number is the tap target.
+        // The harness fakes the overflow the ellipsis would produce.
+        try {
+          Object.defineProperty(val, 'scrollWidth', { value: 9999, configurable: true });
+          Object.defineProperty(val, 'clientWidth', { value: 10, configurable: true });
+          val.click();
+          var dlg = document.getElementById('note-dialog');
+          assert(dlg.open === true, 'tapping a cut account value must open the popup');
+          var txt = document.getElementById('note-dialog-text').textContent;
+          assert(txt === val.textContent, 'the popup must carry the exact value, got ' + txt);
+          var title = document.getElementById('note-dialog-title').textContent;
+          assert(title === 'Account value', 'the popup must be titled "Account value", got ' + title);
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        } finally {
+          try { delete val.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete val.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // A fitting figure opens nothing: overflow is the only door.
+        try {
+          Object.defineProperty(val, 'scrollWidth', { value: 10, configurable: true });
+          Object.defineProperty(val, 'clientWidth', { value: 9999, configurable: true });
+          val.click();
+          assert(document.getElementById('note-dialog').open !== true, 'a fitting account value must not open a popup');
+        } finally {
+          try { delete val.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete val.clientWidth; } catch (e) { /* ignore */ }
+        }
+        // The balance line gets the same door (a cash account line can hold
+        // a long '0.163762314531 XMR' string on a narrow phone).
+        try {
+          Object.defineProperty(pl, 'scrollWidth', { value: 9999, configurable: true });
+          Object.defineProperty(pl, 'clientWidth', { value: 10, configurable: true });
+          pl.click();
+          assert(document.getElementById('note-dialog').open === true, 'tapping a cut balance line must open the popup');
+          assert(document.getElementById('note-dialog-title').textContent === 'Account P&L', 'the balance popup must be titled "Account P&L", got ' + document.getElementById('note-dialog-title').textContent);
+          try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+        } finally {
+          try { delete pl.scrollWidth; } catch (e) { /* ignore */ }
+          try { delete pl.clientWidth; } catch (e) { /* ignore */ }
+        }
+      });
+
+      test('home placeholders never wire a figure popup', function () {
+        seedHome();
+        openHome();
+        var empty = document.querySelector('#accounts .account-card[data-account="h-empty"]');
+        assert(empty !== null, 'the trade-less account must render');
+        var eval0 = empty.querySelector('.acct-value');
+        assert(eval0 !== null && (eval0.textContent === '—' || eval0.textContent === 'New'), 'a trade-less account shows its placeholder, got ' + (eval0 && eval0.textContent));
+        assert(eval0.getAttribute('data-trunc-wired') !== '1' && eval0.getAttribute('role') !== 'button', 'a placeholder must not be a tap target');
+        var hold = document.querySelector('#accounts .account-card[data-account="h-hold"]');
+        assert(hold !== null, 'the holding account must render');
+        var hval = hold.querySelector('.acct-value');
+        assert(hval !== null && (hval.textContent === '—' || hval.textContent === '…'), 'an unknown value shows placeholder, got ' + (hval && hval.textContent));
+        assert(hval.getAttribute('data-trunc-wired') !== '1' && hval.getAttribute('role') !== 'button', 'placeholder must not be a tap target');
+      });
+
+      test('a cut home total opens the balance in a popup', function () {
+        seedHome();
+        var hv = document.getElementById('hero-value');
+        assert(hv !== null, 'the hero must render');
+        // The shipped index.html carries the number in an inner span;
+        // reproduce that markup shape so the wiring hits the real target.
+        var span = null;
+        if (!document.getElementById('hero-value-num')) {
+          span = document.createElement('span');
+          span.id = 'hero-value-num';
+          hv.innerHTML = '';
+          hv.appendChild(span);
+        }
+        var restored = false;
+        function restoreHero() {
+          if (restored) return;
+          restored = true;
+          try {
+            if (span) span.remove();
+            hv.textContent = '—';
+            if (typeof render === 'function') render();
+          } catch (e) { /* cleanup never breaks the suite */ }
+        }
+        try {
+          openHome();
+          var target = document.getElementById('hero-value-num') || hv;
+          assert(target.textContent.indexOf('100') !== -1, 'the hero must show the cash total, got ' + target.textContent);
+          assert(target.getAttribute('data-trunc-wired') === '1', 'the hero total must be wired');
+          assert(target.getAttribute('role') === 'button', 'the hero total must be tappable');
+          assert((hv.getAttribute('title') || '').length > 0, 'the hero keeps its desktop tooltip');
+          try {
+            Object.defineProperty(target, 'scrollWidth', { value: 9999, configurable: true });
+            Object.defineProperty(target, 'clientWidth', { value: 10, configurable: true });
+            target.click();
+            var dlg = document.getElementById('note-dialog');
+            assert(dlg.open === true, 'tapping a cut hero total must open the popup');
+            var txt = document.getElementById('note-dialog-text').textContent;
+            assert(txt === target.textContent, 'the popup must carry the exact total, got ' + txt);
+            var title = document.getElementById('note-dialog-title').textContent;
+            assert(title === 'Total balance', 'the popup must be titled "Total balance", got ' + title);
+            try { closeDialog('note-dialog'); } catch (e) { /* ignore */ }
+          } finally {
+            try { delete target.scrollWidth; } catch (e) { /* ignore */ }
+            try { delete target.clientWidth; } catch (e) { /* ignore */ }
+          }
+          // A fitting total opens nothing: overflow is the only door.
+          try {
+            Object.defineProperty(target, 'scrollWidth', { value: 10, configurable: true });
+            Object.defineProperty(target, 'clientWidth', { value: 9999, configurable: true });
+            target.click();
+            assert(document.getElementById('note-dialog').open !== true, 'a fitting hero total must not open a popup');
+          } finally {
+            try { delete target.scrollWidth; } catch (e) { /* ignore */ }
+            try { delete target.clientWidth; } catch (e) { /* ignore */ }
+          }
+        } finally {
+          restoreHero();
+        }
         navHome();
       });
     })();

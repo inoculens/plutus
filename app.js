@@ -6304,6 +6304,13 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
     paintLoading(hvTarget, heroLoading, 'Total balance');
   }
   if (hv && (!hvTarget || !hvTarget.classList.contains('is-loading'))) hv.title = hvTarget ? hvTarget.textContent : '';
+  // Tap for the full total too: the desktop tooltip is not a popup — phones
+  // never see titles. Same overflow-gated door as every other cut value;
+  // the wiring is idempotent because the hero is static markup that only
+  // re-renders in place. Placeholders never wire.
+  if (hvTarget && anyContent && hvTarget.textContent !== '—' && hvTarget.textContent !== PRICE_LOADING_TEXT) {
+    wireTruncTap(hvTarget, 'Total balance');
+  }
   fitHeroValue();
   // Invested amount: lifetime gross in (every buy + valued income at its
   // locked historical rate) — never reduced by sells, fees or transfers.
@@ -7066,6 +7073,13 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     paintLoading(plv, plLoading, acc.name + ' profit');
   }
   figs.appendChild(valv);
+  // Cut figures read in full on tap (same overflow-gated popup as the
+  // summary cards): narrow phones trim figures around the card's slot, and
+  // the cash balance line can hold a long '0.163762314531 XMR' text. There
+  // is no label on a home card, so the number itself is the tap target —
+  // placeholders ('—', 'New', the '…' loading state) never wire at all.
+  if (valKnown && !valv.classList.contains('is-loading') && valv.textContent !== '—') wireTruncTap(valv, 'Account value');
+  if (hasKnownPl || cashKnown) wireTruncTap(plv, 'Account P&L');
   figs.appendChild(plv);
   card.appendChild(figs);
   if (withSelect && selectionMode) {
@@ -8037,6 +8051,14 @@ function syncInfoDots() {
       if (dot) dot.style.display = trimmed ? 'inline' : 'none';
       try { w.style.cursor = trimmed ? 'pointer' : ''; } catch (e) { /* ignore */ }
     }
+    // Label-less wired values (home account figures, the hero total) carry
+    // no ⓘ badge — the number itself is the tap target. Only the hand
+    // cursor follows the truncation truth.
+    var bare = document.querySelectorAll('.acct-value[data-info-cond], .acct-pl[data-info-cond], #hero-value[data-info-cond], #hero-value-num[data-info-cond]');
+    for (var b = 0; b < bare.length; b++) {
+      var bv = bare[b];
+      try { bv.style.cursor = (bv.scrollWidth > bv.clientWidth + 2) ? 'pointer' : ''; } catch (e) { /* ignore */ }
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -8486,22 +8508,17 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee, tSym) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
+      // skipPopup: we wire the value for truncation popup (show full fee),
+      // and the label gets an ⓘ that opens the fee explainer — two different popups.
       var feeRowT = statRow('Transfer fees', feeTxtT, t.networkFee, false, true);
-      // Tap explains the two numbers in plain language (market worth vs
-      // booked cost) — the card stays clean, the math stays one tap away.
       var feeValT = feeRowT.querySelector('.stat-val');
       var feeLabT = feeRowT.querySelector('.stat-label');
       if (feeValT) {
-        feeValT.setAttribute('role', 'button');
-        feeValT.setAttribute('tabindex', '0');
-        feeValT.setAttribute('aria-label', 'Explain the transfer fee');
-        feeValT.title = 'Tap to explain this fee';
+        // Value tap → show full fee text (truncation popup), no label ⓘ.
+        wireTruncTap(feeValT, 'Transfer fees');
+        // Label ⓘ → fee explainer (market worth vs booked cost).
         (function (tr, mn, fq, rt) {
           function open() { try { openFeeExplainer(tr, mn, fq, rt); } catch (e) { /* ignore */ } }
-          feeValT.addEventListener('click', open);
-          feeValT.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
-          });
           infoDot(feeLabT, open);
         })(t, main, xferFee, xferRate);
       }

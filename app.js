@@ -5800,8 +5800,6 @@ function fmtPct(n) {
 function showBanner(msg, kind, details) {
   var b = document.getElementById('banner');
   if (!b) return;
-  // Clear any pending auto-dismiss
-  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
   var hasDetails = !!(details && ((details.lines && details.lines.length) || details.message));
   if (hasDetails) {
     lastErrorDetails = {
@@ -5817,20 +5815,21 @@ function showBanner(msg, kind, details) {
   // moved in from a pre-existing page banner moves back on close.
   if (!suppressMirror && settingsDialogOpen()) {
     lastMirror = { msg: String(msg), kind: kind, details: details || null, fromPage: false };
-    try {
-      mirrorBannerToSettings(String(msg), kind === 'info' ? 'info' : 'error', hasDetails);
-    } catch (e) { /* never let the mirror break the banner */ }
+    try { mirrorBannerToSettings(String(msg), kind === 'info' ? 'info' : 'error', hasDetails); } catch (e) { /* never let the mirror break the banner */ }
     return;
   }
   var t = document.getElementById('banner-text');
   if (t) t.textContent = String(msg);
   else b.textContent = String(msg);
+  // Already on screen: update in place (no second slide-in). Hidden or
+  // mid-exit: (re)start the entrance from off-screen.
+  var wasShowing = !b.hidden && b.classList.contains('show');
+  cancelBannerTimers();
   b.hidden = false;
   b.classList.remove('error', 'info', 'hide');
-  b.classList.add(kind === 'info' ? 'info' : 'error', 'show');
+  b.classList.add(kind === 'info' ? 'info' : 'error');
+  if (!wasShowing) { b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
   try { b.dataset.kind = kind === 'info' ? 'info' : 'error'; } catch (e) { /* ignore */ }
-  // Force animation restart on re-show
-  void b.offsetWidth;
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
   // Optional drill-down: every error with something more to say gets a
@@ -5845,77 +5844,58 @@ function showBanner(msg, kind, details) {
     btn.setAttribute('aria-label', 'Show error details');
     btn.addEventListener('click', function () { openErrorDialog(); });
     var actions = b.querySelector('.banner-actions');
-    if (actions) actions.appendChild(btn);
+    var closeBtn = document.getElementById('banner-close');
+    if (actions && closeBtn && closeBtn.parentNode === actions) actions.insertBefore(btn, closeBtn); // X stays rightmost
+    else if (actions) actions.appendChild(btn);
     else b.appendChild(btn);
   }
-  // If banner text is truncated, offer a "Read more" button to expand it
-  if (t) {
-    var rmBtn = document.getElementById('banner-read-more');
-    if (rmBtn && rmBtn.parentNode) rmBtn.parentNode.removeChild(rmBtn);
-    if (t.scrollWidth > t.clientWidth + 1) {
-      var rmb = document.createElement('button');
-      rmb.type = 'button';
-      rmb.id = 'banner-read-more';
-      rmb.className = 'quiet';
-      rmb.textContent = 'Read more';
-      rmb.setAttribute('aria-label', 'Show full notification text');
-      rmb.addEventListener('click', function () {
-        t.style.whiteSpace = 'normal';
-        t.style.overflow = 'visible';
-        t.style.textOverflow = 'clip';
-        rmb.hidden = true;
-      });
-      var actions2 = b.querySelector('.banner-actions');
-      if (actions2) actions2.appendChild(rmb);
-      else b.appendChild(rmb);
-    }
-  }
-  // Progress bar: reset then shrink over 5s
-  var bar = document.getElementById('banner-progress-bar');
-  if (bar) {
-    bar.style.transition = 'none';
-    bar.style.transform = 'scaleX(1)';
-    // Force reflow
-    void bar.offsetWidth;
-    bar.style.transition = 'transform 5s linear';
-    bar.style.transform = 'scaleX(0)';
-  }
-  // Auto-dismiss after 5 seconds with bounce-then-slide exit
-  bannerTimer = setTimeout(function () {
-    bannerTimer = null;
+  // Timing: the progress bar waits for the slide-in (lead), then drains over
+  // BANNER_DWELL_MS; the exit starts exactly when it runs out.
+  var lead = wasShowing ? 0 : BANNER_IN_MS;
+  try {
+    b.style.setProperty('--banner-in', BANNER_IN_MS + 'ms');
+    b.style.setProperty('--banner-out', BANNER_OUT_MS + 'ms');
+    b.style.setProperty('--banner-dwell', BANNER_DWELL_MS + 'ms');
+    b.style.setProperty('--banner-lead', lead + 'ms');
+  } catch (e) { /* ignore */ }
+  b.classList.remove('run');
+  void b.offsetWidth; // restart the bar animation
+  b.classList.add('run');
+  bannerTimer = setTimeout(dismissBanner, lead + BANNER_DWELL_MS);}
+
+function cancelBannerTimers() {
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  if (bannerOutTimer) { clearTimeout(bannerOutTimer); bannerOutTimer = null; }}
+
+// Animated exit (progress bar ran out, or the X was pressed): dip, then
+// slide back up off-screen; only then is the element really hidden.
+function dismissBanner() {
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  var b = document.getElementById('banner');
+  if (!b || b.hidden || b.classList.contains('hide')) return;
+  b.classList.remove('show'); // 'run' stays so the bar does not snap back to full during the exit
+  b.classList.add('hide');
+  bannerOutTimer = setTimeout(function () {
+    bannerOutTimer = null;
     var bb = document.getElementById('banner');
-    if (!bb) return;
-    bb.classList.remove('show');
-    bb.classList.add('hide');
-    // After exit animation completes, fully hide
-    setTimeout(function () {
-      var bb2 = document.getElementById('banner');
-      if (bb2 && bb2.classList.contains('hide')) {
-        bb2.hidden = true;
-        bb2.classList.remove('hide');
-        var oldBtn = document.getElementById('banner-details');
-        if (oldBtn && oldBtn.parentNode) oldBtn.parentNode.removeChild(oldBtn);
-      }
-    }, 700);
-  }, 5000);
-}
+    if (bb && bb.classList.contains('hide')) clearBanner();
+  }, BANNER_OUT_MS + 50);}
 
 function clearBanner() {
-  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  cancelBannerTimers();
   var b = document.getElementById('banner');
   if (!b) return;
   var t = document.getElementById('banner-text');
   if (t) t.textContent = '';
   else b.textContent = '';
-  b.classList.remove('error', 'info', 'show', 'hide');
+  b.classList.remove('error', 'info', 'show', 'hide', 'run');
   try { delete b.dataset.kind; } catch (e) { /* ignore */ }
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
   lastErrorDetails = null;
   lastMirror = null;
   b.hidden = true;
-  try { hideSettingsAlert(); } catch (e) { /* ignore */ }
-}
+  try { hideSettingsAlert(); } catch (e) { /* ignore */ }}
 
 var lastErrorDetails = null; // {title, message, lines[]} for the error-details popup
 
@@ -5923,8 +5903,11 @@ var lastErrorDetails = null; // {title, message, lines[]} for the error-details 
 // suppressMirror + lastMirror carry it back to the page banner on close.
 var suppressMirror = false;
 var lastMirror = null; // {msg, kind, details} or null
-var bannerTimer = null; // auto-dismiss timer
-var bannerProgressTimer = null; // progress bar animation reset
+var BANNER_IN_MS = 600;      // slide-in duration (CSS --banner-in)
+var BANNER_OUT_MS = 550;     // slide-out duration (CSS --banner-out)
+var BANNER_DWELL_MS = 5000;  // on-screen time = progress bar run time
+var bannerTimer = null;      // starts the animated exit when the bar runs out
+var bannerOutTimer = null;   // finishes the exit (really hides) after the slide-out
 
 // Settings-dialog mirror of the page banner: modal dialogs paint above the
 // page, so without this an error fired from the Sync tab hides behind the
@@ -6046,7 +6029,8 @@ function hidePageBannerOnly() {
   var t = document.getElementById('banner-text');
   if (t) t.textContent = '';
   else b.textContent = '';
-  b.classList.remove('error', 'info');
+  cancelBannerTimers();
+  b.classList.remove('error', 'info', 'show', 'hide', 'run');
   try { delete b.dataset.kind; } catch (e) { /* ignore */ }
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -14271,7 +14255,7 @@ function buildTopbar() {
   var bclose = document.getElementById('banner-close');
   if (bclose && !bclose.getAttribute('data-wired')) {
     bclose.setAttribute('data-wired', '1');
-    bclose.addEventListener('click', clearBanner);
+    bclose.addEventListener('click', dismissBanner);
   }
   var brandHome = document.getElementById('brand-home');
   if (brandHome && !brandHome.getAttribute('data-wired')) {

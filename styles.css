@@ -741,6 +741,8 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   transform: translateY(-150%) rotate(-1deg);
   opacity: 0;
   pointer-events: none;
+  /* Appears wherever scrolled: fixed at viewport top, below sticky header */
+  top: 3.8rem;
 }
 
 #banner.show {
@@ -824,6 +826,20 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   border-radius: 6px;
 }
 #banner-details:hover { background: rgba(255,255,255,0.06); }
+
+#banner-read-more {
+  flex-shrink: 0;
+  min-height: 2rem;
+  padding: 0.25rem 0.8rem;
+  background: none;
+  border-color: transparent;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: 6px;
+  font-size: 0.86rem;
+}
+#banner-read-more:hover { background: rgba(255,255,255,0.06); }
 
 /* Progress bar */
 .banner-progress {

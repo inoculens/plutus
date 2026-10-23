@@ -5825,6 +5825,7 @@ function showBanner(msg, kind, details) {
   var t = document.getElementById('banner-text');
   if (t) t.textContent = String(msg);
   else b.textContent = String(msg);
+  b.hidden = false;
   b.classList.remove('error', 'info', 'hide');
   b.classList.add(kind === 'info' ? 'info' : 'error', 'show');
   try { b.dataset.kind = kind === 'info' ? 'info' : 'error'; } catch (e) { /* ignore */ }
@@ -5847,7 +5848,28 @@ function showBanner(msg, kind, details) {
     if (actions) actions.appendChild(btn);
     else b.appendChild(btn);
   }
-  b.hidden = false;
+  // If banner text is truncated, offer a "Read more" button to expand it
+  if (t) {
+    var rmBtn = document.getElementById('banner-read-more');
+    if (rmBtn && rmBtn.parentNode) rmBtn.parentNode.removeChild(rmBtn);
+    if (t.scrollWidth > t.clientWidth + 1) {
+      var rmb = document.createElement('button');
+      rmb.type = 'button';
+      rmb.id = 'banner-read-more';
+      rmb.className = 'quiet';
+      rmb.textContent = 'Read more';
+      rmb.setAttribute('aria-label', 'Show full notification text');
+      rmb.addEventListener('click', function () {
+        t.style.whiteSpace = 'normal';
+        t.style.overflow = 'visible';
+        t.style.textOverflow = 'clip';
+        rmb.hidden = true;
+      });
+      var actions2 = b.querySelector('.banner-actions');
+      if (actions2) actions2.appendChild(rmb);
+      else b.appendChild(rmb);
+    }
+  }
   // Progress bar: reset then shrink over 5s
   var bar = document.getElementById('banner-progress-bar');
   if (bar) {

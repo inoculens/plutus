@@ -722,10 +722,11 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
 /* ————— Banner (fixed floating popup card, visible wherever scrolled) ————— */
 #banner {
   position: fixed;
-  top: 0.75rem;
-  left: 50%;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 200;
-  width: min(640px, 92vw);
+  width: 100%;
   max-width: none;
   margin: 0;
   padding: 0.85rem 1.25rem 0.55rem;
@@ -737,7 +738,7 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   gap: 0.35rem;
   font-size: 0.9rem;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
-  transform: translateX(-50%) translateY(-150%) rotate(-1deg);
+  transform: translateY(-150%) rotate(-1deg);
   opacity: 0;
   pointer-events: none;
 }
@@ -753,19 +754,19 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 
 @keyframes slideInBounce {
-  0% { transform: translateX(-50%) translateY(-150%) rotate(-1deg); opacity: 0; }
-  55% { transform: translateX(-50%) translateY(10%) rotate(0.5deg); opacity: 1; }
-  70% { transform: translateX(-50%) translateY(-5%) rotate(-0.2deg); }
-  85% { transform: translateX(-50%) translateY(2%) rotate(0.1deg); }
-  100% { transform: translateX(-50%) translateY(0) rotate(0); opacity: 1; }
+  0% { transform: translateY(-150%) rotate(-1deg); opacity: 0; }
+  55% { transform: translateY(10%) rotate(0.5deg); opacity: 1; }
+  70% { transform: translateY(-5%) rotate(-0.2deg); }
+  85% { transform: translateY(2%) rotate(0.1deg); }
+  100% { transform: translateY(0) rotate(0); opacity: 1; }
 }
 
 @keyframes slideOutBounce {
-  0% { transform: translateX(-50%) translateY(0) rotate(0); opacity: 1; }
-  18% { transform: translateX(-50%) translateY(-18px) rotate(0.3deg); }
-  35% { transform: translateX(-50%) translateY(7px) rotate(-0.15deg); }
-  50% { transform: translateX(-50%) translateY(0) rotate(0); }
-  100% { transform: translateX(-50%) translateY(-150%) rotate(-0.5deg); opacity: 0; }
+  0% { transform: translateY(0) rotate(0); opacity: 1; }
+  18% { transform: translateY(-18px) rotate(0.3deg); }
+  35% { transform: translateY(7px) rotate(-0.15deg); }
+  50% { transform: translateY(0) rotate(0); }
+  100% { transform: translateY(-150%) rotate(-0.5deg); opacity: 0; }
 }
 
 /* Banner inner row */

@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/coin-btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=397">
+  <link rel="stylesheet" href="/styles.css?v=398">
 
   <script type="application/ld+json">
   {
@@ -180,7 +180,16 @@
     </div>
   </header>
 
-  <div id="banner" role="alert" hidden><span id="banner-text"></span><button type="button" id="banner-close" aria-label="Dismiss">✕</button></div>
+  <div id="banner" role="alert" hidden>
+    <div class="banner-row">
+      <span id="banner-text"></span>
+      <div class="banner-actions">
+        <button type="button" id="banner-details" hidden>More details</button>
+        <button type="button" id="banner-close" aria-label="Dismiss">✕</button>
+      </div>
+    </div>
+    <div class="banner-progress"><div id="banner-progress-bar"></div></div>
+  </div>
 
   <main id="main">
     <section class="sr-only" aria-label="About INOCULENS PLUTUS">
@@ -362,6 +371,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=378" defer></script>
+  <script src="/app.js?v=379" defer></script>
 </body>
 </html>

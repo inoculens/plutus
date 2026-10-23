@@ -5800,6 +5800,8 @@ function fmtPct(n) {
 function showBanner(msg, kind, details) {
   var b = document.getElementById('banner');
   if (!b) return;
+  // Clear any pending auto-dismiss
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
   var hasDetails = !!(details && ((details.lines && details.lines.length) || details.message));
   if (hasDetails) {
     lastErrorDetails = {
@@ -5823,9 +5825,11 @@ function showBanner(msg, kind, details) {
   var t = document.getElementById('banner-text');
   if (t) t.textContent = String(msg);
   else b.textContent = String(msg);
-  b.classList.remove('error', 'info');
-  b.classList.add(kind === 'info' ? 'info' : 'error');
+  b.classList.remove('error', 'info', 'hide');
+  b.classList.add(kind === 'info' ? 'info' : 'error', 'show');
   try { b.dataset.kind = kind === 'info' ? 'info' : 'error'; } catch (e) { /* ignore */ }
+  // Force animation restart on re-show
+  void b.offsetWidth;
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
   // Optional drill-down: every error with something more to say gets a
@@ -5839,18 +5843,49 @@ function showBanner(msg, kind, details) {
     btn.textContent = 'More details';
     btn.setAttribute('aria-label', 'Show error details');
     btn.addEventListener('click', function () { openErrorDialog(); });
-    b.appendChild(btn);
+    var actions = b.querySelector('.banner-actions');
+    if (actions) actions.appendChild(btn);
+    else b.appendChild(btn);
   }
   b.hidden = false;
+  // Progress bar: reset then shrink over 5s
+  var bar = document.getElementById('banner-progress-bar');
+  if (bar) {
+    bar.style.transition = 'none';
+    bar.style.transform = 'scaleX(1)';
+    // Force reflow
+    void bar.offsetWidth;
+    bar.style.transition = 'transform 5s linear';
+    bar.style.transform = 'scaleX(0)';
+  }
+  // Auto-dismiss after 5 seconds with bounce-then-slide exit
+  bannerTimer = setTimeout(function () {
+    bannerTimer = null;
+    var bb = document.getElementById('banner');
+    if (!bb) return;
+    bb.classList.remove('show');
+    bb.classList.add('hide');
+    // After exit animation completes, fully hide
+    setTimeout(function () {
+      var bb2 = document.getElementById('banner');
+      if (bb2 && bb2.classList.contains('hide')) {
+        bb2.hidden = true;
+        bb2.classList.remove('hide');
+        var oldBtn = document.getElementById('banner-details');
+        if (oldBtn && oldBtn.parentNode) oldBtn.parentNode.removeChild(oldBtn);
+      }
+    }, 700);
+  }, 5000);
 }
 
 function clearBanner() {
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
   var b = document.getElementById('banner');
   if (!b) return;
   var t = document.getElementById('banner-text');
   if (t) t.textContent = '';
   else b.textContent = '';
-  b.classList.remove('error', 'info');
+  b.classList.remove('error', 'info', 'show', 'hide');
   try { delete b.dataset.kind; } catch (e) { /* ignore */ }
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -5866,6 +5901,8 @@ var lastErrorDetails = null; // {title, message, lines[]} for the error-details 
 // suppressMirror + lastMirror carry it back to the page banner on close.
 var suppressMirror = false;
 var lastMirror = null; // {msg, kind, details} or null
+var bannerTimer = null; // auto-dismiss timer
+var bannerProgressTimer = null; // progress bar animation reset
 
 // Settings-dialog mirror of the page banner: modal dialogs paint above the
 // page, so without this an error fired from the Sync tab hides behind the

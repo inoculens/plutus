@@ -11564,7 +11564,7 @@ function wireTradeDnDEvents(host) {
     // unfunded (selling before the funds arrive).
     var applied = applyTradeReorder(st, accId, date, displayIds.slice().reverse());
     if (!applied || !applied.ok) {
-      showBanner('Cannot rearrange — these records share a date, and this order would spend funds that are not there yet.');
+      showBanner('Cannot rearrange these records even though they share a date, this order would spend funds that are not there yet.');
       render();
       return;
     }

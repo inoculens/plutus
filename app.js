@@ -5743,9 +5743,30 @@ function moneyFmt(currency) {
   return moneyFmtCache[code];
 }
 
+// Stablecoins (USDC/USDT/DAI) and any other non-ISO code are not currencies
+// Intl can symbolise: USDC throws, and moneyFmt's catch would silently fall
+// back to a EUR formatter, printing the right number under the wrong symbol.
+// Those amounts show as "233.05 USDC" (same shape as the Fee row) so the
+// record always names the unit it was actually paid in.
+var codeAmtFmt = null;
+
+function isCodeSuffixed(code) {
+  if (!code) return false;
+  return stableToUsd(code) || !/^[A-Z]{3}$/.test(code);
+}
+
 function fmtMoney(n, currency) {
   var v = Number(n);
   if (!isFinite(v)) return '—';
+  var code = String(currency || '').toUpperCase();
+  if (isCodeSuffixed(code)) {
+    try {
+      if (!codeAmtFmt) codeAmtFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return codeAmtFmt.format(v) + ' ' + code;
+    } catch (e) {
+      return (Math.round(v * 100) / 100).toFixed(2) + ' ' + code;
+    }
+  }
   try {
     return moneyFmt(currency).format(v);
   } catch (e) {

@@ -6708,6 +6708,28 @@
         assert(conv.textContent.indexOf('RON') !== -1 || Number(conv.getAttribute('data-value')) === 497, 'converted value wrong: ' + conv.textContent);
         navHome();
       });
+      test('stablecoin Paid shows the stablecoin, never the view currency', function () {
+        seedConverted('EUR', 'USDC', 'USDC/EUR', 0.92);
+        var det = document.getElementById('account-detail');
+        var paid = det.querySelector('[data-label="Paid"]');
+        assert(paid !== null, 'Paid row must stay');
+        assert(paid.textContent.indexOf('USDC') !== -1, 'Paid must name USDC: ' + paid.textContent);
+        assert(paid.textContent.indexOf('€') === -1 && paid.textContent.indexOf('EUR') === -1, 'Paid must not wear the view currency: ' + paid.textContent);
+        var conv = det.querySelector('[data-label="Converted"]');
+        assert(conv !== null, 'USDC trade in EUR view must still convert');
+        assert(conv.textContent.indexOf('€') !== -1 || conv.textContent.indexOf('EUR') !== -1, 'Converted stays in the view currency: ' + conv.textContent);
+        navHome();
+      });
+      test('fmtMoney: stablecoins suffix the code, fiat keeps its symbol', function () {
+        var usdc = fmtMoney(233.05, 'USDC');
+        assert(usdc.indexOf('233') !== -1 && usdc.indexOf('USDC') !== -1 && usdc.indexOf('€') === -1, 'USDC format wrong: ' + usdc);
+        var usdt = fmtMoney(10, 'usdt');
+        assert(usdt.indexOf('USDT') !== -1 && usdt.indexOf('€') === -1, 'USDT format wrong: ' + usdt);
+        var dai = fmtMoney(10, 'DAI');
+        assert(dai.indexOf('DAI') !== -1 && dai.indexOf('€') === -1, 'DAI format wrong: ' + dai);
+        assert(fmtMoney(215.87, 'EUR').indexOf('€') !== -1, 'EUR must keep its symbol');
+        assert(fmtMoney(NaN, 'USDC') === '—', 'non-finite stays a dash');
+      });
     })();
 
     // === Transfer fee fiat tests (frozen tx-date Fee in fiat rate, no fiat Fee) ===

@@ -1535,6 +1535,23 @@
           assert(same && same.rate === 1, 'same-fiat 1:1 must stay');
         });
 
+        test('USD <-> stablecoin is an exact 1:1 identity (USD view converts USDC trades)', function () {
+          // Even a cached exactly-1 must never be discarded for these pairs.
+          L.cacheRate('2026-02-03', 'USDC', 'USD', 1, '1:1');
+          ['USDC', 'USDT', 'DAI'].forEach(function (s) {
+            var a = L.getCachedRate('2026-02-03', s, 'USD');
+            var b = L.getCachedRate('2026-02-03', 'USD', s);
+            assert(a && a.rate === 1 && a.source === '1:1', s + '->USD must read as 1:1: ' + JSON.stringify(a));
+            assert(b && b.rate === 1 && b.source === '1:1', 'USD->' + s + ' must read as 1:1: ' + JSON.stringify(b));
+          });
+          // No network pair is ever needed for it.
+          var t = { id: 'su1', type: 'buy', symbol: 'AAVE', qty: 1, total: 233.05, currency: 'USDC', date: '2026-02-03', fee: 0, feeCurrency: 'USDC', fxLock: { pair: 'USDC/EUR', rate: 0.9263, source: 'ECB-2026-02-03', interpolated: false } };
+          assert(L.displayPairs([t], 'USD').length === 0, 'USDC trade in USD view must not request a rate');
+          // The USD view must drop the old EUR lock: 233.05 USDC is 233.05 USD, not 215.87.
+          var c = L.convertTrade(t, 'USD');
+          assert(c.fxLock && c.fxLock.rate === 1, 'USD view must use rate 1, got ' + JSON.stringify(c.fxLock));
+        });
+
         testAsync('failed display pairs are reported honestly', function () {
           var realFetch = window.fetch;
           var fxBackup = null;

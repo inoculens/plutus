@@ -1459,6 +1459,12 @@ function getCachedRate(date, from, to) {
   var t = String(to || '').toUpperCase();
   if (!f || !t) return null;
   if (f === t || (stableToUsd(f) && stableToUsd(t))) return { rate: 1, source: '1:1' };
+  // Stablecoins are modelled 1:1 USD (see fetchEcbRate), so USD <-> USDC/USDT/
+  // DAI is an exact identity, not a cached ECB fixing. It must short-circuit
+  // here: the exactly-1 self-heal below would otherwise discard it, leaving the
+  // pair "missing" forever — the trade kept its old-main lock in a USD view
+  // (nominal numbers never converted) and the pair was refetched every paint.
+  if ((f === 'USD' && stableToUsd(t)) || (stableToUsd(f) && t === 'USD')) return { rate: 1, source: '1:1' };
   var cache = loadFxCache();
   var hit = cache[fxCacheKey(date, f, t)];
   if (hit && isFinite(Number(hit.rate)) && Number(hit.rate) > 0 && typeof hit.source === 'string') {

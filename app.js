@@ -6394,6 +6394,13 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
     var heroLoading = !!(anyContent && !mvKnown && anyPriceLoading());
     hvTarget.textContent = anyContent ? (mvKnown ? fmtMoney(mv, main) : (heroLoading ? PRICE_LOADING_TEXT : '—')) : '—';
     paintLoading(hvTarget, heroLoading, 'Total balance');
+    // The tap-to-full rule needs the live full string wherever the element
+    // re-renders in place: the wiring snapshot never goes stale, the hero
+    // never trims its text (fitHeroValue only shrinks the type size), so
+    // the popup carries exactly the painted balance.
+    var hvTxt = String(hvTarget.textContent || '');
+    if (hvTxt !== '' && hvTxt !== '—' && hvTxt !== PRICE_LOADING_TEXT) hvTarget.setAttribute('data-full', hvTxt);
+    else hvTarget.removeAttribute('data-full');
   }
   if (hv && (!hvTarget || !hvTarget.classList.contains('is-loading'))) hv.title = hvTarget ? hvTarget.textContent : '';
   // Tap for the full total too: the desktop tooltip is not a popup — phones
@@ -8058,8 +8065,29 @@ function isTrimmed(el) {
 // opens the same popup as the value. Pass the value element when the popup
 // only exists on overflow — syncInfoDots then hides decorative dots whose
 // value fits. Omit it when the tap always opens something (Transfer fees).
-function infoDot(labelEl, openFn, valueEl) {
-  if (!labelEl || typeof openFn !== 'function') return;
+// A cut caption opens its own full text: the label element keeps the complete
+// string in the DOM (the ellipsis never edits it), so a tap hands it to the
+// note popup. Idempotent: one wiring per element, no double dialogs.
+function wireLabelFull(labelEl) {
+  if (!labelEl || labelEl.getAttribute('data-label-full-wired') === '1') return;
+  labelEl.setAttribute('data-label-full-wired', '1');
+  labelEl.setAttribute('role', 'button');
+  labelEl.setAttribute('tabindex', '0');
+  labelEl.setAttribute('aria-label', 'Show full label');
+  try { labelEl.style.cursor = 'pointer'; } catch (e) { /* ignore */ }
+  function openLab() {
+    try { openNoteDialog(labelEl.textContent, 'Label'); } catch (e) { /* ignore */ }
+  }
+  labelEl.addEventListener('click', openLab);
+  labelEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openLab();
+    }
+  });
+}
+
+function infoDot(labelEl, openFn, valueEl) {  if (!labelEl || typeof openFn !== 'function') return;
   var dot = document.createElement('span');
   // Overflow-gated dots (a measured value was passed) start hidden and only
   // ever appear via the sync pass — any rebuild path that skips the sync
@@ -8117,6 +8145,7 @@ function qtyElCutOne(vEl) {
   var next = cutOneQtyDigit(String(vEl.textContent || ''));
   if (next === null) return false;
   vEl.textContent = next;
+  vEl.setAttribute('data-fit-cut', '1');
   return true;
 }
 
@@ -8145,10 +8174,14 @@ function fitTradeFactsRows(strip) {
   }
   if (!qtys.length) return;
   // Every pass restarts from the exact truth, so a resize can re-fit from
-  // full precision instead of compounding earlier cuts.
+  // full precision instead of compounding earlier cuts. Restoring also
+  // clears the cut flag: only a cut applied by the ladder below keeps it.
   for (i = 0; i < qtys.length; i++) {
     var fv = qtys[i].getAttribute('data-full');
-    if (fv !== null) qtys[i].textContent = fv;
+    if (fv !== null) {
+      qtys[i].textContent = fv;
+      qtys[i].removeAttribute('data-fit-cut');
+    }
   }
   function fits() {
     try {
@@ -8186,13 +8219,22 @@ function wireTruncTap(valEl, title, labelEl) {
   valEl.setAttribute('role', 'button');
   valEl.setAttribute('tabindex', '0');
   valEl.setAttribute('aria-label', 'Show full ' + String(title || 'value').toLowerCase());
+  // The invariant is: every trimmed thing opens its full value on tap. The
+  // exact DOM string is snapshotted right here at wiring time — but never
+  // over an existing one, because in-place re-renders (the hero total) keep
+  // this element and refresh their own snapshot where the text changes.
+  var full0 = String(valEl.textContent || '');
+  if (full0 !== '' && full0 !== '—' && !valEl.getAttribute('data-full')) valEl.setAttribute('data-full', full0);
   function open() {
     try {
+      var snap = String(valEl.getAttribute('data-full') || '');
+      var cur = String(valEl.textContent || '');
+      if (snap !== '' && snap !== cur) { // fit-trimmed: the popup owns the full string
+        openNoteDialog(snap, title);
+        return;
+      }
       if (valEl.scrollWidth <= valEl.clientWidth + 2) return;
-      // The strip-fit may have shortened a quantity cell to give its fiat
-      // neighbours room: data-full carries the exact pre-cut string, so the
-      // popup always shows the complete value.
-      openNoteDialog(valEl.getAttribute('data-full') || valEl.textContent, title);
+      openNoteDialog(snap || cur, title);
     } catch (e) { /* a broken tap must never break the panel */ }
   }
   valEl.addEventListener('click', open);
@@ -8225,10 +8267,35 @@ function syncInfoDots() {
       try { lab = box.querySelector('.stat-label, .detail-meta-label, .card-label'); } catch (e) { lab = null; }
       var overflowing = false;
       try { overflowing = v.scrollWidth > v.clientWidth + 2; } catch (e) { overflowing = false; }
+      // A strategy-trim (the strip fit ladder cut digits to make the row
+      // fit) counts too: the value text differing from its snapshot means
+      // digits gave their room to the neighbours and the popup must be
+      // reachable — the same affordance as a CSS-cut. A mismatch on an
+      // element that measures uncut is the reverse case: an in-place
+      // re-render painted a fresh string, so the snapshot follows the live
+      // text and no stale value can ever be served from a tap.
+      try {
+        var snapV = String(v.getAttribute('data-full') || '');
+        var curV = String(v.textContent || '');
+        if (snapV !== '' && snapV !== curV) {
+          if (v.getAttribute('data-fit-cut') === '1') overflowing = true;
+          else if (!overflowing) v.setAttribute('data-full', curV);
+        }
+      } catch (e) { /* snapshot reads never break the pass */ }
       if (dot) dot.style.display = overflowing ? 'inline' : 'none';
       try { v.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
       if (lab) {
-        try { lab.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
+        var labOverflow = false;
+        try { labOverflow = lab.scrollWidth > lab.clientWidth + 2; } catch (e) { labOverflow = false; }
+        var shown = overflowing || labOverflow;
+        if (dot) dot.style.display = shown ? 'inline' : 'none';
+        try { lab.style.cursor = shown ? 'pointer' : ''; } catch (e) { /* ignore */ }
+        // A cut caption is its own trim: labels carry their full text (the
+        // ellipsis is pure ink), so when the row carries no ⓘ dot at all
+        // (no wired value popup — '—' placeholders skip wiring), the label
+        // itself opens with its complete text. The click-to-full rule has
+        // no exceptions.
+        if (labOverflow && !dot) wireLabelFull(lab);
       }
     }
     // Trade what-pills (.trade-what) trim their own text box; the ⓘ dot is

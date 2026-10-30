@@ -1839,6 +1839,10 @@ function ledgerSym(t) {
   return String((t && t.symbol) || '').trim().toUpperCase();
 }
 
+function ledgerQtyEpsilon(symbol) {
+  return qtyDecimals(symbol) === 18 ? 0 : LEDGER_EPS;
+}
+
 // Stable linkage key for FIFO lot tracing (per-record Sold / Closed-from
 // lines). Null when a legacy trade carries no id — such lots keep their
 // math but opt out of per-record linkage.
@@ -1853,6 +1857,7 @@ function computeAverage(trades) {
     var t = list[i] || {};
     var sym = ledgerSym(t);
     if (!sym) continue;
+    var qtyEps = ledgerQtyEpsilon(sym);
     var n = normalizeTrade(t);
     if (t.type === 'buy' || t.type === 'income') {
       var qbi = Number(t.qty);
@@ -1867,7 +1872,7 @@ function computeAverage(trades) {
       if (!isFinite(qs) || qs <= 0) continue;
       if (!bySym.has(sym)) bySym.set(sym, { qty: 0, cost: 0, realized: 0 });
       var e = bySym.get(sym);
-      if (e.qty <= LEDGER_EPS) continue; // no inventory: ignore, never negative
+      if (e.qty <= qtyEps) continue; // no inventory: ignore, never negative
       var sellQty = Math.min(qs, e.qty);
       var avg = e.qty > 0 ? e.cost / e.qty : 0;
       // Gross proceeds: fees are already baked into the buy price, so sells
@@ -1878,7 +1883,7 @@ function computeAverage(trades) {
       e.realized += proceeds - avg * sellQty;
       e.cost -= avg * sellQty;
       e.qty -= sellQty;
-      if (Math.abs(e.qty) < LEDGER_EPS) { e.qty = 0; e.cost = 0; } // kill float dust
+      if (Math.abs(e.qty) < qtyEps) { e.qty = 0; e.cost = 0; } // kill float dust
     } else if (t.type === 'expense') {
       var hasQ = !(t.qty === undefined || t.qty === null || String(t.qty).trim() === '');
       var hasT = !(t.total === undefined || t.total === null || String(t.total).trim() === '');
@@ -1887,14 +1892,14 @@ function computeAverage(trades) {
       if (!bySym.has(sym)) bySym.set(sym, { qty: 0, cost: 0, realized: 0 });
       var ee = bySym.get(sym);
       if (hasQ) {
-        if (ee.qty > LEDGER_EPS) {
+        if (ee.qty > qtyEps) {
           var rq = Math.min(qe, ee.qty);
           var aqe = ee.qty > 0 ? ee.cost / ee.qty : 0;
           var cRem = aqe * rq;
           ee.realized -= cRem; // crypto lost: proceeds 0 minus cost
           ee.cost -= cRem;
           ee.qty -= rq;
-          if (Math.abs(ee.qty) < LEDGER_EPS) { ee.qty = 0; ee.cost = 0; }
+          if (Math.abs(ee.qty) < qtyEps) { ee.qty = 0; ee.cost = 0; }
         }
       }
       if (hasT || (n.feeMain > 0)) {
@@ -1912,7 +1917,7 @@ function computeAverage(trades) {
       et.fees = (et.fees || 0) + n.feeMain;
       var outsA = transferOutputsOf(t);
       if (!outsA.length) {
-      if (et.qty <= LEDGER_EPS) {
+      if (et.qty <= qtyEps) {
         // no inventory: cannot move, but fiat fee still lost
         if (fiatT > 0) et.realized -= fiatT;
         continue;
@@ -1925,11 +1930,11 @@ function computeAverage(trades) {
       et.qty -= feeQtyT; // net movement is -fee (out+in cancel except fee)
       et.cost -= feeCostT;
       et.realized -= feeCostT + fiatT; // on-chain loss + fiat fee are real losses
-      if (Math.abs(et.qty) < LEDGER_EPS) { et.qty = 0; et.cost = 0; }
+      if (Math.abs(et.qty) < qtyEps) { et.qty = 0; et.cost = 0; }
       } else {
         // Multi-recipient: internal same-symbol moves cancel globally (only
         // the fee matters); external and cross-fiat rows leave the pool.
-        if (et.qty <= LEDGER_EPS) {
+        if (et.qty <= qtyEps) {
           if (fiatT > 0) et.realized -= fiatT;
           continue;
         }
@@ -1955,13 +1960,14 @@ function computeAverage(trades) {
         et.qty -= leaveQ;
         et.cost -= avgA * leaveQ;
         et.realized -= feeCostA + fiatT + leaveSpendC;
-        if (Math.abs(et.qty) < LEDGER_EPS) { et.qty = 0; et.cost = 0; }
+        if (Math.abs(et.qty) < qtyEps) { et.qty = 0; et.cost = 0; }
       }
     }
   }
-  bySym.forEach(function (e) {
-    e.avgEntry = e.qty > LEDGER_EPS ? e.cost / e.qty : 0;
-    if (Math.abs(e.qty) < LEDGER_EPS) { e.qty = 0; e.cost = 0; }
+  bySym.forEach(function (e, sym) {
+    var qtyEps = ledgerQtyEpsilon(sym);
+    e.avgEntry = e.qty > qtyEps ? e.cost / e.qty : 0;
+    if (Math.abs(e.qty) < qtyEps) { e.qty = 0; e.cost = 0; }
   });
   return bySym;
 }
@@ -1979,6 +1985,7 @@ function computeFifo(trades) {
     var t = list[i] || {};
     var sym = ledgerSym(t);
     if (!sym) continue;
+    var qtyEps = ledgerQtyEpsilon(sym);
     var n = normalizeTrade(t);
     var st = state(sym);
     var q = queues.get(sym);
@@ -1991,7 +1998,7 @@ function computeFifo(trades) {
       var qty = Number(t.qty);
       if (!isFinite(qty) || qty <= 0) continue;
       var heldFifo = q.reduce(function (s, l) { return s + l.qty; }, 0);
-      if (heldFifo <= LEDGER_EPS) continue; // no inventory: ignore, never negative
+      if (heldFifo <= qtyEps) continue; // no inventory: ignore, never negative
       // Gross proceeds — fees live inside the buy price, never as sell drag.
       var proceedsTotal = n.totalMain;
       st.fees = (st.fees || 0) + n.feeMain;
@@ -2000,7 +2007,7 @@ function computeFifo(trades) {
       // Scale proceeds when the sell is clamped (oversell ignored, no negative).
       if (qty > sellQty && qty > 0) unitProceeds = (proceedsTotal * (sellQty / qty)) / (sellQty || 1);
       var left = sellQty;
-      while (left > LEDGER_EPS && q.length > 0) {
+      while (left > qtyEps && q.length > 0) {
         var lot = q[0];
         var take = Math.min(lot.qty, left);
         var proceeds = take * unitProceeds;
@@ -2020,7 +2027,7 @@ function computeFifo(trades) {
         st.realized += proceeds - cost;
         lot.qty -= take;
         left -= take;
-        if (lot.qty <= LEDGER_EPS) q.shift();
+        if (lot.qty <= qtyEps) q.shift();
       }
     } else if (t.type === 'expense') {
       var hasQ = !(t.qty === undefined || t.qty === null || String(t.qty).trim() === '');
@@ -2029,10 +2036,10 @@ function computeFifo(trades) {
         var qe = Number(t.qty);
         if (!isFinite(qe) || qe <= 0) continue;
         var heldE = q.reduce(function (s, l) { return s + l.qty; }, 0);
-        if (heldE > LEDGER_EPS) {
+        if (heldE > qtyEps) {
           var rq = Math.min(qe, heldE);
           var leftE = rq;
-          while (leftE > LEDGER_EPS && q.length > 0) {
+          while (leftE > qtyEps && q.length > 0) {
             var lote = q[0];
             var takeE = Math.min(lote.qty, leftE);
             var costE = takeE * lote.unitCost;
@@ -2051,7 +2058,7 @@ function computeFifo(trades) {
             st.realized -= costE;
             lote.qty -= takeE;
             leftE -= takeE;
-            if (lote.qty <= LEDGER_EPS) q.shift();
+            if (lote.qty <= qtyEps) q.shift();
           }
         }
       }
@@ -2067,7 +2074,7 @@ function computeFifo(trades) {
       var fiatT = n.netMain; // all-in fiat cost
       st.fees = (st.fees || 0) + n.feeMain;
       var heldT = q.reduce(function (s, l) { return s + l.qty; }, 0);
-      if (heldT <= LEDGER_EPS) {
+      if (heldT <= qtyEps) {
         if (fiatT > 0) st.realized -= fiatT;
         continue;
       }
@@ -2077,22 +2084,22 @@ function computeFifo(trades) {
       // Remove gross qty oldest-first, then treat fee slice as expense.
       var removed = [];
       var leftT = tQty;
-      while (leftT > LEDGER_EPS && q.length > 0) {
+      while (leftT > qtyEps && q.length > 0) {
         var lotT = q[0];
         var takeT = Math.min(lotT.qty, leftT);
         removed.push({ qty: takeT, unitCost: lotT.unitCost, openDate: lotT.date, buyId: lotT.buyId || null });
         lotT.qty -= takeT;
         leftT -= takeT;
-        if (lotT.qty <= LEDGER_EPS) q.shift();
+        if (lotT.qty <= qtyEps) q.shift();
       }
       var costOutT = removed.reduce(function (s, l) { return s + l.qty * l.unitCost; }, 0);
       var feeCostT = tQty > 0 ? costOutT * (feeQtyT / tQty) : 0;
       // Record the on-chain fee slice as loss lots (proportional across removed lots).
-      if (feeQtyT > LEDGER_EPS && tQty > 0) {
+      if (feeQtyT > qtyEps && tQty > 0) {
         for (var ri = 0; ri < removed.length; ri++) {
           var rl = removed[ri];
           var ft = rl.qty * (feeQtyT / tQty);
-          if (ft <= LEDGER_EPS) continue;
+          if (ft <= qtyEps) continue;
           var fc = ft * rl.unitCost;
           st.lots.push({
             openDate: rl.openDate,
@@ -2121,7 +2128,7 @@ function computeFifo(trades) {
         var spendCostT = 0;
         outsG.forEach(function (o) {
           var rq = Number(o.qty) * scaleT;
-          if (!isFinite(rq) || rq <= LEDGER_EPS) return;
+          if (!isFinite(rq) || rq <= qtyEps) return;
           if (isTransferOutputInternal(o)) {
             var dS = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
               ? sym : String(o.toSymbol).trim().toUpperCase();
@@ -2132,7 +2139,7 @@ function computeFifo(trades) {
           for (var si = 0; si < removed.length; si++) {
             var srl = removed[si];
             var sft = (tQty > 0) ? srl.qty * (rq / tQty) : 0;
-            if (sft <= LEDGER_EPS) continue;
+            if (sft <= qtyEps) continue;
             var sfc = sft * srl.unitCost;
             spendCostT += sfc;
             st.lots.push({
@@ -2152,11 +2159,11 @@ function computeFifo(trades) {
         st.realized -= spendCostT;
       }
       var netQtyT = keepQtyT;
-      if (netQtyT > LEDGER_EPS && tQty > 0) {
+      if (netQtyT > qtyEps && tQty > 0) {
         for (var ni = 0; ni < removed.length; ni++) {
           var ol = removed[ni];
           var keep = ol.qty * (netQtyT / tQty);
-          if (keep > LEDGER_EPS) q.push({ qty: keep, unitCost: ol.unitCost, date: ol.openDate, buyId: ol.buyId || null });
+          if (keep > qtyEps) q.push({ qty: keep, unitCost: ol.unitCost, date: ol.openDate, buyId: ol.buyId || null });
         }
         // Keep FIFO order stable: moved lots go to back (they are still oldest economically, but queue order preserved by re-append; sort by date to keep oldest-first).
         q.sort(function (a, b) { return String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0; });
@@ -2207,7 +2214,8 @@ function computePositions(trades, live, method) {
   });
   var rows = [];
   engine.forEach(function (v, sym) {
-    if (!hasBuy[sym] && !(v.qty > LEDGER_EPS) && !(Math.abs(v.realized || 0) > LEDGER_EPS)) return; // skip phantom sell-only rows
+    var qtyEps = ledgerQtyEpsilon(sym);
+    if (!hasBuy[sym] && !(v.qty > qtyEps) && !(Math.abs(v.realized || 0) > LEDGER_EPS)) return; // skip phantom sell-only rows
     // Unknown live price stays unknown (null) — never coerced to 0, which
     // fabricated a full loss (value 0, unrealized -cost, return -100%).
     var lookup = String(sym).toUpperCase();
@@ -2216,7 +2224,7 @@ function computePositions(trades, live, method) {
     var known = isFinite(num) && num > 0;
     var livePrice = known ? num : null;
     var qtyHeld = v.qty || 0;
-    if (Math.abs(qtyHeld) < LEDGER_EPS) qtyHeld = 0;
+    if (Math.abs(qtyHeld) < qtyEps) qtyHeld = 0;
     var avgEntry = v.avgEntry || 0;
     var marketValue = known ? qtyHeld * num : (qtyHeld === 0 ? 0 : null);
     var unrealized = marketValue === null ? null : marketValue - avgEntry * qtyHeld;
@@ -2265,11 +2273,12 @@ function computePortfolio(allTrades, live, method) {
     return s;
   }
   var totals = { invested: 0, withdrawn: 0, income: 0, incomeQty: 0, feesFiat: 0, feesCryptoQty: 0, feesCryptoMain: 0, expensesFiat: 0, realized: 0, feeDrag: 0 };
-  function avgOf(s) { return s.qty > LEDGER_EPS ? s.cost / s.qty : 0; }
+  function avgOf(s, sym) { return s.qty > ledgerQtyEpsilon(sym) ? s.cost / s.qty : 0; }
   sorted.forEach(function (t) {
     if (!t) return;
     var sym = ledgerSym(t);
     if (!sym) return;
+    var qtyEps = ledgerQtyEpsilon(sym);
     var n = normalizeTrade(t);
     if (t.type === 'buy') {
       var qb = Number(t.qty);
@@ -2301,7 +2310,7 @@ function computePortfolio(allTrades, live, method) {
       var qs = Number(t.qty);
       if (!isFinite(qs) || qs <= 0) return;
       var ss = stFor(t.accountId, sym);
-      if (ss.qty <= LEDGER_EPS && (!isFifo || ss.queue.reduce(function (s, l) { return s + l.qty; }, 0) <= LEDGER_EPS)) return;
+      if (ss.qty <= qtyEps && (!isFifo || ss.queue.reduce(function (s, l) { return s + l.qty; }, 0) <= qtyEps)) return;
       ss.touched = true;
       // Gross proceeds (fees live inside the buy price, never as sell drag).
       var proceeds = n.totalMain;
@@ -2312,7 +2321,7 @@ function computePortfolio(allTrades, live, method) {
         var unitP = sQty > 0 ? proceeds / sQty : 0;
         // also mirror qty/cost for avg view consistency
         var left = sQty;
-        while (left > LEDGER_EPS && ss.queue.length) {
+        while (left > qtyEps && ss.queue.length) {
           var lot = ss.queue[0];
           var take = Math.min(lot.qty, left);
           var pc = take * unitP;
@@ -2322,14 +2331,14 @@ function computePortfolio(allTrades, live, method) {
           totals.realized += pc - cc;
           lot.qty -= take;
           left -= take;
-          if (lot.qty <= LEDGER_EPS) ss.queue.shift();
+          if (lot.qty <= qtyEps) ss.queue.shift();
         }
         ss.qty -= sQty;
         // cost derived from queue; recompute for avg field
         var rc = 0, rq = 0;
         ss.queue.forEach(function (l) { rq += l.qty; rc += l.qty * l.unitCost; });
         ss.cost = rc;
-        if (Math.abs(ss.qty) < LEDGER_EPS && Math.abs(rq) < LEDGER_EPS) { ss.qty = 0; ss.cost = 0; }
+        if (Math.abs(ss.qty) < qtyEps && Math.abs(rq) < qtyEps) { ss.qty = 0; ss.cost = 0; }
         else ss.qty = rq;
         totals.withdrawn += proceeds;
         totals.feesFiat += n.feeMain;
@@ -2337,12 +2346,12 @@ function computePortfolio(allTrades, live, method) {
       } else {
         var sQty2 = Math.min(qs, ss.qty);
         if (qs > ss.qty && qs > 0) proceeds = proceeds * (sQty2 / qs);
-        var a2 = avgOf(ss);
+        var a2 = avgOf(ss, sym);
         ss.realized += proceeds - a2 * sQty2;
         totals.realized += proceeds - a2 * sQty2;
         ss.cost -= a2 * sQty2;
         ss.qty -= sQty2;
-        if (Math.abs(ss.qty) < LEDGER_EPS) { ss.qty = 0; ss.cost = 0; }
+        if (Math.abs(ss.qty) < qtyEps) { ss.qty = 0; ss.cost = 0; }
         totals.withdrawn += proceeds;
         totals.feesFiat += n.feeMain;
         ss.fees += n.feeMain;
@@ -2360,7 +2369,7 @@ function computePortfolio(allTrades, live, method) {
             var heldE = se.queue.reduce(function (s, l) { return s + l.qty; }, 0);
             var rqE = Math.min(qe, heldE);
             var lE = rqE;
-            while (lE > LEDGER_EPS && se.queue.length) {
+            while (lE > qtyEps && se.queue.length) {
               var le2 = se.queue[0];
               var tk = Math.min(le2.qty, lE);
               var ce2 = tk * le2.unitCost;
@@ -2371,14 +2380,14 @@ function computePortfolio(allTrades, live, method) {
               totals.feesCryptoQty += tk;
               le2.qty -= tk;
               lE -= tk;
-              if (le2.qty <= LEDGER_EPS) se.queue.shift();
+              if (le2.qty <= qtyEps) se.queue.shift();
             }
             var rq2 = 0, rc2 = 0;
             se.queue.forEach(function (l) { rq2 += l.qty; rc2 += l.qty * l.unitCost; });
             se.qty = rq2; se.cost = rc2;
-          } else if (se.qty > LEDGER_EPS) {
+          } else if (se.qty > qtyEps) {
             var rqe = Math.min(qe, se.qty);
-            var ae = avgOf(se);
+            var ae = avgOf(se, sym);
             var cre = ae * rqe;
             se.realized -= cre;
             totals.realized -= cre;
@@ -2386,7 +2395,7 @@ function computePortfolio(allTrades, live, method) {
             totals.feesCryptoQty += rqe;
             se.cost -= cre;
             se.qty -= rqe;
-            if (Math.abs(se.qty) < LEDGER_EPS) { se.qty = 0; se.cost = 0; }
+            if (Math.abs(se.qty) < qtyEps) { se.qty = 0; se.cost = 0; }
           }
         }
       }
@@ -2422,7 +2431,7 @@ function computePortfolio(allTrades, live, method) {
       var fiatT = n.netMain; // all-in fiat cost (fee display-only)
       if (isFifo) {
         var heldT = from.queue.reduce(function (s, l) { return s + l.qty; }, 0);
-        if (heldT <= LEDGER_EPS) {
+        if (heldT <= qtyEps) {
           if (fiatT > 0) { from.realized -= fiatT; totals.realized -= fiatT; totals.expensesFiat += fiatT; totals.feesFiat += n.feeMain; }
           return;
         }
@@ -2431,20 +2440,20 @@ function computePortfolio(allTrades, live, method) {
         var feeQ = nft * sc;
         var removed = [];
         var lt = tQty;
-        while (lt > LEDGER_EPS && from.queue.length) {
+        while (lt > qtyEps && from.queue.length) {
           var ltf = from.queue[0];
           var tkf = Math.min(ltf.qty, lt);
           removed.push({ qty: tkf, unitCost: ltf.unitCost, openDate: ltf.date, buyId: ltf.buyId || null });
           ltf.qty -= tkf;
           lt -= tkf;
-          if (ltf.qty <= LEDGER_EPS) from.queue.shift();
+          if (ltf.qty <= qtyEps) from.queue.shift();
         }
         var costOut = removed.reduce(function (s, l) { return s + l.qty * l.unitCost; }, 0);
         var feeC = tQty > 0 ? costOut * (feeQ / tQty) : 0;
-        if (feeQ > LEDGER_EPS && tQty > 0) {
+        if (feeQ > qtyEps && tQty > 0) {
           removed.forEach(function (rl) {
             var fsh = rl.qty * (feeQ / tQty);
-            if (fsh <= LEDGER_EPS) return;
+            if (fsh <= qtyEps) return;
             var fco = fsh * rl.unitCost;
             from.lots.push({ openDate: rl.openDate, closeDate: t.date, qty: fsh, proceeds: 0, cost: fco, gain: -fco, holdingDays: ledgerHoldingDays(rl.openDate, t.date), accountId: t.accountId, symbol: sym, kind: 'network-fee', buyId: rl.buyId || null, sellId: ledgerTradeId(t) });
           });
@@ -2461,10 +2470,10 @@ function computePortfolio(allTrades, live, method) {
         from.qty = frq; from.cost = frc;
         if (!outsP.length) {
         var netQ = tQty - feeQ;
-        if (netQ > LEDGER_EPS && tQty > 0) {
+        if (netQ > qtyEps && tQty > 0) {
           removed.forEach(function (rl) {
             var keep = rl.qty * (netQ / tQty);
-            if (keep > LEDGER_EPS) to.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
+            if (keep > qtyEps) to.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
           });
           to.queue.sort(function (a, b) { return String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0; });
           var trq = 0, trc = 0;
@@ -2475,7 +2484,7 @@ function computePortfolio(allTrades, live, method) {
           var destSeen = {};
           outsP.forEach(function (o) {
             var share = Number(o.qty) * sc;
-            if (!isFinite(share) || share <= LEDGER_EPS) return;
+            if (!isFinite(share) || share <= qtyEps) return;
             if (isTransferOutputInternal(o)) {
               var dSym = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
                 ? sym : String(o.toSymbol).trim().toUpperCase();
@@ -2486,14 +2495,14 @@ function computePortfolio(allTrades, live, method) {
               dst.touched = true;
               removed.forEach(function (rl) {
                 var keep = rl.qty * (share / tQty);
-                if (keep > LEDGER_EPS) dst.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
+                if (keep > qtyEps) dst.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
               });
               var did = String(o.toAccountId).trim() + '|' + dSym;
               destSeen[did] = dst;
             } else if (o.spend !== false) {
               removed.forEach(function (rl) {
                 var xsh = rl.qty * (share / tQty);
-                if (xsh <= LEDGER_EPS) return;
+                if (xsh <= qtyEps) return;
                 var xco = xsh * rl.unitCost;
                 from.lots.push({ openDate: rl.openDate, closeDate: t.date, qty: xsh, proceeds: 0, cost: xco, gain: -xco, holdingDays: ledgerHoldingDays(rl.openDate, t.date), accountId: t.accountId, symbol: sym, kind: 'expense', buyId: rl.buyId || null, sellId: ledgerTradeId(t) });
                 from.realized -= xco;
@@ -2504,11 +2513,11 @@ function computePortfolio(allTrades, live, method) {
             }
           });
           var selfP = transferSelfQtyOf(t);
-          if (selfP > LEDGER_EPS) {
+          if (selfP > qtyEps) {
             var selfScaled = selfP * sc;
             removed.forEach(function (rl) {
               var keep = rl.qty * (selfScaled / tQty);
-              if (keep > LEDGER_EPS) from.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
+              if (keep > qtyEps) from.queue.push({ qty: keep, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
             });
             from.queue.sort(function (a, b) { return String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0; });
             var srq = 0, src = 0;
@@ -2524,19 +2533,19 @@ function computePortfolio(allTrades, live, method) {
           });
         }
       } else {
-        if (from.qty <= LEDGER_EPS) {
+        if (from.qty <= qtyEps) {
           if (fiatT > 0) { from.realized -= fiatT; totals.realized -= fiatT; totals.expensesFiat += fiatT; totals.feesFiat += n.feeMain; }
           return;
         }
         var tQ2 = Math.min(qt, from.qty);
         var sc2 = qt > 0 ? tQ2 / qt : 0;
         var feeQ2 = nft * sc2;
-        var aF = avgOf(from);
+        var aF = avgOf(from, sym);
         var costO = aF * tQ2;
         var feeC2 = aF * feeQ2;
         from.qty -= tQ2;
         from.cost -= costO;
-        if (Math.abs(from.qty) < LEDGER_EPS) { from.qty = 0; from.cost = 0; }
+        if (Math.abs(from.qty) < qtyEps) { from.qty = 0; from.cost = 0; }
         from.realized -= feeC2 + fiatT;
         totals.realized -= feeC2 + fiatT;
         totals.feesCryptoMain += feeC2;
@@ -2560,7 +2569,7 @@ function computePortfolio(allTrades, live, method) {
           }
           outsP.forEach(function (o) {
             var share = Number(o.qty) * sc2;
-            if (!isFinite(share) || share <= LEDGER_EPS) return;
+            if (!isFinite(share) || share <= qtyEps) return;
             var shareCost = aF * share;
             if (isTransferOutputInternal(o)) {
               var dSym = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
@@ -2595,7 +2604,7 @@ function computePortfolio(allTrades, live, method) {
       var raw = live ? (live[sym] !== undefined ? live[sym] : live[lookup]) : undefined;
       var num = Number(raw);
       var known = isFinite(num) && num > 0;
-      var qtyHeld = Math.abs(s.qty) < LEDGER_EPS ? 0 : s.qty;
+      var qtyHeld = Math.abs(s.qty) < ledgerQtyEpsilon(sym) ? 0 : s.qty;
       var avgEntry = qtyHeld > 0 ? s.cost / qtyHeld : 0;
       var mv = known ? qtyHeld * num : (qtyHeld === 0 ? 0 : null);
       var un = mv === null ? null : mv - avgEntry * qtyHeld;
@@ -2681,7 +2690,7 @@ function timelineOutflowShortfalls(trades) {
     if (!isFinite(need) || need <= 0) return 1;
     var available = get(k);
     var moved = Math.min(need, Math.max(0, available));
-    if (need > moved + LEDGER_EPS) {
+    if (need > moved + ledgerQtyEpsilon(ledgerSym(t))) {
       out.push({
         trade: t,
         key: k,
@@ -2790,7 +2799,7 @@ function heldTimelineConflict(allTrades, draftOrDrafts, editingTradeId) {
     var e = next[i];
     var prevMap = (oldTrade && e.trade === drafts[0]) ? baseMap.get(oldTrade) : baseMap.get(e.trade);
     var prevShort = prevMap ? (prevMap.get(e.key) || 0) : 0;
-    if (e.shortfall > prevShort + LEDGER_EPS) {
+    if (e.shortfall > prevShort + ledgerQtyEpsilon(e.symbol)) {
       e.isDraft = drafts.indexOf(e.trade) !== -1;
       return e;
     }
@@ -3379,7 +3388,7 @@ function validateTrade(t, heldQty) {
       var qex = Number(t.qty);
       if (!isFinite(qex) || qex <= 0) return 'qty must be > 0';
       if (typeof heldQty === 'number' && isFinite(heldQty)) {
-        if (qex > heldQty + LEDGER_EPS) return 'oversell: max sellable is ' + heldQty;
+        if (qex > heldQty + ledgerQtyEpsilon(t.symbol)) return 'oversell: max sellable is ' + heldQty;
       }
     }
     if (hasT) {
@@ -3393,7 +3402,7 @@ function validateTrade(t, heldQty) {
     var qty = Number(t.qty);
     if (!isFinite(qty) || qty <= 0) return 'qty must be > 0';
     if ((effType === 'sell' || effType === 'transfer') && typeof heldQty === 'number' && isFinite(heldQty)) {
-      if (qty > heldQty + LEDGER_EPS) return 'oversell: max sellable is ' + heldQty;
+      if (qty > heldQty + ledgerQtyEpsilon(t.symbol)) return 'oversell: max sellable is ' + heldQty;
     }
   }
   if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '') {
@@ -11773,7 +11782,7 @@ function validateTradeReorder(st, accId, date, newOrderIds) {
     var ev = next[i];
     var prevMap = baseMap.get(ev.key);
     var prevShort = prevMap ? (prevMap.get(ev.trade) || 0) : 0;
-    if (ev.shortfall > prevShort + LEDGER_EPS) {
+    if (ev.shortfall > prevShort + ledgerQtyEpsilon(ev.symbol)) {
       return { ok: false, reason: 'shortfall', shortfall: ev };
     }
   }
@@ -12834,7 +12843,7 @@ function exactScaledOf(raw, dec) {
   var exp = 0;
   if (eIdx >= 0) {
     exp = parseInt(s.slice(eIdx + 1), 10);
-    if (isNaN(exp)) return null;
+    if (isNaN(exp) || exp < -400 || exp > 400) return null;
     s = s.slice(0, eIdx);
   }
   var dot = s.indexOf('.');
@@ -12985,7 +12994,7 @@ function exactQtyHeldMap(allTrades) {
     if (nfSc === null || nfSc < 0n) continue; // structurally invalid rows never book
     var availS = held(key);
     var movedS = sc < availS ? sc : availS;
-    var feeS = nfSc < movedS ? nfSc : movedS; // the tx fee rides on the moved slice
+    var feeS = (nfSc * movedS) / sc; // mirror the engines' proportional clamp
     add(key, sym, -movedS);
     var outs = (Array.isArray(t.outputs) && t.outputs.length) ? t.outputs : null;
     var hasTo = (t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '');

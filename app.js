@@ -8063,19 +8063,31 @@ function openFeeExplainer(t, main, feeQty, rate) {
 // A trimmed box tells you it is trimmed only by measuring it: the text runs
 // wider than the box it lives in. Shared by the "show full" tap handlers and
 // by the ⓘ gate, so a badge and its popup always agree on the same truth.
-// The trim truth the tap affordances run on: a value is cut when its
-// laid-out text is wider than its box. textRunWidth reads the real text
-// geometry (Range rects survive ellipsis clipping), so this stays honest
-// even where scrollWidth reports a fitting box for visibly clipped glyphs.
-// No layout (hidden row, jsdom) means nothing to judge: never "cut".
+var _textMeasureCanvas = null;
+var _textMeasureContext = null;
+
+// Measure the complete visible text rather than its clipped Range rect.
+// Some browsers clamp both Range bounds and scrollWidth at an ellipsis.
 function isVisuallyCut(el) {
   if (!el) return false;
   try {
-    var cw = el.clientWidth;
-    if (!(cw > 0)) return false;
-    var w = textRunWidth(el);
-    if (w > 0) return w > cw + 2;
-    return el.scrollWidth > cw + 2;
+    var rect = el.getBoundingClientRect();
+    if (!(rect.width > 0)) return false;
+    var left = rect.left, right = rect.right;
+    for (var node = el; node && node.nodeType === 1; node = node.parentElement) {
+      var style = window.getComputedStyle(node);
+      var overflow = style.overflowX;
+      if (node === el || overflow === 'hidden' || overflow === 'clip' || overflow === 'scroll' || overflow === 'auto') {
+        var box = node.getBoundingClientRect();
+        var clipLeft = box.left + node.clientLeft;
+        left = Math.max(left, clipLeft);
+        right = Math.min(right, clipLeft + node.clientWidth);
+      }
+    }
+    var visibleWidth = Math.max(0, right - left);
+    var fullWidth = textRunWidth(el);
+    if (fullWidth > 0) return fullWidth > visibleWidth + 2;
+    return el.scrollWidth > el.clientWidth + 2;
   } catch (e) { return false; }
 }
 
@@ -8191,19 +8203,43 @@ function qtyElCutOne(vEl) {
 // all outside this set and never appear here.
 var TRADE_FACTS_QTY_LABELS = { 'Amount': 1, 'Amount sold': 1, 'Moved': 1, 'Lost': 1 };
 
-// Natural (unclipped) width of an element's inline contents. A Range rect
-// reports the laid-out text even under overflow: hidden, so a caption that
-// is currently ellipsized still measures at its true width. jsdom (no
-// layout) returns 0 — every caller guards on it.
+// Natural width of an element's visible inline text. Range geometry is kept
+// as a fallback and a cross-check, while canvas measurement recovers text
+// width when overflow clipping makes the Range report only the visible part.
 function textRunWidth(el) {
   if (!el) return 0;
+  var rangeWidth = 0, canvasWidth = 0;
   try {
     var r = document.createRange();
     r.selectNodeContents(el);
-    var w = r.getBoundingClientRect().width;
+    rangeWidth = r.getBoundingClientRect().width;
     if (r.detach) r.detach();
-    return isFinite(w) ? w : 0;
-  } catch (e) { return 0; }
+  } catch (e) { /* canvas measurement remains available */ }
+  try {
+    if (!_textMeasureCanvas) {
+      _textMeasureCanvas = document.createElement('canvas');
+      _textMeasureContext = _textMeasureCanvas.getContext('2d');
+    }
+    if (_textMeasureContext) {
+      var walker = document.createTreeWalker(el, 4, null, false);
+      var textNode;
+      while ((textNode = walker.nextNode())) {
+        var parent = textNode.parentElement;
+        if (!parent || !String(textNode.nodeValue || '').trim() && !/\s/.test(textNode.nodeValue || '')) continue;
+        var cs = window.getComputedStyle(parent);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        var value = String(textNode.nodeValue || '');
+        if (cs.textTransform === 'uppercase') value = value.toUpperCase();
+        else if (cs.textTransform === 'lowercase') value = value.toLowerCase();
+        _textMeasureContext.font = cs.font;
+        var width = _textMeasureContext.measureText(value).width;
+        var spacing = parseFloat(cs.letterSpacing);
+        if (isFinite(spacing) && value.length > 1) width += spacing * (value.length - 1);
+        canvasWidth += width;
+      }
+    }
+  } catch (e) { /* Range geometry remains available */ }
+  return Math.max(isFinite(rangeWidth) ? rangeWidth : 0, isFinite(canvasWidth) ? canvasWidth : 0);
 }
 
 function fitTradeFactsRows(strip) {
@@ -8841,6 +8877,19 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       if (whatHit) {
         var whatTxtEl = whatHit.querySelector('.trade-what-text');
         if (isTrimmed(whatTxtEl || whatHit)) return;
+      }
+      // A clipped value is already an explicit tap target. Let its own
+      // handler open the full-value dialog even while the card is collapsed;
+      // the general card surface must not consume that first tap to expand.
+      var valueHit = tgt.closest('.stat-val[data-trunc-wired="1"]');
+      if (!valueHit && tgt.closest('.info-dot')) {
+        var dotRow = tgt.closest('.stat-row');
+        valueHit = dotRow ? dotRow.querySelector('.stat-val[data-trunc-wired="1"]') : null;
+      }
+      if (valueHit) {
+        var fullValue = String(valueHit.getAttribute('data-full') || '');
+        var currentValue = String(valueHit.textContent || '');
+        if (isVisuallyCut(valueHit) || (fullValue !== '' && fullValue !== currentValue)) return;
       }
       if (box.classList.contains('is-open')) {
         if (tgt.closest('.trade-facts, .lot-links')) return;

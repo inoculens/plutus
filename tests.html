@@ -6523,6 +6523,35 @@
         assert(L.cutOneQtyDigit('1.4523584521545257') === '1.452358452154525', 'bare numeric heads still ladder');
       });
 
+      test('a ladder-trimmed amount paints its cut with an ellipsis', function () {
+        assert(typeof L.fitTrimMark === 'function' && typeof L.qtyElCutOne === 'function', 'trim marker helpers missing');
+        // The marker lands where the digits stopped, before the ticker.
+        assert(L.fitTrimMark('1.452358452154525 AAVE') === '1.452358452154525… AAVE', 'marker sits between head and ticker: ' + JSON.stringify(L.fitTrimMark('1.452358452154525 AAVE')));
+        assert(L.fitTrimMark('3.0') === '3.0…', 'bare heads still confess');
+        // Chained steps: a marked string feeds the next cut and the marker
+        // is dropped for the pure result — one digit per step either way.
+        var chained = L.cutOneQtyDigit(L.fitTrimMark('1.4523584521545257 AAVE'));
+        assert(chained === '1.452358452154525 AAVE', 'a marked string still ladders one digit: ' + JSON.stringify(chained));
+        assert(L.cutOneQtyDigit('1.4… AAVE') === null, 'the floor holds under the marker');
+        // The DOM step marks itself so a JS trim reads like a CSS trim.
+        var el = document.createElement('span');
+        el.textContent = '1.4523584521545257 AAVE';
+        el.setAttribute('data-full', '1.4523584521545257 AAVE');
+        assert(L.qtyElCutOne(el) === true, 'a cuttable step applies');
+        assert(el.textContent === '1.452358452154525… AAVE', 'the painted cut carries …: ' + JSON.stringify(el.textContent));
+        assert(el.getAttribute('data-fit-cut') === '1', 'the element confesses it was cut by the fit');
+        assert(el.getAttribute('data-full') === '1.4523584521545257 AAVE', 'the exact string is untouched on the snapshot');
+        // Restore-to-full must look full again (no stale marker).
+        el.textContent = el.getAttribute('data-full');
+        el.removeAttribute('data-fit-cut');
+        assert(el.textContent === '1.4523584521545257 AAVE', 'restore repaints the exact value');
+        assert(L.qtyElCutOne(el) === true && el.textContent === '1.452358452154525… AAVE', 'a second chained step re-marks');
+        // Nothing cuttable never turns into a marked state.
+        var flat = document.createElement('span');
+        flat.textContent = '2 AAVE';
+        assert(L.qtyElCutOne(flat) === false && flat.textContent === '2 AAVE', 'integers never get laddered or marked');
+      });
+
       test('exactQtyHeldString walks buys, sells, expenses, fees and clamps exactly', function () {
         assert(typeof L.exactQtyHeldString === 'function', 'exactQtyHeldString missing');
         var FX = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };

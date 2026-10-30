@@ -3487,6 +3487,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.qtyUiText = qtyUiText;
   window.Inoculens.qtyDisplayTrim = qtyDisplayTrim;
   window.Inoculens.cutOneQtyDigit = cutOneQtyDigit;
+  window.Inoculens.fitTrimMark = fitTrimMark;
+  window.Inoculens.qtyElCutOne = qtyElCutOne;
   window.Inoculens.qtyDecimals = qtyDecimals;
   window.Inoculens.isValidLedgerCode = isValidLedgerCode;
   window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
@@ -8087,7 +8089,8 @@ function wireLabelFull(labelEl) {
   });
 }
 
-function infoDot(labelEl, openFn, valueEl) {  if (!labelEl || typeof openFn !== 'function') return;
+function infoDot(labelEl, openFn, valueEl) {
+  if (!labelEl || typeof openFn !== 'function') return;
   var dot = document.createElement('span');
   // Overflow-gated dots (a measured value was passed) start hidden and only
   // ever appear via the sync pass — any rebuild path that skips the sync
@@ -8126,25 +8129,38 @@ function infoDot(labelEl, openFn, valueEl) {  if (!labelEl || typeof openFn !== 
 var FIT_FIAT_TICKERS = ['EUR', 'USD', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
 
 // One ladder step (pure): '1.4523584521545257 AAVE' -> '1.452358452154525
-// AAVE'. Integers have nothing fractional to yield; one decimal place is
+// AAVE'. A previously painted trim marker ('…' between head and tail) is
+// accepted on input and dropped on output — the caller re-paints it. Only
+// the raw text is ever returned, so the pure contract stays exact.
+// Integers have nothing fractional to yield; one decimal place is
 // the floor; anything that is not a plain decimal head ('—', notes, hashes,
 // exponent forms) stays untouched. National-fiat symbol tails never yield.
 function cutOneQtyDigit(txt) {
-  var m = /^(-?\d+(?:\.\d+)?)([\s\u00a0].*)?$/.exec(String(txt === null || txt === undefined ? '' : txt));
+  var m = /^(-?\d+(?:\.\d+)?)(\u2026)?([\s\u00a0].*)?$/.exec(String(txt === null || txt === undefined ? '' : txt));
   if (!m) return null;
-  var sym = (m[2] || '').trim().toUpperCase();
+  var sym = (m[3] || '').trim().toUpperCase();
   if (sym !== '' && FIT_FIAT_TICKERS.indexOf(sym) !== -1) return null;
   var num = m[1];
   var dot = num.indexOf('.');
   if (dot < 1) return null;
   if (num.length <= dot + 2) return null;
-  return num.slice(0, num.length - 1) + (m[2] || '');
+  return num.slice(0, num.length - 1) + (m[3] || '');
+}
+
+// The trim must be VISIBLE: digits given up by the fit pass paint the same
+// '…' a CSS ellipsis would, placed where the number stopped. A trimmed
+// amount can never pose as a complete number beside its ticker, so the
+// popup behind the '…' is the only place the full string lives.
+function fitTrimMark(txt) {
+  var m = /^(-?\d+(?:\.\d+)?)([\s\u00a0].*)?$/.exec(String(txt === null || txt === undefined ? '' : txt));
+  if (!m) return String(txt) + '…';
+  return m[1] + '…' + (m[2] || '');
 }
 
 function qtyElCutOne(vEl) {
   var next = cutOneQtyDigit(String(vEl.textContent || ''));
   if (next === null) return false;
-  vEl.textContent = next;
+  vEl.textContent = fitTrimMark(next);
   vEl.setAttribute('data-fit-cut', '1');
   return true;
 }

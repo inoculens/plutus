@@ -3485,6 +3485,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.exactNumOrStr = exactNumOrStr;
   window.Inoculens.exactQtyValue = exactQtyValue;
   window.Inoculens.qtyUiText = qtyUiText;
+  window.Inoculens.qtyDisplayTrim = qtyDisplayTrim;
   window.Inoculens.qtyDecimals = qtyDecimals;
   window.Inoculens.isValidLedgerCode = isValidLedgerCode;
   window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
@@ -5804,12 +5805,15 @@ var xmrQtyFmt = null;
 
 function fmtQty(n, symbol) {
   var s = String(symbol || '').trim().toUpperCase();
-  // EVM-standard assets (18 decimals, wei units): quantities print with all
-  // 18 places exactly, like BTC's satoshis and XMR's piconero. Digits come
-  // from the exact core over the stored string/number — never a float pass.
+  // EVM-standard assets (18 decimals, wei units): quantities print the exact
+  // digits from the exact core over the stored string/number — never a float
+  // pass — with the 18-dec ZERO PADDING trimmed, so rows keep every
+  // significant digit but stop stretching the facts strip out of line with
+  // its fiat neighbours (Fee etc.). Anything still too long cuts with the
+  // ellipsis and the overflow popup hands over the full exact string.
   if (s !== '' && typeof SYMBOL_MAP === 'object' && SYMBOL_MAP && SYMBOL_MAP[s] && s !== 'BTC' && s !== 'XMR') {
     var scStr = (typeof n === 'number') ? exactScaledOf(String(n), 18) : exactScaledOf(n, 18);
-    if (scStr !== null) return exactToStringFixed(scStr, 18);
+    if (scStr !== null) return exactToStringTrim(scStr, 18);
   }
   var v = Number(n);
   if (!isFinite(v)) return '—';
@@ -9950,7 +9954,7 @@ function renderAccountDetail(st, id) {
   if (pos) {
     try { qtyExactTxt = exactQtyHeldString(scopeTrades, null, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
   }
-  stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyExactTxt : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
+  stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyDisplayTrim(qtyExactTxt, pos.symbol) : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
   var tickSym = acc && acc.ticker ? String(acc.ticker).toUpperCase() : '';
@@ -12766,6 +12770,18 @@ function qtyUiText(raw, symbol) {
     var sc = exactScaledOf(raw, dec);
     return (sc !== null) ? exactToStringTrim(sc, dec) : String(raw);
   } catch (e) { return String(raw); }
+}
+
+// Display-side trim for exact fixed strings: BTC and XMR keep their fixed
+// satoshi/piconero grids (the padding is the identity there); EVM tokens
+// drop the 18-dec zero padding so long walls never bully the card cells —
+// trailing zeros carry no information and the popup still shows every
+// exact digit the value actually has.
+function qtyDisplayTrim(txt, symbol) {
+  if (txt === null || txt === undefined) return txt;
+  var s = String(symbol || '').trim().toUpperCase();
+  if (s === 'BTC' || s === 'XMR') return txt;
+  return qtyUiText(txt, s);
 }
 
 function syncTransferFeePreview() {

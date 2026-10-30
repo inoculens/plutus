@@ -6479,16 +6479,26 @@
         assert(L.transferFeeFrom('1', '2', 'AAVE') === null, 'received over sent stays null');
       });
 
-      test('fmtQty prints wei-exact 18 for EVM tokens; BTC/XMR grids stay', function () {
+      test('fmtQty prints exact wei digits trimmed for EVM tokens; BTC/XMR grids stay', function () {
         assert(L.fmtQty('0.000000000000000001', 'AAVE') === '0.000000000000000001', 'one wei must print exact: ' + L.fmtQty('0.000000000000000001', 'AAVE'));
-        assert(L.fmtQty('23.5', 'AAVE') === '23.500000000000000000', 'plain qty shows the full grid: ' + L.fmtQty('23.5', 'AAVE'));
-        assert(L.fmtQty(23.5, 'AAVE') === '23.500000000000000000', 'numbers format identically');
+        assert(L.fmtQty('23.5', 'AAVE') === '23.5', 'trailing zero padding is trimmed away: ' + L.fmtQty('23.5', 'AAVE'));
+        assert(L.fmtQty(23.5, 'AAVE') === '23.5', 'numbers format identically');
+        assert(L.fmtQty('2.000000000000000000', 'AAVE') === '2', 'integral values print bare: ' + L.fmtQty('2.000000000000000000', 'AAVE'));
+        assert(L.fmtQty('0.985000000000000000', 'AAVE') === '0.985', 'arrival values keep significant digits only');
         assert(L.fmtQty('1.000000000000000015', 'AAVE') === '1.000000000000000015', 'float64 may not eat the tail: ' + L.fmtQty('1.000000000000000015', 'AAVE'));
         assert(L.fmtQty(1e-18, 'AAVE') === '0.000000000000000001', 'exponent-number input still prints full digits: ' + L.fmtQty(1e-18, 'AAVE'));
+        assert(L.fmtQty('-5.000000000000000000', 'AAVE') === '-5', 'signs survive the trim');
         assert(L.fmtQty('n/a', 'AAVE') === '—', 'non-finite stays the dash');
+        // BTC/XMR keep the fixed grids (satoshi / piconero); fiat stays trimmed.
         assert(fracOf(L.fmtQty(0.1, 'BTC')) === '10000000', 'btc grid unchanged: ' + L.fmtQty(0.1, 'BTC'));
         assert(fracOf(L.fmtQty(0.1, 'XMR')) === '100000000000', 'xmr grid unchanged: ' + L.fmtQty(0.1, 'XMR'));
         assert(fracOf(L.fmtQty(0.1, 'EUR')) === '1', 'fiat stays trimmed: ' + L.fmtQty(0.1, 'EUR'));
+        // The Quantity stat card decides its trim through the same helper.
+        assert(typeof L.qtyDisplayTrim === 'function', 'qtyDisplayTrim missing');
+        assert(L.qtyDisplayTrim('5.999999999999999985', 'AAVE') === '5.999999999999999985', 'exact walk values stay exact on trim');
+        assert(L.qtyDisplayTrim('24.000000000000000000', 'AAVE') === '24', 'padding zeros leave the card too');
+        assert(L.qtyDisplayTrim('0.10000000', 'BTC') === '0.10000000', 'btc satoshi grid never trims');
+        assert(L.qtyDisplayTrim('0.100000000000', 'XMR') === '0.100000000000', 'xmr piconero grid never trims');
       });
 
       test('qtyUiText renders stored values plain and passes raw through', function () {
@@ -7824,8 +7834,8 @@
         assert(fracOf(L.fmtQty(1, 'BTC')) === '00000000', 'btc 1 wrong: ' + L.fmtQty(1, 'BTC'));
         assert(fracOf(L.fmtQty(0.00039164, 'BTC')) === '00039164', 'btc dust wrong');
         assert(fracOf(L.fmtQty(1, 'btc')) === '00000000', 'lowercase btc wrong');
-        assert(fracOf(L.fmtQty(0.1, 'ETH')) === '100000000000000000', 'eth prints wei-exact 18: ' + L.fmtQty(0.1, 'ETH'));
-        assert(L.fmtQty(1, 'ETH') === '1.000000000000000000', 'eth 1 prints the full wei grid: ' + L.fmtQty(1, 'ETH'));
+        assert(fracOf(L.fmtQty(0.1, 'ETH')) === '1', 'eth prints exact digits with zero padding trimmed: ' + L.fmtQty(0.1, 'ETH'));
+        assert(L.fmtQty(1, 'ETH') === '1' && L.fmtQty('1.5', 'ETH') === '1.5', 'eth stays exact and short after the zero trim: ' + L.fmtQty(1, 'ETH'));
         assert(L.fmtQty('nope') === '—', 'non-finite must stay —');
       });
       test('fmtQty shows 12 decimals for XMR (piconero)', function () {
@@ -7834,7 +7844,7 @@
         assert(fracOf(L.fmtQty(0.000123456789, 'XMR')) === '000123456789', 'xmr piconero dust wrong: ' + L.fmtQty(0.000123456789, 'XMR'));
         assert(fracOf(L.fmtQty(0.000000000333, 'XMR')) === '000000000333', 'xmr sub-satoshi dust wrong: ' + L.fmtQty(0.000000000333, 'XMR'));
         assert(fracOf(L.fmtQty(1, 'xmr')) === '000000000000', 'lowercase xmr wrong');
-        assert(fracOf(L.fmtQty(1, 'ETH')) === '000000000000000000', 'eth keeps its own 18-grid, not xmr padding: ' + L.fmtQty(1, 'ETH'));
+        assert(fracOf(L.fmtQty(1, 'ETH')) === '1', 'eth keeps its own trimmed form, not xmr padding: ' + L.fmtQty(1, 'ETH'));
       });
       test('BTC record cards show full 8-decimal quantities', function () {
         L.tradePageSizeSet(25);

@@ -80,3 +80,14 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   Nothing before it: no greeting, no preamble.
 - The owner must never have to ask for this format again; AGENTS.md carries
   it, and coding agents load this file automatically.
+
+## Commit messages — required format
+- Every commit body must end with a technical overview of the changes made,
+  concise and free of filler: what was changed, where, and why.
+- The commit body must end with an agent signature line:
+  `Commit made with <agent> <version (if relevant)>`.
+- The git author/committer must always be the human owner
+  (`sebaptcd <dev@sebastian.ghiveci.com>`). No `Co-authored-by` trailers
+  naming an AI assistant; agents must not appear as author or committer.
+- Strip any agent co-author trailers before pushing; history must show only
+  human authorship.

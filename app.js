@@ -1026,8 +1026,10 @@ function normalizeTradeForStore(t) {
   // selfQty belongs to multi-output transfers only; legacy records keep their
   // derived sent - fee shape and never gain the field.
   if (Array.isArray(c.outputs) && c.outputs.length) {
-    var __self = (c.selfQty === undefined || c.selfQty === null || String(c.selfQty).trim() === '') ? NaN : Number(c.selfQty);
-    if (isFinite(__self) && __self > 0) c.selfQty = __self;
+    // selfQty keeps its exact digits (number when it round-trips, digit
+    // string otherwise) — a float pass-through could corrupt the last wei.
+    var __self = (c.selfQty === undefined || c.selfQty === null || String(c.selfQty).trim() === '') ? NaN : exactQtyValue(c.selfQty, c.symbol);
+    if (isFinite(Number(__self)) && Number(__self) > 0) c.selfQty = __self;
     else { try { delete c.selfQty; } catch (e2) { c.selfQty = undefined; } }
   } else {
     try { delete c.selfQty; } catch (e3) { c.selfQty = undefined; }
@@ -3476,6 +3478,14 @@ if (typeof window !== 'undefined') {
   window.Inoculens.computeAnalytics = computeAnalytics;
   window.Inoculens.heldForAccount = heldForAccount;
   window.Inoculens.heldTimelineConflict = heldTimelineConflict;
+  window.Inoculens.exactQtyHeldString = exactQtyHeldString;
+  window.Inoculens.exactScaledOf = exactScaledOf;
+  window.Inoculens.exactToStringFixed = exactToStringFixed;
+  window.Inoculens.exactToStringTrim = exactToStringTrim;
+  window.Inoculens.exactNumOrStr = exactNumOrStr;
+  window.Inoculens.exactQtyValue = exactQtyValue;
+  window.Inoculens.qtyUiText = qtyUiText;
+  window.Inoculens.qtyDecimals = qtyDecimals;
   window.Inoculens.isValidLedgerCode = isValidLedgerCode;
   window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
   window.Inoculens.isValidLedgerLabels = isValidLedgerLabels;
@@ -5793,12 +5803,19 @@ var btcQtyFmt = null;
 var xmrQtyFmt = null;
 
 function fmtQty(n, symbol) {
+  var s = String(symbol || '').trim().toUpperCase();
+  // EVM-standard assets (18 decimals, wei units): quantities print with all
+  // 18 places exactly, like BTC's satoshis and XMR's piconero. Digits come
+  // from the exact core over the stored string/number — never a float pass.
+  if (s !== '' && typeof SYMBOL_MAP === 'object' && SYMBOL_MAP && SYMBOL_MAP[s] && s !== 'BTC' && s !== 'XMR') {
+    var scStr = (typeof n === 'number') ? exactScaledOf(String(n), 18) : exactScaledOf(n, 18);
+    if (scStr !== null) return exactToStringFixed(scStr, 18);
+  }
   var v = Number(n);
   if (!isFinite(v)) return '—';
   // BTC always shows all 8 decimals (satoshis): 0.1 -> 0.10000000,
   // 1 -> 1.00000000. XMR always shows all 12 decimals (piconero):
   // 0.1 -> 0.100000000000. Other assets keep trimmed display.
-  var s = String(symbol || '').trim().toUpperCase();
   if (s === 'BTC') {
     try {
       if (!btcQtyFmt) btcQtyFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 8, maximumFractionDigits: 8 });
@@ -9929,7 +9946,11 @@ function renderAccountDetail(st, id) {
       host.appendChild(closedFlag);
     }
   }
-  stats.appendChild(statCard('Quantity', pos ? (fmtQty(pos.qtyHeld, pos.symbol) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
+  var qtyExactTxt = null;
+  if (pos) {
+    try { qtyExactTxt = exactQtyHeldString(scopeTrades, null, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
+  }
+  stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyExactTxt : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
   var tickSym = acc && acc.ticker ? String(acc.ticker).toUpperCase() : '';
@@ -12183,11 +12204,13 @@ function refreshRecipientAccounts() {
 // account, external rows the label (spend:false only for neutral rows —
 // absent means spend). Optional per-row fees and cross-fiat arrivals ride
 // along; legacy single-dest fields are never written with outputs.
-function buildTransferOutputs(rows) {
+function buildTransferOutputs(rows, symbol) {
   var out = [];
+  var decOut = qtyDecimals(symbol);
   (rows || []).forEach(function (r) {
     if (!r) return;
-    var o = { qty: Number(r.qty) };
+    var rqSc = exactScaledOf(r.qty, decOut);
+    var o = { qty: (rqSc === null) ? Number(r.qty) : exactNumOrStr(rqSc, decOut) };
     if (r.kind === 'internal') {
       o.toAccountId = String(r.accountId || '').trim();
     } else {
@@ -12454,29 +12477,295 @@ function syncTradeTypeUI() {
   try { syncTransferFeePreview(); } catch (e) { /* ignore */ }
 }
 
+// Quantity precision + exact decimal core. Satoshis (8) for BTC, piconero
+// (12) for XMR, and 18 decimals (the EVM base-unit standard) for every other
+// known crypto ticker; unknown custom tickers, cash and stocks keep the old
+// 8-decimal default. Scaled BigInt keeps amounts on the chosen grid exactly:
+// raw binary subtraction left dust like 0.000017260000000000062, and 18-dec
+// tokens (AAVE and every other EVM asset) push past what float64 can hold
+// at all — its ~15.95 significant digits would corrupt wei digits on sight.
+function qtyDecimals(symbol) {
+  var s = String(symbol || '').trim().toUpperCase();
+  if (s === 'XMR') return 12;
+  if (s === 'BTC') return 8;
+  if (s !== '' && typeof SYMBOL_MAP === 'object' && SYMBOL_MAP && SYMBOL_MAP[s]) return 18;
+  return 8;
+}
+
+var EX_ACT_POW10 = [1n, 10n, 100n]; // grows on demand, one entry per exponent
+function exactPow10(n) {
+  var p = Number(n);
+  if (!isFinite(p) || p < 0) p = 0;
+  if (p > 30) p = 30;
+  p = Math.floor(p);
+  if (!EX_ACT_POW10 || EX_ACT_POW10.length < 3) EX_ACT_POW10 = [1n, 10n, 100n];
+  while (EX_ACT_POW10.length <= p) EX_ACT_POW10.push(EX_ACT_POW10[EX_ACT_POW10.length - 1] * 10n);
+  return EX_ACT_POW10[p];
+}
+
+// Parse a decimal string (or the String() of a number, exponent forms
+// included) into a scaled BigInt quantized half-up at `dec` decimals.
+// Never goes through a float, so no digit is lost or fabricated.
+// Returns null for anything that is not a plain decimal number.
+function exactScaledOf(raw, dec) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'number') {
+    if (!isFinite(raw)) return null;
+    raw = String(raw);
+  }
+  var s = String(raw).trim();
+  if (s === '' || s.length > 400) return null;
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(s)) return null;
+  var neg = false;
+  if (s.charAt(0) === '+' || s.charAt(0) === '-') { neg = (s.charAt(0) === '-'); s = s.slice(1); }
+  var eIdx = s.indexOf('e');
+  if (eIdx < 0) eIdx = s.indexOf('E');
+  var exp = 0;
+  if (eIdx >= 0) {
+    exp = parseInt(s.slice(eIdx + 1), 10);
+    if (isNaN(exp)) return null;
+    s = s.slice(0, eIdx);
+  }
+  var dot = s.indexOf('.');
+  var ip = dot >= 0 ? (dot > 0 ? s.slice(0, dot) : '0') : s;
+  var fp = dot >= 0 ? s.slice(dot + 1) : '';
+  // Fold the exponent into the digit string: the decimal point sits
+  // fracLen = fp.length − exp digits before the end of ip+fp. Everything
+  // (exponents both directions) reduces to that one rule.
+  var digits = (ip + fp).replace(/[^0-9]/g, '');
+  if (digits === '') return null;
+  var fracLen = fp.length - exp;
+  if (fracLen <= 0) {
+    for (var z = 0; z < -fracLen; z++) digits += '0';
+    fp = '';
+    ip = digits;
+  } else {
+    var intLen = digits.length - fracLen;
+    if (intLen >= 0) {
+      ip = digits.slice(0, intLen);
+      fp = digits.slice(intLen);
+    } else {
+      ip = '0';
+      fp = '';
+      for (var z2 = 0; z2 < -intLen; z2++) fp += '0';
+      fp += digits;
+    }
+  }
+  if (ip === '') ip = '0';
+  var scale = exactPow10(dec);
+  var kept = fp.slice(0, dec);
+  while (kept.length < dec) kept += '0';
+  var scaled = BigInt(ip + kept);
+  // Half-up on the absolute value (matches Math.round-based rounding).
+  if (fp.length > dec && fp.charAt(dec) >= '5') scaled += 1n;
+  if (scaled === 0n) return 0n;
+  return neg ? -scaled : scaled;
+}
+
+// Exact fixed-decimal print: always exactly `dec` places after the point
+// (e.g. 0.1 AAVE at 18 → "0.100000000000000000").
+function exactToStringFixed(sc, dec) {
+  var d = Math.max(0, Math.min(30, Math.floor(Number(dec) || 0)));
+  var neg = sc < 0n;
+  var a = neg ? -sc : sc;
+  var scale = exactPow10(d);
+  var ip = a / scale;
+  var fp = a % scale;
+  var frac = fp.toString();
+  while (frac.length < d) frac = '0' + frac;
+  var out = ip.toString();
+  if (d > 0) out += '.' + frac;
+  return (neg && (ip !== 0n || fp !== 0n)) ? '-' + out : out;
+}
+
+// Exact print with trailing zeros trimmed (integers lose the point too).
+function exactToStringTrim(sc, dec) {
+  var s = exactToStringFixed(sc, dec);
+  if (!/\./.test(s)) return s;
+  s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s === '-0' ? '0' : s;
+}
+
+// Number when the exact value survives a float round-trip (so stored
+// records, tests and money math keep today's shapes), the exact digit
+// string otherwise — numbers simply cannot represent more precision.
+function exactNumOrStr(sc, dec) {
+  var s = exactToStringFixed(sc, dec);
+  var n = Number(s);
+  if (isFinite(n) && exactScaledOf(n, dec) === sc) return n;
+  return sc === 0n ? 0 : exactToStringTrim(sc, dec);
+}
+
+// Form/store entry point: parse the raw input exactly at the symbol's
+// quantity precision — number when it round-trips, exact string when it
+// does not, and the old NaN-through-Number behavior for garbage.
+function exactQtyValue(raw, symbol) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return Number(raw);
+  var sc = exactScaledOf(raw, qtyDecimals(symbol));
+  if (sc === null) return Number(raw);
+  return exactNumOrStr(sc, qtyDecimals(symbol));
+}
+
 // Transfer send/receive helper: fee = sent − received. The fee field is
 // computed-only (read-only in the form): the two amounts are the source of
 // truth, so a saved fee can never contradict them. Received is required.
-// Derived amounts round to the asset's quantity precision — 8 decimals
-// (satoshis) for most assets, 12 decimals (piconero) for XMR: raw binary
-// subtraction leaves dust like 0.000017260000000000062.
-function qtyDecimals(symbol) {
-  return String(symbol || '').trim().toUpperCase() === 'XMR' ? 12 : 8;
-}
-function roundQtyAt(v, decimals) {
-  var p = Number(decimals) === 12 ? 1e12 : 1e8;
-  var r = Math.round(Number(v) * p) / p;
-  return (Math.abs(r) < 1e-12) ? 0 : r;
-}
+// Everything runs on the exact grid, so the derived fee carries every digit.
 function transferFeeFrom(sentRaw, recvRaw, symbol) {
-  var sent = Number(sentRaw);
-  var recv = Number(recvRaw);
   if (String(recvRaw).trim() === '') return null;
-  if (!isFinite(sent) || sent <= 0) return null;
-  if (!isFinite(recv) || recv <= 0 || recv > sent) return null;
-  var fee = roundQtyAt(sent - recv, qtyDecimals(symbol));
-  if (!(fee >= 0 && fee < sent)) return null;
-  return { sent: sent, recv: recv, fee: fee };
+  var dec = qtyDecimals(symbol);
+  var sentSc = exactScaledOf(sentRaw, dec);
+  var recvSc = exactScaledOf(recvRaw, dec);
+  if (sentSc === null || recvSc === null) return null;
+  if (sentSc <= 0n) return null;
+  if (recvSc <= 0n || recvSc > sentSc) return null;
+  var feeSc = sentSc - recvSc;
+  return {
+    sent: exactNumOrStr(sentSc, dec),
+    recv: exactNumOrStr(recvSc, dec),
+    fee: exactNumOrStr(feeSc, dec)
+  };
+}
+
+// Exact holdings walk (BigInt mirror of the ledger engines' quantity flow):
+// only balances are tracked here — money math (cost, proceeds, realized)
+// stays in the float engines untouched. Clamping mirrors the engines, so the
+// returned exact quantity agrees with the qtyHeld a unit shows. Walk keys are
+// timelineHeldKey-shaped (accountId \u0001 SYMBOL).
+function exactQtyHeldMap(allTrades) {
+  var db = new Map();
+  var decs = new Map();
+  function getDec(sym) {
+    var d = decs.get(sym);
+    if (d === undefined) { d = qtyDecimals(sym); decs.set(sym, d); }
+    return d;
+  }
+  function get(key) { return db.get(key) || 0n; }
+  function add(key, sym, sc) {
+    if (sc === null || sc === 0n) return;
+    var v = get(key) + sc;
+    db.set(key, v);
+  }
+  function held(key) { var v = get(key); return v > 0n ? v : 0n; }
+  var list = ledgerSortByDate(allTrades || []);
+  for (var wi = 0; wi < list.length; wi++) {
+    var t = list[wi];
+    if (!t || typeof t.accountId !== 'string' || t.accountId === '') continue;
+    var sym = ledgerSym(t);
+    if (!sym) continue;
+    var key = timelineHeldKey(t.accountId, sym);
+    var d = getDec(sym);
+    var sc = exactScaledOf(t.qty, d);
+    if (t.type === 'buy' || t.type === 'income') {
+      if (sc !== null && sc > 0n) add(key, sym, sc);
+      continue;
+    }
+    var isExp = (t.type === 'expense') && !(t.qty === undefined || t.qty === null || String(t.qty).trim() === '');
+    if (t.type === 'sell' || isExp) {
+      if (sc === null || sc <= 0n) continue; // nothing to sell
+      var avail = held(key);
+      var lean = sc < avail ? sc : avail; // engine clamps oversells
+      add(key, sym, -lean);
+      continue;
+    }
+    if (t.type !== 'transfer') continue;
+    if (sc === null || sc <= 0n) continue;
+    var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? '0' : t.networkFee;
+    var nfSc = exactScaledOf(nfRaw, d);
+    if (nfSc === null || nfSc < 0n) continue; // structurally invalid rows never book
+    var availS = held(key);
+    var movedS = sc < availS ? sc : availS;
+    var feeS = nfSc < movedS ? nfSc : movedS; // the tx fee rides on the moved slice
+    add(key, sym, -movedS);
+    var outs = (Array.isArray(t.outputs) && t.outputs.length) ? t.outputs : null;
+    var hasTo = (t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '');
+    if (!outs && !hasTo) {
+      // Same-account sweep: everything but the fee arrives back.
+      var back = movedS - feeS;
+      if (back > 0n) add(key, sym, back);
+      continue;
+    }
+    if (!outs) {
+      // Legacy single destination. Cross-fiat arrivals land at the
+      // destination's own grid via the stored converted amount.
+      var dSym = (t.toSymbol !== undefined && t.toSymbol !== null && String(t.toSymbol).trim() !== '')
+        ? String(t.toSymbol).trim().toUpperCase() : sym;
+      var backS = movedS - feeS;
+      if (dSym === sym) {
+        if (backS > 0n) add(timelineHeldKey(String(t.toAccountId).trim(), sym), sym, backS);
+      } else {
+        var dDec = getDec(dSym);
+        var arrSc = exactScaledOf(t.toQty, dDec);
+        if (arrSc !== null && arrSc > 0n) add(timelineHeldKey(String(t.toAccountId).trim(), dSym), dSym, arrSc);
+      }
+      continue;
+    }
+    // Multi-recipient: the same-account remainder and internal same-symbol
+    // rows stay in the pool; cross-fiat rows arrive at their converted qty;
+    // external spend rows leave (already debited above). Every share scales
+    // with the actually moved slice, floored on the grid like the engines.
+    var selfSc = exactScaledOf(t.selfQty, d);
+    if (selfSc !== null && selfSc > 0n) {
+      var leanSelf = (selfSc * movedS) / sc;
+      if (leanSelf > 0n) add(key, sym, leanSelf);
+    }
+    for (var oi = 0; oi < outs.length; oi++) {
+      var o = outs[oi];
+      if (!o) continue;
+      var osSc = exactScaledOf(o.qty, d);
+      if (osSc === null || osSc <= 0n) continue;
+      var destId = (o.toAccountId !== undefined && o.toAccountId !== null) ? String(o.toAccountId).trim() : '';
+      if (destId !== '') {
+        var dSymO = (o.toSymbol !== undefined && o.toSymbol !== null && String(o.toSymbol).trim() !== '')
+          ? String(o.toSymbol).trim().toUpperCase() : sym;
+        if (dSymO === sym) {
+          var keep = (osSc * movedS) / sc;
+          if (keep > 0n) add(timelineHeldKey(destId, sym), sym, keep);
+          continue;
+        }
+        var dDecO = getDec(dSymO);
+        var arrO = exactScaledOf(o.toQty, dDecO);
+        if (arrO !== null && arrO > 0n) {
+          var leanArr = (arrO * movedS) / sc;
+          if (leanArr > 0n) add(timelineHeldKey(destId, dSymO), dSymO, leanArr);
+        }
+      }
+    }
+  }
+  return { db: db, decimals: decs };
+}
+
+// Exact holding string for one (account, symbol) pair, or summed across all
+// accounts when accountId is null. Fixed decimals like fmtQty's exact path.
+// Null when nothing is tracked (the caller falls back to its own render).
+function exactQtyHeldString(allTrades, accountId, symbol) {
+  try {
+    var sym = String(symbol || '').trim().toUpperCase();
+    if (!sym) return null;
+    var w = exactQtyHeldMap(allTrades);
+    var d = (w.decimals.get(sym) !== undefined) ? w.decimals.get(sym) : qtyDecimals(sym);
+    var total = 0n;
+    var matchAcct = (accountId === null || accountId === undefined) ? null : String(accountId);
+    w.db.forEach(function (sc, key) {
+      var parts = String(key).split('\u0001');
+      if (matchAcct !== null && parts[0] !== matchAcct) return;
+      if (parts[1] !== sym) return;
+      total += sc;
+    });
+    return exactToStringFixed(total, d);
+  } catch (e) { return null; }
+}
+
+
+// Form-facing quantity text: the stored exact digits in plain decimal form
+// (a round-trip number like 1e-18 reads "0.000000000000000001", exponent
+// forms never leak into inputs). Garbage passes through untouched.
+function qtyUiText(raw, symbol) {
+  try {
+    if (raw === undefined || raw === null || String(raw).trim() === '') return '';
+    var dec = qtyDecimals(symbol);
+    var sc = exactScaledOf(raw, dec);
+    return (sc !== null) ? exactToStringTrim(sc, dec) : String(raw);
+  } catch (e) { return String(raw); }
 }
 
 function syncTransferFeePreview() {
@@ -12486,12 +12775,14 @@ function syncTransferFeePreview() {
   var feeInput = document.getElementById('t-networkfee');
   var selfRow = document.getElementById('t-selfrecv-row');
   var rows = readRecipientRows();
-  var sent = Number(uiVal('t-qty', ''));
-  var sentOk = isFinite(sent) && sent > 0;
+  var symDec = 0;
+  var sentSc = exactScaledOf(uiVal('t-qty', ''), 8);
+  if (sentSc === null) sentSc = 0n;
+  var sentOk = sentSc > 0n;
   var sym = '', tick = '';
   try {
     var acc = accountById(loadState(), uiVal('t-account', ''));
-    if (acc) { tick = String(acc.ticker).trim().toUpperCase(); sym = ' ' + tick; }
+    if (acc) { tick = String(acc.ticker).trim().toUpperCase(); sym = ' ' + tick; symDec = qtyDecimals(tick); sentSc = exactScaledOf(uiVal('t-qty', ''), symDec); if (sentSc === null) sentSc = 0n; sentOk = sentSc > 0n; }
   } catch (e) { sym = ''; tick = ''; }
   if (!feeInput) return;
   // The fee is always computed — the field never unlocks. Received back is
@@ -12499,28 +12790,32 @@ function syncTransferFeePreview() {
   try { feeInput.setAttribute('readonly', ''); } catch (e) { /* ignore */ }
   if (selfRow) selfRow.hidden = false;
   var selfRaw = String(uiVal('t-selfrecv', '')).trim();
-  var selfQty = 0;
+  var selfSc = 0n;
   if (selfRaw !== '') {
-    selfQty = Number(selfRaw);
-    if (!isFinite(selfQty) || selfQty < 0) {
+    selfSc = exactScaledOf(selfRaw, symDec);
+    if (selfSc === null || selfSc < 0n) {
       feeInput.value = '';
       if (hint) hint.textContent = 'Received back must be a number >= 0.';
       return;
     }
   }
+  // Rows carry raw digit strings; every share runs on the exact grid.
+  function rowScaled(sc0) { var v = exactScaledOf(sc0, symDec); return v === null ? -1n : v; }
   if (!rows.length) {
     var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-selfrecv', ''), tick);
     if (!r) {
-      var recvTxt = String(uiVal('t-selfrecv', '')).trim();
+      var recvTxt = selfRaw;
       feeInput.value = '';
       if (hint) hint.textContent = recvTxt === '' ? 'Enter what arrived back — the fee below fills in itself.' : 'Received back must be > 0 and at most what you sent.';
       return;
     }
-    feeInput.value = String(r.fee);
+    var rFeeSc = exactScaledOf(r.fee, symDec);
+    feeInput.value = rFeeSc !== null ? exactToStringTrim(rFeeSc, symDec) : String(r.fee);
     if (hint) {
-      hint.textContent = r.fee === 0
+      var rFeeTxt = (rFeeSc !== null) ? exactToStringTrim(rFeeSc, symDec) : String(r.fee);
+      hint.textContent = rFeeSc === 0n
         ? 'No fee — everything stayed in this account.'
-        : 'Fee ' + String(r.fee) + sym + ' will be recorded as the loss.';
+        : 'Fee ' + rFeeTxt + sym + ' will be recorded as the loss.';
     }
     return;
   }
@@ -12532,7 +12827,7 @@ function syncTransferFeePreview() {
       if (hint) hint.textContent = 'Enter how much you sent first.';
       return;
     }
-    if (selfQty >= sent) {
+    if (selfSc >= sentSc) {
       feeInput.value = '';
       if (hint) hint.textContent = 'Received back must be less than sent when another account receives funds.';
       return;
@@ -12540,50 +12835,50 @@ function syncTransferFeePreview() {
     feeInput.value = '0';
     if (hint) {
       hint.textContent = 'Converted at the trade-date rate — enter what arrives in the destination fiat'
-        + (selfQty > 0 ? '; ' + selfQty + sym + ' stayed here.' : '.');
+        + (selfSc > 0n ? '; ' + exactToStringTrim(selfSc, symDec) + sym + ' stayed here.' : '.');
     }
     return;
   }
-  var sum = 0, ok = true, feeSum = 0;
+  var sumSc = 0n, okRows = true, feeSumSc = 0n;
   rows.forEach(function (r) {
-    var q = Number(r.qty);
-    if (!isFinite(q) || q <= 0) ok = false;
-    else sum += q;
+    var q = rowScaled(r.qty);
+    if (q <= 0n) okRows = false;
+    else sumSc += q;
     if (String(r.fee || '').trim() !== '') {
-      var f = Number(r.fee);
-      if (!isFinite(f) || f < 0) ok = false;
-      else feeSum += f;
+      var f = rowScaled(r.fee);
+      if (f < 0n) okRows = false;
+      else feeSumSc += f;
     }
   });
-  sum = roundQtyAt(sum, qtyDecimals(tick));
   if (!sentOk) {
     feeInput.value = '';
     if (hint) hint.textContent = 'Enter how much you sent first — the fee below fills in itself.';
     return;
   }
-  if (!ok) {
+  if (!okRows) {
     feeInput.value = '';
     if (hint) hint.textContent = 'Each recipient needs an amount > 0.';
     return;
   }
-  var fee = roundQtyAt(sent - sum - selfQty, qtyDecimals(tick));
-  if (!(fee >= 0)) {
+  var feeSc = sentSc - sumSc - selfSc;
+  if (feeSc < 0n) {
     feeInput.value = '';
-    if (hint) hint.textContent = selfQty > 0
+    if (hint) hint.textContent = selfSc > 0n
       ? 'Recipients + received back exceed sent — lower an amount.'
       : 'Recipients exceed sent — lower an amount.';
     return;
   }
-  feeInput.value = String(fee);
+  var feeTxt = exactToStringTrim(feeSc, symDec);
+  feeInput.value = feeTxt;
   if (hint) {
     var n = rows.length + (rows.length === 1 ? ' recipient' : ' recipients');
-    var backTxt = selfQty > 0 ? ' ' + selfQty + sym + ' stayed here.' : '';
-    if (feeSum - fee > 1e-12) {
-      hint.textContent = 'Row fees exceed the tx fee (' + fee + sym + ') — lower a fee share.';
+    var backTxt = selfSc > 0n ? ' ' + exactToStringTrim(selfSc, symDec) + sym + ' stayed here.' : '';
+    if (feeSumSc > feeSc) {
+      hint.textContent = 'Row fees exceed the tx fee (' + feeTxt + sym + ') — lower a fee share.';
     } else {
-      hint.textContent = fee === 0
+      hint.textContent = feeSc === 0n
         ? 'No fee — received equals sent across ' + n + '.' + backTxt
-        : 'Fee ' + fee + sym + ' shared across ' + n + (feeSum > 0 ? ' (' + roundQtyAt(feeSum, qtyDecimals(tick)) + ' attributed per row).' : '.') + backTxt;
+        : 'Fee ' + feeTxt + sym + ' shared across ' + n + (feeSumSc > 0n ? ' (' + exactToStringTrim(feeSumSc, symDec) + ' attributed per row).' : '.') + backTxt;
     }
   }
 }
@@ -12800,8 +13095,8 @@ function openEditTrade(tradeId) {
   }
   syncLockedSymbol();
   syncTradeTypeUI();
-  uiSetVal('t-qty', srcTr.qty !== undefined && srcTr.qty !== null ? String(srcTr.qty) : '');
-  uiSetVal('t-toqty', dstTr && dstTr.qty !== undefined && dstTr.qty !== null ? String(dstTr.qty) : '');
+  uiSetVal('t-qty', srcTr.qty !== undefined && srcTr.qty !== null ? qtyUiText(srcTr.qty, String(srcTr.symbol || '').toUpperCase()) : '');
+  uiSetVal('t-toqty', dstTr && dstTr.qty !== undefined && dstTr.qty !== null ? qtyUiText(dstTr.qty, String(dstTr.symbol || '').toUpperCase()) : '');
   uiSetVal('t-total', srcTr.total !== undefined && srcTr.total !== null ? String(srcTr.total) : '');
   try {
     var cSel = document.getElementById('t-currency');
@@ -12818,7 +13113,7 @@ function openEditTrade(tradeId) {
   uiSetVal('t-ledger', (srcTr.ledger === undefined || srcTr.ledger === null) ? '' : String(srcTr.ledger));
   uiSetVal('t-ledger-label', (srcTr.ledgerLabel === undefined || srcTr.ledgerLabel === null) ? '' : String(srcTr.ledgerLabel));
   uiSetVal('t-txid', srcTr.txid !== undefined && srcTr.txid !== null ? String(srcTr.txid) : (dstTr && dstTr.txid !== undefined && dstTr.txid !== null ? String(dstTr.txid) : ''));
-  uiSetVal('t-networkfee', srcTr.networkFee !== undefined && srcTr.networkFee !== null ? String(srcTr.networkFee) : '');
+  uiSetVal('t-networkfee', srcTr.networkFee !== undefined && srcTr.networkFee !== null ? qtyUiText(srcTr.networkFee, String(srcTr.symbol || '').toUpperCase()) : '');
   if (tr.type === 'transfer') {
     // Recipients replace the old single-destination inputs: stored outputs
     // repopulate row-for-row; legacy records migrate to one row on open.
@@ -12855,20 +13150,26 @@ function openEditTrade(tradeId) {
       if (crossSym !== String(tr.symbol || '').toUpperCase()) {
         erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(tr.qty), fee: '', toQty: (tr.toQty !== undefined && tr.toQty !== null) ? String(tr.toQty) : '' });
       } else if (isFinite(trQty) && trQty > 0 && isFinite(trNf) && trNf >= 0 && trNf < trQty) {
-        erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: String(roundQtyAt(trQty - trNf, qtyDecimals(tr.symbol))), fee: '' });
+        var decET = qtyDecimals(tr.symbol);
+        var qScET = exactScaledOf(tr.qty, decET);
+        var nfScET = exactScaledOf((tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : tr.networkFee, decET);
+        erows.push({ kind: 'internal', accountId: tr.toAccountId, qty: (qScET !== null && nfScET !== null && qScET > nfScET) ? exactToStringTrim(qScET - nfScET, decET) : String(trQty - trNf), fee: '' });
       }
     }
     erows.forEach(function (r) { try { addRecipientRow(r); } catch (e) { /* ignore */ } });
     var storedSelf = transferSelfQtyOf(tr);
     if (storedSelf > 0) {
-      uiSetVal('t-selfrecv', String(storedSelf));
+      uiSetVal('t-selfrecv', qtyUiText(storedSelf, String(tr.symbol || '').toUpperCase()));
     } else if (!erows.length) {
       // Same-account move: restore what arrived back so the locked fee
       // recomputes exactly (legacy records carry sent + fee only).
       var selfQty = Number(tr.qty);
       var selfNf = (tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : Number(tr.networkFee);
       if (isFinite(selfQty) && selfQty > 0 && isFinite(selfNf) && selfNf >= 0 && selfNf < selfQty) {
-        uiSetVal('t-selfrecv', String(roundQtyAt(selfQty - selfNf, qtyDecimals(tr.symbol))));
+        var decES = qtyDecimals(tr.symbol);
+        var qScES = exactScaledOf(tr.qty, decES);
+        var nfScES = exactScaledOf((tr.networkFee === undefined || tr.networkFee === null || String(tr.networkFee).trim() === '') ? 0 : tr.networkFee, decES);
+        uiSetVal('t-selfrecv', (qScES !== null && nfScES !== null && qScES > nfScES) ? exactToStringTrim(qScES - nfScES, decES) : String(selfQty - selfNf));
       }
     }
   }
@@ -13109,8 +13410,8 @@ function onTradeSubmit(ev) {
     var fromSym = symbol;
     var toSym = String(toAccSwap.ticker).toUpperCase();
     if (fromSym === toSym) { tradeFormError('Same asset — use Transfer instead of Swap.'); return; }
-    var fromQty = Number(uiVal('t-qty', ''));
-    var toQty = Number(uiVal('t-toqty', ''));
+    var fromQty = exactQtyValue(uiVal('t-qty', ''), fromSym);
+    var toQty = exactQtyValue(uiVal('t-toqty', ''), toSym);
     var swapTotal = Number(uiVal('t-total', ''));
     var ccySelS = uiVal('t-currency', 'EUR');
     var swapCcy = (ccySelS === 'CUSTOM' ? uiVal('t-custom-ccy', '').trim().toUpperCase() : String(ccySelS).toUpperCase());
@@ -13246,8 +13547,8 @@ function onTradeSubmit(ev) {
     var fromSymE = String(fromAccE.ticker).toUpperCase();
     var toSymE = String(toAccE.ticker).toUpperCase();
     if (fromSymE === toSymE) { tradeFormError('Same asset — use Transfer instead of Swap.'); return; }
-    var fromQtyE = Number(uiVal('t-qty', ''));
-    var toQtyE = Number(uiVal('t-toqty', ''));
+    var fromQtyE = exactQtyValue(uiVal('t-qty', ''), fromSymE);
+    var toQtyE = exactQtyValue(uiVal('t-toqty', ''), toSymE);
     var totalE = Number(uiVal('t-total', ''));
     var ccySelE = uiVal('t-currency', 'EUR');
     var swapCcyE = (ccySelE === 'CUSTOM' ? uiVal('t-custom-ccy', '').trim().toUpperCase() : String(ccySelE).toUpperCase());
@@ -13458,10 +13759,13 @@ function onTradeSubmit(ev) {
   if (side === 'transfer') {
     var recRows = readRecipientRows();
     var sentChk = Number(qtyRaw);
-    if (!isFinite(sentChk) || sentChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
+    var symDecSave = qtyDecimals(symbol);
+    var sentScSave = exactScaledOf(qtyRaw, symDecSave);
+    var sentOkSave = sentScSave !== null && sentScSave > 0n;
+    if (!sentOkSave) { tradeFormError('Enter how much you sent (> 0).'); return; }
     if (recRows.length > TRANSFER_MAX_OUTPUTS) { tradeFormError('Too many recipients (max 20).'); return; }
     var seenAcc = {};
-    var sumQ = 0, sumF = 0, crossN = 0, crossOne = null;
+    var sumQSc = 0n, sumFSc = 0n, crossN = 0, crossOne = null;
     var rowErr = null;
     for (var ri = 0; ri < recRows.length && !rowErr; ri++) {
       (function (rr, idx) {
@@ -13476,62 +13780,63 @@ function onTradeSubmit(ev) {
           var pickTick = String(accPick.ticker).toUpperCase();
           if (!isCashAcc && (isCashKind(accPick.kind) || pickTick !== symbol)) return fail(label + ' needs the same asset in both accounts — use Swap for different assets.');
           if (isCashAcc && !isCashKind(accPick.kind)) return fail('Cash moves only between cash accounts.');
-          var rf0 = (String(rr.fee || '').trim() === '') ? 0 : Number(rr.fee);
-          if (!isFinite(rf0) || rf0 < 0) return fail(label + ' fee must be >= 0.');
-          sumF += rf0;
+          var rf0 = (String(rr.fee || '').trim() === '') ? 0n : exactScaledOf(rr.fee, symDecSave);
+          if (rf0 === null || rf0 < 0n) return fail(label + ' fee must be >= 0.');
+          sumFSc += rf0;
           if (isCashAcc && isCashKind(accPick.kind) && pickTick !== symbol) {
             crossN++;
             crossOne = { row: rr, acc: accPick };
           } else {
-            var rq0 = Number(rr.qty);
-            if (!isFinite(rq0) || rq0 <= 0) return fail(label + ' needs an amount > 0.');
-            sumQ += rq0;
+            var rq0 = exactScaledOf(rr.qty, symDecSave);
+            if (rq0 === null || rq0 <= 0n) return fail(label + ' needs an amount > 0.');
+            sumQSc += rq0;
           }
         } else {
-          var rq = Number(rr.qty);
-          if (!isFinite(rq) || rq <= 0) return fail(label + ' needs an amount > 0.');
-          var rf = (String(rr.fee || '').trim() === '') ? 0 : Number(rr.fee);
-          if (!isFinite(rf) || rf < 0) return fail(label + ' fee must be >= 0.');
+          var rq = exactScaledOf(rr.qty, symDecSave);
+          if (rq === null || rq <= 0n) return fail(label + ' needs an amount > 0.');
+          var rf = (String(rr.fee || '').trim() === '') ? 0n : exactScaledOf(rr.fee, symDecSave);
+          if (rf === null || rf < 0n) return fail(label + ' fee must be >= 0.');
           if (String(rr.label || '').trim() === '') return fail(label + ' needs a label.');
           if (String(rr.label).trim().length > TRANSFER_LABEL_MAX) return fail(label + ' label is too long.');
-          sumQ += rq;
-          sumF += rf;
+          sumQSc += rq;
+          sumFSc += rf;
         }
       })(recRows[ri], ri);
     }
     if (rowErr) { tradeFormError(rowErr); return; }
     if (crossN > 0 && recRows.length > 1) { tradeFormError('Cross-fiat moves stay single-recipient — split the same-fiat rows into their own record.'); return; }
     var selfRawSub = String(uiVal('t-selfrecv', '')).trim();
-    var selfQtySub = 0;
+    var selfScSub = 0n;
     if (recRows.length && selfRawSub !== '') {
-      selfQtySub = Number(selfRawSub);
-      if (!isFinite(selfQtySub) || selfQtySub < 0) { tradeFormError('Received back must be a number >= 0.'); return; }
+      var selfScRaw = exactScaledOf(selfRawSub, symDecSave);
+      if (selfScRaw === null || selfScRaw < 0n) { tradeFormError('Received back must be a number >= 0.'); return; }
+      selfScSub = selfScRaw;
     }
     if (crossN === 1 && recRows.length === 1) {
       var rx = Number(crossOne.row.toQty);
       if (!isFinite(rx) || rx <= 0) { tradeFormError('Enter what arrives in ' + String(crossOne.acc.ticker).toUpperCase() + ' (> 0).'); return; }
-      if (selfQtySub >= sentChk) { tradeFormError('Received back must be less than sent when another account receives funds.'); return; }
-      crossOne.row.qty = String(roundQtyAt(sentChk - selfQtySub, qtyDecimals(symbol)));
+      if (selfScSub >= sentScSave) { tradeFormError('Received back must be less than sent when another account receives funds.'); return; }
+      crossOne.row.qty = String(exactNumOrStr(sentScSave - selfScSub, symDecSave));
       crossOne.row.toSymbol = String(crossOne.acc.ticker).toUpperCase();
       crossOne.row.fee = '';
-      sumQ = roundQtyAt(sentChk - selfQtySub, qtyDecimals(symbol));
-      sumF = 0;
+      sumQSc = sentScSave - selfScSub;
+      sumFSc = 0n;
       networkFee = 0;
-      transferSelfBuilt = selfQtySub;
+      transferSelfBuilt = (selfScSub > 0n) ? exactNumOrStr(selfScSub, symDecSave) : selfRawSub;
       toAccCash = crossOne.acc;
       isCrossFiat = true;
     } else {
-      sumQ = roundQtyAt(sumQ, qtyDecimals(symbol));
-      networkFee = roundQtyAt(sentChk - sumQ - selfQtySub, qtyDecimals(symbol));
-      if (!(networkFee >= 0)) { tradeFormError('Recipients + received back exceed sent — lower an amount.'); return; }
-      if (sumF - networkFee > 1e-12) { tradeFormError('Recipient fees exceed the transfer fee (' + networkFee + ').'); return; }
-      transferSelfBuilt = selfQtySub;
+      var feeScSave = sentScSave - sumQSc - selfScSub;
+      if (feeScSave < 0n) { tradeFormError('Recipients + received back exceed sent — lower an amount.'); return; }
+      networkFee = exactNumOrStr(feeScSave, symDecSave);
+      if (sumFSc > feeScSave) { tradeFormError('Recipient fees exceed the transfer fee (' + String(networkFee) + ').'); return; }
+      transferSelfBuilt = (selfScSub > 0n) ? exactNumOrStr(selfScSub, symDecSave) : selfRawSub;
     }
     if (!recRows.length) {
       // No recipients: same-account move — the fee derives from what
       // arrived back (the fee field is computed-only, as ever).
       var backRaw = uiVal('t-selfrecv', '');
-      var backChk = transferFeeFrom(String(qtyRaw), backRaw);
+      var backChk = transferFeeFrom(String(qtyRaw), backRaw, symbol);
       if (!backChk) {
         if (String(backRaw).trim() === '') tradeFormError('Enter what arrived back (> 0).');
         else tradeFormError('Received back must be > 0 and at most what you sent.');
@@ -13539,20 +13844,22 @@ function onTradeSubmit(ev) {
       }
       networkFee = backChk.fee;
     }
-    if (!isFinite(networkFee) || networkFee < 0 || networkFee >= sentChk) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
-    uiSetVal('t-networkfee', String(networkFee));
+    var nfChkSave = Number(networkFee);
+    if (!isFinite(nfChkSave) || nfChkSave < 0 || nfChkSave >= Number(qtyRaw)) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
+    uiSetVal('t-networkfee', exactToStringTrim(exactScaledOf(networkFee, symDecSave), symDecSave));
     transferRowsBuilt = recRows;
   }
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
   if (!isFinite(fee) || fee < 0) { tradeFormError('Fee must be >= 0.'); return; }
   if (!isFinite(networkFee) || networkFee < 0) { tradeFormError('Transfer fees must be >= 0.'); return; }
-  var qty = (side === 'expense' && String(qtyRaw).trim() === '') ? null : Number(qtyRaw);
+  var qty = (side === 'expense' && String(qtyRaw).trim() === '') ? null : exactQtyValue(qtyRaw, symbol);
+  var qtyChk = Number(qty);
   var total = (String(totalRaw).trim() === '') ? (side === 'buy' || side === 'sell' ? NaN : 0) : Number(totalRaw);
   // Cash income/expense amounts live in the account fiat alone: the amount
   // is the quantity, and total/currency derive from it (the rows hide).
   if (isCashAcc && (side === 'income' || side === 'expense')) {
-    if (!isFinite(qty) || qty <= 0) { tradeFormError('Amount must be > 0.'); return; }
-    total = qty;
+    if (!isFinite(qtyChk) || qtyChk <= 0) { tradeFormError('Amount must be > 0.'); return; }
+    total = exactNumOrStr(exactScaledOf(qtyRaw, qtyDecimals(symbol)), qtyDecimals(symbol));
     currency = symbol;
     feeCurrency = symbol;
   }
@@ -13564,19 +13871,19 @@ function onTradeSubmit(ev) {
   }
   // Per-type validation (messages match legacy for buy/sell so tests keep passing).
   if (side === 'buy' || side === 'sell') {
-    if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
+    if (!isFinite(qtyChk) || qtyChk <= 0) { tradeFormError('Quantity must be > 0.'); return; }
     if (!isFinite(total) || total < 0) { tradeFormError('Total must be >= 0.'); return; }
     if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid — pick one or enter a 2–10 letter code.'); return; }
   } else if (side === 'transfer') {
-    if (!isFinite(qty) || qty <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
-    if (!isFinite(networkFee) || networkFee < 0 || networkFee >= qty) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
+    if (!isFinite(qtyChk) || qtyChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
+    if (!isFinite(nfChkSave) || nfChkSave < 0 || nfChkSave >= qtyChk) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     // Recipients were validated row-by-row above (accounts exist, tickers
     // eligible, label present, sums balance); nothing left to check here.
   } else if (side === 'income') {
-    if (!isFinite(qty) || qty <= 0) { tradeFormError('Quantity must be > 0.'); return; }
+    if (!isFinite(qtyChk) || qtyChk <= 0) { tradeFormError('Quantity must be > 0.'); return; }
     // Cash derives from the account fiat alone (total/currency rows hide):
     // hidden-field leftovers must never override the derivation below.
-    if (isCashAcc) { total = qty; currency = symbol; }
+    if (isCashAcc) { total = exactNumOrStr(exactScaledOf(qtyRaw, qtyDecimals(symbol)), qtyDecimals(symbol)); currency = symbol; }
     else if (String(totalRaw).trim() !== '' && (!isFinite(total) || total < 0)) { tradeFormError('Total must be >= 0.'); return; }
     else if (String(totalRaw).trim() !== '') {
       if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid.'); return; }
@@ -13585,10 +13892,10 @@ function onTradeSubmit(ev) {
     var hasQ = !(String(qtyRaw).trim() === '');
     var hasT = !isCashAcc && !(String(totalRaw).trim() === '');
     if (!hasQ && !hasT) { tradeFormError('Expense needs a quantity or a cash amount.'); return; }
-    if (hasQ && (!isFinite(qty) || qty <= 0)) { tradeFormError('Quantity must be > 0.'); return; }
+    if (hasQ && (!isFinite(qtyChk) || qtyChk <= 0)) { tradeFormError('Quantity must be > 0.'); return; }
     if (hasT && (!isFinite(total) || total <= 0)) { tradeFormError('Fiat amount must be > 0.'); return; }
     if (!hasQ) qty = null;
-    if (isCashAcc) { total = qty; currency = symbol; }
+    if (isCashAcc) { total = exactNumOrStr(exactScaledOf(qtyRaw, qtyDecimals(symbol)), qtyDecimals(symbol)); currency = symbol; }
     else if (!hasT) { total = 0; currency = String(main).toUpperCase(); }
     else if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid.'); return; }
   }
@@ -13606,7 +13913,7 @@ function onTradeSubmit(ev) {
   };
   if (side === 'transfer') {
     heldDraft.networkFee = networkFee;
-    var heldOuts = buildTransferOutputs(transferRowsBuilt);
+    var heldOuts = buildTransferOutputs(transferRowsBuilt, symbol);
     if (heldOuts.length) {
       heldDraft.outputs = heldOuts;
       if (transferSelfBuilt > 0) heldDraft.selfQty = transferSelfBuilt;
@@ -13702,7 +14009,7 @@ function onTradeSubmit(ev) {
       }
       if (side === 'transfer') {
         trade.networkFee = networkFee;
-        var outsEdit = buildTransferOutputs(transferRowsBuilt);
+        var outsEdit = buildTransferOutputs(transferRowsBuilt, symbol);
         if (outsEdit.length) {
           trade.outputs = outsEdit;
           if (transferSelfBuilt > 0) trade.selfQty = transferSelfBuilt;
@@ -13786,7 +14093,7 @@ function onTradeSubmit(ev) {
     }
     if (side === 'transfer') {
       trade.networkFee = networkFee;
-      var outsNew = buildTransferOutputs(transferRowsBuilt);
+      var outsNew = buildTransferOutputs(transferRowsBuilt, symbol);
       if (outsNew.length) {
         trade.outputs = outsNew;
         if (transferSelfBuilt > 0) trade.selfQty = transferSelfBuilt;

@@ -6414,6 +6414,126 @@
       });
     })();
 
+    // === Exact 18-decimal quantity core (EVM tokens; BTC 8 / XMR 12) ===
+    (function exactQtyCoreTests() {
+      var L = window.Inoculens || {};
+      function fracOf(s) {
+        return String(s).split(/[.,]/).pop().replace(/\D/g, '');
+      }
+      test('qty precision map: 18 for EVM tokens, 8 for BTC, 12 for XMR, 8 default', function () {
+        assert(typeof L.qtyDecimals === 'function', 'qtyDecimals missing');
+        assert(L.qtyDecimals('AAVE') === 18, 'aave must be 18, got ' + L.qtyDecimals('AAVE'));
+        assert(L.qtyDecimals('ETH') === 18, 'eth must be 18, got ' + L.qtyDecimals('ETH'));
+        assert(L.qtyDecimals('aave') === 18, 'lowercase ticker must count too');
+        assert(L.qtyDecimals(' BTC ') === 8, 'btc must stay a satoshi asset');
+        assert(L.qtyDecimals('XMR') === 12, 'xmr must stay a piconero asset');
+        assert(L.qtyDecimals('EUR') === 8, 'fiat keeps the legacy 8dp grid');
+        assert(L.qtyDecimals('MYCOIN') === 8, 'unknown custom ticker keeps 8');
+        assert(L.qtyDecimals('') === 8 && L.qtyDecimals(null) === 8, 'blank and missing keep 8');
+      });
+
+      test('exactScaledOf parses decimal and exponent forms without float loss', function () {
+        assert(typeof L.exactScaledOf === 'function', 'exactScaledOf missing');
+        assert(String(L.exactScaledOf('1.000000000000000015', 18)) === '1000000000000000015', 'plain wei digits must survive intact');
+        assert(String(L.exactScaledOf('1e-18', 18)) === '1', 'exponent form must parse exactly');
+        assert(String(L.exactScaledOf('1.5e-17', 18)) === '15', 'exponent fraction must parse exactly');
+        assert(String(L.exactScaledOf('2.5e20', 18)) === '250000000000000000000000000000000000000', 'large exponents must never pass a float');
+        assert(String(L.exactScaledOf('0.1', 18)) === '100000000000000000', 'plain fraction wrong');
+        assert(String(L.exactScaledOf('-1.5', 18)) === '-1500000000000000000', 'sign must carry');
+        assert(String(L.exactScaledOf('0.0000000000000000015', 18)) === '2', 'half-up must round the 19th wei digit');
+        assert(L.exactScaledOf('abc', 18) === null, 'garbage stays null');
+        assert(L.exactScaledOf('', 18) === null, 'blank stays null');
+        assert(L.exactScaledOf('1,2', 18) === null, 'thousands separator stays null');
+      });
+
+      test('exactNumOrStr keeps a number when it round-trips, exact string otherwise', function () {
+        var wei = L.exactNumOrStr(1n, 18);
+        assert(typeof wei === 'number' && wei === 1e-18, 'one wei must stay numeric, got ' + typeof wei);
+        assert(L.exactNumOrStr(0n, 18) === 0, 'zero stays the number 0');
+        var tail = L.exactNumOrStr(123456789123456789n, 18);
+        assert(typeof tail === 'string' && tail === '0.123456789123456789', '17-digit tails must degrade to string, got ' + JSON.stringify(tail));
+        var wide = L.exactNumOrStr(10000000000000000000500000000000000000n, 18);
+        assert(wide === '10000000000000000000.5', 'beyond-float precision must keep every digit, got ' + JSON.stringify(wide));
+      });
+
+      test('exactQtyValue quantizes form input at the symbol grid', function () {
+        assert(L.exactQtyValue('1.000000000000000015', 'AAVE') === '1.000000000000000015', 'wei tails store as exact digits, got ' + JSON.stringify(L.exactQtyValue('1.000000000000000015', 'AAVE')));
+        assert(L.exactQtyValue('0.1', 'AAVE') === 0.1, 'round-trip values stay numbers');
+        assert(L.exactQtyValue('2.5E20', 'AAVE') === 2.5e20, 'exponent input must normalize to a number, got ' + String(L.exactQtyValue('2.5E20', 'AAVE')));
+        assert(L.exactQtyValue('1.5', 'BTC') === 1.5, 'btc path stays numeric');
+        assert(L.exactQtyValue('0.1234567899', 'MYCOIN') === 0.12345679, 'unknown tickers quantize at 8dp, got ' + L.exactQtyValue('0.1234567899', 'MYCOIN'));
+        assert(isNaN(L.exactQtyValue('abc', 'AAVE')), 'garbage keeps the NaN-through-Number contract');
+      });
+
+      test('transferFeeFrom stays wei-exact on 18-decimal tokens', function () {
+        assert(typeof L.transferFeeFrom === 'function', 'transferFeeFrom missing');
+        var wei = L.transferFeeFrom('1.000000000000000015', '1', 'AAVE');
+        assert(wei !== null && wei.fee === 1.5e-17, '15 wei must survive subtraction, got ' + JSON.stringify(wei && wei.fee));
+        var wide = L.transferFeeFrom('20000000000000000000.5', '10000000000000000000', 'AAVE');
+        assert(wide !== null && typeof wide.fee === 'string' && wide.fee === '10000000000000000000.5', 'beyond-float fees must store digits, got ' + JSON.stringify(wide && wide.fee));
+        var flat = L.transferFeeFrom('1.5', '1.5', 'AAVE');
+        assert(flat !== null && flat.fee === 0, 'equal amounts stay a numeric zero, got ' + JSON.stringify(flat && flat.fee));
+        var dust = L.transferFeeFrom('1', '0.999999999999999985', 'AAVE');
+        assert(dust !== null && dust.fee === 1.5e-17, '18-grid dust must stay exact, got ' + JSON.stringify(dust && dust.fee));
+        assert(L.transferFeeFrom('abc', '1', 'AAVE') === null, 'garbage sent stays null');
+        assert(L.transferFeeFrom('1', '2', 'AAVE') === null, 'received over sent stays null');
+      });
+
+      test('fmtQty prints wei-exact 18 for EVM tokens; BTC/XMR grids stay', function () {
+        assert(L.fmtQty('0.000000000000000001', 'AAVE') === '0.000000000000000001', 'one wei must print exact: ' + L.fmtQty('0.000000000000000001', 'AAVE'));
+        assert(L.fmtQty('23.5', 'AAVE') === '23.500000000000000000', 'plain qty shows the full grid: ' + L.fmtQty('23.5', 'AAVE'));
+        assert(L.fmtQty(23.5, 'AAVE') === '23.500000000000000000', 'numbers format identically');
+        assert(L.fmtQty('1.000000000000000015', 'AAVE') === '1.000000000000000015', 'float64 may not eat the tail: ' + L.fmtQty('1.000000000000000015', 'AAVE'));
+        assert(L.fmtQty(1e-18, 'AAVE') === '0.000000000000000001', 'exponent-number input still prints full digits: ' + L.fmtQty(1e-18, 'AAVE'));
+        assert(L.fmtQty('n/a', 'AAVE') === '—', 'non-finite stays the dash');
+        assert(fracOf(L.fmtQty(0.1, 'BTC')) === '10000000', 'btc grid unchanged: ' + L.fmtQty(0.1, 'BTC'));
+        assert(fracOf(L.fmtQty(0.1, 'XMR')) === '100000000000', 'xmr grid unchanged: ' + L.fmtQty(0.1, 'XMR'));
+        assert(fracOf(L.fmtQty(0.1, 'EUR')) === '1', 'fiat stays trimmed: ' + L.fmtQty(0.1, 'EUR'));
+      });
+
+      test('qtyUiText renders stored values plain and passes raw through', function () {
+        assert(typeof L.qtyUiText === 'function', 'qtyUiText missing');
+        assert(L.qtyUiText('1e-18', 'AAVE') === '0.000000000000000001', 'exponent form must read plain: ' + L.qtyUiText('1e-18', 'AAVE'));
+        assert(L.qtyUiText('23.500000000000000000', 'AAVE') === '23.5', 'whole stores stay plain');
+        assert(L.qtyUiText('n/a', 'AAVE') === 'n/a', 'raw passthrough');
+        assert(L.qtyUiText('', 'AAVE') === '', 'blank stays blank');
+      });
+
+      test('exactQtyHeldString walks buys, sells, expenses, fees and clamps exactly', function () {
+        assert(typeof L.exactQtyHeldString === 'function', 'exactQtyHeldString missing');
+        var FX = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
+        function mk(id, type, qty, acc, date, extra) {
+          var t = { id: id, type: type, symbol: 'AAVE', qty: qty, total: 0, currency: 'EUR', date: date, fee: 0, feeCurrency: 'EUR', accountId: acc, fxLock: FX, createdAt: '2026-01-01T00:00:00.000Z' };
+          if (extra) for (var k in extra) t[k] = extra[k];
+          return t;
+        }
+        var trades = [
+          mk('b1', 'buy', 2, 'a1', '2026-01-01'),
+          mk('b2', 'buy', '1.000000000000000015', 'a1', '2026-01-02'),
+          mk('s1', 'sell', 0.5, 'a1', '2026-02-01'),
+          mk('e1', 'expense', '0.000000000000000001', 'a1', '2026-02-02'),
+          mk('t1', 'transfer', 1, 'a1', '2026-02-03', { networkFee: 0.015, toAccountId: 'a2' })
+        ];
+        var a1 = L.exactQtyHeldString(trades, 'a1', 'AAVE');
+        assert(a1 === '1.500000000000000014', 'a1 walk must be wei-exact, got ' + a1);
+        var a2 = L.exactQtyHeldString(trades, 'a2', 'AAVE');
+        assert(a2 === '0.985000000000000000', 'the arrivee holds sent minus fee on the grid, got ' + a2);
+        var all = L.exactQtyHeldString(trades, null, 'AAVE');
+        assert(all === '2.485000000000000014', 'all-accounts total stays on the grid, got ' + all);
+        var avg = L.computeAverage(trades).get('AAVE');
+        assert(avg && Math.abs(avg.qty - 2.485000000000000014) < 1e-9, 'the float engine must agree with the walk, got ' + (avg && avg.qty));
+        trades.push(mk('s2', 'sell', 5, 'a1', '2026-03-01'));
+        a1 = L.exactQtyHeldString(trades, 'a1', 'AAVE');
+        assert(a1 === '0.000000000000000000', 'oversells must clamp to the held slice, got ' + a1);
+        var btc = [
+          { id: 'bb1', type: 'buy', symbol: 'BTC', qty: 1.1, total: 0, currency: 'EUR', date: '2026-02-01', fee: 0, feeCurrency: 'EUR', fxLock: FX, accountId: 'a1', createdAt: '2026-02-01T00:00:00.000Z' },
+          { id: 'tb1', type: 'transfer', symbol: 'BTC', qty: 1, total: 0, currency: 'EUR', date: '2026-02-02', fee: 0, feeCurrency: 'EUR', fxLock: FX, accountId: 'a1', networkFee: 0.1, toAccountId: 'a2', createdAt: '2026-02-02T00:00:00.000Z' }
+        ];
+        assert(L.exactQtyHeldString(btc, 'a1', 'BTC') === '0.10000000', 'btc sweep keeps satoshis, got ' + L.exactQtyHeldString(btc, 'a1', 'BTC'));
+        assert(L.exactQtyHeldString(btc, 'a2', 'BTC') === '0.90000000', 'btc arrival keeps satoshis, got ' + L.exactQtyHeldString(btc, 'a2', 'BTC'));
+      });
+    })();
+
     // === Time-ordered holdings: retro edits + future protection ===
     (function retroHeldTimelineTests() {
       var L = window.Inoculens || {};
@@ -7699,13 +7819,13 @@
       function fracOf(s) {
         return String(s).split(/[.,]/).pop().replace(/\D/g, '');
       }
-      test('fmtQty shows 8 decimals for BTC, trimmed elsewhere', function () {
+      test('fmtQty shows 8 decimals for BTC, 18 fixed for EVM tokens', function () {
         assert(fracOf(L.fmtQty(0.1, 'BTC')) === '10000000', 'btc 0.1 wrong: ' + L.fmtQty(0.1, 'BTC'));
         assert(fracOf(L.fmtQty(1, 'BTC')) === '00000000', 'btc 1 wrong: ' + L.fmtQty(1, 'BTC'));
         assert(fracOf(L.fmtQty(0.00039164, 'BTC')) === '00039164', 'btc dust wrong');
         assert(fracOf(L.fmtQty(1, 'btc')) === '00000000', 'lowercase btc wrong');
-        assert(fracOf(L.fmtQty(0.1, 'ETH')) === '1', 'eth must stay trimmed: ' + L.fmtQty(0.1, 'ETH'));
-        assert(L.fmtQty(1, 'ETH').indexOf('00000000') === -1, 'eth 1 must stay short: ' + L.fmtQty(1, 'ETH'));
+        assert(fracOf(L.fmtQty(0.1, 'ETH')) === '100000000000000000', 'eth prints wei-exact 18: ' + L.fmtQty(0.1, 'ETH'));
+        assert(L.fmtQty(1, 'ETH') === '1.000000000000000000', 'eth 1 prints the full wei grid: ' + L.fmtQty(1, 'ETH'));
         assert(L.fmtQty('nope') === '—', 'non-finite must stay —');
       });
       test('fmtQty shows 12 decimals for XMR (piconero)', function () {
@@ -7714,7 +7834,7 @@
         assert(fracOf(L.fmtQty(0.000123456789, 'XMR')) === '000123456789', 'xmr piconero dust wrong: ' + L.fmtQty(0.000123456789, 'XMR'));
         assert(fracOf(L.fmtQty(0.000000000333, 'XMR')) === '000000000333', 'xmr sub-satoshi dust wrong: ' + L.fmtQty(0.000000000333, 'XMR'));
         assert(fracOf(L.fmtQty(1, 'xmr')) === '000000000000', 'lowercase xmr wrong');
-        assert(L.fmtQty(1, 'ETH').indexOf('000000000000') === -1, 'eth must not inherit xmr padding: ' + L.fmtQty(1, 'ETH'));
+        assert(fracOf(L.fmtQty(1, 'ETH')) === '000000000000000000', 'eth keeps its own 18-grid, not xmr padding: ' + L.fmtQty(1, 'ETH'));
       });
       test('BTC record cards show full 8-decimal quantities', function () {
         L.tradePageSizeSet(25);

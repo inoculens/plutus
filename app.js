@@ -8357,6 +8357,7 @@ function syncTradeFactsFit() {
 
 function wireTruncTap(valEl, title, labelEl) {
   if (!valEl || valEl.getAttribute('data-trunc-wired') === '1') return;
+  var alwaysOpen = title === 'Paid' || title === 'Real price' || title === 'Amount';
   valEl.setAttribute('data-trunc-wired', '1');
   valEl.setAttribute('data-info-cond', '1');
   valEl.setAttribute('role', 'button');
@@ -8374,6 +8375,10 @@ function wireTruncTap(valEl, title, labelEl) {
       var cur = String(valEl.textContent || '');
       if (snap !== '' && snap !== cur) { // fit-trimmed: the popup owns the full string
         openNoteDialog(snap, title);
+        return;
+      }
+      if (alwaysOpen) {
+        openNoteDialog(snap || cur, title);
         return;
       }
       if (!isVisuallyCut(valEl)) return;
@@ -8887,6 +8892,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
         valueHit = dotRow ? dotRow.querySelector('.stat-val[data-trunc-wired="1"]') : null;
       }
       if (valueHit) {
+        var valueLabel = valueHit.closest('.stat-row');
+        var valueName = valueLabel ? valueLabel.getAttribute('data-label') : '';
+        if (valueName === 'Paid' || valueName === 'Real price' || valueName === 'Amount') return;
         var fullValue = String(valueHit.getAttribute('data-full') || '');
         var currentValue = String(valueHit.textContent || '');
         if (isVisuallyCut(valueHit) || (fullValue !== '' && fullValue !== currentValue)) return;

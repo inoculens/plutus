@@ -6509,6 +6509,20 @@
         assert(L.qtyUiText('', 'AAVE') === '', 'blank stays blank');
       });
 
+      test('facts-strip amount ladder yields decimals to the labels, floors at one', function () {
+        assert(typeof L.cutOneQtyDigit === 'function', 'cutOneQtyDigit missing');
+        assert(L.cutOneQtyDigit('1.4523584521545257 AAVE') === '1.452358452154525 AAVE', 'one digit per step: ' + JSON.stringify(L.cutOneQtyDigit('1.4523584521545257 AAVE')));
+        assert(L.cutOneQtyDigit('0.452358452154525 AAVE') === '0.45235845215452 AAVE', 'plain heads cut');
+        assert(L.cutOneQtyDigit('-1.000000000000000015 AAVE') === '-1.00000000000000001 AAVE', 'signs survive: ' + JSON.stringify(L.cutOneQtyDigit('-1.000000000000000015 AAVE')));
+        assert(L.cutOneQtyDigit('1.4 AAVE') === null, 'one decimal place is the floor');
+        assert(L.cutOneQtyDigit('0.5 AAVE') === null, 'the floor shows at short heads too');
+        assert(L.cutOneQtyDigit('2 AAVE') === null, 'integers have nothing to yield');
+        assert(L.cutOneQtyDigit('-5 AAVE') === null, 'signed integers have nothing to yield');
+        assert(L.cutOneQtyDigit('—') === null && L.cutOneQtyDigit('') === null, 'placeholders never ladder');
+        assert(L.cutOneQtyDigit('150.00 EUR') === null && L.cutOneQtyDigit('60.00 USD') === null, 'national-fiat tails never yield digits');
+        assert(L.cutOneQtyDigit('1.4523584521545257') === '1.452358452154525', 'bare numeric heads still ladder');
+      });
+
       test('exactQtyHeldString walks buys, sells, expenses, fees and clamps exactly', function () {
         assert(typeof L.exactQtyHeldString === 'function', 'exactQtyHeldString missing');
         var FX = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };

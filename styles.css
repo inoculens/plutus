@@ -1938,7 +1938,11 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   border-bottom: none;
   padding: 0.12rem 0 0.08rem;
 }
-.trade-block .stat-label { flex: none; font-size: 0.8rem; }
+/* Labels hold the strip's shared line: a squeezed caption cuts with its own
+   ellipsis instead of wrapping, because a two-line label (like 'Exec.
+   price') pushes its exact value — often the '—' dash — a whole line down,
+   out of line with every other row. The popup still carries the full text. */
+.trade-block .stat-label { flex: none; font-size: 0.8rem; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .trade-block .stat-val { flex: none; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trade-block .stat-row[data-label="Note"] {
   flex: 0 1 auto;

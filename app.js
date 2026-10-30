@@ -3486,6 +3486,7 @@ if (typeof window !== 'undefined') {
   window.Inoculens.exactQtyValue = exactQtyValue;
   window.Inoculens.qtyUiText = qtyUiText;
   window.Inoculens.qtyDisplayTrim = qtyDisplayTrim;
+  window.Inoculens.cutOneQtyDigit = cutOneQtyDigit;
   window.Inoculens.qtyDecimals = qtyDecimals;
   window.Inoculens.isValidLedgerCode = isValidLedgerCode;
   window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
@@ -8083,6 +8084,101 @@ function infoDot(labelEl, openFn, valueEl) {
 // `labelEl` attaches the overflow-gated ⓘ badge; label-less values (home
 // account figures, the hero total) are tappable directly. The flag makes the
 // wiring idempotent for static elements (hero) that re-render in place.
+// ————— Facts-strip room: the amount yields first, labels hold the line —————
+// The record facts strip keeps everything on one line: label above value,
+// all cells sharing the strip's single row. A 17-digit quantity is far
+// wider than its fiat neighbours, so when the strip (or any caption) runs
+// out of space the QUANTITY rows — and only them — give up their right-most
+// decimal digits one at a time until everything fits again. The overflow
+// popup still carries the complete exact string (cached on the element
+// before the first cut, and data-full is preferred by the popup), so not a
+// digit of truth is lost — the strip simply stops repeating what the popup
+// already owns. National-fiat tails (EUR…) are never touched: cash rows
+// keep every digit, and captions/notes/hashes have their own CSS cut.
+var FIT_FIAT_TICKERS = ['EUR', 'USD', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
+
+// One ladder step (pure): '1.4523584521545257 AAVE' -> '1.452358452154525
+// AAVE'. Integers have nothing fractional to yield; one decimal place is
+// the floor; anything that is not a plain decimal head ('—', notes, hashes,
+// exponent forms) stays untouched. National-fiat symbol tails never yield.
+function cutOneQtyDigit(txt) {
+  var m = /^(-?\d+(?:\.\d+)?)([\s\u00a0].*)?$/.exec(String(txt === null || txt === undefined ? '' : txt));
+  if (!m) return null;
+  var sym = (m[2] || '').trim().toUpperCase();
+  if (sym !== '' && FIT_FIAT_TICKERS.indexOf(sym) !== -1) return null;
+  var num = m[1];
+  var dot = num.indexOf('.');
+  if (dot < 1) return null;
+  if (num.length <= dot + 2) return null;
+  return num.slice(0, num.length - 1) + (m[2] || '');
+}
+
+function qtyElCutOne(vEl) {
+  var next = cutOneQtyDigit(String(vEl.textContent || ''));
+  if (next === null) return false;
+  vEl.textContent = next;
+  return true;
+}
+
+// Trim profiles that may yield room: the real quantity columns of the
+// facts strip. Fiat rows ('Paid', the sell 'Received', 'Converted'),
+// transfer recipient lists (a different 'Received'), Rate, Note and Tx are
+// all outside this set and never appear here.
+var TRADE_FACTS_QTY_LABELS = { 'Amount': 1, 'Amount sold': 1, 'Moved': 1, 'Lost': 1 };
+
+function fitTradeFactsRows(strip) {
+  if (!strip) return;
+  var rows = strip.querySelectorAll('.stat-row');
+  var qtys = [];
+  var i, row, lab, v, txt;
+  for (i = 0; i < rows.length; i++) {
+    row = rows[i];
+    lab = row.getAttribute ? (row.getAttribute('data-label') || '') : '';
+    if (!TRADE_FACTS_QTY_LABELS[lab]) continue;
+    v = row.querySelector('.stat-val');
+    if (!v) continue;
+    txt = String(v.textContent || '');
+    if (txt === '' || txt === '—') continue;
+    // Cache the exact DOM string once: the popup reads it after any cut.
+    if (!v.getAttribute('data-full')) v.setAttribute('data-full', txt);
+    qtys.push(v);
+  }
+  if (!qtys.length) return;
+  // Every pass restarts from the exact truth, so a resize can re-fit from
+  // full precision instead of compounding earlier cuts.
+  for (i = 0; i < qtys.length; i++) {
+    var fv = qtys[i].getAttribute('data-full');
+    if (fv !== null) qtys[i].textContent = fv;
+  }
+  function fits() {
+    try {
+      if (strip.scrollWidth > strip.clientWidth + 2) return false;
+      var ls = strip.querySelectorAll('.stat-label');
+      for (var k = 0; k < ls.length; k++) {
+        if (ls[k].scrollWidth > ls[k].clientWidth + 2) return false;
+      }
+      return true;
+    } catch (e) { return true; }
+  }
+  if (fits()) return;
+  var guard = 64; // digits + headroom — far past the one-decimal floor
+  while (guard-- > 0 && !fits()) {
+    // The longest numeric head yields first: with one quantity column per
+    // card this is simply the amount of the record.
+    var pick = null, pickLen = 0;
+    for (i = 0; i < qtys.length; i++) {
+      var len = String(qtys[i].textContent || '').length;
+      if (len > pickLen) { pickLen = len; pick = qtys[i]; }
+    }
+    if (!pick || !qtyElCutOne(pick)) return;
+  }
+}
+
+function syncTradeFactsFit() {
+  var strips = document.querySelectorAll('.trade-facts');
+  for (var i = 0; i < strips.length; i++) fitTradeFactsRows(strips[i]);
+}
+
 function wireTruncTap(valEl, title, labelEl) {
   if (!valEl || valEl.getAttribute('data-trunc-wired') === '1') return;
   valEl.setAttribute('data-trunc-wired', '1');
@@ -8093,7 +8189,10 @@ function wireTruncTap(valEl, title, labelEl) {
   function open() {
     try {
       if (valEl.scrollWidth <= valEl.clientWidth + 2) return;
-      openNoteDialog(valEl.textContent, title);
+      // The strip-fit may have shortened a quantity cell to give its fiat
+      // neighbours room: data-full carries the exact pre-cut string, so the
+      // popup always shows the complete value.
+      openNoteDialog(valEl.getAttribute('data-full') || valEl.textContent, title);
     } catch (e) { /* a broken tap must never break the panel */ }
   }
   valEl.addEventListener('click', open);
@@ -8113,6 +8212,7 @@ function wireTruncTap(valEl, title, labelEl) {
 // follows width). The 2px floor swallows subpixel rounding so near-fitting
 // labels never flap their dot across paints, refreshes or resizes.
 function syncInfoDots() {
+  try { syncTradeFactsFit(); } catch (e) { /* the strip fit never breaks the sync */ }
   try {
     var vals = document.querySelectorAll('.stat-val[data-info-cond], .detail-meta-val[data-info-cond], .ledger-label-text[data-info-cond], .card-value[data-info-cond]');
     for (var i = 0; i < vals.length; i++) {

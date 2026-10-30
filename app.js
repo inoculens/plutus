@@ -8355,9 +8355,11 @@ function syncTradeFactsFit() {
   for (var i = 0; i < strips.length; i++) fitTradeFactsRows(strips[i]);
 }
 
+var ALWAYS_OPEN_TRADE_VALUES = { 'Paid': 1, 'Real price': 1, 'Amount': 1 };
+
 function wireTruncTap(valEl, title, labelEl) {
   if (!valEl || valEl.getAttribute('data-trunc-wired') === '1') return;
-  var alwaysOpen = title === 'Paid' || title === 'Real price' || title === 'Amount';
+  var alwaysOpen = !!ALWAYS_OPEN_TRADE_VALUES[title];
   valEl.setAttribute('data-trunc-wired', '1');
   valEl.setAttribute('data-info-cond', '1');
   valEl.setAttribute('role', 'button');
@@ -8415,6 +8417,8 @@ function syncInfoDots() {
       try { lab = box.querySelector('.stat-label, .detail-meta-label, .card-label'); } catch (e) { lab = null; }
       var overflowing = false;
       try { overflowing = isVisuallyCut(v); } catch (e) { overflowing = false; }
+      var rowLabel = box.classList.contains('stat-row') ? box.getAttribute('data-label') : '';
+      if (ALWAYS_OPEN_TRADE_VALUES[rowLabel]) overflowing = true;
       // A strategy-trim (the strip fit ladder cut digits to make the row
       // fit) counts too: the value text differing from its snapshot means
       // digits gave their room to the neighbours and the popup must be
@@ -8894,7 +8898,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       if (valueHit) {
         var valueLabel = valueHit.closest('.stat-row');
         var valueName = valueLabel ? valueLabel.getAttribute('data-label') : '';
-        if (valueName === 'Paid' || valueName === 'Real price' || valueName === 'Amount') return;
+        if (ALWAYS_OPEN_TRADE_VALUES[valueName]) return;
         var fullValue = String(valueHit.getAttribute('data-full') || '');
         var currentValue = String(valueHit.textContent || '');
         if (isVisuallyCut(valueHit) || (fullValue !== '' && fullValue !== currentValue)) return;

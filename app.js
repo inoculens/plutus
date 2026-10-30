@@ -8171,11 +8171,57 @@ function qtyElCutOne(vEl) {
 // all outside this set and never appear here.
 var TRADE_FACTS_QTY_LABELS = { 'Amount': 1, 'Amount sold': 1, 'Moved': 1, 'Lost': 1 };
 
+// Natural (unclipped) width of an element's inline contents. A Range rect
+// reports the laid-out text even under overflow: hidden, so a caption that
+// is currently ellipsized still measures at its true width. jsdom (no
+// layout) returns 0 — every caller guards on it.
+function textRunWidth(el) {
+  if (!el) return 0;
+  try {
+    var r = document.createRange();
+    r.selectNodeContents(el);
+    var w = r.getBoundingClientRect().width;
+    if (r.detach) r.detach();
+    return isFinite(w) ? w : 0;
+  } catch (e) { return 0; }
+}
+
 function fitTradeFactsRows(strip) {
   if (!strip) return;
   var rows = strip.querySelectorAll('.stat-row');
   var qtys = [];
   var i, row, lab, v, txt;
+  // The captions are the strip's contract: every label shows in full and
+  // the squeeze is paid by the data cells (Note, Rate, Amount) instead of
+  // clipping words like 'Exec. price' or 'Fee'. Pin each cell's min-width
+  // to its caption's natural width — plus the ⓘ slot while the badge is
+  // hidden, so it can never re-cut the caption when it surfaces.
+  for (i = 0; i < rows.length; i++) {
+    row = rows[i];
+    lab = row.querySelector('.stat-label');
+    if (!lab) continue;
+    var labW = textRunWidth(lab);
+    if (!(labW > 0)) continue;
+    var dotEl = lab.querySelector('.info-dot');
+    var dotPad = (dotEl && !dotEl.offsetWidth) ? 14 : 0;
+    var want = Math.ceil(labW) + dotPad + 1;
+    if (parseFloat(row.style.minWidth || '') !== want) row.style.minWidth = want + 'px';
+  }
+  // Tx is the copyable id: its shortened first…last form must always read
+  // whole — a CSS tail cut would fake hidden characters after the last
+  // block. Pin the cell to the short hash plus the copy glyph, so the
+  // strip takes the room from Note and the amounts instead.
+  var txRow = strip.querySelector('.stat-row[data-label="Tx"]');
+  if (txRow) {
+    var txTxt = txRow.querySelector('.stat-val > :first-child');
+    var txW = textRunWidth(txTxt);
+    if (txW > 0) {
+      var txCopy = txRow.querySelector('.tx-copy');
+      var txNeed = Math.ceil(txW) + ((txCopy && txCopy.offsetWidth) ? txCopy.offsetWidth + 6 : 0) + 1;
+      var txMin = parseFloat(txRow.style.minWidth || '') || 0;
+      if (txNeed > txMin) txRow.style.minWidth = txNeed + 'px';
+    }
+  }
   for (i = 0; i < rows.length; i++) {
     row = rows[i];
     lab = row.getAttribute ? (row.getAttribute('data-label') || '') : '';
@@ -8199,6 +8245,11 @@ function fitTradeFactsRows(strip) {
       qtys[i].removeAttribute('data-fit-cut');
     }
   }
+  // The note cap restarts from its CSS bound for the same reason: a wider
+  // layout must hand the note its room back instead of keeping a shrink
+  // decided at some narrower width.
+  var noteRow = strip.querySelector('.stat-row[data-label="Note"]');
+  if (noteRow) noteRow.style.maxWidth = '';
   function fits() {
     try {
       if (strip.scrollWidth > strip.clientWidth + 2) return false;
@@ -8206,10 +8257,30 @@ function fitTradeFactsRows(strip) {
       for (var k = 0; k < ls.length; k++) {
         if (ls[k].scrollWidth > ls[k].clientWidth + 2) return false;
       }
+      // Every quantity value must render COMPLETE inside its own cell: a
+      // long string with its tail cut shows data that was trimmed anyway —
+      // the fit prefers a shorter value with the precision marker over a
+      // longer one whose ticker drowns at the cell edge.
+      for (var q = 0; q < qtys.length; q++) {
+        if (qtys[q].scrollWidth > qtys[q].clientWidth + 2) return false;
+      }
       return true;
     } catch (e) { return true; }
   }
   if (fits()) return;
+  // Note text is free-form and trimmed anyway: minimal viable data first —
+  // it yields width (a recognizable prefix stays, the full text lives on
+  // tap) before any quantity loses another digit. The cap steps down until
+  // the strip fits or the minimal prefix is reached.
+  var rootFs = 16;
+  try { rootFs = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16; } catch (e) { rootFs = 16; }
+  var NOTE_MIN_CAP = 6.5 * rootFs; // a recognizable note prefix
+  var NOTE_CAP = 12 * rootFs; // the CSS max-width the inline reset restores
+  while (noteRow && !fits()) {
+    var cap = noteRow.style.maxWidth ? parseFloat(noteRow.style.maxWidth) : NOTE_CAP;
+    if (!(cap > NOTE_MIN_CAP)) break;
+    noteRow.style.maxWidth = Math.max(NOTE_MIN_CAP, cap - 12) + 'px';
+  }
   var guard = 64; // digits + headroom — far past the one-decimal floor
   while (guard-- > 0 && !fits()) {
     // The longest numeric head yields first: with one quantity column per

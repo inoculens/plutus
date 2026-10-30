@@ -6821,6 +6821,13 @@
         assert(btn !== null, 'xmr record must carry a copy button');
         assert(btn.getAttribute('data-copy') === HASH, 'copy button must carry the full hash, got ' + btn.getAttribute('data-copy'));
         assert(btn.querySelector('svg') !== null, 'copy button must carry the svg glyph');
+        // The shortened id keeps exactly the first and last blocks: one
+        // middle ellipsis, never a trailing one — the cell is pinned wide
+        // enough for this form, so a cut tail would only fake extra hidden
+        // characters.
+        var mid = expectShort.indexOf('…');
+        assert(mid === 8 && expectShort.slice(-6) === HASH.slice(-6) && !/…$/.test(expectShort),
+          'the tx short form must be first…last with no trailing ellipsis, got ' + JSON.stringify(expectShort));
         try { closeDialog('trade-dialog'); } catch (e) { /* ignore */ }
         navHome();
       });

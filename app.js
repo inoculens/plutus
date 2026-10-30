@@ -3489,6 +3489,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.cutOneQtyDigit = cutOneQtyDigit;
   window.Inoculens.fitTrimMark = fitTrimMark;
   window.Inoculens.qtyElCutOne = qtyElCutOne;
+  window.Inoculens.textRunWidth = textRunWidth;
+  window.Inoculens.isVisuallyCut = isVisuallyCut;
+  window.Inoculens.isTrimmed = isTrimmed;
+  window.Inoculens.wireTruncTap = wireTruncTap;
   window.Inoculens.qtyDecimals = qtyDecimals;
   window.Inoculens.isValidLedgerCode = isValidLedgerCode;
   window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
@@ -8059,8 +8063,24 @@ function openFeeExplainer(t, main, feeQty, rate) {
 // A trimmed box tells you it is trimmed only by measuring it: the text runs
 // wider than the box it lives in. Shared by the "show full" tap handlers and
 // by the ⓘ gate, so a badge and its popup always agree on the same truth.
+// The trim truth the tap affordances run on: a value is cut when its
+// laid-out text is wider than its box. textRunWidth reads the real text
+// geometry (Range rects survive ellipsis clipping), so this stays honest
+// even where scrollWidth reports a fitting box for visibly clipped glyphs.
+// No layout (hidden row, jsdom) means nothing to judge: never "cut".
+function isVisuallyCut(el) {
+  if (!el) return false;
+  try {
+    var cw = el.clientWidth;
+    if (!(cw > 0)) return false;
+    var w = textRunWidth(el);
+    if (w > 0) return w > cw + 2;
+    return el.scrollWidth > cw + 2;
+  } catch (e) { return false; }
+}
+
 function isTrimmed(el) {
-  try { return el.scrollWidth > el.clientWidth + 2; } catch (e) { return false; }
+  return isVisuallyCut(el);
 }
 
 // Discoverability for tap-for-info rows: an ⓘ badge on the label that
@@ -8255,14 +8275,14 @@ function fitTradeFactsRows(strip) {
       if (strip.scrollWidth > strip.clientWidth + 2) return false;
       var ls = strip.querySelectorAll('.stat-label');
       for (var k = 0; k < ls.length; k++) {
-        if (ls[k].scrollWidth > ls[k].clientWidth + 2) return false;
+        if (isVisuallyCut(ls[k])) return false;
       }
       // Every quantity value must render COMPLETE inside its own cell: a
       // long string with its tail cut shows data that was trimmed anyway —
       // the fit prefers a shorter value with the precision marker over a
       // longer one whose ticker drowns at the cell edge.
       for (var q = 0; q < qtys.length; q++) {
-        if (qtys[q].scrollWidth > qtys[q].clientWidth + 2) return false;
+        if (isVisuallyCut(qtys[q])) return false;
       }
       return true;
     } catch (e) { return true; }
@@ -8320,7 +8340,7 @@ function wireTruncTap(valEl, title, labelEl) {
         openNoteDialog(snap, title);
         return;
       }
-      if (valEl.scrollWidth <= valEl.clientWidth + 2) return;
+      if (!isVisuallyCut(valEl)) return;
       openNoteDialog(snap || cur, title);
     } catch (e) { /* a broken tap must never break the panel */ }
   }
@@ -8353,7 +8373,7 @@ function syncInfoDots() {
       var lab = null;
       try { lab = box.querySelector('.stat-label, .detail-meta-label, .card-label'); } catch (e) { lab = null; }
       var overflowing = false;
-      try { overflowing = v.scrollWidth > v.clientWidth + 2; } catch (e) { overflowing = false; }
+      try { overflowing = isVisuallyCut(v); } catch (e) { overflowing = false; }
       // A strategy-trim (the strip fit ladder cut digits to make the row
       // fit) counts too: the value text differing from its snapshot means
       // digits gave their room to the neighbours and the popup must be
@@ -8373,7 +8393,7 @@ function syncInfoDots() {
       try { v.style.cursor = overflowing ? 'pointer' : ''; } catch (e) { /* ignore */ }
       if (lab) {
         var labOverflow = false;
-        try { labOverflow = lab.scrollWidth > lab.clientWidth + 2; } catch (e) { labOverflow = false; }
+        try { labOverflow = isVisuallyCut(lab); } catch (e) { labOverflow = false; }
         var shown = overflowing || labOverflow;
         if (dot) dot.style.display = shown ? 'inline' : 'none';
         try { lab.style.cursor = shown ? 'pointer' : ''; } catch (e) { /* ignore */ }
@@ -8402,7 +8422,7 @@ function syncInfoDots() {
     var bare = document.querySelectorAll('.acct-value[data-info-cond], .acct-pl[data-info-cond], #hero-value[data-info-cond], #hero-value-num[data-info-cond]');
     for (var b = 0; b < bare.length; b++) {
       var bv = bare[b];
-      try { bv.style.cursor = (bv.scrollWidth > bv.clientWidth + 2) ? 'pointer' : ''; } catch (e) { /* ignore */ }
+      try { bv.style.cursor = isVisuallyCut(bv) ? 'pointer' : ''; } catch (e) { /* ignore */ }
     }
   } catch (e) { /* ignore */ }
 }
@@ -8533,7 +8553,7 @@ function rateRow(label, text) {
     String(text).trim() !== '—';
   function openRate() {
     // Popup only when the text actually overflows the row.
-    if (rv.scrollWidth <= rv.clientWidth + 2) return;
+    if (!isVisuallyCut(rv)) return;
     openNoteDialog(text, label);
   }
   if (hasContent) {
@@ -8926,7 +8946,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       var recLab = row.querySelector('.stat-label');
       function openRecips() {
         // Popup only when the text actually overflows the row.
-        if (!recVal || recVal.scrollWidth <= recVal.clientWidth + 2) return;
+        if (!recVal || !isVisuallyCut(recVal)) return;
         openNoteDialog(lines.join('\n'), 'Received');
       }
       if (recVal) {
@@ -9012,7 +9032,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       (function (val, txt) {
         function open() {
           // Popup only when the text actually overflows the row.
-          if (val.scrollWidth <= val.clientWidth + 2) return;
+          if (!isVisuallyCut(val)) return;
           openNoteDialog(txt);
         }
         val.addEventListener('click', open);
@@ -9269,7 +9289,7 @@ function detailMetaRow(label, text, title) {
   v.setAttribute('tabindex', '0');
   v.setAttribute('aria-label', 'Show full ' + String(title).toLowerCase());
   function open() {
-    if (v.scrollWidth <= v.clientWidth + 2) return;
+    if (!isVisuallyCut(v)) return;
     openNoteDialog(text, title);
   }
   v.addEventListener('click', open);
@@ -9323,7 +9343,7 @@ function ledgerRowEl(code, label, total, main, depth, opts) {
   lt.textContent = full;
   l.appendChild(lt);
   function openFull() {
-    if (lt.scrollWidth <= lt.clientWidth + 2) return;
+    if (!isVisuallyCut(lt)) return;
     openNoteDialog(full, 'Ledger ' + code);
   }
   lt.setAttribute('role', 'button');

@@ -6552,6 +6552,44 @@
         assert(L.qtyElCutOne(flat) === false && flat.textContent === '2 AAVE', 'integers never get laddered or marked');
       });
 
+      test('a clipped value opens its full text even when scrollWidth lies', function () {
+        assert(typeof L.isVisuallyCut === 'function', 'isVisuallyCut missing');
+        assert(typeof L.wireTruncTap === 'function', 'wireTruncTap missing');
+        var origRect = Range.prototype.getBoundingClientRect;
+        var dlg = document.getElementById('note-dialog');
+        function resetDlg() { try { if (dlg && dlg.open) closeDialog('note-dialog'); } catch (e) { /* ignore */ } }
+        function fakeRangeWidth(w) {
+          Range.prototype.getBoundingClientRect = function () { return { width: w }; };
+        }
+        try {
+          // The reported browser quirk: the scroll pair claims the box fits
+          // while the glyphs are visibly clipped. The laid-out text width
+          // (Range rect) is the truth every trim affordance runs on.
+          var v = document.createElement('span');
+          v.textContent = '445.49 USD';
+          L.wireTruncTap(v, 'Paid');
+          Object.defineProperty(v, 'clientWidth', { value: 100, configurable: true });
+          Object.defineProperty(v, 'scrollWidth', { value: 100, configurable: true });
+          fakeRangeWidth(250);
+          assert(L.isVisuallyCut(v) === true, 'the range width must outvote a lying scroll pair');
+          resetDlg();
+          v.click();
+          assert(dlg && dlg.open === true, 'a clipped value must open its full text on tap');
+          assert(document.getElementById('note-dialog-text').textContent === '445.49 USD', 'the popup must carry the full string');
+          assert(document.getElementById('note-dialog-title').textContent === 'Paid', 'the popup must carry the row title');
+          // The reverse: an honestly fitting value stays quiet on tap.
+          resetDlg();
+          fakeRangeWidth(80);
+          assert(L.isVisuallyCut(v) === false, 'fitting text is not cut');
+          v.click();
+          assert(!dlg || dlg.open === false, 'an honestly fitting value must not open a popup');
+        } finally {
+          if (origRect) Range.prototype.getBoundingClientRect = origRect;
+          else try { delete Range.prototype.getBoundingClientRect; } catch (e) { /* keep shim */ }
+          resetDlg();
+        }
+      });
+
       test('exactQtyHeldString walks buys, sells, expenses, fees and clamps exactly', function () {
         assert(typeof L.exactQtyHeldString === 'function', 'exactQtyHeldString missing');
         var FX = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };

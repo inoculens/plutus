@@ -159,6 +159,19 @@ function normalizeSettings(s, fallback) {
   return res;
 }
 
+// Coins on their own chain (not EVM tokens) keep their real on-chain
+// precision; every other SYMBOL_MAP ticker is an EVM-style 18-decimal asset.
+var QTY_NATIVE_DECIMALS = {
+  BTC: 8, XMR: 12, SOL: 9, LTC: 8, BCH: 8, DOGE: 8, XRP: 6, ADA: 6, DOT: 10,
+  ATOM: 6, XLM: 7, TRX: 6, NEAR: 24, TON: 9, ICP: 8, HBAR: 8, KAS: 8, ZEC: 8,
+  DASH: 8, XTZ: 6, EOS: 4, KSM: 12, ALGO: 6, KAVA: 6, FLOW: 8, HNT: 8, SUI: 9,
+  APT: 8, SEI: 6, TIA: 6, STX: 6, RUNE: 8, TAO: 9, JUP: 6, PYTH: 6, WIF: 6,
+  BONK: 5, RAY: 6, ORCA: 6, AR: 12
+};
+// Tickers held in stock/commodity accounts (W, OP, AR, ...) must never pick
+// up a same-named crypto's precision. Rebuilt whenever accounts load/save.
+var QTY_NON_CRYPTO = {};
+
 function loadState() {
   var fallback = defaultState();
   var raw = null;
@@ -188,6 +201,7 @@ function loadState() {
     priceOverrides = parsed.priceOverrides;
   }
   var settings = normalizeSettings(parsed.settings, fallback.settings);
+  try { noteSymbolKinds(accounts); } catch (e) { /* never breaks load */ }
   return {
     settings: settings,
     accounts: accounts,
@@ -197,6 +211,7 @@ function loadState() {
 }
 
 function saveState(s) {
+  try { noteSymbolKinds(s && s.accounts); } catch (e) { /* ignore */ }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch (e) {
@@ -1840,7 +1855,7 @@ function ledgerSym(t) {
 }
 
 function ledgerQtyEpsilon(symbol) {
-  return qtyDecimals(symbol) === 18 ? 0 : LEDGER_EPS;
+  return qtyDecimals(symbol) >= 18 ? 0 : LEDGER_EPS;
 }
 
 // Stable linkage key for FIFO lot tracing (per-record Sold / Closed-from
@@ -12806,10 +12821,24 @@ function syncTradeTypeUI() {
 // at all — its ~15.95 significant digits would corrupt wei digits on sight.
 function qtyDecimals(symbol) {
   var s = String(symbol || '').trim().toUpperCase();
-  if (s === 'XMR') return 12;
-  if (s === 'BTC') return 8;
+  if (s !== '' && Object.prototype.hasOwnProperty.call(QTY_NON_CRYPTO, s)) return 8; // stock/commodity accounts only
+  if (s !== '' && Object.prototype.hasOwnProperty.call(QTY_NATIVE_DECIMALS, s)) return QTY_NATIVE_DECIMALS[s];
   if (s !== '' && typeof SYMBOL_MAP === 'object' && SYMBOL_MAP && SYMBOL_MAP[s]) return 18;
   return 8;
+}
+
+function noteSymbolKinds(accounts) {
+  var next = {};
+  var crypto = {};
+  (Array.isArray(accounts) ? accounts : []).forEach(function (a) {
+    if (!a || a.ticker === undefined || a.ticker === null) return;
+    var t = String(a.ticker).trim().toUpperCase();
+    var k = String(a.kind || '').trim().toLowerCase();
+    if (k === 'stock' || k === 'commodity') next[t] = true;
+    else if (k === 'crypto') crypto[t] = true;
+  });
+  Object.keys(crypto).forEach(function (t) { delete next[t]; });
+  QTY_NON_CRYPTO = next;
 }
 
 var EX_ACT_POW10 = [1n, 10n, 100n]; // grows on demand, one entry per exponent
@@ -12880,6 +12909,19 @@ function exactScaledOf(raw, dec) {
   if (fp.length > dec && fp.charAt(dec) >= '5') scaled += 1n;
   if (scaled === 0n) return 0n;
   return neg ? -scaled : scaled;
+}
+
+// True when `raw` carries non-zero digits beyond what the asset can hold
+// (0.123456789 BTC). Forms reject these instead of silently rounding.
+function qtyOverPrecise(raw, symbol) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return false;
+  var dec = qtyDecimals(symbol);
+  var hi = exactScaledOf(raw, 30);
+  if (hi === null) return false; // malformed input is rejected elsewhere
+  return hi % exactPow10(30 - dec) !== 0n;
+}
+function qtyPrecisionError(symbol) {
+  return String(symbol) + ' allows at most ' + qtyDecimals(symbol) + ' decimals — shorten the amount.';
 }
 
 // Exact fixed-decimal print: always exactly `dec` places after the point
@@ -14095,6 +14137,9 @@ function onTradeSubmit(ev) {
     var sentScSave = exactScaledOf(qtyRaw, symDecSave);
     var sentOkSave = sentScSave !== null && sentScSave > 0n;
     if (!sentOkSave) { tradeFormError('Enter how much you sent (> 0).'); return; }
+    var precBad = qtyOverPrecise(qtyRaw, symbol) || qtyOverPrecise(uiVal('t-selfrecv', ''), symbol);
+    recRows.forEach(function (rr) { if (qtyOverPrecise(rr.qty, symbol) || qtyOverPrecise(rr.fee, symbol)) precBad = true; });
+    if (precBad) { tradeFormError(qtyPrecisionError(symbol)); return; }
     if (recRows.length > TRANSFER_MAX_OUTPUTS) { tradeFormError('Too many recipients (max 20).'); return; }
     var seenAcc = {};
     var sumQSc = 0n, sumFSc = 0n, crossN = 0, crossOne = null;
@@ -14177,13 +14222,15 @@ function onTradeSubmit(ev) {
       networkFee = backChk.fee;
     }
     var nfChkSave = Number(networkFee);
-    if (!isFinite(nfChkSave) || nfChkSave < 0 || nfChkSave >= Number(qtyRaw)) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
+    var nfScChk = exactScaledOf(networkFee, symDecSave);
+    if (nfScChk === null || nfScChk < 0n || nfScChk >= sentScSave) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     uiSetVal('t-networkfee', exactToStringTrim(exactScaledOf(networkFee, symDecSave), symDecSave));
     transferRowsBuilt = recRows;
   }
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
   if (!isFinite(fee) || fee < 0) { tradeFormError('Fee must be >= 0.'); return; }
   if (!isFinite(networkFee) || networkFee < 0) { tradeFormError('Transfer fees must be >= 0.'); return; }
+  if (qtyOverPrecise(qtyRaw, symbol)) { tradeFormError(qtyPrecisionError(symbol)); return; }
   var qty = (side === 'expense' && String(qtyRaw).trim() === '') ? null : exactQtyValue(qtyRaw, symbol);
   var qtyChk = Number(qty);
   var total = (String(totalRaw).trim() === '') ? (side === 'buy' || side === 'sell' ? NaN : 0) : Number(totalRaw);
@@ -14208,7 +14255,7 @@ function onTradeSubmit(ev) {
     if (!isValidCurrencyCode(currency)) { tradeFormError('Currency code invalid — pick one or enter a 2–10 letter code.'); return; }
   } else if (side === 'transfer') {
     if (!isFinite(qtyChk) || qtyChk <= 0) { tradeFormError('Enter how much you sent (> 0).'); return; }
-    if (!isFinite(nfChkSave) || nfChkSave < 0 || nfChkSave >= qtyChk) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
+    if (nfScChk === null || nfScChk < 0n || nfScChk >= sentScSave) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     // Recipients were validated row-by-row above (accounts exist, tickers
     // eligible, label present, sums balance); nothing left to check here.
   } else if (side === 'income') {

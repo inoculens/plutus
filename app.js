@@ -8301,9 +8301,8 @@ function fitTradeFactsRows(strip) {
       qtys[i].removeAttribute('data-fit-cut');
     }
   }
-  // The note cap restarts from its CSS bound for the same reason: a wider
-  // layout must hand the note its room back instead of keeping a shrink
-  // decided at some narrower width.
+  // Reset any previous inline note cap; every fact cell shares its space
+  // with the others and truncates its own value independently.
   var noteRow = strip.querySelector('.stat-row[data-label="Note"]');
   if (noteRow) noteRow.style.maxWidth = '';
   function fits() {
@@ -8324,19 +8323,6 @@ function fitTradeFactsRows(strip) {
     } catch (e) { return true; }
   }
   if (fits()) return;
-  // Note text is free-form and trimmed anyway: minimal viable data first —
-  // it yields width (a recognizable prefix stays, the full text lives on
-  // tap) before any quantity loses another digit. The cap steps down until
-  // the strip fits or the minimal prefix is reached.
-  var rootFs = 16;
-  try { rootFs = parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16; } catch (e) { rootFs = 16; }
-  var NOTE_MIN_CAP = 6.5 * rootFs; // a recognizable note prefix
-  var NOTE_CAP = 12 * rootFs; // the CSS max-width the inline reset restores
-  while (noteRow && !fits()) {
-    var cap = noteRow.style.maxWidth ? parseFloat(noteRow.style.maxWidth) : NOTE_CAP;
-    if (!(cap > NOTE_MIN_CAP)) break;
-    noteRow.style.maxWidth = Math.max(NOTE_MIN_CAP, cap - 12) + 'px';
-  }
   var guard = 64; // digits + headroom — far past the one-decimal floor
   while (guard-- > 0 && !fits()) {
     // The longest numeric head yields first: with one quantity column per

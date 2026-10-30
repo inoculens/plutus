@@ -1921,15 +1921,13 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 .trade-block .stat-label { flex: 0 0 7rem; }
 .trade-block .stat-val { flex: 1; }
 .trade-block .stat-row { padding: 0.5rem 0.1rem; }
-/* Trade facts: cells size to content (Rate/Note capped) so short values
-   never stretch; the strip spreads them edge-to-edge with even gaps, so
-   the row fills with no trailing dead space. Long values trim with … on
-   the single desktop line; the popup opens the full text on click. */
+/* Trade facts share equal-width columns, so a long value never pushes its
+   neighbours around. Values trim in their own cells and open in a popup. */
 .trade-block { display: flex; flex-wrap: wrap; column-gap: 1.25rem; }
 .trade-head { flex: 1 1 100%; }
 .trade-block .stat-row {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   flex-direction: column;
   align-items: stretch;
@@ -1945,8 +1943,8 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 .trade-block .stat-label { flex: none; font-size: 0.8rem; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .trade-block .stat-val { flex: none; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trade-block .stat-row[data-label="Note"] {
-  flex: 0 1 auto;
-  max-width: 12rem;
+  flex: 1 1 0;
+  max-width: none;
   min-width: 0;
   overflow: hidden;
 }
@@ -1954,8 +1952,8 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
    hogs the strip — short values stay narrow, long ones trim with … and
    the truncated-only popup opens the full text on click. */
 .trade-block .stat-row.rate-line {
-  flex: 0 1 auto;
-  max-width: 9rem;
+  flex: 1 1 0;
+  max-width: none;
   min-width: 0;
   overflow: hidden;
 }
@@ -1967,8 +1965,8 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
    Rate so a long recipient list trims with … instead of pushing the strip
    (and the card) off-screen. Tap/ⓘ opens the full list. */
 .trade-block .stat-row[data-label="Received"] {
-  flex: 0 1 auto;
-  max-width: 12rem;
+  flex: 1 1 0;
+  max-width: none;
   min-width: 0;
   overflow: hidden;
 }
@@ -2026,7 +2024,7 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 }
 /* One true facts line on desktop: the strip never wraps, so every fact —
    however long — shares the single row and trims instead of spilling below. */
-.trade-facts { display: flex; flex-wrap: nowrap; justify-content: space-between; align-items: stretch; gap: 0 1.25rem; min-width: 0; flex: 1 1 100%; max-width: 100%; overflow: hidden; }
+.trade-facts { display: flex; flex-wrap: nowrap; justify-content: flex-start; align-items: stretch; gap: 0 1.25rem; min-width: 0; flex: 1 1 100%; max-width: 100%; overflow: hidden; }
 .trade-foot { display: flex; justify-content: flex-end; padding: 0.5rem 0 0.35rem; }
 .trade-del { margin-left: 0.25rem; padding: 0.45rem 0.7rem; min-height: 2.5rem; font-size: 1.05rem; line-height: 1; }
 /* Phone action cluster (▾ ✎ 🗑): the wrapper only exists so the three wrap to

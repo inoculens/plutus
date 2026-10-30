@@ -8085,7 +8085,7 @@ function isVisuallyCut(el) {
       }
     }
     var visibleWidth = Math.max(0, right - left);
-    var fullWidth = unclippedTextWidth(el);
+    var fullWidth = textRunWidth(el);
     if (fullWidth > 0) return fullWidth > visibleWidth + 2;
     return el.scrollWidth > el.clientWidth + 2;
   } catch (e) { return false; }
@@ -8208,8 +8208,6 @@ var TRADE_FACTS_QTY_LABELS = { 'Amount': 1, 'Amount sold': 1, 'Moved': 1, 'Lost'
 // width when overflow clipping makes the Range report only the visible part.
 function textRunWidth(el) {
   if (!el) return 0;
-  var naturalWidth = unclippedTextWidth(el);
-  if (naturalWidth > 0) return naturalWidth;
   var rangeWidth = 0, canvasWidth = 0;
   try {
     var r = document.createRange();
@@ -8242,38 +8240,6 @@ function textRunWidth(el) {
     }
   } catch (e) { /* Range geometry remains available */ }
   return Math.max(isFinite(rangeWidth) ? rangeWidth : 0, isFinite(canvasWidth) ? canvasWidth : 0);
-}
-
-function unclippedTextWidth(el) {
-  if (!el || !document.body) return 0;
-  var copy = null;
-  try {
-    var cs = window.getComputedStyle(el);
-    copy = el.cloneNode(true);
-    copy.style.setProperty('position', 'fixed', 'important');
-    copy.style.setProperty('left', '-100000px', 'important');
-    copy.style.setProperty('top', '0', 'important');
-    copy.style.setProperty('display', 'inline-block', 'important');
-    copy.style.setProperty('width', 'max-content', 'important');
-    copy.style.setProperty('min-width', '0', 'important');
-    copy.style.setProperty('max-width', 'none', 'important');
-    copy.style.setProperty('overflow', 'visible', 'important');
-    copy.style.setProperty('text-overflow', 'clip', 'important');
-    copy.style.setProperty('white-space', 'nowrap', 'important');
-    copy.style.setProperty('flex', 'none', 'important');
-    copy.style.setProperty('padding', '0', 'important');
-    copy.style.setProperty('border', '0', 'important');
-    copy.style.setProperty('font', cs.font, 'important');
-    copy.style.setProperty('letter-spacing', cs.letterSpacing, 'important');
-    copy.style.setProperty('text-transform', cs.textTransform, 'important');
-    document.body.appendChild(copy);
-    var width = copy.getBoundingClientRect().width;
-    document.body.removeChild(copy);
-    return isFinite(width) ? width : 0;
-  } catch (e) {
-    if (copy && copy.parentNode) copy.parentNode.removeChild(copy);
-    return 0;
-  }
 }
 
 function fitTradeFactsRows(strip) {
@@ -8920,7 +8886,8 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
       if (valueHit) {
         var fullValue = String(valueHit.getAttribute('data-full') || '');
         var currentValue = String(valueHit.textContent || '');
-        if (isVisuallyCut(valueHit) || (fullValue !== '' && fullValue !== currentValue)) return;
+        var fitCut = valueHit.getAttribute('data-fit-cut') === '1' && fullValue !== '' && fullValue !== currentValue;
+        if (isVisuallyCut(valueHit) || fitCut) return;
       }
       if (box.classList.contains('is-open')) {
         if (tgt.closest('.trade-facts, .lot-links')) return;

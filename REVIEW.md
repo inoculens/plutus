@@ -61,7 +61,6 @@ limits at the bottom.
 ### Method & limits (2026-10-13 review)
 
 - Headless verification only: standalone Python + esprima (parse) + Duktape
-  (load + pure-logic assertions). No browser here, so the following still
-  need a human run: `tests.html` all-green in a real browser (including the
-  11 linkage tests), a live two-machine sync scenario, and visual review of
-  the new pills/linkage rows/flash on a real screen.
+  (load + pure-logic assertions). No browser was available for that review,
+  so real-browser interaction, a live two-machine sync scenario, and visual
+  review of the new pills/linkage rows/flash were not performed.

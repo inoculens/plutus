@@ -1,5 +1,3 @@
 User-agent: *
 Allow: /
-Disallow: /tests.html
-
 Sitemap: https://plutus.inoculens.com/sitemap.xml

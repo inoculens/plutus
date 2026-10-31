@@ -1,7 +1,7 @@
 # PLUTUS — instructions for AI agents (and humans)
 
 Local-first portfolio tracker. Static site: `index.html`, `app.js`,
-`styles.css` (+ `tests.html` harness, `netlify.toml`, `stamp-version.sh`).
+`styles.css`, `netlify.toml`, and `stamp-version.sh`.
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
 ## Session start — always work on latest
@@ -55,7 +55,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 ## Verify before every push
 - Syntax-check `app.js` with any available JS runtime
   (`node --check app.js`, QuickJS, or equivalent).
-- Open `tests.html` in a browser — everything must be green.
+- Smoke-test the app in a browser when changing user-facing behavior.
 - Verify `stamp-version.sh` is committed as mode `100755` (see above).
 
 ## Invariants — do not break
@@ -66,9 +66,9 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   a -100% loss).
 - Grand totals = SUM of the per-account runs, never a blended global run.
 - `computePositions` / `computeAverage` / `computeFifo` buy/sell math must
-  keep matching the spec fixtures in `tests.html`.
+  preserve their established behavior.
 - `fetchLivePrice` single-symbol behavior and `refreshAllPrices` return
-  shape are asserted by tests — extend, don't reshape.
+  shape are established contracts — extend, don't reshape.
 - New price APIs need a `SYMBOL_MAP` entry (verified against CoinGecko),
   a `connect-src` host in the `index.html` CSP, and a manual-override
   fallback path.

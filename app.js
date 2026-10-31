@@ -1018,7 +1018,7 @@ function isValidImportTrade(t, accountIds) {
     }
     return true;
   }
-  // buy / sell (legacy strict path, preserved for tests)
+  // buy / sell (legacy strict path)
   if (typeof t.qty !== 'number' && typeof t.qty !== 'string') return false;
   var qty = Number(t.qty);
   if (!isFinite(qty) || qty <= 0) return false;
@@ -1298,20 +1298,6 @@ function accountById(st, id) {
   return null;
 }
 
-// Expose pure functions for tests.html via window.Inoculens.
-if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.loadState = loadState;
-  window.Inoculens.saveState = saveState;
-  window.Inoculens.exportState = exportState;
-  window.Inoculens.importState = importState;
-  window.Inoculens.defaultState = defaultState;
-  window.Inoculens.accountById = accountById;
-  window.Inoculens.isValidAttachment = isValidAttachment;
-  window.Inoculens.syncBlobFilename = syncBlobFilename;
-  window.Inoculens.syncBlobNameHash = syncBlobNameHash;
-}
-
 // === Fx ===
 // ECB historical FX via the Frankfurter proxy (https://api.frankfurter.dev).
 // NOTE: the legacy api.frankfurter.app host 301-redirects cross-origin and
@@ -1424,7 +1410,7 @@ function fetchEcbRate(date, from, to) {
     return Promise.resolve({ rate: 1, interpolated: false, source: '1:1' });
   }
   // Hermetic async: capture window.fetch once per operation so concurrent
-  // tests.html stubs (or later restores) cannot clobber retry/walkBack fetches.
+  // Keep each operation's fetch implementation stable across retries.
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   function attempt(d, back) {
     if (!d || !isValidDateStr(d)) return Promise.reject(new Error('fx-unavailable'));
@@ -1687,25 +1673,6 @@ function convertTrade(t, main) {
 
 function convertTrades(trades, main) {
   return (trades || []).map(function (t) { return convertTrade(t, main); });
-}
-
-// Expose Fx on window.Inoculens for tests.html, Ledger (Task 4), Ui (Task 6).
-if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.fetchEcbRate = fetchEcbRate;
-  window.Inoculens.stableToUsd = stableToUsd;
-  window.Inoculens.normalizeToMain = normalizeToMain;
-  window.Inoculens.pickRate = pickRate;
-  window.Inoculens.convertTrade = convertTrade;
-  window.Inoculens.convertTrades = convertTrades;
-  window.Inoculens.displayPairs = displayPairs;
-  window.Inoculens.ensureDisplayRates = ensureDisplayRates;
-  window.Inoculens.fxFailedPairs = function () { return fxFailedList.slice(); };
-  window.Inoculens.fxFailedMessage = fxFailedMessage;
-  window.Inoculens.getCachedRate = getCachedRate;
-  window.Inoculens.cacheRate = cacheRate;
-  window.Inoculens.clearFxCache = clearFxCache;
-  window.Inoculens.reloadFxCache = function () { loadFxCache(true); };
 }
 
 // === Ledger ===
@@ -3531,92 +3498,6 @@ function validateTrade(t, heldQty) {
   return null;
 }
 
-// Expose Ledger on window.Inoculens for tests.html and Ui (Task 6).
-if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.normalizeTrade = normalizeTrade;
-  window.Inoculens.computeAverage = computeAverage;
-  window.Inoculens.computeFifo = computeFifo;
-  window.Inoculens.computePositions = computePositions;
-  window.Inoculens.validateTrade = validateTrade;
-  window.Inoculens.computePortfolio = computePortfolio;
-  window.Inoculens.computeAnalytics = computeAnalytics;
-  window.Inoculens.heldForAccount = heldForAccount;
-  window.Inoculens.heldTimelineConflict = heldTimelineConflict;
-  window.Inoculens.exactQtyHeldString = exactQtyHeldString;
-  window.Inoculens.exactScaledOf = exactScaledOf;
-  window.Inoculens.exactToStringFixed = exactToStringFixed;
-  window.Inoculens.exactToStringTrim = exactToStringTrim;
-  window.Inoculens.exactNumOrStr = exactNumOrStr;
-  window.Inoculens.exactQtyValue = exactQtyValue;
-  window.Inoculens.qtyUiText = qtyUiText;
-  window.Inoculens.qtyDisplayTrim = qtyDisplayTrim;
-  window.Inoculens.cutOneQtyDigit = cutOneQtyDigit;
-  window.Inoculens.fitTrimMark = fitTrimMark;
-  window.Inoculens.qtyElCutOne = qtyElCutOne;
-  window.Inoculens.textRunWidth = textRunWidth;
-  window.Inoculens.isVisuallyCut = isVisuallyCut;
-  window.Inoculens.isTrimmed = isTrimmed;
-  window.Inoculens.wireTruncTap = wireTruncTap;
-  window.Inoculens.qtyDecimals = qtyDecimals;
-  window.Inoculens.isValidLedgerCode = isValidLedgerCode;
-  window.Inoculens.isValidLedgerLabel = isValidLedgerLabel;
-  window.Inoculens.isValidLedgerLabels = isValidLedgerLabels;
-  window.Inoculens.normalizeLedgerLabels = normalizeLedgerLabels;
-  window.Inoculens.isCashKind = isCashKind;
-  window.Inoculens.isCashAccount = isCashAccount;
-  window.Inoculens.cashAccountIds = cashAccountIds;
-  window.Inoculens.cashReceivedOf = cashReceivedOf;
-  window.Inoculens.cashSignedNative = cashSignedNative;
-  window.Inoculens.cashBalance = cashBalance;
-  window.Inoculens.transferOutputsOf = transferOutputsOf;
-  window.Inoculens.transferSelfQtyOf = transferSelfQtyOf;
-  window.Inoculens.transferSelfArrivalOf = transferSelfArrivalOf;
-  window.Inoculens.transferExternalQtyOf = transferExternalQtyOf;
-  window.Inoculens.transferDestIds = transferDestIds;
-  window.Inoculens.transferArrivalFor = transferArrivalFor;
-  window.Inoculens.transferInvolvesAccount = transferInvolvesAccount;
-  window.Inoculens.transferRowArrival = transferRowArrival;
-  window.Inoculens.isValidTransferOutput = isValidTransferOutput;
-  window.Inoculens.ledgerParentOf = ledgerParentOf;
-  window.Inoculens.ledgerDescendantsOf = ledgerDescendantsOf;
-  window.Inoculens.ledgerAccountCodes = ledgerAccountCodes;
-  window.Inoculens.ledgerRecordConflict = ledgerRecordConflict;
-  window.Inoculens.ledgerViolations = ledgerViolations;
-  window.Inoculens.ledgerConflictMessage = ledgerConflictMessage;
-  window.Inoculens.ledgerTree = ledgerTree;
-  window.Inoculens.ledgerTreeMulti = ledgerTreeMulti;
-  window.Inoculens.ledgerScopeOf = ledgerScopeOf;
-  window.Inoculens.groupFillFiats = groupFillFiats;
-  window.Inoculens.ledgerChartFor = ledgerChartFor;
-  window.Inoculens.ensureAccountChart = ensureAccountChart;
-  window.Inoculens.groupMembers = groupMembers;
-  window.Inoculens.groupMainOf = groupMainOf;
-  window.Inoculens.isGroupMain = isGroupMain;
-  window.Inoculens.defaultGroupCurrency = defaultGroupCurrency;
-  window.Inoculens.ensureGroupCurrency = ensureGroupCurrency;
-  window.Inoculens.assignGroup = assignGroup;
-  window.Inoculens.ungroupAll = ungroupAll;
-  window.Inoculens.sanitizeGroups = sanitizeGroups;
-  window.Inoculens.expandDeleteIds = expandDeleteIds;
-  window.Inoculens.uniqueSubName = uniqueSubName;
-  window.Inoculens.assetLedgersOn = assetLedgersOn;
-  window.Inoculens.openLedgerDialog = openLedgerDialog;
-  window.Inoculens.openGroupDialog = openGroupDialog;
-  window.Inoculens.createSubAccount = createSubAccount;
-  window.Inoculens.renameAccountLedger = renameAccountLedger;
-  window.Inoculens.deleteAccountLedger = deleteAccountLedger;
-  window.Inoculens.ledgerSignedMain = ledgerSignedMain;
-  window.Inoculens.ledgerSignedMainRealized = ledgerSignedMainRealized;
-  window.Inoculens.buildCashRealization = buildCashRealization;
-  window.Inoculens.cashFiatOf = cashFiatOf;
-  window.Inoculens.cashQtyOf = cashQtyOf;
-  window.Inoculens.learnLedgerLabel = learnLedgerLabel;
-  window.Inoculens.findLedgerLabel = findLedgerLabel;
-  window.Inoculens.refreshLedgerList = refreshLedgerList;
-  window.Inoculens.TRADE_TYPES = TRADE_TYPES;
-}
-
 // === Prices ===
 // Live crypto prices via CoinGecko simple/price with manual fallback.
 // Resolution order per symbol: (1) manual override from live
@@ -5399,49 +5280,6 @@ function ensureHistoricalExec(trades, main, kinds) {
   });
 }
 
-// Expose Prices on window.Inoculens for tests.html and Ui (Task 6).
-if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.SYMBOL_MAP = SYMBOL_MAP;
-  window.Inoculens.COMMODITY_MAP = COMMODITY_MAP;
-  window.Inoculens.stooqCommoditySymbol = stooqCommoditySymbol;
-  window.Inoculens.goldApiSymbol = goldApiSymbol;
-  window.Inoculens.fetchGoldApiUsd = fetchGoldApiUsd;
-  window.Inoculens.YAHOO_COMMODITY_MAP = YAHOO_COMMODITY_MAP;
-  window.Inoculens.fetchYahooHistory = fetchYahooHistory;
-  window.Inoculens.hasCommoditySource = hasCommoditySource;
-  window.Inoculens.fetchKrakenLiveUsd = fetchKrakenLiveUsd;
-  window.Inoculens.fetchCoinbaseLiveUsd = fetchCoinbaseLiveUsd;
-  window.Inoculens.fetchCommodityPrice = fetchCommodityPrice;
-  window.Inoculens.fetchHistoricalCommodityPrice = fetchHistoricalCommodityPrice;
-  window.Inoculens.PRICE_CACHE_TTL_MS = PRICE_CACHE_TTL_MS;
-  window.Inoculens.priceCache = priceCache;
-  window.Inoculens.fetchLivePrice = fetchLivePrice;
-  window.Inoculens.refreshAllPrices = refreshAllPrices;
-  window.Inoculens.fetchHistoricalPrice = fetchHistoricalPrice;
-  window.Inoculens.getHistoricalExec = getHistoricalExec;
-  window.Inoculens.ensureHistoricalExec = ensureHistoricalExec;
-  window.Inoculens.getHistCached = getHistCached;
-  window.Inoculens.setHistCached = setHistCached;
-  window.Inoculens.clearHistCache = clearHistCache;
-  window.Inoculens.reloadHistCache = function () { loadHistCache(true); };
-  window.Inoculens.parseStooqDaily = parseStooqDaily;
-  window.Inoculens.yahooSymbol = yahooSymbol;
-  window.Inoculens.parseYahooQuote = parseYahooQuote;
-  window.Inoculens.parseYahooDaily = parseYahooDaily;
-  window.Inoculens.parseCnbcQuotes = parseCnbcQuotes;
-  window.Inoculens.fetchBatchCnbc = fetchBatchCnbc;
-  window.Inoculens.toCoingeckoDate = toCoingeckoDate;
-  window.Inoculens.roundHalfUp2 = roundHalfUp2;
-  window.Inoculens.frozenExecOf = frozenExecOf;
-  window.Inoculens.freezeExecLock = freezeExecLock;
-  window.Inoculens.retryFeeRate = retryFeeRate;
-  window.Inoculens.priceOverrideEntry = priceOverrideEntry;
-  window.Inoculens.priceOverrideFor = priceOverrideFor;
-  window.Inoculens.resolveExecPrice = resolveExecPrice;
-  window.Inoculens.dropBakedExecLocks = dropBakedExecLocks;
-}
-
 // === Ui ===
 // DOM boot + render loop (Task 6; top-bar + dialogs redesign). Binds the
 // sticky top bar, positions/trades tables, trade + settings dialogs,
@@ -5452,7 +5290,7 @@ if (typeof window !== 'undefined') {
 // current mainCurrency. Every positions/trades <td> carries a data-label
 // so the mobile card layout (styles.css) can label rows. init() boots on
 // DOMContentLoaded; render()/refreshPrices() are the recompute+render
-// entry points (also used by tests.html).
+// recompute+render entry points.
 
 // === Version contract (for any AI or human editing this app) ===
 // Full rules live in AGENTS.md at the repo root — coding agents load it
@@ -7829,7 +7667,7 @@ function navHome() {
 
 // --- Stacked facts (minimalist detail layout) ---
 // One fact per row: muted label left, tabular value right. Values carry
-// data-label (stable test hook) and data-value when known; P&L figures
+// data-label and data-value when known; P&L figures
 // tint gain/loss. The FX conversion always gets its own line so amounts
 // never run into their provenance.
 
@@ -14878,7 +14716,7 @@ function onTradeSubmit(ev) {
 // Sticky top panel: totals, main currency, cost toggle, Add record +
 // Settings buttons. The trade form and settings live in modal <dialog>s
 // so the page never scrolls through them. Dialog content keeps the same
-// element IDs, so tests.html and existing handlers keep working.
+// element IDs, so existing handlers keep working.
 
 var dialogOpener = null;
 
@@ -16322,7 +16160,7 @@ function init() {
   refreshPrices();
   try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
   try {
-    if (!document.getElementById('ui-fixtures')) syncWatchStart(); // tests drive ticks explicitly
+    syncWatchStart();
   } catch (e) { /* the watch never breaks boot */ }
 }
 
@@ -16380,7 +16218,7 @@ function releaseReducedMotionLoader(loader) {
 }
 
 // Runs the baked-quote repair once per page load (see dropBakedExecLocks).
-// Later init() calls (tests re-render constantly) must not re-save.
+// Later init() calls must not re-save.
 var execRepairDone = false;
 function repairBakedExecLocksOnce() {
   if (execRepairDone) return false;
@@ -16394,103 +16232,7 @@ function repairBakedExecLocksOnce() {
   return true;
 }
 
-// Expose Ui on window.Inoculens for tests.html; init/render are also bare
-// globals (classic script top-level functions) for the DOM checklist.
 if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.init = init;
-  window.Inoculens.render = render;
-  window.Inoculens.refreshPrices = refreshPrices;
-  window.Inoculens.isPriceLoading = isPriceLoading;
-  window.Inoculens.anyPriceLoading = anyPriceLoading;
-  window.Inoculens.getLivePrices = function () { return livePrices; };
-  window.Inoculens.fxBadgeText = fxBadgeText;
-  window.Inoculens.TRADE_CCY_OPTIONS = TRADE_CCY_OPTIONS;
-  window.Inoculens.saveStateGuarded = saveStateGuarded;
-  window.Inoculens.isValidImportTrade = isValidImportTrade;
-  window.Inoculens.isValidDateFormat = isValidDateFormat;
-  window.Inoculens.normalizeDateFormat = normalizeDateFormat;
-  window.Inoculens.isValidTxid = isValidTxid;
-  window.Inoculens.txExplorerUrl = txExplorerUrl;
-  window.Inoculens.shortTxid = shortTxid;
-  window.Inoculens.copyToClip = copyToClip;
-  window.Inoculens.txCopyButton = txCopyButton;
-  window.Inoculens.renderAccounts = renderAccounts;
-  window.Inoculens.openAccountDialog = openAccountDialog;
-  window.Inoculens.createAccount = createAccount;
-  window.Inoculens.renameAccount = renameAccount;
-  window.Inoculens.deleteAccount = deleteAccount;
-  window.Inoculens.accountTrades = accountTrades;
-  window.Inoculens.heldQtyFor = heldQtyFor;
-  window.Inoculens.openPrefillTrade = openPrefillTrade;
-  window.Inoculens.openEditTrade = openEditTrade;
-  window.Inoculens.startInlineLabelEdit = startInlineLabelEdit;
-  window.Inoculens.openNoteDialog = openNoteDialog;
-  window.Inoculens.openErrorDialog = openErrorDialog;
-  window.Inoculens.applyColorToSelection = applyColorToSelection;
-  window.Inoculens.applyTradeColorToSelection = applyTradeColorToSelection;
-  window.Inoculens.validateTradeReorder = validateTradeReorder;
-  window.Inoculens.applyTradeReorder = applyTradeReorder;
-  window.Inoculens.selectedTradeCount = selectedTradeCount;
-  window.Inoculens.toggleTradeSelect = toggleTradeSelect;
-  window.Inoculens.cancelTradeSelection = cancelTradeSelection;
-  window.Inoculens.findTradeById = findTradeById;
-  window.Inoculens.tradeSelectionMode = function () { return tradeSelectionMode; };
-  window.Inoculens.resetTradeForm = resetTradeForm;
-  window.Inoculens.syncTradeFab = syncTradeFab;
-  window.Inoculens.syncTradeButtons = syncTradeFab;
-  window.Inoculens.syncLockedSymbol = syncLockedSymbol;
-  window.Inoculens.syncTradeTypeUI = syncTradeTypeUI;
-  window.Inoculens.syncInfoDots = syncInfoDots;
-  window.Inoculens.syncTradeHeadRows = syncTradeHeadRows;
-  window.Inoculens.transferFeeFrom = transferFeeFrom;
-  window.Inoculens.syncTransferFeePreview = syncTransferFeePreview;
-  window.Inoculens.route = route;
-  window.Inoculens.renderAccountDetail = renderAccountDetail;
-  window.Inoculens.accountDetailId = accountDetailId;
-  window.Inoculens.currentRouteId = currentRouteId;
-  window.Inoculens.navTo = navTo;
-  window.Inoculens.navHome = navHome;
-  window.Inoculens.renderHeroAlloc = renderHeroAlloc;
-  window.Inoculens.allocationData = allocationData;
-  window.Inoculens.syncHeroAllocHeight = syncHeroAllocHeight;
-  window.Inoculens.fitHeroValue = fitHeroValue;
-  window.Inoculens.downloadTradesCsv = downloadTradesCsv;
-  window.Inoculens.downloadLotsCsv = downloadLotsCsv;
-  window.Inoculens.csvSafeText = csvSafeText;
-  window.Inoculens.fmtDateDmy = fmtDateDmy;
-  window.Inoculens.fmtQty = fmtQty;
-  window.Inoculens.tradeNowValue = tradeNowValue;
-  window.Inoculens.tradeNowPct = tradeNowPct;
-  window.Inoculens.tradeNowMeta = tradeNowMeta;
-  window.Inoculens.tradeNowText = tradeNowText;
-  window.Inoculens.tradeDisplayId = tradeDisplayId;
-  window.Inoculens.fifoLinksFor = fifoLinksFor;
-  window.Inoculens.parseDateInput = parseDateInput;
-  window.Inoculens.dmyDateEdit = dmyDateEdit;
-  window.Inoculens.dmyDateBump = dmyDateBump;
-  window.Inoculens.dmySegmentRange = dmySegmentRange;
-  window.Inoculens.dmyPartsFromAny = dmyPartsFromAny;
-  window.Inoculens.todayDmy = todayDmy;
-  window.Inoculens.fmtDateTimeDmy = fmtDateTimeDmy;
-  window.Inoculens.todayStr = todayStr;
-  window.Inoculens.TRADE_PAGE_SIZES = TRADE_PAGE_SIZES;
-  window.Inoculens.tradePageSizeGet = tradePageSizeGet;
-  window.Inoculens.tradePageSizeSet = tradePageSizeSet;
-  window.Inoculens.tradePageCountFor = tradePageCountFor;
-  window.Inoculens.tradePageGet = tradePageGet;
-  window.Inoculens.tradePageSetFor = tradePageSetFor;
-  window.Inoculens.buildTradePager = buildTradePager;
-  window.Inoculens.buildAccountPager = buildAccountPager;
-  window.Inoculens.compactPagerItems = compactPagerItems;
-  window.Inoculens.normalizeTradeTypeFilter = normalizeTradeTypeFilter;
-  window.Inoculens.tradeTypeFilterFor = tradeTypeFilterFor;
-  window.Inoculens.setTradeTypeFilter = setTradeTypeFilter;
-  window.Inoculens.filterTradesByType = filterTradesByType;
-  window.Inoculens.tradeDateFilterFor = tradeDateFilterFor;
-  window.Inoculens.setTradeDateFilter = setTradeDateFilter;
-  window.Inoculens.filterTradesByDateRange = filterTradesByDateRange;
-  window.Inoculens.dateRangeOutflowIssue = dateRangeOutflowIssue;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', init);
   }
@@ -16694,7 +16436,7 @@ function syncUtf8Decode(bytes) {
   return s;
 }
 
-// --- Envelope + pure helpers (covered by tests.html) ---
+// --- Envelope + pure helpers ---
 
 function syncEnvelopeWrap(ctB64, saltB64, ivB64, iter) {
   return JSON.stringify({ app: SYNC_APP, v: SYNC_VERSION, iter: iter, salt: saltB64, iv: ivB64, ciphertext: ctB64 });
@@ -18909,7 +18651,7 @@ function syncPullFlow() {
   });
 }
 
-// One remote check, shared by the page-load hook below (and tests): download,
+// One remote check, shared by the page-load hook below: download,
 // decrypt and reconcile against the last sync point. Never overwrites local
 // work blindly — remote-only changes are pulled, local-only changes are left
 // for the next push, conflicts only raise the stale flag + status.
@@ -19020,13 +18762,12 @@ function syncCheckRemoteNow() {
 
 // Page-load hook: when this device wakes up behind another one, say so (or
 // catch up) instead of claiming "up to date" on local hashes alone. Runs
-// once per page load, never in the test harness, and never breaks boot.
+// once per page load and never breaks boot.
 var syncLoadChecked = false;
 function syncCheckOnLoad() {
   if (syncLoadChecked) return;
   syncLoadChecked = true;
   try {
-    if (typeof document !== 'undefined' && document.getElementById('ui-fixtures')) return; // tests.html: no network, no live state
     if (syncBusy) return;
     var cfg = null;
     try {
@@ -19141,15 +18882,14 @@ function syncWatchFlush() {
   }
 }
 
-function syncWatchTick(opts) {
-  var force = !!(opts && opts.force); // test hook: ignore hidden/typing, never dialogs
+function syncWatchTick() {
   if (syncBusy || syncChecking) return Promise.resolve('busy');
   try {
     if (typeof document === 'undefined') return Promise.resolve('unavailable');
-    if (!force && document.hidden) return Promise.resolve('hidden');
+    if (document.hidden) return Promise.resolve('hidden');
     if (syncWatchDialogBusy()) return Promise.resolve('dialog');
-    if (!force && syncWatchInputBusy()) return Promise.resolve('typing');
-    if (!force && typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve('offline');
+    if (syncWatchInputBusy()) return Promise.resolve('typing');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve('offline');
     var rd = syncReadForm();
     var cfg = rd.cfg;
     var pass = rd.passphrase;
@@ -19972,113 +19712,8 @@ function buildSyncSettings() {
   syncRefreshSyncPanel();
 }
 
-// Expose Sync on window.Inoculens for tests.html.
-if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.SYNC_PROVIDERS = SYNC_PROVIDERS;
-  window.Inoculens.SYNC_SHARED_APPS = SYNC_SHARED_APPS;
-  window.Inoculens.syncB64encode = syncB64encode;
-  window.Inoculens.syncB64decode = syncB64decode;
-  window.Inoculens.syncB64UrlEncode = syncB64UrlEncode;
-  window.Inoculens.syncUtf8Encode = syncUtf8Encode;
-  window.Inoculens.syncUtf8Decode = syncUtf8Decode;
-  window.Inoculens.syncEnvelopeWrap = syncEnvelopeWrap;
-  window.Inoculens.syncEnvelopeParse = syncEnvelopeParse;
-  window.Inoculens.syncIsEncryptedBackup = syncIsEncryptedBackup;
-  window.Inoculens.syncCompareTimestamps = syncCompareTimestamps;
-  window.Inoculens.syncDirection = syncDirection;
-  window.Inoculens.syncCheckOnLoad = syncCheckOnLoad;
-  window.Inoculens.syncCheckRemoteNow = syncCheckRemoteNow;
-  window.Inoculens.syncRemotePending = function () { return syncPendingRemote; };
-  window.Inoculens.syncSetPendingRemote = function (v) { syncPendingRemote = !!v; return syncPendingRemote; };
-  window.Inoculens.syncProviderById = syncProviderById;
-  window.Inoculens.syncIsProvider = syncIsProvider;
-  window.Inoculens.syncJoinUrl = syncJoinUrl;
-  window.Inoculens.syncSanitizeFilename = syncSanitizeFilename;
-  window.Inoculens.syncDisplayBasename = syncDisplayBasename;
-  window.Inoculens.syncNormalizeFolder = syncNormalizeFolder;
-  window.Inoculens.syncLocationKey = syncLocationKey;
-  window.Inoculens.syncTrustIdentity = syncTrustIdentity;
-  window.Inoculens.syncIsTrustedLocation = syncIsTrustedLocation;
-  window.Inoculens.syncConnectThenSync = syncConnectThenSync;
-  window.Inoculens.syncRemoteExists = syncRemoteExists;
-  window.Inoculens.syncRemoteEnsureFolder = syncRemoteEnsureFolder;
-  window.Inoculens.syncDropboxFullPath = syncDropboxFullPath;
-  window.Inoculens.syncWebdavMkdirP = syncWebdavMkdirP;
-  window.Inoculens.syncDefaultConfig = syncDefaultConfig;
-  window.Inoculens.syncSanitizeConfig = syncSanitizeConfig;
-  window.Inoculens.syncCryptoAvailable = syncCryptoAvailable;
-  window.Inoculens.syncEncryptEnvelope = syncEncryptEnvelope;
-  window.Inoculens.syncDecryptEnvelope = syncDecryptEnvelope;
-  window.Inoculens.syncFingerprint = syncFingerprint;
-  window.Inoculens.syncSha256 = syncSha256;
-  window.Inoculens.syncHmac = syncHmac;
-  window.Inoculens.syncOAuthAuthUrl = syncOAuthAuthUrl;
-  window.Inoculens.syncParseQuery = syncParseQuery;
-  window.Inoculens.syncS3CanonicalRequest = syncS3CanonicalRequest;
-  window.Inoculens.syncAmzDate = syncAmzDate;
-  window.Inoculens.syncSplitUrl = syncSplitUrl;
-  window.Inoculens.syncS3Url = syncS3Url;
-  window.Inoculens.syncRequireHttpsUrl = syncRequireHttpsUrl;
-  window.Inoculens.syncS3ErrorBody = syncS3ErrorBody;
-  window.Inoculens.syncFetch = syncFetch;
-  window.Inoculens.syncStateHash = syncStateHash;
-  window.Inoculens.syncHashOfExport = syncHashOfExport;
-  window.Inoculens.syncCurrentHash = syncCurrentHash;
-  window.Inoculens.syncIsConnected = syncIsConnected;
-  window.Inoculens.syncRefreshHeaderIcon = syncRefreshHeaderIcon;
-  window.Inoculens.syncAutoPush = syncAutoPush;
-  window.Inoculens.syncAutoDelay = syncAutoDelay;
-  window.Inoculens.syncRefreshSyncPanel = syncRefreshSyncPanel;
-  window.Inoculens.syncSharedId = syncSharedId;
-  window.Inoculens.syncEffectiveClientId = syncEffectiveClientId;
-  window.Inoculens.syncTestConnection = syncTestConnection;
-  window.Inoculens.updateModalLock = updateModalLock;
-  window.Inoculens.syncPostForm = syncPostForm;
-  window.Inoculens.syncEnsureAccessToken = syncEnsureAccessToken;
-  window.Inoculens.syncOAuthRefresh = syncOAuthRefresh;
-  window.Inoculens.syncWebdavUpload = syncWebdavUpload;
-  window.Inoculens.syncWebdavDownload = syncWebdavDownload;
-  window.Inoculens.syncDriveUpload = syncDriveUpload;
-  window.Inoculens.syncDriveDownload = syncDriveDownload;
-  window.Inoculens.syncDriveFind = syncDriveFind;
-  window.Inoculens.syncDropboxUpload = syncDropboxUpload;
-  window.Inoculens.syncDropboxDownload = syncDropboxDownload;
-  window.Inoculens.syncS3Put = syncS3Put;
-  window.Inoculens.syncS3Get = syncS3Get;
-  window.Inoculens.syncRemoteUpload = syncRemoteUpload;
-  window.Inoculens.syncRemoteDownload = syncRemoteDownload;
-  window.Inoculens.syncRemoteStamp = syncRemoteStamp;
-  window.Inoculens.syncWatchTick = syncWatchTick;
-  window.Inoculens.syncWatchStart = syncWatchStart;
-  window.Inoculens.syncWatchStop = syncWatchStop;
-  window.Inoculens.syncWatchDelay = syncWatchDelay;
-  window.Inoculens.syncWatchReset = function () {
-    syncWatchStamp = '';
-    syncWatchSeen = false;
-    syncWatchUnknown = 0;
-    syncWatchLoc = '';
-    syncWatchQuietNext = false;
-    syncChecking = false;
-    syncAfterCheck = '';
-    syncWatchBusy = false;
-    return true;
-  };
-  window.Inoculens.syncLoadConfig = syncLoadConfig;
-  window.Inoculens.syncSaveConfig = syncSaveConfig;
-  window.Inoculens.syncReadForm = syncReadForm;
-  window.Inoculens.syncPushFlow = syncPushFlow;
-  window.Inoculens.syncPullFlow = syncPullFlow;
-  window.Inoculens.confirmAction3 = confirmAction3;
-  window.Inoculens.syncDisconnect = syncDisconnect;
-  window.Inoculens.showBanner = showBanner;
-  window.Inoculens.clearBanner = clearBanner;
-  window.Inoculens.openDialog = openDialog;
-  window.Inoculens.closeDialog = closeDialog;
-  window.Inoculens.flushSettingsAlertToBanner = flushSettingsAlertToBanner;
-  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    document.addEventListener('DOMContentLoaded', syncHandleOAuthRedirect);
-  }
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('DOMContentLoaded', syncHandleOAuthRedirect);
 }
 
 // === Consent / Analytics (GDPR Basic mode) ===
@@ -20179,10 +19814,6 @@ function consentInitBanner() {
 }
 
 if (typeof window !== 'undefined') {
-  window.Inoculens = window.Inoculens || {};
-  window.Inoculens.consentRead = consentRead;
-  window.Inoculens.consentApply = consentApply;
-  window.Inoculens.consentLoadGA = consentLoadGA;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', consentInitBanner);
     try {

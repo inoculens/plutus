@@ -31,10 +31,25 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - The footer renders the version automatically (`#app-ver`); users only ever
   see that string, never these notes.
 
+## Netlify build script permissions — mandatory
+- `stamp-version.sh` must remain executable in Git (`100755`): `netlify.toml`
+  invokes it directly, and a missing executable bit fails the deploy with
+  `Permission denied` (exit code 126).
+- Before committing or pushing, verify the committed mode with
+  `git ls-tree HEAD stamp-version.sh` (expect `100755 blob`). On Windows,
+  filesystem permissions may not preserve the executable bit; if needed,
+  set it in Git's index with `git update-index --chmod=+x stamp-version.sh`,
+  stage the change, then verify the staged mode with
+  `git ls-files -s stamp-version.sh` (expect `100755`).
+- Never commit a mode change that makes this script non-executable. Do not
+  rely on `chmod` or the Windows worktree mode as proof; Git's index/commit
+  mode is what Netlify receives.
+
 ## Verify before every push
 - Syntax-check `app.js` with any available JS runtime
   (`node --check app.js`, QuickJS, or equivalent).
 - Open `tests.html` in a browser — everything must be green.
+- Verify `stamp-version.sh` is committed as mode `100755` (see above).
 
 ## Invariants — do not break
 - `isValidImportTrade` must keep accepting plain buy/sell trades; export

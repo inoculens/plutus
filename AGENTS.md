@@ -13,6 +13,13 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   start editing.
 - If the tree is dirty or the pull would overwrite local work: STOP and
   ask the owner before touching anything.
+- Windows exception: a mode-only worktree difference on `stamp-version.sh`
+  is expected when Git tracks it as `100755` but the local filesystem reports
+  it as non-executable. Confirm `git diff -- stamp-version.sh` shows no
+  content changes and `git ls-files -s stamp-version.sh` still shows `100755`;
+  preserve the tracked executable mode and proceed without staging or
+  otherwise changing the script. Any content difference or other dirty file
+  still requires asking the owner.
 - This applies to every new session and every new agent with no prompting
   needed.
 

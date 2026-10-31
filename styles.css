@@ -500,6 +500,119 @@ body {
 
 ::selection { background: rgba(227, 197, 124, 0.32); }
 
+#app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #050607;
+  opacity: 1;
+  transition: opacity 450ms ease;
+}
+
+#app-loader.is-exiting { opacity: 0; pointer-events: none; }
+
+.app-loader-glow {
+  position: absolute;
+  width: min(42rem, 110vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+.app-loader-glow-gold {
+  top: -38%;
+  left: 8%;
+  background: radial-gradient(circle, rgba(227, 197, 124, 0.1), transparent 68%);
+}
+
+.app-loader-glow-blue {
+  right: -24%;
+  bottom: -48%;
+  background: radial-gradient(circle, rgba(80, 120, 255, 0.1), transparent 70%);
+}
+
+.app-loader-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4rem;
+}
+
+.app-loader-stage {
+  position: relative;
+  width: min(18rem, 76vw);
+  height: 5.5rem;
+}
+
+.app-loader-coin,
+.app-loader-logo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  object-fit: contain;
+  transform: translate(-50%, -50%);
+}
+
+.app-loader-coin {
+  width: 4.5rem;
+  height: 4.5rem;
+  opacity: 0;
+  filter: blur(8px);
+}
+
+.app-loader-logo {
+  width: 5.5rem;
+  height: 5.5rem;
+  opacity: 0;
+}
+
+#app-loader.is-running .app-loader-usd { animation: loaderCoinPass 650ms ease-out both; }
+#app-loader.is-running .app-loader-eur { animation: loaderCoinPass 650ms ease-out 480ms both; }
+#app-loader.is-running .app-loader-btc { animation: loaderCoinPass 650ms ease-out 960ms both; }
+#app-loader.is-running .app-loader-logo { animation: loaderLogoReveal 650ms ease 1.65s both; }
+
+@keyframes loaderCoinPass {
+  0% { opacity: 0; filter: blur(8px); transform: translate(3.2rem, -50%); }
+  28% { opacity: 1; filter: blur(0); transform: translate(-50%, -50%); }
+  65% { opacity: 0.9; filter: blur(1px); transform: translate(-55%, -50%); }
+  100% { opacity: 0; filter: blur(9px); transform: translate(calc(-50% - 3.2rem), -50%); }
+}
+
+@keyframes loaderLogoReveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.app-loader-progress {
+  width: min(12rem, 56vw);
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.app-loader-progress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #b98f3e, #f5e6c4, #e3c57c);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+#app-loader.is-running .app-loader-progress span {
+  animation: loaderProgress 2.3s ease-in-out both;
+}
+
+@keyframes loaderProgress {
+  to { transform: scaleX(1); }
+}
+
 .skip-link {
   position: absolute;
   left: 1rem;

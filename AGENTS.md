@@ -86,6 +86,10 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   concise and free of filler: what was changed, where, and why.
 - The commit body must end with an agent signature line:
   `Commit made with <agent> <version (if relevant)>`.
+- When creating a multi-line commit message in PowerShell, use actual line
+  breaks (for example, multiple `-m` arguments or a here-string); never use
+  literal `\n` escape sequences, which Git stores verbatim. Inspect the
+  resulting message with `git show -s --format=%B HEAD` before pushing.
 - The git author/committer must always be the human owner
   (`sebaptcd <dev@sebastian.ghiveci.com>`). No `Co-authored-by` trailers
   naming an AI assistant; agents must not appear as author or committer.

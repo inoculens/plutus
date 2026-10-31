@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=420">
+  <link rel="stylesheet" href="/styles.css?v=421">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -148,6 +148,19 @@
   <style>.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}</style>
 </head>
 <body>
+  <div id="app-loader" role="status" aria-live="polite" aria-label="Loading INOCULENS PLUTUS" aria-busy="true">
+    <div class="app-loader-glow app-loader-glow-gold" aria-hidden="true"></div>
+    <div class="app-loader-glow app-loader-glow-blue" aria-hidden="true"></div>
+    <div class="app-loader-content" aria-hidden="true">
+      <div class="app-loader-stage">
+        <img class="app-loader-coin app-loader-usd" src="/icons/usd.webp?v=1" width="72" height="72" alt="" draggable="false">
+        <img class="app-loader-coin app-loader-eur" src="/icons/eur.webp?v=1" width="72" height="72" alt="" draggable="false">
+        <img class="app-loader-coin app-loader-btc" src="/icons/btc.webp?v=1" width="72" height="72" alt="" draggable="false">
+        <img class="app-loader-logo" src="/icons/plutus-logo.png" width="88" height="88" alt="">
+      </div>
+      <div class="app-loader-progress"><span></span></div>
+    </div>
+  </div>
   <a class="skip-link" href="#main">Skip to portfolio</a>
   <header class="brand">
     <div class="brand-inner topbar">
@@ -368,6 +381,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=403" defer></script>
+  <script src="/app.js?v=404" defer></script>
 </body>
 </html>

@@ -15988,6 +15988,7 @@ function init() {
   if (d && !d.value) d.value = todayDmy();
   uiBooted = true;
   render();
+  finishStartupLoader();
   refreshPrices();
   try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
   try {
@@ -15995,6 +15996,23 @@ function init() {
   } catch (e) { /* the watch never breaks boot */ }
 }
 
+function finishStartupLoader() {
+  var loader = document.getElementById('app-loader');
+  if (!loader) return;
+  var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion) {
+    loader.hidden = true;
+    return;
+  }
+  loader.classList.add('is-running');
+  window.setTimeout(function () {
+    loader.setAttribute('aria-busy', 'false');
+    loader.classList.add('is-exiting');
+    loader.addEventListener('transitionend', function (event) {
+      if (event.target === loader && event.propertyName === 'opacity') loader.hidden = true;
+    }, { once: true });
+  }, 2450);
+}
 
 // Runs the baked-quote repair once per page load (see dropBakedExecLocks).
 // Later init() calls (tests re-render constantly) must not re-save.

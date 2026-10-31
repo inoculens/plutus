@@ -6243,7 +6243,7 @@ var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
 var netWorthHistorySeriesCache = {};
 var netWorthHistoryRateFetches = {};
 
-function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
+function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) {
   var sym = String(symbol || '').toUpperCase();
   var currency = String(main || '').toUpperCase();
   var startSec = Math.floor(start / 1000);
@@ -6260,22 +6260,114 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
   var cached = netWorthHistorySeriesCache[cacheKey];
   if (cached && Date.now() - cached.at < 5 * 60 * 1000) return Promise.resolve(cached.series);
 
+  function report(provider, completed, total, chunk, phase, error, attempt) {
+    if (typeof onProgress !== 'function') return;
+    onProgress({
+      phase: phase || 'download',
+      symbol: sym,
+      provider: provider,
+      completed: completed,
+      total: total,
+      attempt: attempt || 1,
+      error: error ? String(error.message || error) : '',
+      assetStart: start,
+      assetEnd: end,
+      start: chunk ? chunk.start * 1000 : start,
+      end: chunk ? chunk.end * 1000 : end
+    });
+  }
+  function makeChunks(from, to, chunkDays) {
+    var chunkSeconds = chunkDays * 86400;
+    var chunks = [];
+    for (var cursor = from; cursor < to;) {
+      var chunkEnd = Math.min(to, cursor + chunkSeconds);
+      chunks.push({ start: cursor, end: chunkEnd });
+      cursor = chunkEnd;
+    }
+    return chunks;
+  }
+  function fetchChunks(chunks, provider, fetchChunk) {
+    var points = [];
+    var errors = [];
+    var currencyCode = currency;
+    function next(index) {
+      if (index >= chunks.length) {
+        if (!points.length) {
+          return Promise.reject(new Error(errors.join('; ') || provider + ' returned no prices'));
+        }
+        var uniquePoints = {};
+        points.forEach(function (point) {
+          var pointCurrency = String(point.currency || currencyCode).toUpperCase();
+          var key = String(point.at);
+          if (!Object.prototype.hasOwnProperty.call(uniquePoints, key)) {
+            uniquePoints[key] = {
+              at: point.at,
+              price: point.price,
+              currency: pointCurrency
+            };
+          }
+        });
+        return Promise.resolve({
+          currency: currencyCode,
+          points: Object.keys(uniquePoints).map(function (key) { return uniquePoints[key]; }),
+          error: errors.length ? errors.join('; ').slice(0, 800) : ''
+        });
+      }
+      var chunk = chunks[index];
+      report(provider, index, chunks.length, chunk);
+      function fetchWithRetry(attempt) {
+        return fetchChunk(chunk).then(function (result) {
+          if (!result.points.length) throw new Error(provider + ' returned no prices for this chunk');
+          result.points.sort(function (a, b) { return a.at - b.at; });
+          var first = result.points[0].at;
+          var last = result.points[result.points.length - 1].at;
+          var tolerance = Math.min(48 * 60 * 60 * 1000, (chunk.end - chunk.start) * 250);
+          if (chunk.end - chunk.start > 2 * 86400 &&
+              (first > chunk.start * 1000 + tolerance || last < chunk.end * 1000 - tolerance)) {
+            throw new Error(provider + ' returned partial history for this chunk');
+          }
+          return result;
+        }).then(null, function (error) {
+          if (attempt < 2) {
+            report(provider, index, chunks.length, chunk, 'retry', error, attempt + 1);
+            return new Promise(function (resolve) { setTimeout(resolve, 750); })
+              .then(function () { return fetchWithRetry(attempt + 1); });
+          }
+          throw error;
+        });
+      }
+      return fetchWithRetry(1).then(function (result) {
+        points = points.concat(result.points);
+        currencyCode = result.currency || currencyCode;
+        report(provider, index + 1, chunks.length, chunk);
+        return next(index + 1);
+      }, function (error) {
+        report(provider, index, chunks.length, chunk, 'download-error', error, 2);
+        errors.push(provider + ' ' + new Date(chunk.start * 1000).toISOString().slice(0, 10) +
+          ': ' + String(error && error.message ? error.message : error));
+        return next(index + 1);
+      });
+    }
+    return next(0);
+  }
   var request;
   if (SYMBOL_MAP[sym]) {
     function fetchCoinGeckoSeries(vs) {
-      var url = 'https://api.coingecko.com/api/v3/coins/' + encodeURIComponent(SYMBOL_MAP[sym]) +
-        '/market_chart/range?vs_currency=' + encodeURIComponent(vs.toLowerCase()) +
-        '&from=' + queryStart + '&to=' + queryEnd;
-      return window.fetch(url).then(function (response) {
-        if (!response.ok) throw new Error('market data HTTP ' + response.status);
-        return response.json();
-      }).then(function (data) {
-        var prices = data && Array.isArray(data.prices) ? data.prices : [];
-        var points = prices.filter(function (row) {
-          return Array.isArray(row) && isFinite(Number(row[0])) && isFinite(Number(row[1])) && Number(row[1]) > 0;
-        }).map(function (row) { return { at: Number(row[0]), price: Number(row[1]) }; });
-        if (!points.length) throw new Error('market provider returned no prices');
-        return { currency: vs, points: points };
+      var chunks = makeChunks(queryStart, queryEnd, 180);
+      return fetchChunks(chunks, 'CoinGecko (' + vs.toUpperCase() + ')', function (chunk) {
+        var url = 'https://api.coingecko.com/api/v3/coins/' + encodeURIComponent(SYMBOL_MAP[sym]) +
+          '/market_chart/range?vs_currency=' + encodeURIComponent(vs.toLowerCase()) +
+          '&from=' + chunk.start + '&to=' + chunk.end;
+        return fetchWithTimeout(window.fetch.bind(window), url).then(function (response) {
+          if (!response.ok) throw new Error('market data HTTP ' + response.status);
+          return response.json();
+        }).then(function (data) {
+          var prices = data && Array.isArray(data.prices) ? data.prices : [];
+          var points = prices.filter(function (row) {
+            return Array.isArray(row) && isFinite(Number(row[0])) && isFinite(Number(row[1])) && Number(row[1]) > 0;
+          }).map(function (row) { return { at: Number(row[0]), price: Number(row[1]), currency: vs }; });
+          return { currency: vs, points: points };
+        });
       });
     }
     function fetchCoinbaseSeries() {
@@ -6287,91 +6379,148 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
       while (cursor < queryEnd) {
         var chunkEnd = Math.min(queryEnd, cursor + chunkDays * 86400);
         chunks.push({ start: cursor, end: chunkEnd });
-        cursor = chunkEnd + 86400;
+        cursor = chunkEnd;
       }
-      return Promise.all(chunks.map(function (chunk) {
+      return fetchChunks(chunks, 'Coinbase (' + fiat + ')', function (chunk) {
         var url = 'https://api.exchange.coinbase.com/products/' + encodeURIComponent(sym + '-' + fiat) +
           '/candles?start=' + encodeURIComponent(new Date(chunk.start * 1000).toISOString()) +
           '&end=' + encodeURIComponent(new Date(chunk.end * 1000).toISOString()) + '&granularity=86400';
-        return window.fetch(url).then(function (response) {
+        return fetchWithTimeout(window.fetch.bind(window), url).then(function (response) {
           if (!response.ok) throw new Error('market data HTTP ' + response.status);
           return response.json();
-        });
-      })).then(function (candles) {
-        var points = [];
-        candles.forEach(function (rows) {
-          if (!Array.isArray(rows)) return;
-          rows.forEach(function (row) {
+        }).then(function (rows) {
+          var points = [];
+          if (Array.isArray(rows)) {
+            rows.forEach(function (row) {
             if (!Array.isArray(row) || !isFinite(Number(row[0])) || !isFinite(Number(row[4])) || Number(row[4]) <= 0) return;
-            points.push({ at: Number(row[0]) * 1000, price: Number(row[4]) });
-          });
+              points.push({ at: Number(row[0]) * 1000, price: Number(row[4]), currency: fiat });
+            });
+          }
+          return { currency: fiat, points: points };
         });
-        points.sort(function (a, b) { return a.at - b.at; });
-        if (!points.length) throw new Error('market provider returned no prices');
-        return { currency: fiat, points: points };
+      }).then(function (series) {
+        if (!series.points.length) throw new Error('market provider returned no prices');
+        return series;
       });
     }
     function fetchYahooCryptoSeries(symbolCurrency) {
       var yahooCrypto = sym + '-' + symbolCurrency;
       var interval = end - start <= 7 * 86400000 ? '60m' : '1d';
-      var query = 'period1=' + queryStart + '&period2=' + queryEnd + '&interval=' + interval;
-      return fetchFirstJson(yahooProxyUrls(yahooCrypto, query), window.fetch.bind(window)).then(function (data) {
+      var chunks = interval === '60m' ? [{ start: queryStart, end: queryEnd }] : makeChunks(queryStart, queryEnd, 180);
+      return fetchChunks(chunks, 'Yahoo Finance (' + symbolCurrency + ')', function (chunk) {
+        var query = 'period1=' + chunk.start + '&period2=' + chunk.end + '&interval=' + interval;
+        return fetchFirstJson(yahooProxyUrls(yahooCrypto, query), window.fetch.bind(window)).then(function (data) {
         var result = data && data.chart && data.chart.result && data.chart.result[0];
         if (!result) throw new Error('Yahoo Finance has no history for ' + yahooCrypto);
+        var timestamps = result.timestamp || [];
+        var quotes = result.indicators && result.indicators.quote && result.indicators.quote[0];
+        var closes = quotes && quotes.close ? quotes.close : [];
+        var resultCurrency = String((result.meta && result.meta.currency) || symbolCurrency).toUpperCase();
+        var points = [];
+        for (var i = 0; i < timestamps.length; i++) {
+          var price = Number(closes[i]);
+          if (isFinite(price) && price > 0) {
+            points.push({ at: Number(timestamps[i]) * 1000, price: price, currency: resultCurrency });
+          }
+        }
+        return { currency: resultCurrency, points: points };
+        });
+      });
+    }
+    function mergeSeries(first, second) {
+      if (!first) return second;
+      if (!second) return first;
+      var pointsByKey = {};
+      first.points.concat(second.points).forEach(function (point) {
+        var pointCurrency = String(point.currency || first.currency || currency).toUpperCase();
+        var key = String(point.at);
+        if (!Object.prototype.hasOwnProperty.call(pointsByKey, key)) {
+          pointsByKey[key] = {
+            at: point.at,
+            price: point.price,
+            currency: pointCurrency
+          };
+        }
+      });
+      var errors = [];
+      [first.error, second.error].forEach(function (error) {
+        if (error && errors.indexOf(error) === -1) errors.push(error);
+      });
+      return {
+        currency: first.currency || second.currency || currency,
+        points: Object.keys(pointsByKey).map(function (key) { return pointsByKey[key]; }),
+        error: errors.join('; ').slice(0, 800)
+      };
+    }
+    function hasFullCoverage(series) {
+      if (!series || !series.points.length) return false;
+      series.points.sort(function (a, b) { return a.at - b.at; });
+      var tolerance = 48 * 60 * 60 * 1000;
+      if (series.points[0].at > start + tolerance ||
+          series.points[series.points.length - 1].at < end - tolerance) return false;
+      for (var i = 1; i < series.points.length; i++) {
+        if (series.points[i].at - series.points[i - 1].at > 4 * 86400000) return false;
+      }
+      return true;
+    }
+    function completeCryptoHistory() {
+      var combined = null;
+      var coinGeckoCurrencies = currency === 'USD' ? ['USD'] : [currency, 'USD'];
+      var yahooCurrencies = currency === 'EUR' || currency === 'GBP'
+        ? [currency, 'USD'] : ['USD'];
+      var providers = [];
+      coinGeckoCurrencies.forEach(function (code) {
+        providers.push(function () { return fetchCoinGeckoSeries(code); });
+      });
+      yahooCurrencies.forEach(function (code) {
+        providers.push(function () { return fetchYahooCryptoSeries(code); });
+      });
+      if (COINBASE_SYMBOLS.indexOf(sym) !== -1) providers.push(fetchCoinbaseSeries);
+      function nextProvider(index) {
+        if (hasFullCoverage(combined)) {
+          combined.error = '';
+          return Promise.resolve(combined);
+        }
+        if (index >= providers.length) {
+          if (combined && combined.points.length) return Promise.resolve(combined);
+          return Promise.reject(new Error(combined && combined.error
+            ? combined.error
+            : 'No historical market data available for ' + sym));
+        }
+        return providers[index]().then(function (series) {
+          combined = mergeSeries(combined, series);
+          return nextProvider(index + 1);
+        }, function (error) {
+          combined = mergeSeries(combined, { currency: currency, points: [], error: String(error.message || error) });
+          return nextProvider(index + 1);
+        });
+      }
+      return nextProvider(0);
+    }
+    request = completeCryptoHistory();
+  } else if (kind === 'stock' || Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) {
+    var yahoo = kind === 'stock' ? yahooSymbol(sym) : YAHOO_COMMODITY_MAP[sym];
+    if (!yahoo) return Promise.resolve({ currency: currency, points: [], error: 'No market history for ' + sym });
+    var interval = end - start <= 7 * 86400000 ? '60m' : '1d';
+    var stockChunks = interval === '60m' ? [{ start: queryStart, end: queryEnd }] : makeChunks(queryStart, queryEnd, 180);
+    request = fetchChunks(stockChunks, 'Yahoo Finance', function (chunk) {
+      var query = 'period1=' + chunk.start + '&period2=' + chunk.end + '&interval=' + interval;
+      return fetchFirstJson(yahooProxyUrls(yahoo, query), window.fetch.bind(window)).then(function (data) {
+        var result = data && data.chart && data.chart.result && data.chart.result[0];
+        if (!result) throw new Error('stock provider returned no prices');
+        var resultCurrency = String((result.meta && result.meta.currency) || 'USD').toUpperCase();
         var timestamps = result.timestamp || [];
         var quotes = result.indicators && result.indicators.quote && result.indicators.quote[0];
         var closes = quotes && quotes.close ? quotes.close : [];
         var points = [];
         for (var i = 0; i < timestamps.length; i++) {
           var price = Number(closes[i]);
-          if (isFinite(price) && price > 0) points.push({ at: Number(timestamps[i]) * 1000, price: price });
+          if (isFinite(price) && price > 0) {
+            points.push({ at: Number(timestamps[i]) * 1000, price: price, currency: resultCurrency });
+          }
         }
-        if (!points.length) throw new Error('Yahoo Finance has no history for ' + yahooCrypto);
-        return { currency: String((result.meta && result.meta.currency) || symbolCurrency).toUpperCase(), points: points };
+        return { currency: resultCurrency, points: points };
       });
-    }
-    function fetchCryptoFallback() {
-      var yahooCurrencies = currency === 'EUR' || currency === 'GBP'
-        ? [currency, 'USD'] : ['USD'];
-      var lastError = null;
-      function tryYahoo(index) {
-        if (index >= yahooCurrencies.length) {
-          return fetchCoinbaseSeries().then(null, function (coinbaseError) {
-            var message = lastError && lastError.message ? lastError.message : 'Yahoo Finance history unavailable';
-            throw new Error(message + '; ' + String(coinbaseError && coinbaseError.message ? coinbaseError.message : coinbaseError));
-          });
-        }
-        return fetchYahooCryptoSeries(yahooCurrencies[index]).then(null, function (error) {
-          lastError = error;
-          return tryYahoo(index + 1);
-        });
-      }
-      return tryYahoo(0);
-    }
-    request = fetchCoinGeckoSeries(currency).then(null, function () {
-      if (currency !== 'USD') {
-        return fetchCoinGeckoSeries('USD').then(null, fetchCryptoFallback);
-      }
-      return fetchCryptoFallback();
-    });
-  } else if (kind === 'stock' || Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) {
-    var yahoo = kind === 'stock' ? yahooSymbol(sym) : YAHOO_COMMODITY_MAP[sym];
-    if (!yahoo) return Promise.resolve({ currency: currency, points: [], error: 'No market history for ' + sym });
-    var interval = end - start <= 7 * 86400000 ? '60m' : '1d';
-    var query = 'period1=' + queryStart + '&period2=' + queryEnd + '&interval=' + interval;
-    request = fetchFirstJson(yahooProxyUrls(yahoo, query), window.fetch.bind(window)).then(function (data) {
-      var result = data && data.chart && data.chart.result && data.chart.result[0];
-      if (!result) throw new Error('stock provider returned no prices');
-      var timestamps = result.timestamp || [];
-      var quotes = result.indicators && result.indicators.quote && result.indicators.quote[0];
-      var closes = quotes && quotes.close ? quotes.close : [];
-      var points = [];
-      for (var i = 0; i < timestamps.length; i++) {
-        var price = Number(closes[i]);
-        if (isFinite(price) && price > 0) points.push({ at: Number(timestamps[i]) * 1000, price: price });
-      }
-      if (!points.length) throw new Error('stock provider returned no prices');
-      return { currency: String((result.meta && result.meta.currency) || 'USD').toUpperCase(), points: points };
     });
   } else if (kind === 'commodity') {
     var stooq = stooqCommoditySymbol(sym);
@@ -6401,7 +6550,8 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
 
   return request.then(function (series) {
     series.points.sort(function (a, b) { return a.at - b.at; });
-    netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
+    series.kind = kind;
+    if (!series.error) netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
     return series;
   }, function (error) {
     var series = {
@@ -6428,9 +6578,12 @@ function netWorthHistorySeriesPrice(series, at, main) {
     if (picked.at - at > 36 * 60 * 60 * 1000) return Promise.resolve(null);
   } else if (!picked) {
     return Promise.resolve(null);
+  } else {
+    var maxStale = series.kind === 'crypto' ? 4 * 86400000 : 10 * 86400000;
+    if (at - picked.at > maxStale) return Promise.resolve(null);
   }
   var native = Number(picked.price);
-  var from = String(series.currency || main).toUpperCase();
+  var from = String(picked.currency || series.currency || main).toUpperCase();
   var to = String(main).toUpperCase();
   if (!isFinite(native) || native <= 0) return Promise.resolve(null);
   if (from === to) return Promise.resolve(native);
@@ -6441,7 +6594,7 @@ function netWorthHistorySeriesPrice(series, at, main) {
   }, function () { return null; });
 }
 
-function buildNetWorthHistory(st, main, range) {
+function buildNetWorthHistory(st, main, range, onProgress) {
   var included = netWorthHistoryIncludedAccounts(st);
   var earliest = netWorthHistoryStart(st, included);
   if (earliest === null) earliest = range.start;
@@ -6469,19 +6622,6 @@ function buildNetWorthHistory(st, main, range) {
     if (!trade || !symbol || !included[trade.accountId] || historyCashIds[trade.accountId]) return;
     symbols[symbol] = kinds[symbol] || 'crypto';
   });
-  var names = Object.keys(symbols);
-  var seriesBySymbol = {};
-  var nextSymbol = 0;
-  function loadNextSeries() {
-    if (nextSymbol >= names.length) return Promise.resolve();
-    var symbol = names[nextSymbol++];
-    return fetchNetWorthHistorySeries(symbol, symbols[symbol], main, start, end).then(function (series) {
-      seriesBySymbol[symbol] = series;
-      return loadNextSeries();
-    });
-  }
-  var workers = [];
-  for (var worker = 0; worker < Math.min(3, names.length); worker++) workers.push(loadNextSeries());
   var firstTradeBySymbol = {};
   (st.trades || []).forEach(function (trade) {
     if (!trade || !included[trade.accountId]) return;
@@ -6489,35 +6629,102 @@ function buildNetWorthHistory(st, main, range) {
     if (!symbol || !trade.date || (firstTradeBySymbol[symbol] && firstTradeBySymbol[symbol] <= trade.date)) return;
     firstTradeBySymbol[symbol] = trade.date;
   });
+  var names = Object.keys(symbols);
+  if (typeof onProgress === 'function') {
+    onProgress({
+      phase: 'start',
+      symbols: names,
+      totalAssets: names.length,
+      start: start,
+      end: end
+    });
+  }
+  netWorthHistoryFetchBudget.remaining = Math.max(
+    netWorthHistoryFetchBudget.remaining,
+    Math.min(5000, times.length * Math.max(1, names.length + Object.keys(historyCashIds).length) + 100)
+  );
+  var seriesBySymbol = {};
+  var nextSymbol = 0;
+  var completedSymbols = {};
+  function loadNextSeries() {
+    if (nextSymbol >= names.length) return Promise.resolve();
+    var symbol = names[nextSymbol++];
+    var firstTradeAt = firstTradeBySymbol[symbol]
+      ? Date.parse(firstTradeBySymbol[symbol] + 'T00:00:00')
+      : NaN;
+    var symbolStart = isFinite(firstTradeAt) ? Math.max(start, firstTradeAt) : start;
+    return fetchNetWorthHistorySeries(symbol, symbols[symbol], main, symbolStart, end, onProgress).then(function (series) {
+      seriesBySymbol[symbol] = series;
+      completedSymbols[symbol] = true;
+      if (typeof onProgress === 'function') {
+        onProgress({
+          phase: 'asset-complete',
+          symbol: symbol,
+          completedAssets: Object.keys(completedSymbols).length,
+          totalAssets: names.length,
+          start: start,
+          end: end,
+          assetStart: symbolStart,
+          assetEnd: end,
+          failed: !series.points.length,
+          error: series.error || ''
+        });
+      }
+      return loadNextSeries();
+    });
+  }
+  var workers = [];
+  for (var worker = 0; worker < Math.min(3, names.length); worker++) workers.push(loadNextSeries());
 
   return Promise.all(workers).then(function () {
     var incomplete = names.some(function (symbol) {
-      return !seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length;
+      return !seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length || !!seriesBySymbol[symbol].error;
     });
     var missingSymbols = {};
     names.forEach(function (symbol) {
-      if (!seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length) missingSymbols[symbol] = true;
+      if (!seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length || seriesBySymbol[symbol].error) {
+        missingSymbols[symbol] = true;
+      }
     });
-    return Promise.all(times.map(function (at, index) {
-      var prices = {};
-      var priceJobs = names.map(function (symbol) {
-        return netWorthHistorySeriesPrice(seriesBySymbol[symbol], at, main).then(function (price) {
-          if (price !== null) prices[symbol] = price;
-          else if (firstTradeBySymbol[symbol] &&
-              new Date(at).toISOString().slice(0, 10) >= firstTradeBySymbol[symbol]) {
-            incomplete = true;
-            missingSymbols[symbol] = true;
-          }
+    var points = [];
+    var batchSize = 6;
+    function valueNextBatch(offset) {
+      if (offset >= times.length) return Promise.resolve(points);
+      var batch = times.slice(offset, offset + batchSize);
+      return Promise.all(batch.map(function (at) {
+        var prices = {};
+        var priceJobs = names.map(function (symbol) {
+          return netWorthHistorySeriesPrice(seriesBySymbol[symbol], at, main).then(function (price) {
+            if (price !== null) prices[symbol] = price;
+            else if (firstTradeBySymbol[symbol] &&
+                new Date(at).toISOString().slice(0, 10) >= firstTradeBySymbol[symbol]) {
+              incomplete = true;
+              missingSymbols[symbol] = true;
+            }
+          });
         });
-      });
-      return Promise.all(priceJobs).then(function () {
-        var point = { at: at, prices: prices };
-        return netWorthHistoryPointValue(point, st, main, false).then(function (result) {
-          if (result.complete === false) incomplete = true;
-          return { at: at, value: result.value, prices: prices };
+        return Promise.all(priceJobs).then(function () {
+          var point = { at: at, prices: prices };
+          return netWorthHistoryPointValue(point, st, main, false).then(function (result) {
+            if (result.complete === false) incomplete = true;
+            return { at: at, value: result.value, prices: prices };
+          });
         });
+      })).then(function (batchPoints) {
+        points = points.concat(batchPoints);
+        if (typeof onProgress === 'function') {
+          onProgress({
+            phase: 'valuation',
+            completed: points.length,
+            total: times.length,
+            start: start,
+            end: end
+          });
+        }
+        return valueNextBatch(offset + batch.length);
       });
-    })).then(function (points) {
+    }
+    return valueNextBatch(0).then(function () {
       var missing = Object.keys(missingSymbols);
       return {
         points: points,
@@ -6740,9 +6947,13 @@ function updateNetWorthHistory(st, value, main) {
       );
     },
     prepareRetry: function () {
-      netWorthHistoryFetchBudget = { signature: signature, remaining: 160 };
+      netWorthHistoryFetchBudget = { signature: signature, remaining: 5000 };
+      netWorthHistoryFailures = {};
+      netWorthHistorySeriesCache = {};
     },
-    loadHistory: function (range) { return buildNetWorthHistory(st, main, range); }
+    loadHistory: function (range) {
+      return buildNetWorthHistory(st, main, range, range.onProgress);
+    }
   });
 }
 

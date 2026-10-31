@@ -3485,22 +3485,48 @@ label.sync-check input {
 .history-plot-wrap { position: relative; min-width: 0; margin-top: 0.55rem; }
 .history-plot { display: block; width: 100%; height: auto; min-height: 10rem; overflow: visible; touch-action: pan-y; outline: none; }
 .history-plot:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 8px; }
+.history-load-panel { position: relative; z-index: 2; margin-bottom: 0.35rem; }
+.history-load-heading { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
 .history-load-status {
-  position: absolute;
-  z-index: 2;
-  top: 0.2rem;
-  left: 5.4rem;
-  max-width: calc(100% - 5.6rem);
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  padding: 0.35rem 0.55rem;
+  padding: 0;
   color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
   font-size: 0.72rem;
-  pointer-events: none;
 }
-.history-load-status[hidden] { display: none; }
+.history-load-status:empty { display: none; }
+.history-load-info-button {
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  min-width: 1.35rem;
+  min-height: 1.35rem;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.history-load-info-button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.history-load-info-button[hidden] { display: none; }
+.history-load-details {
+  margin-top: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.7rem;
+}
+.history-load-details[hidden] { display: none; }
+.history-load-summary { margin: 0; white-space: pre-line; line-height: 1.5; }
+.history-load-progress { display: block; width: 100%; height: 0.35rem; margin-top: 0.4rem; accent-color: var(--gold); }
+.history-load-progress[hidden] { display: none; }
+.history-load-duration { margin: 0.3rem 0 0; font-variant-numeric: tabular-nums; }
 .history-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 6; }
 .history-axis-label { fill: var(--muted); font: 11px var(--font-ui); font-variant-numeric: tabular-nums; }
 .history-line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }

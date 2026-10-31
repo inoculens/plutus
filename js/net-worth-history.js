@@ -24,6 +24,7 @@
   var rangeDrag = null;
   var rangeRequestTimer = null;
   var historyRetryTimer = null;
+  var historyProgressTimer = null;
   var requestSequence = 0;
   var lastReportedStatus = '';
 
@@ -239,6 +240,15 @@
       requestHistory();
     });
 
+    var infoButton = byId('history-load-info-button');
+    if (infoButton) infoButton.addEventListener('click', function () {
+      var details = byId('history-load-details');
+      if (!details) return;
+      var expanded = infoButton.getAttribute('aria-expanded') === 'true';
+      details.hidden = expanded;
+      infoButton.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    });
+
     var startRange = byId('history-range-start');
     var endRange = byId('history-range-end');
     var rangeTrack = byId('history-navigator-wrap');
@@ -405,13 +415,38 @@
     data.loading = true;
     data.loadError = '';
     data.loadMessage = '';
+    data.progress = {
+      phase: 'start',
+      startedAt: Date.now(),
+      symbols: [],
+      totalAssets: 0,
+      completedAssets: 0,
+      assets: {},
+      completedValues: 0,
+      totalValues: 0,
+      start: range.start,
+      end: range.end
+    };
+    var infoButton = byId('history-load-info-button');
+    var details = byId('history-load-details');
+    if (infoButton) infoButton.setAttribute('aria-expanded', 'false');
+    if (details) details.hidden = true;
     reportStatus(data, 'loading', key, 'Loading historical market prices for the selected interval.');
     draw();
+    if (historyProgressTimer !== null) root.clearInterval(historyProgressTimer);
+    historyProgressTimer = root.setInterval(function () {
+      if (active === data && data.loading) renderLoadDetails(data);
+    }, 1000);
     Promise.resolve().then(function () {
       return data.loadHistory({
         period: data.period,
         start: range.start,
-        end: range.end
+        end: range.end,
+        onProgress: function (progress) {
+          if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
+          updateLoadProgress(data, progress);
+          draw();
+        }
       });
     }).then(function (result) {
       if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
@@ -434,6 +469,9 @@
       data.loadedKey = key;
       data.loadingKey = '';
       data.loading = false;
+      data.progress.phase = data.incomplete ? 'incomplete' : 'complete';
+      if (historyProgressTimer !== null) root.clearInterval(historyProgressTimer);
+      historyProgressTimer = null;
       if (data.incomplete) {
         reportStatus(data, 'incomplete', key, data.loadMessage);
         scheduleHistoryRetry(data, key);
@@ -449,10 +487,179 @@
       data.incomplete = true;
       data.loadError = String(error && error.message ? error.message : error);
       data.loadedKey = key;
+      data.progress.phase = 'error';
+      if (historyProgressTimer !== null) root.clearInterval(historyProgressTimer);
+      historyProgressTimer = null;
       reportStatus(data, 'error', key, data.loadError);
       scheduleHistoryRetry(data, key);
       draw();
     });
+  }
+
+  function updateLoadProgress(data, event) {
+    if (!data.progress || !event) return;
+    var progress = data.progress;
+    progress.phase = event.phase || progress.phase;
+    progress.current = event;
+    if (Array.isArray(event.symbols)) {
+      progress.symbols = event.symbols.slice();
+      progress.totalAssets = Number(event.totalAssets) || event.symbols.length;
+      progress.start = Number(event.start) || progress.start;
+      progress.end = Number(event.end) || progress.end;
+    }
+    if (event.phase === 'download' && event.symbol) {
+      progress.assets[event.symbol] = {
+        provider: event.provider,
+        completed: Number(event.completed) || 0,
+        total: Number(event.total) || 0,
+        start: Number(event.assetStart) || progress.start,
+        end: Number(event.assetEnd) || progress.end
+      };
+    } else if (event.phase === 'asset-complete' && event.symbol) {
+      var asset = progress.assets[event.symbol] || { completed: 0, total: 0 };
+      asset.start = Number(event.assetStart) || progress.start;
+      asset.end = Number(event.assetEnd) || progress.end;
+      if (!asset.total) asset.total = Math.max(1,
+        Math.ceil((asset.end - asset.start) / (180 * 86400000)));
+      asset.completed = asset.total;
+      asset.done = true;
+      asset.failed = !!event.failed;
+      asset.error = String(event.error || '');
+      progress.assets[event.symbol] = asset;
+      progress.completedAssets = Number(event.completedAssets) || 0;
+    } else if (event.phase === 'valuation') {
+      progress.completedValues = Number(event.completed) || 0;
+      progress.totalValues = Number(event.total) || 0;
+    }
+  }
+
+  function formatElapsed(milliseconds) {
+    var seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    var minutes = Math.floor(seconds / 60);
+    seconds %= 60;
+    return (minutes < 10 ? '0' : '') + minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
+  }
+
+  function displayRangeDate(timestamp) {
+    try {
+      return new Date(timestamp).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (e) {
+      return dateKey(timestamp);
+    }
+  }
+
+  function renderLoadDetails(data) {
+    var status = byId('history-load-status');
+    var infoButton = byId('history-load-info-button');
+    var details = byId('history-load-details');
+    var summary = byId('history-load-summary');
+    var duration = byId('history-load-duration');
+    var meter = byId('history-load-progress');
+    if (!data || !status || !infoButton || !details) return;
+
+    var progress = data.progress;
+    var current = progress && progress.current;
+    var visible = !!(data.loading || data.incomplete || data.loadError);
+    infoButton.hidden = !visible;
+    if (!visible) {
+      details.hidden = true;
+      infoButton.setAttribute('aria-expanded', 'false');
+      status.textContent = '';
+      return;
+    }
+
+    var rangeText = progress
+      ? displayRangeDate(progress.start) + ' to ' + displayRangeDate(progress.end)
+      : 'Selected interval';
+    if (data.loading && current && current.phase === 'retry') {
+      status.textContent = 'Retrying ' + current.symbol + ' — ' + current.provider +
+        ', chunk ' + (Number(current.completed) + 1) + ' of ' + current.total + ' (attempt ' + current.attempt + ').';
+    } else if (data.loading && current && current.phase === 'download-error') {
+      status.textContent = 'Could not load ' + current.symbol + ' chunk ' +
+        (Number(current.completed) + 1) + ' of ' + current.total + '; trying another source.';
+    } else if (data.loading && current && current.phase === 'download') {
+      status.textContent = 'Downloading ' + current.symbol + ' — ' + current.provider +
+        ', chunk ' + (Number(current.completed) + (Number(current.completed) < Number(current.total) ? 1 : 0)) +
+        ' of ' + current.total + '.';
+    } else if (data.loading && current && current.phase === 'valuation') {
+      status.textContent = 'Calculating portfolio values: ' + current.completed + ' of ' + current.total + ' dates.';
+    } else if (data.loading && current && current.phase === 'asset-complete') {
+      status.textContent = 'Loaded historical prices for ' + current.completedAssets + ' of ' + current.totalAssets + ' assets.';
+    } else if (data.loading) {
+      status.textContent = 'Preparing historical prices for the selected interval…';
+    } else if (data.loadError) {
+      status.textContent = 'Historical market data could not be loaded.';
+    } else if (data.incomplete) {
+      status.textContent = 'Some historical values are still unavailable.';
+    } else {
+      status.textContent = 'Historical market data loaded.';
+    }
+
+    var completedAssets = progress ? Number(progress.completedAssets) || 0 : 0;
+    var totalChunks = 0;
+    var completedChunks = 0;
+    if (progress) {
+      var defaultChunks = Math.max(1, Math.ceil((progress.end - progress.start) / (180 * 86400000)));
+      progress.symbols.forEach(function (symbol) {
+        var asset = progress.assets[symbol];
+        var assetChunks = asset
+          ? Math.max(1, Math.ceil(((asset.end || progress.end) - (asset.start || progress.start)) /
+            (180 * 86400000)))
+          : defaultChunks;
+        totalChunks += asset && asset.total ? asset.total : assetChunks;
+        completedChunks += asset && asset.done
+          ? (asset.total || assetChunks)
+          : (asset ? Math.min(asset.completed, asset.total || 0) : 0);
+      });
+    }
+    var lines = [
+      'Date range: ' + rangeText,
+      'Assets ready: ' + completedAssets + ' of ' + (progress ? progress.totalAssets : 0),
+      'History chunks: ' + completedChunks + ' of ' + totalChunks
+    ];
+    if (progress) {
+      progress.symbols.forEach(function (symbol) {
+        var asset = progress.assets[symbol];
+        if (asset && asset.failed) {
+          lines.push('No history loaded for ' + symbol + (asset.error ? ': ' + asset.error : '.'));
+        }
+      });
+    }
+    if (current && current.phase === 'download') {
+      lines.push('Current download: ' + current.symbol + ' · ' + current.provider);
+      lines.push('Chunk range: ' + displayRangeDate(current.start) + ' to ' + displayRangeDate(current.end));
+    } else if (current && current.phase === 'retry') {
+      lines.push('Retrying: ' + current.symbol + ' · ' + current.provider + ' · attempt ' + current.attempt);
+    } else if (current && current.phase === 'download-error') {
+      lines.push('Source error: ' + current.error);
+    }
+    if (progress && progress.totalValues) {
+      lines.push('Portfolio values calculated: ' + progress.completedValues + ' of ' + progress.totalValues);
+    }
+    var elapsed = progress ? Date.now() - progress.startedAt : 0;
+    lines.push('Elapsed: ' + formatElapsed(elapsed));
+    var completedWork = completedChunks + (progress ? progress.completedValues : 0);
+    var totalWork = totalChunks + (progress ? progress.totalValues : 0);
+    if (data.loading && elapsed >= 1000 && completedWork > 0 && totalWork > completedWork) {
+      var eta = elapsed * (totalWork - completedWork) / completedWork;
+      lines.push('Estimated remaining: ' + formatElapsed(eta));
+    } else if (data.loading) {
+      lines.push('Estimated remaining: calculating after the first completed chunk.');
+    } else if (data.loadError || data.incomplete) {
+      lines.push(data.loadError || data.loadMessage || 'Some values could not be retrieved. Use Retry to try again.');
+    }
+    if (summary) summary.textContent = lines.join('\n');
+    if (duration) duration.textContent = 'Total elapsed: ' + formatElapsed(elapsed) + '.';
+    if (meter) {
+      meter.max = Math.max(1, totalWork);
+      meter.value = Math.min(completedWork, totalWork);
+      meter.hidden = !data.loading || !totalWork;
+    }
+    details.hidden = infoButton.getAttribute('aria-expanded') !== 'true';
   }
 
   function reportStatus(data, state, key, message) {
@@ -472,6 +679,7 @@
       historyRetryTimer = null;
       if (active !== data || data.loadedKey !== key || data.loading) return;
       data.loadedKey = '';
+      if (typeof data.prepareRetry === 'function') data.prepareRetry();
       requestHistory();
     }, attempt === 0 ? 15000 : 60000);
   }
@@ -768,16 +976,10 @@
 
     var note = byId('history-note');
     var badge = byId('history-local-badge');
-    var loadStatus = byId('history-load-status');
     var retryButton = byId('history-retry');
     var panel = byId('networth-history');
     if (panel) panel.setAttribute('aria-busy', active.loading ? 'true' : 'false');
-    if (loadStatus) {
-      loadStatus.hidden = !active.loading;
-      loadStatus.textContent = active.loading
-        ? 'Loading historical prices. The chart may be incomplete until this finishes.'
-        : '';
-    }
+    renderLoadDetails(active);
     if (retryButton) retryButton.hidden = !(active.loadError || active.incomplete);
     if (badge) badge.textContent = storageMessage ? 'Storage issue' : 'Saved locally';
     if (note) {

@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=437">
+  <link rel="stylesheet" href="/styles.css?v=438">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -263,7 +263,21 @@
           <span id="history-local-badge" class="history-local-badge">Saved locally</span>
         </div>
         <div class="history-plot-wrap">
-          <p id="history-load-status" class="history-load-status" role="status" aria-live="polite" hidden></p>
+          <div class="history-load-panel">
+            <div class="history-load-heading">
+              <p id="history-load-status" class="history-load-status" role="status" aria-live="polite"></p>
+              <button id="history-load-info-button" class="history-load-info-button" type="button"
+                aria-label="Show historical download status" aria-expanded="false"
+                aria-controls="history-load-details" hidden>i</button>
+            </div>
+            <div id="history-load-details" class="history-load-details" role="region"
+              aria-label="Historical download details" hidden>
+              <p id="history-load-summary" class="history-load-summary"></p>
+              <progress id="history-load-progress" class="history-load-progress"
+                aria-label="Historical portfolio loading progress" max="1" value="0" hidden></progress>
+              <p id="history-load-duration" class="history-load-duration"></p>
+            </div>
+          </div>
           <div id="history-tooltip" class="history-tooltip" role="status" hidden></div>
           <svg id="history-plot" class="history-plot" viewBox="0 0 960 260" role="img"
             aria-label="Portfolio value over time. Hover or touch the chart to inspect a value." tabindex="0"></svg>
@@ -429,7 +443,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=16" defer></script>
-  <script src="/app.js?v=421" defer></script>
+  <script src="/js/net-worth-history.js?v=17" defer></script>
+  <script src="/app.js?v=422" defer></script>
 </body>
 </html>

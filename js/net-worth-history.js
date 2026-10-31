@@ -835,7 +835,7 @@
     min -= padding;
     max += padding;
     if (max === min) max = min + 1;
-    var start = range.start;
+    var start = validPoints[0].at;
     var end = Math.max(start + 1, range.end);
     function xAt(time) { return left + ((time - start) / (end - start)) * (right - left); }
     function yAt(value) { return bottom - ((value - min) / (max - min)) * (bottom - top); }

@@ -22,6 +22,8 @@
   var lastDrawn = [];
   var storeLoaded = false;
   var rangeDrag = null;
+  var rangeRequestTimer = null;
+  var requestSequence = 0;
 
   function loadStore() {
     try {
@@ -176,17 +178,15 @@
     panel.querySelectorAll('[data-history-period]').forEach(function (button) {
       button.addEventListener('click', function () {
         if (!active) return;
+        active.loadedKey = '';
         active.period = button.getAttribute('data-history-period');
         active.rangeStart = null;
         active.rangeEnd = null;
-        if (active.period === 'CUSTOM') {
-          var min = active.points.length ? dateKey(active.points[0].at) : dateKey(Date.now());
-          var max = dateKey(Date.now());
-          active.from = active.from || min;
-          active.to = active.to || max;
-        }
+        active.from = '';
+        active.to = '';
         saveStore();
         draw();
+        requestHistory();
       });
     });
 
@@ -194,6 +194,7 @@
     var toInput = byId('history-date-to');
     if (fromInput) fromInput.addEventListener('change', function () {
       if (!active) return;
+      active.loadedKey = '';
       active.period = 'CUSTOM';
       active.rangeStart = null;
       active.rangeEnd = null;
@@ -201,9 +202,11 @@
       if (active.to && active.from > active.to) active.to = active.from;
       saveStore();
       draw();
+      requestHistory();
     });
     if (toInput) toInput.addEventListener('change', function () {
       if (!active) return;
+      active.loadedKey = '';
       active.period = 'CUSTOM';
       active.rangeStart = null;
       active.rangeEnd = null;
@@ -211,6 +214,7 @@
       if (active.from && active.to < active.from) active.from = active.to;
       saveStore();
       draw();
+      requestHistory();
     });
 
     var startRange = byId('history-range-start');
@@ -283,9 +287,9 @@
   }
 
   function currentRange() {
-    if (!active || !active.points.length) return { start: 0, end: Date.now() };
-    var oldest = active.points[0].at;
+    if (!active) return { start: 0, end: Date.now() };
     var now = Date.now();
+    var oldest = Number(active.historyStart) || (active.points.length ? active.points[0].at : now);
     if (active.period === 'ALL') return { start: oldest, end: now };
     if (active.period === 'CUSTOM') {
       if (active.rangeStart !== null && active.rangeStart !== undefined &&
@@ -300,7 +304,7 @@
       var to = dateTimestamp(active.to || dateKey(now), true);
       return { start: isFinite(from) ? from : oldest, end: isFinite(to) ? to : now };
     }
-    return { start: Math.max(oldest, now - PERIODS[active.period]), end: now };
+    return { start: now - PERIODS[active.period], end: now };
   }
 
   function visiblePoints(range) {
@@ -353,8 +357,69 @@
     active.period = 'CUSTOM';
     active.from = dateKey(active.rangeStart);
     active.to = dateKey(active.rangeEnd);
+    active.loadedKey = '';
     saveStore();
     draw();
+    if (rangeRequestTimer !== null) root.clearTimeout(rangeRequestTimer);
+    rangeRequestTimer = root.setTimeout(function () {
+      rangeRequestTimer = null;
+      requestHistory();
+    }, 180);
+  }
+
+  function requestHistory() {
+    if (!active || typeof active.loadHistory !== 'function') return;
+    var data = active;
+    var range = currentRange();
+    var keyPrecision = data.period === 'CUSTOM' ? 1 : 300000;
+    var key = [
+      data.sourceSignature,
+      data.period,
+      Math.floor(range.start / keyPrecision),
+      Math.floor(range.end / keyPrecision)
+    ].join('|');
+    if (data.loadingKey === key || data.loadedKey === key) return;
+    var sequence = ++requestSequence;
+    data.loadingKey = key;
+    data.loading = true;
+    data.loadError = '';
+    data.loadMessage = '';
+    draw();
+    Promise.resolve().then(function () {
+      return data.loadHistory({
+        period: data.period,
+        start: range.start,
+        end: range.end
+      });
+    }).then(function (result) {
+      if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
+      if (!result || !Array.isArray(result.points)) throw new Error('History provider returned no points.');
+      var byTime = {};
+      result.points.forEach(function (point) { byTime[point.at] = pointCopy(point); });
+      data.points.forEach(function (point) {
+        if (!Object.prototype.hasOwnProperty.call(byTime, point.at)) {
+          byTime[point.at] = pointCopy(point);
+        }
+      });
+      data.points = compactPoints(Object.keys(byTime).map(function (at) { return byTime[at]; }));
+      data.historyStart = Number(result.historyStart) || data.historyStart;
+      data.signature = data.sourceSignature;
+      data.incomplete = !!result.incomplete;
+      data.loadMessage = String(result.message || '');
+      data.loadedKey = key;
+      data.loadingKey = '';
+      data.loading = false;
+      saveStore();
+      draw();
+    }).catch(function (error) {
+      if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
+      data.loadingKey = '';
+      data.loading = false;
+      data.incomplete = true;
+      data.loadError = String(error && error.message ? error.message : error);
+      data.loadedKey = key;
+      draw();
+    });
   }
 
   function syncRangeInputs(range) {
@@ -546,22 +611,26 @@
       });
     }
     var custom = byId('history-custom');
-    if (custom) custom.hidden = active.period !== 'CUSTOM';
+    if (custom) custom.hidden = false;
     var from = byId('history-date-from');
     var to = byId('history-date-to');
     if (from && active.points.length) {
-      from.min = dateKey(active.points[0].at);
+      from.min = dateKey(Number(active.historyStart) || active.points[0].at);
       from.max = dateKey(Date.now());
-      from.value = active.from || from.min;
+      from.value = active.period === 'CUSTOM'
+        ? (active.from || from.min)
+        : dateKey(range.start);
     } else if (from) {
       from.value = '';
       from.min = '';
       from.max = '';
     }
     if (to && active.points.length) {
-      to.min = dateKey(active.points[0].at);
+      to.min = dateKey(Number(active.historyStart) || active.points[0].at);
       to.max = dateKey(Date.now());
-      to.value = active.to || to.max;
+      to.value = active.period === 'CUSTOM'
+        ? (active.to || to.max)
+        : dateKey(range.end);
     } else if (to) {
       to.value = '';
       to.min = '';
@@ -603,10 +672,12 @@
     if (badge) badge.textContent = storageMessage ? 'Storage issue' : 'Saved locally';
     if (note) {
       if (storageMessage) note.textContent = storageMessage;
-      else if (active.updating) note.textContent = 'Rebuilding saved values using locally cached prices; missing historical prices are fetched only when needed.';
-      else if (active.incomplete) note.textContent = 'Some past values could not be rebuilt because historical prices were unavailable or a safe request limit was reached.';
-      else if (active.points.length === 1) note.textContent = 'One snapshot is saved. The graph will show changes after another portfolio update; earlier history is unavailable.';
-      else note.textContent = 'Snapshots start now and are recorded when PLUTUS updates a portfolio value. Past transactions recalculate saved points where prices are available; no values are invented before the first snapshot.';
+      else if (active.loading) note.textContent = 'Loading historical market prices for this interval…';
+      else if (active.loadError) note.textContent = 'Could not load historical chart data: ' + active.loadError;
+      else if (active.incomplete) note.textContent = active.loadMessage ||
+        'Some assets have no historical prices for this interval. Their values are shown as gaps.';
+      else if (active.points.length === 1) note.textContent = 'Only one value is available for this interval.';
+      else note.textContent = 'Portfolio history is rebuilt from historical market prices and saved on this device.';
     }
   }
 
@@ -724,15 +795,31 @@
     var panel = byId('networth-history');
     if (!panel) return;
     active = scopeData(options.scope);
+    var nextSignature = String(options.signature || '');
+    if (active.signature !== nextSignature) {
+      active.points = [];
+      active.rangeStart = null;
+      active.rangeEnd = null;
+      active.from = '';
+      active.to = '';
+      active.loadedKey = '';
+      active.loadingKey = '';
+      active.incomplete = false;
+      active.loadError = '';
+      active.loadMessage = '';
+      active.signature = nextSignature;
+    }
     active.currency = String(options.currency || 'EUR').toUpperCase();
+    active.historyStart = Number(options.historyStart) || active.historyStart;
+    active.sourceSignature = nextSignature;
+    active.loadHistory = options.loadHistory;
     active.updating = !!active.updating;
     active.incomplete = !!active.incomplete;
     record(active, options.value, options.prices);
-    if (!active.signature && options.signature) active.signature = String(options.signature);
-    else if (options.revalue) revalue(active, { signature: options.signature, revalue: options.revalue });
     saveStore();
     panel.hidden = false;
     draw();
+    requestHistory();
   }
 
   root.NetWorthHistory = { update: update };

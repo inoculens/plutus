@@ -3513,7 +3513,7 @@ label.sync-check input {
 }
 .history-empty { min-height: 1.2em; margin: -0.6rem 0 0.35rem; color: var(--muted); font-size: 0.78rem; text-align: center; }
 .history-navigator-wrap { position: relative; margin: 0.1rem 0 0.5rem; }
-.history-navigator { display: block; width: 100%; height: 3.5rem; overflow: visible; }
+.history-navigator { display: block; width: 100%; height: 2.4rem; overflow: visible; }
 .history-navigator-line { fill: none; stroke: var(--muted); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
 .history-navigator-point { fill: var(--gold); }
 .history-navigator-selection { fill: rgba(227, 197, 124, 0.09); stroke: rgba(227, 197, 124, 0.35); stroke-width: 1; }
@@ -3521,7 +3521,7 @@ label.sync-check input {
 .history-range-track {
   position: relative;
   height: 1.35rem;
-  margin: -0.65rem 0 0;
+  margin: 0.1rem 0 0.45rem;
   border-radius: 999px;
   touch-action: none;
 }
@@ -3545,11 +3545,17 @@ label.sync-check input {
 }
 .history-range-thumb {
   position: absolute;
-  top: 0.26rem;
+  top: 0.22rem;
   width: 14px;
   height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  max-width: 14px;
+  max-height: 14px;
   margin: 0;
   padding: 0;
+  line-height: 1;
+  font-size: 0;
   appearance: none;
   background: var(--surface);
   border: 2px solid var(--gold);

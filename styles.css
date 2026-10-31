@@ -3452,6 +3452,7 @@ label.sync-check input {
 }
 .history-panel[hidden] { display: none; }
 .history-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.history-head-meta { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; }
 .history-kicker {
   margin: 0;
   color: var(--muted);
@@ -3535,12 +3536,12 @@ label.sync-check input {
 .history-single-point { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .history-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .history-marker { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
-.history-tooltip-slot { position: relative; height: 1.9rem; }
+.history-tooltip-slot { position: relative; width: min(22rem, 70vw); height: 1.9rem; }
 .history-tooltip {
   position: absolute;
   top: 0.2rem;
-  left: 5.4rem;
-  max-width: calc(100% - 5.6rem);
+  right: 0;
+  max-width: min(22rem, calc(100vw - 3rem));
   padding: 0.35rem 0.55rem;
   overflow: hidden;
   color: var(--text);
@@ -3554,7 +3555,7 @@ label.sync-check input {
   pointer-events: none;
 }
 .history-empty { min-height: 1.2em; margin: -0.6rem 0 0.35rem; color: var(--muted); font-size: 0.78rem; text-align: center; }
-.history-navigator-wrap { position: relative; margin: 0.1rem 0 0.5rem; }
+.history-navigator-wrap { position: relative; margin: 0.1rem 0 0.8rem; }
 .history-navigator { display: block; width: 100%; height: 2.4rem; overflow: visible; }
 .history-navigator-line { fill: none; stroke: var(--muted); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
 .history-navigator-point { fill: var(--gold); }
@@ -3587,7 +3588,7 @@ label.sync-check input {
 .history-range-thumb:disabled { cursor: default; opacity: 0.55; }
 .history-range-start { z-index: 2; }
 .history-range-end { z-index: 1; }
-.history-controls { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap; }
+.history-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 0.65rem; }
 .history-periods { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .history-periods button {
   min-height: 2rem;
@@ -3605,6 +3606,7 @@ label.sync-check input {
 .history-custom input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .history-custom {
   display: flex;
+  align-self: flex-start;
   align-items: end;
   gap: 0.55rem;
   margin: 0;

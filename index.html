@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=445">
+  <link rel="stylesheet" href="/styles.css?v=446">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -260,7 +260,12 @@
             <p id="history-value" class="history-value" aria-live="polite">—</p>
             <p class="history-reading"><span id="history-date"></span><span id="history-change"></span></p>
           </div>
-          <span id="history-local-badge" class="history-local-badge">Saved locally</span>
+          <div class="history-head-meta">
+            <span id="history-local-badge" class="history-local-badge">Saved locally</span>
+            <div class="history-tooltip-slot">
+              <div id="history-tooltip" class="history-tooltip" role="status" hidden></div>
+            </div>
+          </div>
         </div>
         <div class="history-plot-wrap">
           <svg id="history-plot" class="history-plot" viewBox="0 0 960 260" role="img"
@@ -310,9 +315,6 @@
             <progress id="history-load-progress" class="history-load-progress"
               aria-label="Historical portfolio loading progress" max="1" value="0" hidden></progress>
             <p id="history-load-duration" class="history-load-duration"></p>
-          </div>
-          <div class="history-tooltip-slot">
-            <div id="history-tooltip" class="history-tooltip" role="status" hidden></div>
           </div>
         </div>
         <p id="history-note" class="history-note">Values are saved on this device.</p>
@@ -445,7 +447,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=22" defer></script>
-  <script src="/app.js?v=428" defer></script>
+  <script src="/js/net-worth-history.js?v=23" defer></script>
+  <script src="/app.js?v=429" defer></script>
 </body>
 </html>

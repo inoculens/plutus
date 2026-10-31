@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=444">
+  <link rel="stylesheet" href="/styles.css?v=445">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -263,24 +263,6 @@
           <span id="history-local-badge" class="history-local-badge">Saved locally</span>
         </div>
         <div class="history-plot-wrap">
-          <div class="history-load-panel">
-            <div class="history-load-heading">
-              <p id="history-load-status" class="history-load-status" role="status" aria-live="polite"></p>
-              <button id="history-load-info-button" class="history-load-info-button" type="button"
-                aria-label="Show historical download status" aria-expanded="false"
-                aria-controls="history-load-details" hidden>i</button>
-            </div>
-            <div id="history-load-details" class="history-load-details" role="region"
-              aria-label="Historical download details" hidden>
-              <p id="history-load-summary" class="history-load-summary"></p>
-              <progress id="history-load-progress" class="history-load-progress"
-                aria-label="Historical portfolio loading progress" max="1" value="0" hidden></progress>
-              <p id="history-load-duration" class="history-load-duration"></p>
-            </div>
-            <div class="history-tooltip-slot">
-              <div id="history-tooltip" class="history-tooltip" role="status" hidden></div>
-            </div>
-          </div>
           <svg id="history-plot" class="history-plot" viewBox="0 0 960 260" role="img"
             aria-label="Portfolio value over time. Hover or touch the chart to inspect a value." tabindex="0"></svg>
           <p id="history-empty" class="history-empty" aria-live="polite"></p>
@@ -315,6 +297,24 @@
           </fieldset>
         </div>
         <button id="history-retry" class="history-retry quiet" type="button" hidden>Retry historical prices</button>
+        <div class="history-load-panel">
+          <div class="history-load-heading">
+            <p id="history-load-status" class="history-load-status" role="status" aria-live="polite"></p>
+            <button id="history-load-info-button" class="history-load-info-button" type="button"
+              aria-label="Show historical download status" aria-expanded="false"
+              aria-controls="history-load-details" hidden>i</button>
+          </div>
+          <div id="history-load-details" class="history-load-details" role="region"
+            aria-label="Historical download details" hidden>
+            <p id="history-load-summary" class="history-load-summary"></p>
+            <progress id="history-load-progress" class="history-load-progress"
+              aria-label="Historical portfolio loading progress" max="1" value="0" hidden></progress>
+            <p id="history-load-duration" class="history-load-duration"></p>
+          </div>
+          <div class="history-tooltip-slot">
+            <div id="history-tooltip" class="history-tooltip" role="status" hidden></div>
+          </div>
+        </div>
         <p id="history-note" class="history-note">Values are saved on this device.</p>
       </section>
       <section id="overview" aria-label="Summary">
@@ -445,7 +445,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=21" defer></script>
-  <script src="/app.js?v=427" defer></script>
+  <script src="/js/net-worth-history.js?v=22" defer></script>
+  <script src="/app.js?v=428" defer></script>
 </body>
 </html>

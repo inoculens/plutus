@@ -980,6 +980,7 @@
     if (retryButton) retryButton.hidden = !(active.loadError || active.incomplete);
     if (badge) badge.textContent = storageMessage ? 'Storage issue' : 'Saved locally';
     if (note) {
+      note.hidden = !storageMessage && (active.loading || active.loadError || active.incomplete);
       if (storageMessage) note.textContent = storageMessage;
       else if (active.loading) note.textContent = 'Loading historical market prices for this interval…';
       else if (active.loadError) note.textContent = 'Could not load historical chart data: ' + active.loadError;

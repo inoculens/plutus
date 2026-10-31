@@ -3536,10 +3536,8 @@ label.sync-check input {
 .history-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .history-marker { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .history-tooltip {
-  position: absolute;
-  z-index: 1;
-  top: calc(100% + 0.2rem);
-  left: 5.4rem;
+  display: inline-block;
+  margin: 0.2rem 0 0 5.4rem;
   max-width: calc(100% - 5.6rem);
   padding: 0.35rem 0.55rem;
   overflow: hidden;

@@ -3490,6 +3490,7 @@ label.sync-check input {
 .history-line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .history-line.is-positive { stroke: var(--gain); }
 .history-line.is-negative { stroke: var(--loss); }
+.history-single-point { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .history-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .history-marker { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .history-tooltip {
@@ -3514,6 +3515,7 @@ label.sync-check input {
 .history-navigator-wrap { position: relative; margin: 0.1rem 0 0.5rem; }
 .history-navigator { display: block; width: 100%; height: 3.5rem; overflow: visible; }
 .history-navigator-line { fill: none; stroke: var(--muted); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+.history-navigator-point { fill: var(--gold); }
 .history-navigator-selection { fill: rgba(227, 197, 124, 0.09); stroke: rgba(227, 197, 124, 0.35); stroke-width: 1; }
 .history-navigator-handle { stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .history-range-track {
@@ -3521,6 +3523,7 @@ label.sync-check input {
   height: 1.35rem;
   margin: -0.65rem 0 0;
   border-radius: 999px;
+  touch-action: none;
 }
 .history-range-track::before {
   content: "";
@@ -3540,38 +3543,23 @@ label.sync-check input {
   border-radius: 999px;
   pointer-events: none;
 }
-.history-range-input {
+.history-range-thumb {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 1.35rem;
-  margin: 0;
-  appearance: none;
-  background: transparent;
-  pointer-events: none;
-}
-.history-range-input::-webkit-slider-runnable-track { height: 3px; background: transparent; }
-.history-range-input::-moz-range-track { height: 3px; background: transparent; }
-.history-range-input::-webkit-slider-thumb {
+  top: 0.26rem;
   width: 14px;
   height: 14px;
-  margin-top: -5px;
+  margin: 0;
+  padding: 0;
   appearance: none;
   background: var(--surface);
   border: 2px solid var(--gold);
   border-radius: 50%;
-  pointer-events: auto;
+  transform: translateX(-50%);
+  touch-action: none;
   cursor: ew-resize;
 }
-.history-range-input::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
-  background: var(--surface);
-  border: 2px solid var(--gold);
-  border-radius: 50%;
-  pointer-events: auto;
-  cursor: ew-resize;
-}
+.history-range-thumb:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.history-range-thumb:disabled { cursor: default; opacity: 0.55; }
 .history-range-start { z-index: 2; }
 .history-range-end { z-index: 1; }
 .history-controls { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.8rem; flex-wrap: wrap; }

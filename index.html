@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=429">
+  <link rel="stylesheet" href="/styles.css?v=431">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -270,12 +270,14 @@
         </div>
         <div class="history-navigator-wrap" aria-label="Adjust the chart date range">
           <svg id="history-navigator" class="history-navigator" viewBox="0 0 900 72" aria-hidden="true"></svg>
-          <div class="history-range-track" aria-hidden="false">
+          <div id="history-range-track" class="history-range-track" role="group" aria-label="Adjust visible chart period">
             <span id="history-range-fill" class="history-range-fill"></span>
-            <input id="history-range-start" class="history-range-input history-range-start" type="range"
-              min="0" max="1000" value="0" aria-label="Start of visible chart period">
-            <input id="history-range-end" class="history-range-input history-range-end" type="range"
-              min="0" max="1000" value="1000" aria-label="End of visible chart period">
+            <button id="history-range-start" class="history-range-thumb history-range-start" type="button"
+              role="slider" aria-label="Start of visible chart period" aria-valuemin="0" aria-valuemax="1000"
+              aria-valuenow="0" aria-valuetext="Start of visible chart period" disabled></button>
+            <button id="history-range-end" class="history-range-thumb history-range-end" type="button"
+              role="slider" aria-label="End of visible chart period" aria-valuemin="0" aria-valuemax="1000"
+              aria-valuenow="1000" aria-valuetext="End of visible chart period" disabled></button>
           </div>
         </div>
         <div class="history-controls">
@@ -426,7 +428,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=7" defer></script>
+  <script src="/js/net-worth-history.js?v=9" defer></script>
   <script src="/app.js?v=414" defer></script>
 </body>
 </html>

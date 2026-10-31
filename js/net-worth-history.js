@@ -21,6 +21,7 @@
   var pinned = false;
   var lastDrawn = [];
   var storeLoaded = false;
+  var rangeDrag = null;
 
   function loadStore() {
     try {
@@ -56,6 +57,8 @@
           period: data.period,
           from: data.from,
           to: data.to,
+          rangeStart: data.rangeStart,
+          rangeEnd: data.rangeEnd,
           signature: data.signature,
           incomplete: !!data.incomplete
         };
@@ -174,6 +177,8 @@
       button.addEventListener('click', function () {
         if (!active) return;
         active.period = button.getAttribute('data-history-period');
+        active.rangeStart = null;
+        active.rangeEnd = null;
         if (active.period === 'CUSTOM') {
           var min = active.points.length ? dateKey(active.points[0].at) : dateKey(Date.now());
           var max = dateKey(Date.now());
@@ -190,6 +195,8 @@
     if (fromInput) fromInput.addEventListener('change', function () {
       if (!active) return;
       active.period = 'CUSTOM';
+      active.rangeStart = null;
+      active.rangeEnd = null;
       active.from = fromInput.value;
       if (active.to && active.from > active.to) active.to = active.from;
       saveStore();
@@ -198,6 +205,8 @@
     if (toInput) toInput.addEventListener('change', function () {
       if (!active) return;
       active.period = 'CUSTOM';
+      active.rangeStart = null;
+      active.rangeEnd = null;
       active.to = toInput.value;
       if (active.from && active.to < active.from) active.from = active.to;
       saveStore();
@@ -206,8 +215,52 @@
 
     var startRange = byId('history-range-start');
     var endRange = byId('history-range-end');
-    if (startRange) startRange.addEventListener('input', function () { onRangeInput(true); });
-    if (endRange) endRange.addEventListener('input', function () { onRangeInput(false); });
+    var rangeTrack = byId('history-range-track');
+    [startRange, endRange].forEach(function (handle, index) {
+      if (!handle) return;
+      handle.addEventListener('keydown', function (event) {
+        var current = rangeValue(handle);
+        var next = current;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next -= 1;
+        else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next += 1;
+        else if (event.key === 'PageDown') next -= 50;
+        else if (event.key === 'PageUp') next += 50;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = 1000;
+        else return;
+        event.preventDefault();
+        setRangeValue(handle, Math.max(0, Math.min(1000, next)));
+        onRangeInput(index === 0);
+      });
+    });
+    if (rangeTrack) {
+      rangeTrack.addEventListener('pointerdown', function (event) {
+        if (!active || !active.points.length) return;
+        var target = event.target.closest('.history-range-thumb');
+        if (target && target.disabled) return;
+        var rect = rangeTrack.getBoundingClientRect();
+        if (!rect.width) return;
+        if (!target) {
+          var ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+          var position = ratio * 1000;
+          target = Math.abs(position - rangeValue(startRange)) <= Math.abs(position - rangeValue(endRange))
+            ? startRange : endRange;
+        }
+        if (target.disabled) return;
+        rangeDrag = { pointerId: event.pointerId, startChanged: target === startRange };
+        rangeTrack.setPointerCapture(event.pointerId);
+        moveRangeFromPointer(event, rangeTrack);
+        event.preventDefault();
+      });
+      rangeTrack.addEventListener('pointermove', function (event) {
+        if (rangeDrag && rangeDrag.pointerId === event.pointerId) moveRangeFromPointer(event, rangeTrack);
+      });
+      rangeTrack.addEventListener('pointerup', function (event) {
+        if (rangeDrag && rangeDrag.pointerId === event.pointerId) rangeDrag = null;
+      });
+      rangeTrack.addEventListener('pointercancel', function () { rangeDrag = null; });
+      rangeTrack.addEventListener('lostpointercapture', function () { rangeDrag = null; });
+    }
 
     var plot = byId('history-plot');
     if (plot) {
@@ -235,6 +288,14 @@
     var now = Date.now();
     if (active.period === 'ALL') return { start: oldest, end: now };
     if (active.period === 'CUSTOM') {
+      if (active.rangeStart !== null && active.rangeStart !== undefined &&
+          active.rangeEnd !== null && active.rangeEnd !== undefined &&
+          isFinite(Number(active.rangeStart)) && isFinite(Number(active.rangeEnd))) {
+        return {
+          start: Number(active.rangeStart),
+          end: Math.max(Number(active.rangeStart) + 1, Number(active.rangeEnd))
+        };
+      }
       var from = dateTimestamp(active.from || dateKey(oldest), false);
       var to = dateTimestamp(active.to || dateKey(now), true);
       return { start: isFinite(from) ? from : oldest, end: isFinite(to) ? to : now };
@@ -253,6 +314,25 @@
     if (node) node.textContent = text;
   }
 
+  function rangeValue(handle) {
+    return handle ? Number(handle.getAttribute('aria-valuenow')) : 0;
+  }
+
+  function setRangeValue(handle, value) {
+    if (!handle) return;
+    var bounded = Math.max(0, Math.min(1000, Math.round(value)));
+    handle.setAttribute('aria-valuenow', String(bounded));
+    handle.style.left = (bounded / 10) + '%';
+  }
+
+  function moveRangeFromPointer(event, track) {
+    var rect = track.getBoundingClientRect();
+    if (!rect.width || !rangeDrag) return;
+    var position = Math.max(0, Math.min(1000, (event.clientX - rect.left) / rect.width * 1000));
+    setRangeValue(byId(rangeDrag.startChanged ? 'history-range-start' : 'history-range-end'), position);
+    onRangeInput(rangeDrag.startChanged);
+  }
+
   function onRangeInput(startChanged) {
     if (!active || !active.points.length) return;
     var start = byId('history-range-start');
@@ -260,17 +340,19 @@
     var min = active.points[0].at;
     var max = active.points[active.points.length - 1].at;
     var maxValue = 1000;
-    var low = Number(start.value);
-    var high = Number(end.value);
+    var low = rangeValue(start);
+    var high = rangeValue(end);
     if (high - low < 2) {
       if (startChanged) low = Math.max(0, high - 2);
       else high = Math.min(maxValue, low + 2);
-      start.value = String(low);
-      end.value = String(high);
+      setRangeValue(start, low);
+      setRangeValue(end, high);
     }
+    active.rangeStart = min + (max - min) * low / maxValue;
+    active.rangeEnd = min + (max - min) * high / maxValue;
     active.period = 'CUSTOM';
-    active.from = dateKey(min + (max - min) * low / maxValue);
-    active.to = dateKey(min + (max - min) * high / maxValue);
+    active.from = dateKey(active.rangeStart);
+    active.to = dateKey(active.rangeEnd);
     saveStore();
     draw();
   }
@@ -278,18 +360,39 @@
   function syncRangeInputs(range) {
     var start = byId('history-range-start');
     var end = byId('history-range-end');
-    if (!start || !end || !active || !active.points.length) return;
+    if (!start || !end) return;
+    if (!active || !active.points.length) {
+      start.disabled = true;
+      end.disabled = true;
+      setRangeValue(start, 0);
+      setRangeValue(end, 1000);
+      var emptyFill = byId('history-range-fill');
+      if (emptyFill) {
+        emptyFill.style.left = '0%';
+        emptyFill.style.width = '0%';
+      }
+      return;
+    }
     var min = active.points[0].at;
     var max = active.points[active.points.length - 1].at;
+    var hasRange = max > min;
     var span = Math.max(1, max - min);
     var low = Math.max(0, Math.min(1000, Math.round((range.start - min) / span * 1000)));
     var high = Math.max(0, Math.min(1000, Math.round((range.end - min) / span * 1000)));
-    start.value = String(Math.min(low, high - 1));
-    end.value = String(Math.max(high, low + 1));
+    if (high - low < 2) {
+      if (low >= 999) low = 998;
+      else high = Math.min(1000, low + 2);
+    }
+    setRangeValue(start, low);
+    setRangeValue(end, high);
+    start.disabled = !hasRange;
+    end.disabled = !hasRange;
+    start.setAttribute('aria-valuetext', displayDate(min + span * low / 1000, true));
+    end.setAttribute('aria-valuetext', displayDate(min + span * high / 1000, true));
     var fill = byId('history-range-fill');
     if (fill) {
-      fill.style.left = (Number(start.value) / 10) + '%';
-      fill.style.width = ((Number(end.value) - Number(start.value)) / 10) + '%';
+      fill.style.left = (low / 10) + '%';
+      fill.style.width = ((high - low) / 10) + '%';
     }
   }
 
@@ -322,6 +425,15 @@
       segmentOpen = true;
     });
     if (d) svg.appendChild(svgElement('path', { d: d, 'class': 'history-navigator-line' }));
+    if (values.length === 1) {
+      var only = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); })[0];
+      svg.appendChild(svgElement('circle', {
+        cx: (only.at - minT) / (maxT - minT) * width,
+        cy: height / 2,
+        r: 3,
+        'class': 'history-navigator-point'
+      }));
+    }
     var range = currentRange();
     var x1 = Math.max(0, Math.min(width, (range.start - minT) / (maxT - minT) * width));
     var x2 = Math.max(x1 + 1, Math.min(width, (range.end - minT) / (maxT - minT) * width));
@@ -389,6 +501,14 @@
     });
     var positive = Number(validPoints[validPoints.length - 1].value) >= Number(validPoints[0].value);
     if (d) svg.appendChild(svgElement('path', { d: d, 'class': 'history-line ' + (positive ? 'is-positive' : 'is-negative') }));
+    if (validPoints.length === 1) {
+      svg.appendChild(svgElement('circle', {
+        cx: xAt(validPoints[0].at),
+        cy: yAt(Number(validPoints[0].value)),
+        r: 4,
+        'class': 'history-single-point'
+      }));
+    }
 
     var labelCount = Math.min(4, validPoints.length);
     for (var i = 0; i < labelCount; i++) {
@@ -433,11 +553,19 @@
       from.min = dateKey(active.points[0].at);
       from.max = dateKey(Date.now());
       from.value = active.from || from.min;
+    } else if (from) {
+      from.value = '';
+      from.min = '';
+      from.max = '';
     }
     if (to && active.points.length) {
       to.min = dateKey(active.points[0].at);
       to.max = dateKey(Date.now());
       to.value = active.to || to.max;
+    } else if (to) {
+      to.value = '';
+      to.min = '';
+      to.max = '';
     }
 
     var validPoints = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); });
@@ -477,6 +605,7 @@
       if (storageMessage) note.textContent = storageMessage;
       else if (active.updating) note.textContent = 'Rebuilding saved values using locally cached prices; missing historical prices are fetched only when needed.';
       else if (active.incomplete) note.textContent = 'Some past values could not be rebuilt because historical prices were unavailable or a safe request limit was reached.';
+      else if (active.points.length === 1) note.textContent = 'One snapshot is saved. The graph will show changes after another portfolio update; earlier history is unavailable.';
       else note.textContent = 'Snapshots start now and are recorded when PLUTUS updates a portfolio value. Past transactions recalculate saved points where prices are available; no values are invented before the first snapshot.';
     }
   }

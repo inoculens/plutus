@@ -6185,6 +6185,215 @@ function fitHeroValue() {
   } catch (e) { /* ignore */ }
 }
 
+function netWorthHistoryDate(timestamp) {
+  var d = new Date(timestamp);
+  var month = String(d.getMonth() + 1);
+  var day = String(d.getDate());
+  return d.getFullYear() + '-' + (month.length < 2 ? '0' : '') + month + '-' + (day.length < 2 ? '0' : '') + day;
+}
+
+function netWorthHistorySignature(st) {
+  return JSON.stringify({
+    accounts: st.accounts || [],
+    trades: st.trades || [],
+    priceOverrides: st.priceOverrides || {},
+    mainCurrency: st.settings.mainCurrency,
+    costMethod: st.settings.costMethod,
+    accountFilter: st.settings.accountFilter
+  });
+}
+
+function netWorthHistoryKinds(st) {
+  var kinds = {};
+  (st.accounts || []).forEach(function (account) {
+    if (account && account.ticker && account.kind) kinds[String(account.ticker).toUpperCase()] = account.kind;
+  });
+  (st.trades || []).forEach(function (trade) {
+    if (!trade || !trade.symbol) return;
+    var account = accountById(st, trade.accountId);
+    if (account && account.kind) kinds[String(trade.symbol).toUpperCase()] = account.kind;
+  });
+  return kinds;
+}
+
+var netWorthHistoryFetches = {};
+var netWorthHistoryFailures = {};
+var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
+
+function fetchNetWorthHistoryPrice(symbol, day, main, kind) {
+  var cacheKind = histKindFor(kind);
+  var key = histCacheKey(symbol, day, main, cacheKind);
+  var cached = getHistCached(symbol, day, main, cacheKind);
+  if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
+    return Promise.resolve(Number(cached.price));
+  }
+  if (netWorthHistoryFailures[key]) return Promise.resolve(null);
+  if (netWorthHistoryFetches[key]) return netWorthHistoryFetches[key];
+  if (histInflight[key] || histBlocked(key)) return Promise.resolve(null);
+  if (netWorthHistoryFetchBudget.remaining <= 0) return Promise.resolve(null);
+  netWorthHistoryFetchBudget.remaining--;
+
+  netWorthHistoryFetches[key] = fetchHistoricalPrice(symbol, day, main, kind).then(function (price) {
+    delete netWorthHistoryFetches[key];
+    if (isFinite(Number(price)) && Number(price) > 0) {
+      setHistCached(symbol, day, main, cacheKind, Number(price), 'net-worth-history', false);
+      saveHistCache();
+      return Number(price);
+    }
+    netWorthHistoryFailures[key] = true;
+    return null;
+  }, function () {
+    delete netWorthHistoryFetches[key];
+    netWorthHistoryFailures[key] = true;
+    return null;
+  });
+  return netWorthHistoryFetches[key];
+}
+
+function fetchNetWorthHistoryRate(day, from, to) {
+  var cached = getCachedRate(day, from, to);
+  if (cached && isFinite(Number(cached.rate)) && Number(cached.rate) > 0) return Promise.resolve(cached);
+  if (netWorthHistoryFetchBudget.remaining <= 0) return Promise.resolve(null);
+  netWorthHistoryFetchBudget.remaining--;
+  return fetchEcbRate(day, from, to).then(function (rate) { return rate; }, function () { return null; });
+}
+
+function netWorthHistoryPointValue(point, st, main) {
+  var day = netWorthHistoryDate(point.at);
+  var trades = convertTrades((st.trades || []).filter(function (trade) {
+    return trade && typeof trade.date === 'string' && trade.date <= day;
+  }), main);
+  var kinds = netWorthHistoryKinds(st);
+  var prices = {};
+  Object.keys(point.prices || {}).forEach(function (symbol) {
+    var price = Number(point.prices[symbol]);
+    if (isFinite(price) && price > 0) prices[symbol] = price;
+  });
+  var portfolio = computePortfolio(trades, prices, st.settings.costMethod);
+  var filter = selectedTickers(st);
+  var accounts = (st.accounts || []).filter(function (account) {
+    return (filter === null || filter.indexOf(String(account.ticker || '').toUpperCase()) !== -1) &&
+      !groupMainOf(st, account.id);
+  });
+  var total = 0;
+  var complete = true;
+  var missing = {};
+  var cashTotal = 0;
+  var seenAccount = {};
+
+  function addAccountPositions(accountId) {
+    if (seenAccount[accountId]) return;
+    seenAccount[accountId] = true;
+    var rows = portfolio.byAccount[accountId];
+    if (!rows) return;
+    rows.forEach(function (row, symbol) {
+      if (!(Number(row.qtyHeld) > 0)) return;
+      if (row.marketValue === null) {
+        missing[String(symbol).toUpperCase()] = kinds[String(symbol).toUpperCase()] || 'crypto';
+      } else {
+        total += Number(row.marketValue);
+      }
+    });
+  }
+
+  accounts.forEach(function (account) {
+    addAccountPositions(account.id);
+    groupMembers(st, account.id).forEach(function (member) { addAccountPositions(member.id); });
+  });
+
+  var cashIds = cashAccountIds(st);
+  var cashJobs = [];
+  Object.keys(cashIds).forEach(function (accountId) {
+    var account = accountById(st, accountId);
+    if (!account || (filter !== null && filter.indexOf(String(account.ticker || '').toUpperCase()) === -1)) return;
+    if (!(trades || []).some(function (trade) { return transferInvolvesAccount(trade, accountId); })) return;
+    var balance = cashBalance(trades, accountId, main, false);
+    var currency = String(balance.ticker || account.ticker || '').toUpperCase();
+    var native = Number(balance.native);
+    if (!isFinite(native) || !currency) {
+      complete = false;
+      return;
+    }
+    if (currency === String(main).toUpperCase()) {
+      cashTotal += native;
+      return;
+    }
+    cashJobs.push(fetchNetWorthHistoryRate(day, currency, main).then(function (rate) {
+      if (!rate) {
+        complete = false;
+        return;
+      }
+      var converted = native * Number(rate.rate);
+      if (isFinite(converted)) cashTotal += converted;
+      else complete = false;
+    }));
+  });
+
+  var symbols = Object.keys(missing);
+  var jobs = symbols.map(function (symbol) {
+    var kind = missing[symbol];
+    return fetchNetWorthHistoryPrice(symbol, day, main, kind).then(function (price) {
+      if (isFinite(Number(price)) && Number(price) > 0) {
+        prices[symbol] = Number(price);
+        return true;
+      }
+      complete = false;
+      return false;
+    });
+  });
+
+  return Promise.all(jobs.concat(cashJobs)).then(function () {
+    if (symbols.length) saveHistCache();
+    if (symbols.length) {
+      var repriced = computePortfolio(trades, prices, st.settings.costMethod);
+      total = 0;
+      accounts.forEach(function (account) {
+        function addRows(accountId) {
+          var rows = repriced.byAccount[accountId];
+          if (!rows) return;
+          rows.forEach(function (row) {
+            if (!(Number(row.qtyHeld) > 0)) return;
+            if (row.marketValue === null) complete = false;
+            else total += Number(row.marketValue);
+          });
+        }
+        addRows(account.id);
+        groupMembers(st, account.id).forEach(function (member) { addRows(member.id); });
+      });
+    }
+    total += cashTotal;
+    return {
+      value: complete ? total : null,
+      prices: prices,
+      complete: complete
+    };
+  });
+}
+
+function updateNetWorthHistory(st, value, main) {
+  if (typeof window === 'undefined' || !window.NetWorthHistory || !st || !st.settings) return;
+  var signature = netWorthHistorySignature(st);
+  if (netWorthHistoryFetchBudget.signature !== signature) {
+    netWorthHistoryFetchBudget = { signature: signature, remaining: 20 };
+  }
+  var filter = selectedTickers(st);
+  var scope = String(main || st.settings.mainCurrency).toUpperCase() + '|' +
+    (filter === null ? 'all' : filter.slice().sort().join(','));
+  var prices = {};
+  Object.keys(livePrices || {}).forEach(function (symbol) {
+    var price = Number(livePrices[symbol]);
+    if (isFinite(price) && price > 0) prices[String(symbol).toUpperCase()] = price;
+  });
+  window.NetWorthHistory.update({
+    scope: scope,
+    currency: main,
+    value: value,
+    prices: prices,
+    signature: signature,
+    revalue: function (point) { return netWorthHistoryPointValue(point, st, main); }
+  });
+}
+
 function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   var main = st.settings.mainCurrency;
   var mv = 0;
@@ -6282,6 +6491,11 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   }
   var host = document.getElementById('summary-cards');
   if (!host) return;
+  var historyValueKnown = mvKnown;
+  rows.forEach(function (position) {
+    if (Number(position.qtyHeld) > 0 && position.marketValue === null) historyValueKnown = false;
+  });
+  updateNetWorthHistory(st, historyValueKnown ? mv : null, main);
   host.innerHTML = '';
   if (!anyContent) {
     var p = document.createElement('p');
@@ -7324,6 +7538,7 @@ function renderAccounts(st) {
   host.innerHTML = '';
   var landing = document.getElementById('landing');
   var hero = document.getElementById('hero');
+  var history = document.getElementById('networth-history');
   var overview = document.getElementById('overview');
   var fab = document.getElementById('fab-trade');
   var emptyState = !accounts.length;
@@ -7332,6 +7547,7 @@ function renderAccounts(st) {
   var landingTicker = document.getElementById('landing-ticker-wrap');
   if (landingTicker) landingTicker.hidden = !emptyState;
   if (hero) hero.hidden = emptyState || noTrades;
+  if (history) history.hidden = emptyState || noTrades;
   if (overview) overview.hidden = emptyState || noTrades;
   if (fab) fab.hidden = emptyState || noTrades;
   document.body.classList.toggle('is-empty', emptyState);

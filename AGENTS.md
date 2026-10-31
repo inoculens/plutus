@@ -1,7 +1,8 @@
 # PLUTUS — instructions for AI agents (and humans)
 
 Local-first portfolio tracker. Static site: `index.html`, `app.js`,
-`styles.css`, `netlify.toml`, and `stamp-version.sh`.
+`js/net-worth-history.js`, `styles.css`, `netlify.toml`, and
+`stamp-version.sh`.
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
 ## Session start — always work on latest

@@ -560,6 +560,49 @@
     setRangeValue(byId('history-range-end'), x2 / width * 1000);
   }
 
+  function smoothLinePath(points, xAt, yAt) {
+    if (!points.length) return '';
+    var coordinates = points.map(function (point) {
+      return { x: xAt(point.at), y: yAt(Number(point.value)) };
+    });
+    if (coordinates.length === 1) return 'M ' + coordinates[0].x.toFixed(2) + ' ' + coordinates[0].y.toFixed(2);
+
+    var slopes = [];
+    var tangents = [];
+    for (var i = 0; i < coordinates.length - 1; i++) {
+      slopes.push((coordinates[i + 1].y - coordinates[i].y) /
+        (coordinates[i + 1].x - coordinates[i].x));
+    }
+    tangents[0] = slopes[0];
+    tangents[coordinates.length - 1] = slopes[slopes.length - 1];
+    for (var j = 1; j < coordinates.length - 1; j++) {
+      var previousSlope = slopes[j - 1];
+      var nextSlope = slopes[j];
+      if (previousSlope * nextSlope <= 0) {
+        tangents[j] = 0;
+      } else {
+        var previousWidth = coordinates[j].x - coordinates[j - 1].x;
+        var nextWidth = coordinates[j + 1].x - coordinates[j].x;
+        var previousWeight = 2 * nextWidth + previousWidth;
+        var nextWeight = nextWidth + 2 * previousWidth;
+        tangents[j] = (previousWeight + nextWeight) /
+          (previousWeight / previousSlope + nextWeight / nextSlope);
+      }
+    }
+
+    var path = 'M ' + coordinates[0].x.toFixed(2) + ' ' + coordinates[0].y.toFixed(2);
+    for (var k = 0; k < coordinates.length - 1; k++) {
+      var from = coordinates[k];
+      var to = coordinates[k + 1];
+      var width = to.x - from.x;
+      path += ' C ' +
+        (from.x + width / 3).toFixed(2) + ' ' + (from.y + tangents[k] * width / 3).toFixed(2) + ' ' +
+        (to.x - width / 3).toFixed(2) + ' ' + (to.y - tangents[k + 1] * width / 3).toFixed(2) + ' ' +
+        to.x.toFixed(2) + ' ' + to.y.toFixed(2);
+    }
+    return path;
+  }
+
   function drawPlot(points, range) {
     var svg = byId('history-plot');
     if (!svg) return;
@@ -601,16 +644,7 @@
       svg.appendChild(label);
     }
 
-    var d = '';
-    var segmentOpen = false;
-    points.forEach(function (point) {
-      if (point.value === null || !isFinite(Number(point.value))) {
-        segmentOpen = false;
-        return;
-      }
-      d += (segmentOpen ? ' L ' : 'M ') + xAt(point.at).toFixed(2) + ' ' + yAt(Number(point.value)).toFixed(2);
-      segmentOpen = true;
-    });
+    var d = smoothLinePath(validPoints, xAt, yAt);
     var positive = Number(validPoints[validPoints.length - 1].value) >= Number(validPoints[0].value);
     if (d) svg.appendChild(svgElement('path', { d: d, 'class': 'history-line ' + (positive ? 'is-positive' : 'is-negative') }));
     if (validPoints.length === 1) {
@@ -622,16 +656,34 @@
       }));
     }
 
-    var labelCount = Math.min(4, validPoints.length);
-    for (var i = 0; i < labelCount; i++) {
-      var point = validPoints[Math.round(i * (validPoints.length - 1) / Math.max(1, labelCount - 1))];
+    var labelIndices = [0, Math.round((validPoints.length - 1) / 3),
+      Math.round((validPoints.length - 1) * 2 / 3), validPoints.length - 1];
+    var labels = [];
+    labelIndices.forEach(function (index, labelIndex) {
+      var labelText = displayDate(validPoints[index].at, true);
+      if (labels.some(function (label) { return label.text === labelText; })) return;
+      var point = validPoints[index];
+      var anchor = labelIndex === 0 ? 'start' : (labelIndex === labelIndices.length - 1 ? 'end' : 'middle');
       var dateLabel = svgElement('text', {
-        x: xAt(point.at), y: 248, 'text-anchor': i === 0 ? 'start' : (i === labelCount - 1 ? 'end' : 'middle'),
+        x: xAt(point.at), y: 248, 'text-anchor': anchor,
         'class': 'history-axis-label'
       });
-      dateLabel.textContent = displayDate(point.at, true);
+      dateLabel.textContent = labelText;
       svg.appendChild(dateLabel);
-    }
+      var bounds = dateLabel.getBoundingClientRect();
+      var leftEdge = bounds.left;
+      var rightEdge = bounds.right;
+      if (labelIndex === labelIndices.length - 1) {
+        while (labels.length > 1 && leftEdge < labels[labels.length - 1].right + 4) {
+          svg.removeChild(labels.pop().node);
+        }
+      }
+      if (labels.length && leftEdge < labels[labels.length - 1].right + 4) {
+        svg.removeChild(dateLabel);
+        return;
+      }
+      labels.push({ node: dateLabel, text: dateLabel.textContent, right: rightEdge });
+    });
 
     if (hoverPoint && points.indexOf(hoverPoint) !== -1) {
       var hx = xAt(hoverPoint.at);

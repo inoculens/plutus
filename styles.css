@@ -2229,11 +2229,9 @@ body.modal-open { overflow: hidden; }
 /* Step 1 (no accounts): the landing CTA is the only path. Topbar chrome hides. */
 body.is-empty .topbar-controls { display: none; }
 
-/* Step 2 (accounts, no trades yet): only the next action shows.
-   Currency + cost method + extra account can wait for real data. */
+/* Step 2 (accounts, no trades yet): currency + cost method can wait for data. */
 body.has-no-trades .tb-field,
-body.has-no-trades .segmented,
-body.has-no-trades #tb-account { display: none; }
+body.has-no-trades .segmented { display: none; }
 
 /* ————— Guide panel (Step 2 of 2) ————— */
 .guide-panel {
@@ -2637,9 +2635,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   html, body { overflow-x: clip; }
   body { font-size: 16px; }
 
-  /* — Topbar: brand row, then one compact control row, then a big Record. —
-     Currency + method + icons share row 1; the primary action owns row 2
-     at full thumb width so first-time setup is one obvious tap. */
+  /* — Topbar: brand row, then one compact control row. —
+     Currency, method and icons share the control row. */
   .topbar { flex-wrap: wrap; row-gap: 0.6rem; }
   .brand-id { flex: 1 1 100%; }
   .brand h1 { font-size: 0.85rem; }
@@ -2650,8 +2647,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .segmented button { flex: 1 1 0; min-height: 2.75rem; padding: 0.45rem 0.5rem; font-size: 0.85rem; white-space: nowrap; }
   #tb-sync { order: 3; flex: 0 0 auto; min-height: 2.75rem; }
   #tb-settings { order: 4; flex: 0 0 auto; min-height: 2.75rem; }
-  #tb-add { order: 5; flex: 1 1 100%; min-height: 3.1rem; font-size: 1rem; font-weight: 650; }
-  #tb-account { display: none; }
   #fab-trade { display: inline-flex; }
   /* A modal owns the screen: the floating + must never cover its fields. */
   body.modal-open #fab-trade { display: none !important; }

@@ -10710,13 +10710,11 @@ function route() {
   // The pinned-corner caps lift for pills that wrapped under the buttons:
   // needs a fresh measurement after every layout change.
   try { syncTradeHeadRows(); } catch (e) { /* ignore */ }
-  syncTradeButtons();
+  syncTradeFab();
 }
 
-// Trade entry lives inside accounts only: the top-bar +Trade and the mobile
-// FAB hide on home (the elements stay in the DOM so programmatic clicks and
-// tests keep working). First-run onboarding keeps its own guide CTA.
-function syncTradeButtons() {
+// Trade entry lives inside accounts only; first-run onboarding keeps its own CTA.
+function syncTradeFab() {
   var st = null;
   try {
     st = loadState();
@@ -10739,13 +10737,6 @@ function syncTradeButtons() {
   var inAccount = !!id && !!accountById(st, id);
   var hasAccts = Array.isArray(st.accounts) && st.accounts.length > 0;
   var hasTrades = Array.isArray(st.trades) && st.trades.length > 0;
-  // Entry points live with their lists now (+ Account above accounts,
-  // + Record above trades), so the top-bar duplicates stay hidden everywhere
-  // (elements remain in the DOM for tests and programmatic use).
-  var add = document.getElementById('tb-add');
-  if (add) add.hidden = true;
-  var acctBtn = document.getElementById('tb-account');
-  if (acctBtn) acctBtn.hidden = true;
   var fab = document.getElementById('fab-trade');
   if (fab) fab.hidden = !(inAccount && hasAccts && hasTrades);
 }
@@ -11093,11 +11084,6 @@ function buildAccounts() {
         return;
       }
     });
-  }
-  var add = document.getElementById('tb-account');
-  if (add && !add.getAttribute('data-wired')) {
-    add.setAttribute('data-wired', '1');
-    add.addEventListener('click', function () { openAccountDialog(); });
   }
   // Folder-card navigation (home → detail). Buttons keep their own
   // behavior; anything else on the card opens the account page.
@@ -15026,27 +15012,6 @@ function buildTopbar() {
       render(); // no refetch: cost view needs no new prices
     });
   });
-  var add = document.getElementById('tb-add');
-  if (add && !add.getAttribute('data-wired')) {
-    add.setAttribute('data-wired', '1');
-    add.addEventListener('click', function () {
-      var cur = loadState();
-      if (!Array.isArray(cur.accounts) || cur.accounts.length === 0) {
-        showBanner('Create your first account to enable Add record.');
-        var host = document.getElementById('accounts');
-        if (host && host.scrollIntoView) {
-          try { host.scrollIntoView(); } catch (e) { /* ignore */ }
-        }
-        return;
-      }
-      // On an open account page the trade belongs to that account (locked);
-      // on home the account stays selectable (defaults to the default).
-      var rid = accountDetailId();
-      var open = (typeof rid === 'string' && rid) ? accountById(cur, rid) : null;
-      if (open) openPrefillTrade(open.id, true);
-      else openPrefillTrade(null);
-    });
-  }
   var gear = document.getElementById('tb-settings');
   if (gear && !gear.getAttribute('data-wired')) {
     gear.setAttribute('data-wired', '1');
@@ -15061,8 +15026,9 @@ function buildTopbar() {
   if (fab && !fab.getAttribute('data-wired')) {
     fab.setAttribute('data-wired', '1');
     fab.addEventListener('click', function () {
-      var tb = document.getElementById('tb-add');
-      if (tb) tb.click();
+      var id = accountDetailId();
+      var account = id ? accountById(loadState(), id) : null;
+      if (account) openPrefillTrade(account.id, true);
       else openPrefillTrade(null);
     });
   }
@@ -16086,7 +16052,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.findTradeById = findTradeById;
   window.Inoculens.tradeSelectionMode = function () { return tradeSelectionMode; };
   window.Inoculens.resetTradeForm = resetTradeForm;
-  window.Inoculens.syncTradeButtons = syncTradeButtons;
+  window.Inoculens.syncTradeFab = syncTradeFab;
+  window.Inoculens.syncTradeButtons = syncTradeFab;
   window.Inoculens.syncLockedSymbol = syncLockedSymbol;
   window.Inoculens.syncTradeTypeUI = syncTradeTypeUI;
   window.Inoculens.syncInfoDots = syncInfoDots;

@@ -17,7 +17,7 @@ var STORE_VERSION = 2;
 
 function defaultState() {
   return {
-    settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true },
+    settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true, dateFormat: 'DD/MM/YYYY' },
     accounts: [],
     trades: [],
     priceOverrides: {}
@@ -25,6 +25,29 @@ function defaultState() {
 }
 
 var MAIN_CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'RON'];
+var DEFAULT_DATE_FORMAT = 'DD/MM/YYYY';
+var DATE_FORMAT_PRESETS = ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY/MM/DD', 'YYYY-MM-DD'];
+var activeDateFormat = DEFAULT_DATE_FORMAT;
+
+function isValidDateFormat(format) {
+  if (typeof format !== 'string') return false;
+  var tokens = format.match(/YYYY|DD|MM|D|M/g);
+  if (!tokens || tokens.length !== 3) return false;
+  var seen = {};
+  tokens.forEach(function (token) {
+    var part = token === 'D' || token === 'DD' ? 'day' : (token === 'M' || token === 'MM' ? 'month' : 'year');
+    seen[part] = (seen[part] || 0) + 1;
+  });
+  if (seen.day !== 1 || seen.month !== 1 || seen.year !== 1) return false;
+  var separators = format.split(/YYYY|DD|MM|D|M/g);
+  if (separators.length !== 4 || separators[0] !== '' || separators[3] !== '') return false;
+  return separators[1].length === 1 && separators[2].length === 1 &&
+    /^[./ -]$/.test(separators[1]) && /^[./ -]$/.test(separators[2]);
+}
+
+function normalizeDateFormat(format) {
+  return isValidDateFormat(format) ? format : DEFAULT_DATE_FORMAT;
+}
 
 function isValidDateStr(d) {
   if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
@@ -52,7 +75,8 @@ function isFutureDateStr(d) {
 function isValidSettings(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v) &&
     typeof v.mainCurrency === 'string' && MAIN_CURRENCIES.indexOf(v.mainCurrency.toUpperCase()) !== -1 &&
-    (v.costMethod === 'average' || v.costMethod === 'fifo');
+    (v.costMethod === 'average' || v.costMethod === 'fifo') &&
+    (v.dateFormat === undefined || isValidDateFormat(v.dateFormat));
 }
 
 function isValidAccount(a) {
@@ -137,9 +161,14 @@ function normalizeAccountFilter(v) {
 }
 
 function normalizeSettings(s, fallback) {
-  var fb = fallback || { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true };
+  var fb = fallback || { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true, dateFormat: DEFAULT_DATE_FORMAT };
   if (!isValidSettings(s)) {
-    var outFb = { mainCurrency: fb.mainCurrency, costMethod: fb.costMethod, assetLedgers: (fb.assetLedgers === false) ? false : true };
+    var outFb = {
+      mainCurrency: fb.mainCurrency,
+      costMethod: fb.costMethod,
+      assetLedgers: (fb.assetLedgers === false) ? false : true,
+      dateFormat: normalizeDateFormat(fb.dateFormat)
+    };
     var fbf = normalizeAccountFilter(fb.accountFilter);
     if (fbf !== null) outFb.accountFilter = fbf;
     return outFb;
@@ -147,7 +176,8 @@ function normalizeSettings(s, fallback) {
   var res = {
     mainCurrency: String(s.mainCurrency).toUpperCase(),
     costMethod: s.costMethod,
-    assetLedgers: (s.assetLedgers === false) ? false : true
+    assetLedgers: (s.assetLedgers === false) ? false : true,
+    dateFormat: normalizeDateFormat(s.dateFormat)
   };
   var flt = normalizeAccountFilter(s.accountFilter);
   if (flt !== null) res.accountFilter = flt;
@@ -174,6 +204,7 @@ var QTY_NON_CRYPTO = {};
 
 function loadState() {
   var fallback = defaultState();
+  activeDateFormat = fallback.settings.dateFormat;
   var raw = null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
@@ -201,6 +232,7 @@ function loadState() {
     priceOverrides = parsed.priceOverrides;
   }
   var settings = normalizeSettings(parsed.settings, fallback.settings);
+  activeDateFormat = settings.dateFormat;
   try { noteSymbolKinds(accounts); } catch (e) { /* never breaks load */ }
   return {
     settings: settings,
@@ -3484,7 +3516,7 @@ function validateTrade(t, heldQty) {
     } else if (hasToV && t.accountId && t.toAccountId && t.accountId === t.toAccountId) return 'transfer needs two different accounts';
   }
   if (typeof t.date === 'string' && t.date.length > 0) {
-    if (!isValidDateStr(t.date)) return 'date must be dd/mm/yyyy';
+    if (!isValidDateStr(t.date)) return 'date must be a valid ISO calendar date';
     if (isFutureDateStr(t.date)) return 'date cannot be in the future';
   }
   return null;
@@ -5500,23 +5532,20 @@ function todayStr() {
   return n.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
 }
 
-// All user-visible dates are dd/mm/yyyy, built manually from parts — never
-// via toLocaleDateString / Intl (device locale must not change the format).
-// Storage stays ISO YYYY-MM-DD; these helpers only format for display and
-// parse user input back to ISO.
+// Storage stays ISO YYYY-MM-DD. User-visible dates follow the saved format,
+// independent of the device locale.
 function fmtDateDmy(d) {
   if (d === undefined || d === null) return '';
   var s = String(d).trim();
   if (!s) return '';
-  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (m) return m[3] + '/' + m[2] + '/' + m[1];
-  var m2 = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
-  if (m2) {
-    var dd = m2[1].length < 2 ? '0' + m2[1] : m2[1];
-    var mm = m2[2].length < 2 ? '0' + m2[2] : m2[2];
-    return dd + '/' + mm + '/' + m2[3];
+  var iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!iso) {
+    var parsed = parseDateInput(s);
+    if (!parsed) return s;
+    iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(parsed);
   }
-  return s;
+  var values = { YYYY: iso[1], MM: iso[2], M: String(Number(iso[2])), DD: iso[3], D: String(Number(iso[3])) };
+  return normalizeDateFormat(activeDateFormat).replace(/YYYY|DD|MM|D|M/g, function (token) { return values[token]; });
 }
 
 function parseDateInput(s) {
@@ -5524,22 +5553,34 @@ function parseDateInput(s) {
   var v = s.trim();
   if (!v) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return isValidDateStr(v) ? v : null;
-  var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);
-  if (m) {
-    var dd = m[1].length < 2 ? '0' + m[1] : m[1];
-    var mm = m[2].length < 2 ? '0' + m[2] : m[2];
-    var iso = m[3] + '-' + mm + '-' + dd;
-    return isValidDateStr(iso) ? iso : null;
+  var format = normalizeDateFormat(activeDateFormat);
+  var tokens = format.match(/YYYY|DD|MM|D|M/g);
+  var separators = format.split(/YYYY|DD|MM|D|M/g);
+  var pattern = '^';
+  tokens.forEach(function (token, i) {
+    pattern += '(' + (token === 'YYYY' ? '\\d{4}' : '\\d{1,2}') + ')';
+    if (i < separators.length - 1) pattern += separators[i + 1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  });
+  pattern += '$';
+  var match = new RegExp(pattern).exec(v);
+  if (!match && tokens.every(function (token) { return token !== 'D' && token !== 'M'; })) {
+    var compactPattern = '^' + tokens.map(function (token) {
+      return '(\\d{' + (token === 'YYYY' ? '4' : '2') + '})';
+    }).join('') + '$';
+    match = new RegExp(compactPattern).exec(v);
   }
-  return null;
+  if (!match) return null;
+  var values = {};
+  tokens.forEach(function (token, i) { values[token] = match[i + 1]; });
+  var month = String(values.MM || values.M);
+  var day = String(values.DD || values.D);
+  if (month.length < 2) month = '0' + month;
+  if (day.length < 2) day = '0' + day;
+  var iso = values.YYYY + '-' + month + '-' + day;
+  return isValidDateStr(iso) ? iso : null;
 }
 
-// Typing helpers for the record form's date field. The field is a plain text
-// input (locale-proof, see above), so these reproduce the native date
-// control's segment flow: click a segment and type — the caret advances
-// dd → mm → yyyy by itself; Up/Down bump the focused segment. Values are the
-// field's own text, partial states included; storage stays ISO and submit
-// still goes through parseDateInput.
+// Legacy DMY segment helpers are retained for existing tests and integrations.
 function dmyPartsOf(value) {
   var s = String(value === undefined || value === null ? '' : value).trim();
   var m = /^(\d{0,2})(?:\/(\d{0,2})(?:\/(\d{0,4}))?)?$/.exec(s);
@@ -5733,15 +5774,16 @@ function fmtDateTimeDmy(iso) {
     var d = new Date(iso);
     if (!isFinite(d.getTime())) return String(iso);
     function p(x) { return (x < 10 ? '0' : '') + x; }
-    return p(d.getUTCDate()) + '/' + p(d.getUTCMonth() + 1) + '/' + d.getUTCFullYear() +
+    var day = d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+    return fmtDateDmy(day) +
       ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds()) + ' UTC';
   } catch (e) { return String(iso); }
 }
 
 function fmtEcbInText(s) {
   if (typeof s !== 'string') return s;
-  var out = s.replace(/ECB-(\d{4})-(\d{2})-(\d{2})/g, function (_, y, m, d) { return 'ECB-' + d + '/' + m + '/' + y; });
-  out = out.replace(/Stooq-(\d{4})(\d{2})(\d{2})/g, function (_, y, m, d) { return 'Stooq-' + d + '/' + m + '/' + y; });
+  var out = s.replace(/ECB-(\d{4})-(\d{2})-(\d{2})/g, function (_, y, m, d) { return 'ECB-' + fmtDateDmy(y + '-' + m + '-' + d); });
+  out = out.replace(/Stooq-(\d{4})(\d{2})(\d{2})/g, function (_, y, m, d) { return 'Stooq-' + fmtDateDmy(y + '-' + m + '-' + d); });
   return out;
 }
 
@@ -7126,12 +7168,20 @@ function buildTradeTypeFilter(acc, atrades) {
     label.className = 'filter-date-field';
     label.textContent = labelText;
     var input = document.createElement('input');
-    input.type = 'date';
-    input.value = draft[key] || '';
-    input.max = todayStr();
+    input.type = 'text';
+    input.inputMode = 'numeric';
+    input.autocomplete = 'off';
+    input.placeholder = normalizeDateFormat(activeDateFormat);
+    input.value = draft[key] ? fmtDateDmy(draft[key]) : '';
     input.setAttribute('data-date-filter-' + key, '1');
     input.addEventListener('input', function () {
-      draft[key] = input.value;
+      draft[key] = parseDateInput(input.value) || input.value;
+    });
+    input.addEventListener('blur', function () {
+      var iso = parseDateInput(input.value);
+      if (!iso) return;
+      input.value = fmtDateDmy(iso);
+      draft[key] = iso;
     });
     label.appendChild(input);
     dateFields.appendChild(label);
@@ -7156,11 +7206,17 @@ function buildTradeTypeFilter(acc, atrades) {
   applyDate.className = 'ghost';
   applyDate.textContent = 'Apply interval';
   applyDate.addEventListener('click', function () {
-    var from = fromInput.value;
-    var to = toInput.value;
-    if ((from && (!isValidDateStr(from) || isFutureDateStr(from))) ||
-        (to && (!isValidDateStr(to) || isFutureDateStr(to)))) {
-      dateError.textContent = 'Choose valid dates that are not in the future.';
+    var fromRaw = fromInput.value.trim();
+    var toRaw = toInput.value.trim();
+    var from = fromRaw ? parseDateInput(fromRaw) : '';
+    var to = toRaw ? parseDateInput(toRaw) : '';
+    if ((fromRaw && !from) || (toRaw && !to)) {
+      dateError.textContent = 'Enter dates in ' + normalizeDateFormat(activeDateFormat) + ' format.';
+      dateError.hidden = false;
+      return;
+    }
+    if ((from && isFutureDateStr(from)) || (to && isFutureDateStr(to))) {
+      dateError.textContent = 'Choose dates that are not in the future.';
       dateError.hidden = false;
       return;
     }
@@ -12459,8 +12515,8 @@ function buildTradeForm() {
     '<label for="t-custom-ccy" id="t-custom-ccy-label" hidden>Custom currency code</label>' +
     '<input id="t-custom-ccy" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY" hidden>' +
     '<label for="t-date">Date</label>' +
-    '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="dd/mm/yyyy" maxlength="10">' +
-    '<p class="fld-hint">Format dd/mm/yyyy.</p>' +
+    '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="DD/MM/YYYY" maxlength="10">' +
+    '<p class="fld-hint" id="t-date-hint">Format DD/MM/YYYY.</p>' +
     '<details class="adv"><summary>Details</summary>' +
     '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger (optional)</label>' +
     '<input id="t-ledger" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24" list="t-ledger-codes">' +
@@ -12497,7 +12553,7 @@ function buildTradeForm() {
   var form = document.getElementById('trade-form');
   form.addEventListener('submit', onTradeSubmit);
   var dateEl = document.getElementById('t-date');
-  if (dateEl) wireDmyDateInput(dateEl);
+  if (dateEl) wireDateInput(dateEl);
   var acctSel = document.getElementById('t-account');
   if (acctSel) {
     acctSel.addEventListener('change', function () { syncLockedSymbol(); syncTradeTypeUI(); });
@@ -12562,92 +12618,34 @@ function buildTradeForm() {
   syncTradeTypeUI();
 }
 
-// --- dd/mm/yyyy typing flow (record form) ---
-// The date field is a text input to stay locale-proof, so this restores what
-// the native date control used to do: a click selects the segment under the
-// pointer, typing fills it and advances dd → mm → yyyy, arrows hop segments,
-// Up/Down bump them, digits and '/' are the only accepted characters, blur
-// pads single digits, and paste is normalised. Storage and submit stay ISO.
-function wireDmyDateInput(el) {
+// --- Date input formatting (record form) ---
+function wireDateInput(el) {
   if (!el || el.getAttribute('data-dmy-wired') === '1') return;
   el.setAttribute('data-dmy-wired', '1');
-  function apply(out) {
-    el.value = out.value;
-    try { el.setSelectionRange(out.start, out.end); } catch (err) { /* ignore */ }
-  }
-  function selectSegmentAt(pos) {
-    var seg = dmySegmentRange(el.value, pos);
-    if (seg) { try { el.setSelectionRange(seg.start, seg.end); } catch (err) { /* ignore */ } }
-  }
-  el.addEventListener('click', function () {
-    selectSegmentAt(el.selectionStart === null || el.selectionStart === undefined ? 0 : el.selectionStart);
-  });
-  el.addEventListener('focus', function () {
-    selectSegmentAt(el.selectionStart === null || el.selectionStart === undefined ? 0 : el.selectionStart);
-  });
-  el.addEventListener('keydown', function (ev) {
-    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-    var start = el.selectionStart;
-    var end = el.selectionEnd;
-    if (start === null || start === undefined || end === null || end === undefined) return;
-    var key = ev.key;
-    if (key === 'ArrowUp' || key === 'ArrowDown') {
-      var b = dmyDateBump(el.value, start, end, key === 'ArrowUp' ? 1 : -1);
-      if (b) { ev.preventDefault(); apply(b); }
-      return;
-    }
-    if (key === 'ArrowLeft' || key === 'ArrowRight') {
-      if (ev.shiftKey) return; // keep native selection extension
-      var h = dmyDateEdit(el.value, start, end, key);
-      if (h) { ev.preventDefault(); apply(h); }
-      return;
-    }
-    if (key === 'Backspace' || key === 'Delete' || key === '/') {
-      var d = dmyDateEdit(el.value, start, end, key);
-      if (d) { ev.preventDefault(); apply(d); }
-      return;
-    }
-    if (key.length === 1) {
-      if (/^\d$/.test(key)) {
-        var out = dmyDateEdit(el.value, start, end, key);
-        if (out) { ev.preventDefault(); apply(out); }
-      } else if (!ev.isComposing) {
-        ev.preventDefault(); // the date field takes digits and '/' only
-      }
-    }
-  });
-  // Soft keyboards often report key as 'Unidentified' on keydown; beforeinput
-  // still carries the real text and the deletion intent.
-  el.addEventListener('beforeinput', function (ev) {
-    var it = ev.inputType || '';
-    var key = null;
-    if (it === 'insertText') {
-      if (typeof ev.data !== 'string' || ev.data === '') return;
-      if (!/^\d$/.test(ev.data) && ev.data !== '/') { ev.preventDefault(); return; }
-      key = ev.data;
-    } else if (it === 'deleteContentBackward') key = 'Backspace';
-    else if (it === 'deleteContentForward') key = 'Delete';
-    else return;
-    var start = el.selectionStart;
-    var end = el.selectionEnd;
-    if (start === null || start === undefined) return;
-    var out = dmyDateEdit(el.value, start, end, key);
-    if (out) { ev.preventDefault(); apply(out); }
-  });
   el.addEventListener('paste', function (ev) {
     var text = '';
     try { text = (ev.clipboardData && ev.clipboardData.getData) ? ev.clipboardData.getData('text') : ''; } catch (err) { text = ''; }
-    var parts = dmyPartsFromAny(text);
-    if (!parts) return;
+    var iso = parseDateInput(text);
+    if (!iso) return;
     ev.preventDefault();
-    var layout = dmyLayout(parts);
-    el.value = layout.text;
-    try { el.setSelectionRange(layout.text.length, layout.text.length); } catch (err) { /* ignore */ }
+    el.value = fmtDateDmy(iso);
   });
   el.addEventListener('blur', function () {
     var iso = parseDateInput(el.value);
     if (iso) el.value = fmtDateDmy(iso);
   });
+}
+
+function syncDateFormatInputs() {
+  var format = normalizeDateFormat(activeDateFormat);
+  var input = document.getElementById('t-date');
+  if (input) input.placeholder = format;
+  var hint = document.getElementById('t-date-hint');
+  if (hint) hint.textContent = 'Format ' + format + '.';
+  var from = document.querySelector('[data-date-filter-from]');
+  var to = document.querySelector('[data-date-filter-to]');
+  if (from) from.placeholder = format;
+  if (to) to.placeholder = format;
 }
 
 // --- Multi-recipient transfer rows (form) ---
@@ -13983,8 +13981,8 @@ function onTradeSubmit(ev) {
   }
   var dateRaw = uiVal('t-date', '').trim();
   var date = dateRaw ? parseDateInput(dateRaw) : todayStr();
-  if (!date) { tradeFormError('Date must be dd/mm/yyyy.'); return; }
-  if (!isValidDateStr(date)) { tradeFormError('Date must be dd/mm/yyyy.'); return; }
+  if (!date) { tradeFormError('Date must be a valid date in ' + normalizeDateFormat(activeDateFormat) + ' format.'); return; }
+  if (!isValidDateStr(date)) { tradeFormError('Date must be a valid date in ' + normalizeDateFormat(activeDateFormat) + ' format.'); return; }
   if (isFutureDateStr(date)) { tradeFormError('date cannot be in the future'); return; }
   var note = uiVal('t-note', '').trim();
   var txid = uiVal('t-txid', '').trim();
@@ -15343,6 +15341,7 @@ function buildSettings() {
   wrap.innerHTML =
     '<div class="set-tabs" role="tablist" aria-label="Settings sections">' +
     '<button type="button" role="tab" data-settab="overrides" aria-selected="true">Price overrides</button>' +
+    '<button type="button" role="tab" data-settab="date-format" aria-selected="false">Date format</button>' +
     '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledgers (default)</button>' +
     '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backup &amp; restore</button>' +
     '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud Sync</button>' +
@@ -15356,6 +15355,24 @@ function buildSettings() {
     '<input id="o-price" inputmode="decimal" placeholder="e.g. 67000">' +
     '<button id="o-add" type="button">Save override</button>' +
     '<ul id="o-list"></ul>' +
+    '</section>' +
+    '<section data-setpanel="date-format" role="tabpanel" aria-label="Date format" hidden>' +
+    '<p class="muted set-blurb">Choose how dates appear throughout the app. Your records stay stored in a consistent format and are not changed.</p>' +
+    '<label for="set-date-format">Date format</label>' +
+    '<select id="set-date-format">' +
+    '<option value="DD/MM/YYYY">European · DD/MM/YYYY</option>' +
+    '<option value="MM/DD/YYYY">American · MM/DD/YYYY</option>' +
+    '<option value="YYYY/MM/DD">Asian · YYYY/MM/DD</option>' +
+    '<option value="YYYY-MM-DD">ISO · YYYY-MM-DD</option>' +
+    '<option value="custom">Custom</option>' +
+    '</select>' +
+    '<div id="set-date-format-custom" hidden>' +
+    '<label for="set-date-format-pattern">Custom pattern</label>' +
+    '<input id="set-date-format-pattern" autocomplete="off" spellcheck="false" maxlength="10" placeholder="e.g. DD.MM.YYYY">' +
+    '<p class="muted set-blurb">Use D or DD for day, M or MM for month, and YYYY for year, in any order, separated by /, ., - or spaces.</p>' +
+    '</div>' +
+    '<p class="muted set-blurb" id="set-date-format-preview"></p>' +
+    '<button id="set-date-format-apply" type="button">Apply date format</button>' +
     '</section>' +
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
     '<p class="muted set-blurb">Default bookkeeping codes every cash account starts from (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Editing codes inside an account diverges it from this default; renaming here changes future suggestions — records keep their own stored labels.</p>' +
@@ -15463,6 +15480,47 @@ function buildSettings() {
     var tab = e && e.target && e.target.closest ? e.target.closest('[data-settab]') : null;
     if (!tab) return;
     showSettingsTab(tab.getAttribute('data-settab'));
+  });
+  var dateFormatSelect = document.getElementById('set-date-format');
+  var dateFormatCustom = document.getElementById('set-date-format-custom');
+  var dateFormatPattern = document.getElementById('set-date-format-pattern');
+  var dateFormatPreview = document.getElementById('set-date-format-preview');
+  function updateDateFormatPreview() {
+    var selectedFormat = dateFormatSelect && dateFormatSelect.value === 'custom'
+      ? String(dateFormatPattern && dateFormatPattern.value || '').trim()
+      : String(dateFormatSelect && dateFormatSelect.value || DEFAULT_DATE_FORMAT);
+    if (dateFormatPreview) {
+      dateFormatPreview.textContent = isValidDateFormat(selectedFormat)
+        ? 'Preview: ' + selectedFormat.replace(/YYYY|DD|MM|D|M/g, function (token) {
+          return token === 'YYYY' ? '2001' : (token === 'MM' || token === 'M' ? '11' : '23');
+        })
+        : 'Enter a pattern using D or DD, M or MM, and YYYY once each.';
+    }
+  }
+  if (dateFormatSelect) {
+    dateFormatSelect.addEventListener('change', function () {
+      if (dateFormatCustom) dateFormatCustom.hidden = dateFormatSelect.value !== 'custom';
+      updateDateFormatPreview();
+    });
+  }
+  if (dateFormatPattern) dateFormatPattern.addEventListener('input', updateDateFormatPreview);
+  document.getElementById('set-date-format-apply').addEventListener('click', function () {
+    var nextFormat = dateFormatSelect && dateFormatSelect.value === 'custom'
+      ? String(dateFormatPattern && dateFormatPattern.value || '').trim()
+      : String(dateFormatSelect && dateFormatSelect.value || DEFAULT_DATE_FORMAT);
+    if (!isValidDateFormat(nextFormat)) {
+      showBanner('Use D or DD, M or MM, and YYYY once each, separated by /, ., - or spaces.', 'error');
+      return;
+    }
+    var tradeDate = document.getElementById('t-date');
+    var tradeDateIso = tradeDate ? parseDateInput(tradeDate.value) : null;
+    var st = loadState();
+    st.settings.dateFormat = nextFormat;
+    if (!saveStateGuarded(st)) return;
+    activeDateFormat = nextFormat;
+    if (tradeDateIso && tradeDate) tradeDate.value = fmtDateDmy(tradeDateIso);
+    clearBanner();
+    render();
   });
   document.getElementById('o-add').addEventListener('click', function () {
     var sym = uiVal('o-symbol', '').trim().toUpperCase();
@@ -15615,6 +15673,17 @@ function buildSettings() {
 function syncTopbar(st) {
   var main = document.getElementById('tb-main');
   if (main) main.value = st.settings.mainCurrency;
+  var dateFormat = normalizeDateFormat(st.settings.dateFormat);
+  var dateFormatSelect = document.getElementById('set-date-format');
+  var dateFormatCustom = document.getElementById('set-date-format-custom');
+  var dateFormatPattern = document.getElementById('set-date-format-pattern');
+  var dateFormatPreview = document.getElementById('set-date-format-preview');
+  var isPresetDateFormat = DATE_FORMAT_PRESETS.indexOf(dateFormat) !== -1;
+  if (dateFormatSelect) dateFormatSelect.value = isPresetDateFormat ? dateFormat : 'custom';
+  if (dateFormatCustom) dateFormatCustom.hidden = isPresetDateFormat;
+  if (dateFormatPattern) dateFormatPattern.value = isPresetDateFormat ? '' : dateFormat;
+  if (dateFormatPreview) dateFormatPreview.textContent = 'Preview: ' + fmtDateDmy('2001-11-23');
+  syncDateFormatInputs();
   var avg = document.getElementById('tb-avg');
   var fifo = document.getElementById('tb-fifo');
   var isFifo = st.settings.costMethod === 'fifo';
@@ -16295,6 +16364,8 @@ if (typeof window !== 'undefined') {
   window.Inoculens.TRADE_CCY_OPTIONS = TRADE_CCY_OPTIONS;
   window.Inoculens.saveStateGuarded = saveStateGuarded;
   window.Inoculens.isValidImportTrade = isValidImportTrade;
+  window.Inoculens.isValidDateFormat = isValidDateFormat;
+  window.Inoculens.normalizeDateFormat = normalizeDateFormat;
   window.Inoculens.isValidTxid = isValidTxid;
   window.Inoculens.txExplorerUrl = txExplorerUrl;
   window.Inoculens.shortTxid = shortTxid;

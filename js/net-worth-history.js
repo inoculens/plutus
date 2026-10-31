@@ -723,7 +723,8 @@
     var height = 72;
     var minT = Number(active.historyStart) || points[0].at;
     var maxT = Math.max(minT + 1, points[points.length - 1].at);
-    var values = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); })
+    var validPoints = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); });
+    var values = validPoints
       .map(function (point) { return Number(point.value); });
     if (!values.length) return;
     var minV = Math.min.apply(Math, values);
@@ -731,12 +732,8 @@
     if (minV === maxV) { minV -= 1; maxV += 1; }
     var d = '';
     var segmentOpen = false;
-    points.forEach(function (point) {
+    validPoints.forEach(function (point) {
       if (point.at < minT) return;
-      if (point.value === null || !isFinite(Number(point.value))) {
-        segmentOpen = false;
-        return;
-      }
       var x = (point.at - minT) / (maxT - minT) * width;
       var y = height - 6 - ((Number(point.value) - minV) / (maxV - minV)) * (height - 12);
       d += (segmentOpen ? ' L ' : 'M ') + x.toFixed(2) + ' ' + y.toFixed(2);
@@ -744,7 +741,7 @@
     });
     if (d) svg.appendChild(svgElement('path', { d: d, 'class': 'history-navigator-line' }));
     if (values.length === 1) {
-      var only = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); })[0];
+      var only = validPoints[0];
       svg.appendChild(svgElement('circle', {
         cx: (only.at - minT) / (maxT - minT) * width,
         cy: height / 2,

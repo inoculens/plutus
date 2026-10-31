@@ -3538,7 +3538,7 @@ label.sync-check input {
 .history-tooltip {
   position: absolute;
   z-index: 1;
-  top: 0.2rem;
+  top: calc(100% + 0.2rem);
   left: 5.4rem;
   max-width: calc(100% - 5.6rem);
   padding: 0.35rem 0.55rem;

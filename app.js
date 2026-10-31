@@ -6311,11 +6311,48 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
         return { currency: fiat, points: points };
       });
     }
+    function fetchYahooCryptoSeries(symbolCurrency) {
+      var yahooCrypto = sym + '-' + symbolCurrency;
+      var interval = end - start <= 7 * 86400000 ? '60m' : '1d';
+      var query = 'period1=' + queryStart + '&period2=' + queryEnd + '&interval=' + interval;
+      return fetchFirstJson(yahooProxyUrls(yahooCrypto, query), window.fetch.bind(window)).then(function (data) {
+        var result = data && data.chart && data.chart.result && data.chart.result[0];
+        if (!result) throw new Error('Yahoo Finance has no history for ' + yahooCrypto);
+        var timestamps = result.timestamp || [];
+        var quotes = result.indicators && result.indicators.quote && result.indicators.quote[0];
+        var closes = quotes && quotes.close ? quotes.close : [];
+        var points = [];
+        for (var i = 0; i < timestamps.length; i++) {
+          var price = Number(closes[i]);
+          if (isFinite(price) && price > 0) points.push({ at: Number(timestamps[i]) * 1000, price: price });
+        }
+        if (!points.length) throw new Error('Yahoo Finance has no history for ' + yahooCrypto);
+        return { currency: String((result.meta && result.meta.currency) || symbolCurrency).toUpperCase(), points: points };
+      });
+    }
+    function fetchCryptoFallback() {
+      var yahooCurrencies = currency === 'EUR' || currency === 'GBP'
+        ? [currency, 'USD'] : ['USD'];
+      var lastError = null;
+      function tryYahoo(index) {
+        if (index >= yahooCurrencies.length) {
+          return fetchCoinbaseSeries().then(null, function (coinbaseError) {
+            var message = lastError && lastError.message ? lastError.message : 'Yahoo Finance history unavailable';
+            throw new Error(message + '; ' + String(coinbaseError && coinbaseError.message ? coinbaseError.message : coinbaseError));
+          });
+        }
+        return fetchYahooCryptoSeries(yahooCurrencies[index]).then(null, function (error) {
+          lastError = error;
+          return tryYahoo(index + 1);
+        });
+      }
+      return tryYahoo(0);
+    }
     request = fetchCoinGeckoSeries(currency).then(null, function () {
       if (currency !== 'USD') {
-        return fetchCoinGeckoSeries('USD').then(null, function () { return fetchCoinbaseSeries(); });
+        return fetchCoinGeckoSeries('USD').then(null, fetchCryptoFallback);
       }
-      return fetchCoinbaseSeries();
+      return fetchCryptoFallback();
     });
   } else if (kind === 'stock' || Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) {
     var yahoo = kind === 'stock' ? yahooSymbol(sym) : YAHOO_COMMODITY_MAP[sym];
@@ -6372,7 +6409,6 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
       points: [],
       error: String(error && error.message ? error.message : error)
     };
-    netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
     return series;
   });
 }
@@ -6388,7 +6424,11 @@ function netWorthHistorySeriesPrice(series, at, main) {
     else high = mid - 1;
   }
   var picked = points[low];
-  if (!picked || picked.at > at) return Promise.resolve(null);
+  if (picked && picked.at > at) {
+    if (picked.at - at > 36 * 60 * 60 * 1000) return Promise.resolve(null);
+  } else if (!picked) {
+    return Promise.resolve(null);
+  }
   var native = Number(picked.price);
   var from = String(series.currency || main).toUpperCase();
   var to = String(main).toUpperCase();
@@ -6687,15 +6727,20 @@ function updateNetWorthHistory(st, value, main) {
     signature: signature,
     historyStart: historyStart,
     onStatus: function (status) {
-      if (!status || (status.state !== 'error' && status.state !== 'incomplete')) return;
+      if (!status || (status.state !== 'loading' && status.state !== 'error' && status.state !== 'incomplete')) return;
       var message = String(status.message || 'Some historical prices are unavailable.');
       showBanner(
-        status.state === 'error'
-          ? 'Historical chart data could not be loaded.'
-          : 'Historical chart is incomplete — some values are missing.',
-        'error',
-        { title: 'Historical chart data', lines: [message] }
+        status.state === 'loading'
+          ? 'Loading historical chart prices — the graph may be incomplete.'
+          : (status.state === 'error'
+            ? 'Historical chart data could not be loaded.'
+            : 'Historical chart is incomplete — some values are missing.'),
+        status.state === 'loading' ? 'info' : 'error',
+        status.state === 'loading' ? null : { title: 'Historical chart data', lines: [message] }
       );
+    },
+    prepareRetry: function () {
+      netWorthHistoryFetchBudget = { signature: signature, remaining: 160 };
     },
     loadHistory: function (range) { return buildNetWorthHistory(st, main, range); }
   });

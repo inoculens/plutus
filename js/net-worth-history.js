@@ -23,6 +23,7 @@
   var storeLoaded = false;
   var rangeDrag = null;
   var rangeRequestTimer = null;
+  var historyRetryTimer = null;
   var requestSequence = 0;
   var lastReportedStatus = '';
 
@@ -218,6 +219,26 @@
       requestHistory();
     });
 
+    var retryButton = byId('history-retry');
+    if (retryButton) retryButton.addEventListener('click', function () {
+      if (!active) return;
+      if (historyRetryTimer !== null) root.clearTimeout(historyRetryTimer);
+      historyRetryTimer = null;
+      active.loadedKey = '';
+      active.loadingKey = '';
+      active.loadError = '';
+      active.loadMessage = '';
+      active.retryCounts = active.retryCounts || {};
+      var range = currentRange();
+      var key = [active.sourceSignature, active.period,
+        Math.floor(range.start / (active.period === 'CUSTOM' ? 1 : 300000)),
+        Math.floor(range.end / (active.period === 'CUSTOM' ? 1 : 300000))].join('|');
+      delete active.retryCounts[key];
+      if (typeof active.prepareRetry === 'function') active.prepareRetry();
+      draw();
+      requestHistory();
+    });
+
     var startRange = byId('history-range-start');
     var endRange = byId('history-range-end');
     var rangeTrack = byId('history-navigator-wrap');
@@ -384,6 +405,7 @@
     data.loading = true;
     data.loadError = '';
     data.loadMessage = '';
+    reportStatus(data, 'loading', key, 'Loading historical market prices for the selected interval.');
     draw();
     Promise.resolve().then(function () {
       return data.loadHistory({
@@ -412,7 +434,12 @@
       data.loadedKey = key;
       data.loadingKey = '';
       data.loading = false;
-      if (data.incomplete) reportStatus(data, 'incomplete', key, data.loadMessage);
+      if (data.incomplete) {
+        reportStatus(data, 'incomplete', key, data.loadMessage);
+        scheduleHistoryRetry(data, key);
+      } else if (data.retryCounts) {
+        delete data.retryCounts[key];
+      }
       saveStore();
       draw();
     }).catch(function (error) {
@@ -423,6 +450,7 @@
       data.loadError = String(error && error.message ? error.message : error);
       data.loadedKey = key;
       reportStatus(data, 'error', key, data.loadError);
+      scheduleHistoryRetry(data, key);
       draw();
     });
   }
@@ -432,6 +460,20 @@
     if (statusKey === lastReportedStatus || typeof data.onStatus !== 'function') return;
     lastReportedStatus = statusKey;
     data.onStatus({ state: state, message: message, key: key });
+  }
+
+  function scheduleHistoryRetry(data, key) {
+    data.retryCounts = data.retryCounts || {};
+    var attempt = Number(data.retryCounts[key]) || 0;
+    if (attempt >= 2) return;
+    data.retryCounts[key] = attempt + 1;
+    if (historyRetryTimer !== null) root.clearTimeout(historyRetryTimer);
+    historyRetryTimer = root.setTimeout(function () {
+      historyRetryTimer = null;
+      if (active !== data || data.loadedKey !== key || data.loading) return;
+      data.loadedKey = '';
+      requestHistory();
+    }, attempt === 0 ? 15000 : 60000);
   }
 
   function syncRangeInputs(range) {
@@ -675,6 +717,7 @@
     var note = byId('history-note');
     var badge = byId('history-local-badge');
     var loadStatus = byId('history-load-status');
+    var retryButton = byId('history-retry');
     var panel = byId('networth-history');
     if (panel) panel.setAttribute('aria-busy', active.loading ? 'true' : 'false');
     if (loadStatus) {
@@ -683,6 +726,7 @@
         ? 'Loading historical prices. The chart may be incomplete until this finishes.'
         : '';
     }
+    if (retryButton) retryButton.hidden = !(active.loadError || active.incomplete);
     if (badge) badge.textContent = storageMessage ? 'Storage issue' : 'Saved locally';
     if (note) {
       if (storageMessage) note.textContent = storageMessage;
@@ -831,6 +875,7 @@
     active.sourceSignature = nextSignature;
     active.loadHistory = options.loadHistory;
     active.onStatus = options.onStatus;
+    active.prepareRetry = options.prepareRetry;
     active.scopeKey = String(options.scope || 'default');
     active.updating = !!active.updating;
     active.incomplete = !!active.incomplete;

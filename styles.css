@@ -3591,6 +3591,8 @@ label.sync-check input {
 .history-custom label { display: grid; gap: 0.2rem; color: var(--muted); font-size: 0.65rem; }
 .history-custom input { min-height: 1.8rem; padding: 0.2rem 0.35rem; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color-scheme: dark; }
 .history-note { min-height: 1em; margin: 0.5rem 0 0; color: var(--muted); font-size: 0.68rem; }
+.history-retry { margin-top: 0.5rem; padding: 0.35rem 0.55rem; color: var(--text); border-color: var(--border-strong); }
+.history-retry[hidden] { display: none; }
 @media (max-width: 560px) {
   .history-panel { padding: 0.9rem 0.75rem 0.7rem; }
   .history-plot { min-height: 8.5rem; }

@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=435">
+  <link rel="stylesheet" href="/styles.css?v=436">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -270,7 +270,8 @@
           <p id="history-empty" class="history-empty" aria-live="polite"></p>
         </div>
         <div id="history-navigator-wrap" class="history-navigator-wrap" aria-label="Adjust the chart date range">
-          <svg id="history-navigator" class="history-navigator" viewBox="0 0 900 72" aria-hidden="true"></svg>
+          <svg id="history-navigator" class="history-navigator" viewBox="0 0 900 72"
+            preserveAspectRatio="none" aria-hidden="true"></svg>
           <div id="history-range-track" class="history-range-track" role="group" aria-label="Adjust visible chart period">
             <button id="history-range-start" class="history-range-thumb history-range-start" type="button"
               role="slider" aria-label="Start of visible chart period" aria-valuemin="0" aria-valuemax="1000"
@@ -297,6 +298,7 @@
             <label>To <input id="history-date-to" type="date"></label>
           </fieldset>
         </div>
+        <button id="history-retry" class="history-retry quiet" type="button" hidden>Retry historical prices</button>
         <p id="history-note" class="history-note">Values are saved on this device.</p>
       </section>
       <section id="overview" aria-label="Summary">
@@ -427,7 +429,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=14" defer></script>
-  <script src="/app.js?v=419" defer></script>
+  <script src="/js/net-worth-history.js?v=15" defer></script>
+  <script src="/app.js?v=420" defer></script>
 </body>
 </html>

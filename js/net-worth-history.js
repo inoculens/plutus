@@ -832,7 +832,7 @@
     var min = Math.min.apply(Math, vals);
     var max = Math.max.apply(Math, vals);
     var padding = Math.max((max - min) * 0.12, Math.max(Math.abs(min), Math.abs(max), 1) * 0.004);
-    min -= padding;
+    min = min >= 0 ? Math.max(0, min - padding) : min - padding;
     max += padding;
     if (max === min) max = min + 1;
     var start = validPoints[0].at;

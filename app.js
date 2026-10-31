@@ -4523,6 +4523,7 @@ function refreshAllPrices(symbols, vs, kinds) {
 var HISTCACHE_KEY = 'inoculens.histcache.v1';
 var HISTCACHE_MAX = 1000;
 var histPriceCache = null; // key "SYM|DATE|VS|kind" -> {price, source, interpolated, at}; lazy-loaded
+var priceDataCacheRevision = 0;
 
 function histCacheKey(symbol, date, vs, kind) {
   return String(symbol).toUpperCase() + '|' + String(date).slice(0, 10) + '|' +
@@ -4543,17 +4544,20 @@ function loadHistCache(reload) {
 }
 
 function saveHistCache() {
+  priceDataCacheRevision++;
   try {
-    if (typeof localStorage === 'undefined') return;
-    var keys = Object.keys(histPriceCache || {});
-    var store = histPriceCache;
-    if (keys.length > HISTCACHE_MAX) {
-      store = {};
-      keys.slice(keys.length - 800).forEach(function (k) { store[k] = histPriceCache[k]; });
-      histPriceCache = store;
+    if (typeof localStorage !== 'undefined') {
+      var keys = Object.keys(histPriceCache || {});
+      var store = histPriceCache;
+      if (keys.length > HISTCACHE_MAX) {
+        store = {};
+        keys.slice(keys.length - 800).forEach(function (k) { store[k] = histPriceCache[k]; });
+        histPriceCache = store;
+      }
+      localStorage.setItem(HISTCACHE_KEY, JSON.stringify(store));
     }
-    localStorage.setItem(HISTCACHE_KEY, JSON.stringify(store));
   } catch (e) { /* private mode / quota: memory cache still works */ }
+  try { priceDataScheduleUpload(); } catch (e2) { /* cache persistence must not break quote lookup */ }
 }
 
 // Keys that failed recently (network/429/dead source): later passes skip
@@ -6258,7 +6262,10 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
   var endDay = new Date(end).toISOString().slice(0, 10);
   var cacheKey = [sym, kind, currency, Math.floor(queryStart / 300), Math.floor(queryEnd / 300)].join('|');
   var cached = netWorthHistorySeriesCache[cacheKey];
-  if (cached && Date.now() - cached.at < 5 * 60 * 1000) return Promise.resolve(cached.series);
+  if (cached && (Date.now() - cached.at < 5 * 60 * 1000 ||
+      (cached.shared && Date.now() - cached.at < PRICE_DATA_SERIES_TTL))) {
+    return Promise.resolve(cached.series);
+  }
 
   function report(provider, completed, total, chunk, phase, error, attempt) {
     if (typeof onProgress !== 'function') return;
@@ -6551,7 +6558,11 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
   return request.then(function (series) {
     series.points.sort(function (a, b) { return a.at - b.at; });
     series.kind = kind;
-    if (!series.error) netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
+    if (!series.error) {
+      netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
+      priceDataCacheRevision++;
+      try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break rendering */ }
+    }
     return series;
   }, function (error) {
     var series = {
@@ -16085,6 +16096,52 @@ function buildSettings() {
     '<p class="muted set-blurb" id="sy-fp">Key fingerprint: —</p>' +
     '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically on every change</label>' +
     '<p class="muted set-blurb">Open devices check the drive every few seconds and pull newer changes on their own — no reload needed.</p>' +
+    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Save Price Data next to the Records Data file</label>' +
+    '<p class="muted set-blurb">Price Data includes trade-date quotes and chart series. It is a rebuildable encrypted cache and never participates in account or trade reconciliation.</p>' +
+    '<div id="pd-independent" hidden>' +
+    '<label for="pd-provider">Price Data provider</label>' +
+    '<select id="pd-provider">' +
+    '<option value="webdav">WebDAV / Nextcloud</option>' +
+    '<option value="gdrive">Google Drive</option>' +
+    '<option value="dropbox">Dropbox</option>' +
+    '<option value="megas3">MEGA (S4 object storage)</option>' +
+    '</select>' +
+    '<label for="pd-filename">Price Data file name</label>' +
+    '<input id="pd-filename" autocomplete="off" spellcheck="false" placeholder="price-data.plutus.inoculens.com">' +
+    '<label for="pd-folder">Folder (optional)</label>' +
+    '<input id="pd-folder" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Prices">' +
+    '<div id="pd-g-webdav" hidden>' +
+    '<label for="pd-url">WebDAV server URL</label>' +
+    '<input id="pd-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
+    '<label for="pd-user">Username</label>' +
+    '<input id="pd-user" autocomplete="username" spellcheck="false">' +
+    '<label for="pd-passwd">App password</label>' +
+    '<input id="pd-passwd" type="password" autocomplete="current-password">' +
+    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-data password in this browser</label>' +
+    '</div>' +
+    '<div id="pd-g-oauth" hidden>' +
+    '<p class="muted set-blurb">Google Drive and Dropbox use the existing OAuth sign-in infrastructure. The price-data file is encrypted with the Sync passphrase above.</p>' +
+    '</div>' +
+    '<div id="pd-g-megas3" hidden>' +
+    '<label for="pd-endpoint">MEGA S4 endpoint</label>' +
+    '<input id="pd-endpoint" autocomplete="off" spellcheck="false" placeholder="https://s3.eu-amsterdam.megas4.com">' +
+    '<label for="pd-region">Region</label>' +
+    '<input id="pd-region" autocomplete="off" spellcheck="false">' +
+    '<label for="pd-bucket">Bucket</label>' +
+    '<input id="pd-bucket" autocomplete="off" spellcheck="false">' +
+    '<label for="pd-key">Access key</label>' +
+    '<input id="pd-key" autocomplete="off" spellcheck="false">' +
+    '<label for="pd-skey">Secret key</label>' +
+    '<input id="pd-skey" type="password" autocomplete="off">' +
+    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-data secret key in this browser</label>' +
+    '</div>' +
+    '<p class="muted set-blurb">When using a separate destination, credentials are stored separately from the Records Data sync profile. The file is named exactly as entered.</p>' +
+    '<div class="sync-btns">' +
+    '<button id="pd-connect" type="button">Connect Price Data destination</button>' +
+    '<button id="pd-sync" type="button">Sync Price Data now</button>' +
+    '</div>' +
+    '</div>' +
+    '<p class="muted set-blurb" id="pd-status">Price Data is stored next to the Records Data file.</p>' +
     '<p class="muted set-blurb" id="sy-status">Not connected.</p>' +
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
@@ -17052,6 +17109,13 @@ var SYNC_APP = 'plutus.inoculens.com';
 var SYNC_APP_LEGACY = 'inoculens-plutus-sync';
 var SYNC_VERSION = 1;
 var SYNC_STORAGE_KEY = 'inoculens.sync.v1';
+var PRICE_DATA_STORAGE_KEY = 'inoculens.price-data-sync.v1';
+var PRICE_DATA_APP = 'plutus.price-data.inoculens.com';
+var PRICE_DATA_FILENAME = 'price-data.plutus.inoculens.com';
+var PRICE_DATA_SERIES_MAX = 24;
+var PRICE_DATA_SERIES_POINTS_MAX = 25000;
+var PRICE_DATA_SERIES_SINGLE_MAX = 5000;
+var PRICE_DATA_SERIES_TTL = 24 * 60 * 60 * 1000;
 var SYNC_OAUTH_KEY = 'inoculens.oauth.v1';
 var SYNC_DEFAULT_BASENAME = 'plutus.inoculens.com';
 var SYNC_DEFAULT_FILENAME = 'plutus.inoculens.com.enc.json';
@@ -17499,14 +17563,66 @@ function syncSaveConfig(cfg) {
   }
 }
 
+function priceDataSanitizeFilename(value) {
+  var name = String(value == null ? '' : value).trim();
+  name = name.replace(/^[/\\.\s]+/, '').replace(/[\/\\'"]/g, '');
+  name = name.replace(/[^\x20-\xFF]/g, '_').replace(/[. ]+$/, '').slice(0, 100);
+  return name || PRICE_DATA_FILENAME;
+}
+
+function priceDataDefaultConfig() {
+  var cfg = syncDefaultConfig();
+  cfg.sameAsRecords = true;
+  cfg.filename = PRICE_DATA_FILENAME;
+  cfg.objectKey = PRICE_DATA_FILENAME;
+  return cfg;
+}
+
+function priceDataSanitizeConfig(raw) {
+  var c = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  var out = syncSanitizeConfig(c);
+  out.sameAsRecords = (c.sameAsRecords !== false);
+  out.filename = priceDataSanitizeFilename(c.filename);
+  out.objectKey = out.filename;
+  out.lastLocation = null;
+  out.lastIdentity = null;
+  out.locV = null;
+  out.lastSyncedHash = null;
+  out.lastSyncAt = null;
+  out.lastRemoteAt = null;
+  return out;
+}
+
+function priceDataLoadConfig() {
+  try {
+    if (typeof localStorage === 'undefined') return priceDataDefaultConfig();
+    var raw = localStorage.getItem(PRICE_DATA_STORAGE_KEY);
+    return priceDataSanitizeConfig(raw ? JSON.parse(raw) : null);
+  } catch (e) {
+    return priceDataDefaultConfig();
+  }
+}
+
+function priceDataSaveConfig(cfg) {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    localStorage.setItem(PRICE_DATA_STORAGE_KEY, JSON.stringify(priceDataSanitizeConfig(cfg)));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Secrets the user chose NOT to remember live only in memory, never in storage.
 function syncPassword(cfg) {
   if (cfg.password) return cfg.password;
+  if (cfg.priceDataAuth) return syncMemSecrets.pricePassword || '';
   return syncMemSecrets.password || '';
 }
 
 function syncSecret(cfg) {
   if (cfg.secretKey) return cfg.secretKey;
+  if (cfg.priceDataAuth) return syncMemSecrets.priceSecretKey || '';
   return syncMemSecrets.secretKey || '';
 }
 
@@ -17813,7 +17929,8 @@ function syncEnsureAccessToken(cfg) {
   }
   return syncOAuthRefresh(cfg.provider, cfg).then(function (n) {
     cfg.tokens = n;
-    syncSaveConfig(cfg);
+    if (cfg.priceDataAuth) priceDataSaveConfig(cfg);
+    else syncSaveConfig(cfg);
     return n.access;
   });
 }
@@ -18499,6 +18616,384 @@ function syncRemoteEnsureFolder(cfg) {
     if (cfg.provider === 'dropbox') return true;
     return Promise.reject(new Error('sync failed: unknown provider.'));
   });
+}
+
+function priceDataCloneConfig(source) {
+  var out = {};
+  Object.keys(source || {}).forEach(function (key) { out[key] = source[key]; });
+  return out;
+}
+
+function priceDataDestination(syncCfg) {
+  var saved = priceDataLoadConfig();
+  var cfg = saved.sameAsRecords
+    ? priceDataCloneConfig(syncCfg || syncLoadConfig())
+    : priceDataCloneConfig(saved);
+  cfg.filename = PRICE_DATA_FILENAME;
+  cfg.objectKey = PRICE_DATA_FILENAME;
+  cfg.priceDataAuth = !saved.sameAsRecords;
+  if (!saved.sameAsRecords) {
+    cfg.filename = saved.filename;
+    cfg.objectKey = saved.objectKey;
+    if (cfg.provider === 'webdav' && cfg.folder) {
+      cfg.url = String(cfg.url || '').replace(/\/+$/, '') + '/' +
+        cfg.folder.split('/').map(function (part) { return encodeURIComponent(part); }).join('/');
+    }
+  }
+  return cfg;
+}
+
+function priceDataValidKey(key) {
+  var parts = String(key || '').split('|');
+  return parts.length === 4 &&
+    /^[A-Z0-9._-]{1,48}$/.test(parts[0]) &&
+    isValidDateStr(parts[1]) &&
+    /^[A-Z0-9_-]{2,12}$/.test(parts[2]) &&
+    /^(crypto|stock|commodity)$/.test(parts[3]);
+}
+
+function priceDataNormalizeRecords(input, strict) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    if (strict) throw new Error('price data file is invalid: records must be an object.');
+    return {};
+  }
+  var inputKeys = Object.keys(input);
+  if (strict && inputKeys.length > HISTCACHE_MAX) {
+    throw new Error('price data file is invalid: it contains too many records.');
+  }
+  var out = {};
+  inputKeys.forEach(function (key) {
+    var item = input[key];
+    var price = item && Number(item.price);
+    if (!priceDataValidKey(key) || !item || typeof item !== 'object' ||
+        !isFinite(price) || price <= 0) {
+      if (strict) throw new Error('price data file is invalid: a price record is malformed.');
+      return;
+    }
+    out[key] = {
+      price: price,
+      source: String(item.source || '').slice(0, 120),
+      interpolated: !!item.interpolated,
+      at: (isFinite(Number(item.at)) && Number(item.at) > 0) ? Number(item.at) : 0
+    };
+  });
+  return out;
+}
+
+function priceDataValidSeriesKey(key) {
+  var parts = String(key || '').split('|');
+  return parts.length === 5 &&
+    /^[A-Z0-9._-]{1,48}$/.test(parts[0]) &&
+    /^(crypto|stock|commodity)$/.test(parts[1]) &&
+    /^[A-Z0-9_-]{2,12}$/.test(parts[2]) &&
+    /^-?\d{1,12}$/.test(parts[3]) &&
+    /^-?\d{1,12}$/.test(parts[4]) &&
+    Number(parts[3]) < Number(parts[4]);
+}
+
+function priceDataNormalizeSeries(input, strict) {
+  if (input == null) return {};
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    if (strict) throw new Error('price data file is invalid: chart series must be an object.');
+    return {};
+  }
+  var keys = Object.keys(input);
+  if (strict && keys.length > PRICE_DATA_SERIES_MAX) {
+    throw new Error('price data file is invalid: it contains too many chart series.');
+  }
+  var out = {};
+  keys.forEach(function (key) {
+    var entry = input[key];
+    var series = entry && entry.series;
+    var keyParts = key.split('|');
+    var points = [];
+    var valid = priceDataValidSeriesKey(key) && entry && typeof entry === 'object' &&
+      isFinite(Number(entry.at)) && Number(entry.at) > 0 &&
+      series && typeof series === 'object' && !Array.isArray(series) &&
+      series.kind === keyParts[1] && Array.isArray(series.points) &&
+      series.points.length > 0 && series.points.length <= PRICE_DATA_SERIES_SINGLE_MAX &&
+      (series.currency == null || /^[A-Z0-9_-]{2,12}$/i.test(String(series.currency)));
+    if (valid) {
+      for (var i = 0; i < series.points.length; i++) {
+        var point = series.points[i];
+        var at = point && Number(point.at);
+        var price = point && Number(point.price);
+        if (!point || !isFinite(at) || !isFinite(price) || price <= 0) {
+          valid = false;
+          break;
+        }
+        var normalizedPoint = { at: at, price: price };
+        if (typeof point.currency === 'string' && /^[A-Z0-9_-]{2,12}$/i.test(point.currency)) {
+          normalizedPoint.currency = point.currency.toUpperCase();
+        }
+        points.push(normalizedPoint);
+      }
+    }
+    if (!valid) {
+      if (strict) throw new Error('price data file is invalid: a chart series is malformed.');
+      return;
+    }
+    points.sort(function (a, b) { return a.at - b.at; });
+    out[key] = {
+      at: Number(entry.at),
+      series: {
+        currency: String(series.currency || keyParts[2]).toUpperCase(),
+        kind: keyParts[1],
+        points: points
+      }
+    };
+  });
+  if (strict) {
+    var totalPoints = 0;
+    Object.keys(out).forEach(function (key) { totalPoints += out[key].series.points.length; });
+    if (totalPoints > PRICE_DATA_SERIES_POINTS_MAX) {
+      throw new Error('price data file is invalid: it contains too many chart prices.');
+    }
+  }
+  return out;
+}
+
+function priceDataMergeSeries(first, second) {
+  var merged = priceDataNormalizeSeries(first, false);
+  var incoming = priceDataNormalizeSeries(second, false);
+  Object.keys(incoming).forEach(function (key) {
+    var old = merged[key];
+    var next = incoming[key];
+    if (!old) {
+      merged[key] = next;
+      return;
+    }
+    var byTime = {};
+    old.series.points.forEach(function (point) { byTime[String(point.at)] = point; });
+    next.series.points.forEach(function (point) {
+      var prior = byTime[String(point.at)];
+      if (!prior || Number(next.at) >= Number(old.at)) byTime[String(point.at)] = point;
+    });
+    var points = Object.keys(byTime).map(function (at) { return byTime[at]; })
+      .sort(function (a, b) { return a.at - b.at; });
+    merged[key] = {
+      at: Math.max(Number(old.at) || 0, Number(next.at) || 0),
+      series: {
+        currency: next.series.currency || old.series.currency,
+        kind: next.series.kind,
+        points: points.slice(-PRICE_DATA_SERIES_SINGLE_MAX)
+      }
+    };
+  });
+  var keys = Object.keys(merged);
+  keys.sort(function (a, b) { return Number(merged[a].at || 0) - Number(merged[b].at || 0); });
+  var totalPoints = keys.reduce(function (sum, key) { return sum + merged[key].series.points.length; }, 0);
+  while (keys.length > PRICE_DATA_SERIES_MAX || totalPoints > PRICE_DATA_SERIES_POINTS_MAX) {
+    var removed = keys.shift();
+    totalPoints -= merged[removed].series.points.length;
+    delete merged[removed];
+  }
+  return merged;
+}
+
+function priceDataParsePayload(plaintext) {
+  var data;
+  try { data = JSON.parse(plaintext); }
+  catch (e) { throw new Error('price data file is invalid JSON.'); }
+  if (!data || data.app !== PRICE_DATA_APP || data.version !== 1) {
+    throw new Error('price data file is not a supported INOCULENS PLUTUS price cache.');
+  }
+  return {
+    records: priceDataNormalizeRecords(data.records, true),
+    series: priceDataNormalizeSeries(data.series, true)
+  };
+}
+
+function priceDataFingerprint(payload) {
+  var records = {};
+  var series = {};
+  Object.keys(payload.records || {}).sort().forEach(function (key) {
+    var item = payload.records[key];
+    records[key] = {
+      price: item.price,
+      source: item.source,
+      interpolated: item.interpolated,
+      at: item.at
+    };
+  });
+  Object.keys(payload.series || {}).sort().forEach(function (key) {
+    var item = payload.series[key];
+    series[key] = {
+      at: item.at,
+      series: {
+        currency: item.series.currency,
+        kind: item.series.kind,
+        points: item.series.points
+      }
+    };
+  });
+  return JSON.stringify({ records: records, series: series });
+}
+
+function priceDataMergeRecords(first, second) {
+  var merged = priceDataNormalizeRecords(first, false);
+  var incoming = priceDataNormalizeRecords(second, false);
+  Object.keys(incoming).forEach(function (key) {
+    var old = merged[key];
+    var next = incoming[key];
+    if (!old || Number(next.at || 0) >= Number(old.at || 0)) merged[key] = next;
+  });
+  var keys = Object.keys(merged);
+  if (keys.length > HISTCACHE_MAX) {
+    keys.sort(function (a, b) { return Number(merged[a].at || 0) - Number(merged[b].at || 0); });
+    keys.slice(0, keys.length - HISTCACHE_MAX).forEach(function (key) { delete merged[key]; });
+  }
+  return merged;
+}
+
+function priceDataReadRemote(cfg, passphrase) {
+  return syncRemoteDownload(cfg).then(function (text) {
+    return syncDecryptEnvelope(text, passphrase).then(function (plain) {
+      var payload = priceDataParsePayload(plain);
+      payload.exists = true;
+      return payload;
+    });
+  }, function (err) {
+    if (err && err.message && err.message.indexOf('no backup found') !== -1) {
+      return { exists: false, records: {}, series: {} };
+    }
+    throw err;
+  });
+}
+
+var priceDataSyncBusy = false;
+var priceDataSyncTimer = null;
+var priceDataFailureShown = {};
+
+function priceDataReportFailure(err, automatic) {
+  var message = String((err && err.message) || err);
+  var status = (typeof document !== 'undefined') ? document.getElementById('pd-status') : null;
+  if (status) status.textContent = 'Price Data sync failed — ' + message;
+  if (!priceDataFailureShown[message]) {
+    priceDataFailureShown[message] = true;
+    showBanner('Shared Price Data could not sync.', 'error', {
+      title: 'Price Data sync',
+      lines: [message, automatic ? 'It will retry after another history update or sync.' : 'Your account and trade data were not changed.']
+    });
+  }
+}
+
+function priceDataSyncFlow(opts) {
+  opts = opts || {};
+  if (priceDataSyncBusy) return Promise.resolve('busy');
+  var rd;
+  try { rd = syncReadForm(); }
+  catch (e) { return Promise.reject(e); }
+  var passphrase = rd.passphrase;
+  var cfg = priceDataDestination(rd.cfg);
+  if (!passphrase) {
+    var missingPass = new Error('Enter the Sync passphrase to access encrypted Price Data.');
+    if (opts.automatic) {
+      var missingStatus = (typeof document !== 'undefined') ? document.getElementById('pd-status') : null;
+      if (missingStatus) missingStatus.textContent = 'Price Data needs the Sync passphrase before it can load.';
+      return Promise.resolve('skipped');
+    }
+    priceDataReportFailure(missingPass, false);
+    return Promise.reject(missingPass);
+  }
+  if (!syncIsConnected(cfg)) {
+    if (opts.automatic) return Promise.resolve('skipped');
+    var notConnected = new Error('Connect the selected Price Data provider first.');
+    priceDataReportFailure(notConnected, false);
+    return Promise.reject(notConnected);
+  }
+  priceDataSyncBusy = true;
+  var status = (typeof document !== 'undefined') ? document.getElementById('pd-status') : null;
+  if (status) status.textContent = 'Loading shared Price Data…';
+  function localPayload() {
+    return {
+      records: priceDataNormalizeRecords(loadHistCache(), false),
+      series: priceDataNormalizeSeries(netWorthHistorySeriesCache, false)
+    };
+  }
+  function applyPayload(payload) {
+    var cache = loadHistCache();
+    Object.keys(cache).forEach(function (key) { delete cache[key]; });
+    Object.keys(payload.records).forEach(function (key) { cache[key] = payload.records[key]; });
+    saveHistCache();
+    Object.keys(netWorthHistorySeriesCache).forEach(function (key) { delete netWorthHistorySeriesCache[key]; });
+    Object.keys(payload.series).forEach(function (key) {
+      netWorthHistorySeriesCache[key] = {
+        at: payload.series[key].at,
+        series: payload.series[key].series,
+        shared: true
+      };
+    });
+  }
+  var local = localPayload();
+  var uploadRevision = priceDataCacheRevision;
+  return priceDataReadRemote(cfg, passphrase).then(function (remote) {
+    var merged = {
+      records: priceDataMergeRecords(remote.records, local.records),
+      series: priceDataMergeSeries(remote.series, local.series)
+    };
+    applyPayload(merged);
+    return priceDataReadRemote(cfg, passphrase).then(function (latest) {
+      var freshLocal = localPayload();
+      merged = {
+        records: priceDataMergeRecords(merged.records, freshLocal.records),
+        series: priceDataMergeSeries(merged.series, freshLocal.series)
+      };
+      merged.records = priceDataMergeRecords(merged.records, latest.records);
+      merged.series = priceDataMergeSeries(merged.series, latest.series);
+      applyPayload(merged);
+      uploadRevision = priceDataCacheRevision;
+      if (latest.exists && priceDataFingerprint(merged) === priceDataFingerprint(latest)) {
+        return merged;
+      }
+      var plaintext = JSON.stringify({
+        app: PRICE_DATA_APP,
+        version: 1,
+        records: merged.records,
+        series: merged.series
+      });
+      return syncEncryptEnvelope(plaintext, passphrase).then(function (encrypted) {
+        if (status) status.textContent = 'Saving shared Price Data…';
+        return syncRemoteEnsureFolder(cfg).then(function () {
+          return syncRemoteUpload(cfg, encrypted);
+        });
+      }).then(function () { return merged; });
+    });
+  }).then(function (merged) {
+    priceDataFailureShown = {};
+    priceDataSyncBusy = false;
+    var priceCount = Object.keys(merged.records).length;
+    var seriesCount = Object.keys(merged.series).length;
+    if (status) status.textContent = 'Price Data synced (' + priceCount + ' historical prices, ' + seriesCount + ' chart series).';
+    if (priceDataCacheRevision !== uploadRevision) priceDataScheduleUpload();
+    try { render(); } catch (e) { /* repaint must not affect a completed cache sync */ }
+    return 'synced';
+  }, function (err) {
+    priceDataSyncBusy = false;
+    priceDataReportFailure(err, !!opts.automatic);
+    if (opts.automatic) return 'failed';
+    throw err;
+  });
+}
+
+function priceDataCanSync() {
+  try {
+    var rd = syncReadForm();
+    return !!(rd.passphrase && syncIsConnected(priceDataDestination(rd.cfg)));
+  } catch (e) {
+    return false;
+  }
+}
+
+function priceDataScheduleUpload() {
+  if (priceDataSyncBusy || !priceDataCanSync()) return;
+  if (priceDataSyncTimer) {
+    try { clearTimeout(priceDataSyncTimer); } catch (e) { /* ignore */ }
+  }
+  priceDataSyncTimer = setTimeout(function () {
+    priceDataSyncTimer = null;
+    priceDataSyncFlow({ automatic: true });
+  }, 12000);
 }
 
 // --- Record-attachment blobs (invoices / receipts) ---
@@ -19284,6 +19779,9 @@ function syncPushFlow(opts) {  if (syncBusy) return;
       // connection state but keep the specific status line that was set.
       syncRefreshSyncPanel({ keepStatus: true });
       try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
+      if (outcome === 'adopted' || outcome === 'pulled' || outcome === 'verified') {
+        priceDataSyncFlow({ automatic: auto });
+      }
       return;
     }
     var now = new Date().toISOString();
@@ -19299,6 +19797,7 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     try { syncRefreshHeaderIcon(); } catch (e) { /* ignore */ }
     clearBanner();
     syncSetStatus('Synced ' + fmtDateTimeDmy(now) + '.');
+    priceDataSyncFlow({ automatic: auto });
     // Attachments ride along: upload this device's blobs (skip-if-exists)
     // after the state lands. Best-effort — state is already synced, blobs
     // retry on the next push, so this never fails the sync itself.
@@ -19417,6 +19916,7 @@ function syncPullFlow() {
       clearBanner();
       syncSetStatus('Restored from ' + syncProviderLabel(cfg.provider) + '.');
       refreshPrices();
+      priceDataSyncFlow({ automatic: false });
       closeDialog('settings-dialog');
       return 'pulled';
     });
@@ -19554,7 +20054,6 @@ function syncCheckOnLoad() {
     } catch (e) {
       return;
     }
-    if (!syncIsConnected(cfg)) return;
     var pass = '';
     try {
       pass = syncReadForm().passphrase;
@@ -19562,9 +20061,16 @@ function syncCheckOnLoad() {
       pass = '';
     }
     if (!pass || !syncCryptoAvailable()) return;
-    syncCheckRemoteNow().then(function (outcome) {
-      if (outcome === 'pulled') syncAnnouncePull();
-    }, function () { /* silent: manual sync still reports */ });
+    var check = Promise.resolve('skipped');
+    if (syncIsConnected(cfg)) {
+      check = syncCheckRemoteNow().then(function (outcome) {
+        if (outcome === 'pulled') syncAnnouncePull();
+        return outcome;
+      }, function () { return 'unreachable'; });
+    }
+    check.then(function () {
+      if (syncIsConnected(priceDataDestination(cfg))) priceDataSyncFlow({ automatic: true });
+    });
   } catch (e) { /* never break boot */ }
 }
 
@@ -20063,6 +20569,212 @@ function syncRefreshSyncPanel(opts) {
     fp.textContent = 'Key fingerprint: —';
   }
   try { syncToggleEncButtons(); } catch (e) { /* ignore */ }
+  try { priceDataRefreshPanel(); } catch (e2) { /* separate cache settings must not break Records Data sync */ }
+}
+
+function priceDataSetVal(id, value) {
+  var el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+  if (el) el.value = value == null ? '' : value;
+}
+
+function priceDataReadForm() {
+  var cfg = priceDataLoadConfig();
+  function val(id, fallback) {
+    var el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+    return el ? el.value : fallback;
+  }
+  function checked(id, fallback) {
+    var el = (typeof document !== 'undefined') ? document.getElementById(id) : null;
+    return el ? !!el.checked : !!fallback;
+  }
+  cfg.sameAsRecords = checked('pd-same', cfg.sameAsRecords);
+  if (cfg.sameAsRecords) return priceDataSanitizeConfig(cfg);
+  var provider = val('pd-provider', cfg.provider);
+  if (syncIsProvider(provider)) cfg.provider = provider;
+  cfg.filename = priceDataSanitizeFilename(val('pd-filename', cfg.filename));
+  cfg.objectKey = cfg.filename;
+  cfg.folder = syncNormalizeFolder(val('pd-folder', cfg.folder));
+  if (cfg.provider === 'webdav') {
+    cfg.url = val('pd-url', cfg.url).trim().slice(0, 512);
+    cfg.username = val('pd-user', cfg.username).slice(0, 256);
+    var password = val('pd-passwd', '');
+    cfg.rememberPassword = checked('pd-remember', cfg.rememberPassword);
+    if (cfg.rememberPassword) {
+      if (password) cfg.password = password;
+    } else {
+      cfg.password = '';
+      if (password) syncMemSecrets.pricePassword = password;
+    }
+  } else if (cfg.provider === 'megas3') {
+    cfg.endpoint = val('pd-endpoint', cfg.endpoint).trim().replace(/\/+$/, '').slice(0, 256);
+    cfg.region = val('pd-region', cfg.region).trim().slice(0, 64);
+    cfg.bucket = val('pd-bucket', cfg.bucket).trim().slice(0, 128);
+    cfg.accessKey = val('pd-key', cfg.accessKey).trim().slice(0, 256);
+    var secret = val('pd-skey', '');
+    cfg.rememberSecret = checked('pd-remember2', cfg.rememberSecret);
+    if (cfg.rememberSecret) {
+      if (secret) cfg.secretKey = secret;
+    } else {
+      cfg.secretKey = '';
+      if (secret) syncMemSecrets.priceSecretKey = secret;
+    }
+  }
+  return priceDataSanitizeConfig(cfg);
+}
+
+function priceDataRefreshPanel() {
+  if (typeof document === 'undefined' || !document.getElementById('pd-same')) return;
+  var cfg = priceDataLoadConfig();
+  var same = document.getElementById('pd-same');
+  if (same) same.checked = !!cfg.sameAsRecords;
+  var independent = document.getElementById('pd-independent');
+  if (independent) independent.hidden = !!cfg.sameAsRecords;
+  priceDataSetVal('pd-provider', cfg.provider);
+  priceDataSetVal('pd-filename', cfg.filename);
+  priceDataSetVal('pd-folder', cfg.folder);
+  priceDataSetVal('pd-url', cfg.url);
+  priceDataSetVal('pd-user', cfg.username);
+  if (cfg.password) priceDataSetVal('pd-passwd', cfg.password);
+  priceDataSetVal('pd-endpoint', cfg.endpoint);
+  priceDataSetVal('pd-region', cfg.region);
+  priceDataSetVal('pd-bucket', cfg.bucket);
+  priceDataSetVal('pd-key', cfg.accessKey);
+  if (cfg.secretKey) priceDataSetVal('pd-skey', cfg.secretKey);
+  var rem = document.getElementById('pd-remember');
+  if (rem) rem.checked = !!cfg.rememberPassword;
+  var rem2 = document.getElementById('pd-remember2');
+  if (rem2) rem2.checked = !!cfg.rememberSecret;
+  var groups = { webdav: 'pd-g-webdav', gdrive: 'pd-g-oauth', dropbox: 'pd-g-oauth', megas3: 'pd-g-megas3' };
+  ['pd-g-webdav', 'pd-g-oauth', 'pd-g-megas3'].forEach(function (id) {
+    var group = document.getElementById(id);
+    if (group) group.hidden = !!cfg.sameAsRecords || groups[cfg.provider] !== id;
+  });
+  var status = document.getElementById('pd-status');
+  if (status && !priceDataSyncBusy) {
+    status.textContent = cfg.sameAsRecords
+      ? 'Price Data is stored next to the Records Data file.'
+      : 'Price Data destination: ' + syncProviderLabel(cfg.provider) + ' / ' + cfg.filename;
+  }
+}
+
+function priceDataSaveForm() {
+  var cfg = priceDataReadForm();
+  return priceDataSaveConfig(cfg);
+}
+
+function priceDataConnectOAuth(cfg) {
+  if (cfg.provider === 'gdrive') {
+    return syncGoogleOneClick(cfg).then(function (tokens) {
+      cfg.tokens = tokens;
+      priceDataSaveConfig(cfg);
+      return true;
+    });
+  }
+  if (cfg.provider !== 'dropbox') return Promise.reject(new Error('Choose a supported Price Data provider.'));
+  var clientId = syncSharedId('dropbox') || cfg.clientId;
+  var redirect = syncRedirectUri();
+  if (!clientId) return Promise.reject(new Error('Dropbox one-click sign-in is not configured.'));
+  if (!redirect) return Promise.reject(new Error('OAuth needs the hosted https:// page.'));
+  return syncPkcePair().then(function (pair) {
+    return new Promise(function (resolve, reject) {
+      var state = 'plutus-price-dropbox-' + syncB64UrlEncode(syncRandomBytes(12));
+      var url = syncOAuthAuthUrl('dropbox', clientId, redirect, pair.challenge, state);
+      var popup = null;
+      try { popup = window.open(url, 'plutus-price-oauth', 'width=540,height=680'); } catch (e) { popup = null; }
+      if (!popup) {
+        reject(new Error('Popup blocked — allow popups for this page, then try again.'));
+        return;
+      }
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        window.removeEventListener('message', onMessage);
+        reject(new Error('Dropbox sign-in was cancelled or timed out.'));
+      }, 180000);
+      function onMessage(event) {
+        var data = event && event.data;
+        if (!data || data.type !== 'plutus-oauth' || data.state !== state) return;
+        if (event.origin !== window.location.origin || done) return;
+        done = true;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        if (data.error || !data.code) {
+          reject(new Error(data.error || 'Dropbox sign-in returned no authorization code.'));
+          return;
+        }
+        syncOAuthTokenExchange('dropbox', cfg, data.code, pair.verifier).then(resolve, reject);
+      }
+      window.addEventListener('message', onMessage);
+    });
+  }).then(function (tokens) {
+    cfg.tokens = tokens;
+    priceDataSaveConfig(cfg);
+    return true;
+  });
+}
+
+function priceDataConnectFlow() {
+  var cfg = priceDataReadForm();
+  if (cfg.sameAsRecords) return priceDataSyncFlow({ manual: true });
+  cfg.priceDataAuth = true;
+  priceDataSaveConfig(cfg);
+  var status = document.getElementById('pd-status');
+  if (status) status.textContent = 'Connecting to ' + syncProviderLabel(cfg.provider) + '…';
+  var connected;
+  if (cfg.provider === 'gdrive' || cfg.provider === 'dropbox') {
+    connected = priceDataConnectOAuth(cfg);
+  } else {
+    connected = Promise.resolve(true);
+  }
+  return connected.then(function () {
+    return priceDataSyncFlow({ manual: true });
+  }).catch(function (err) {
+    priceDataReportFailure(err, false);
+    throw err;
+  });
+}
+
+function priceDataWireSettings() {
+  if (typeof document === 'undefined') return;
+  var checkbox = document.getElementById('pd-same');
+  if (checkbox && !checkbox.getAttribute('data-wired')) {
+    checkbox.setAttribute('data-wired', '1');
+    checkbox.addEventListener('change', function () {
+      priceDataSaveForm();
+      priceDataRefreshPanel();
+    });
+  }
+  var provider = document.getElementById('pd-provider');
+  if (provider && !provider.getAttribute('data-wired')) {
+    provider.setAttribute('data-wired', '1');
+    provider.addEventListener('change', function () {
+      priceDataSaveForm();
+      priceDataRefreshPanel();
+    });
+  }
+  ['pd-filename', 'pd-folder', 'pd-url', 'pd-user', 'pd-passwd', 'pd-endpoint', 'pd-region',
+    'pd-bucket', 'pd-key', 'pd-skey', 'pd-remember', 'pd-remember2'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el && !el.getAttribute('data-wired')) {
+      el.setAttribute('data-wired', '1');
+      el.addEventListener('change', priceDataSaveForm);
+    }
+  });
+  var connect = document.getElementById('pd-connect');
+  if (connect && !connect.getAttribute('data-wired')) {
+    connect.setAttribute('data-wired', '1');
+    connect.addEventListener('click', function () {
+      priceDataConnectFlow().catch(function () {});
+    });
+  }
+  var sync = document.getElementById('pd-sync');
+  if (sync && !sync.getAttribute('data-wired')) {
+    sync.setAttribute('data-wired', '1');
+    sync.addEventListener('click', function () {
+      priceDataSyncFlow({ manual: true }).catch(function () {});
+    });
+  }
 }
 
 function syncClearOAuthAttempt() {
@@ -20488,6 +21200,7 @@ function buildSyncSettings() {
       try { input.value = ''; } catch (e2) { /* ignore */ }
     });
   }
+  priceDataWireSettings();
   syncRefreshSyncPanel();
 }
 

@@ -84,7 +84,7 @@
     <p class="muted">INOCULENS PLUTUS — effective 13 October 2026.</p>
 
     <h2>The short version</h2>
-    <p>INOCULENS PLUTUS is a <strong>local-first</strong> business accounting and portfolio tracker. There is no INOCULENS PLUTUS account and no business or portfolio server: your business and portfolio live only in your browser's local storage. Market prices come from public price services. If you enable sync, an <strong>encrypted</strong> copy is stored on a cloud drive <strong>you</strong> choose — and only you hold the passphrase that can decrypt it. Optional anonymous analytics (Google Analytics 4) loads <strong>only if you press Accept</strong> on the cookie banner — Decline or ignoring it means no analytics request is ever made.</p>
+    <p>INOCULENS PLUTUS is a <strong>local-first</strong> business accounting and portfolio tracker. There is no INOCULENS PLUTUS account and no business or portfolio server: your business and portfolio live only in your browser's local storage. Market prices come from public price services. If you enable sync, your records and (by default) a separate, rebuildable historical price cache are stored as <strong>end-to-end encrypted</strong> files on cloud drives <strong>you</strong> choose — and only you hold the passphrase that can decrypt them. Optional anonymous analytics (Google Analytics 4) loads <strong>only if you press Accept</strong> on the cookie banner — Decline or ignoring it means no analytics request is ever made.</p>
 
     <h2>Who we are</h2>
     <p>Data controller: INOCULENS PLUTUS. Contact: <a href="mailto:create@inoculens.com">create@inoculens.com</a>.</p>
@@ -94,8 +94,8 @@
     <ul>
       <li><strong>Portfolio data</strong> — business accounts, ledgers, trades, settings and price overrides, kept in your browser's local storage so the app works offline and privately.</li>
       <li><strong>Cookie choice</strong> — your Accept / Decline decision for analytics, kept in the same browser storage so the banner does not nag you on every visit.</li>
-      <li><strong>Sync configuration</strong> — only if you use sync: which provider you chose, filenames, and sign-in tokens. Your sync <strong>passphrase stays in the form unless you explicitly tick “Remember passphrase in this browser”</strong>, in which case it is kept in the same browser storage — and it is never transmitted anywhere either way.</li>
-      <li><strong>Price cache</strong> — recent market prices and currency rates, to limit network requests.</li>
+      <li><strong>Sync configuration</strong> — only if you use sync: provider choices, file destinations, and sign-in tokens. Your sync <strong>passphrase stays in the form unless you explicitly tick “Remember passphrase in this browser”</strong>, in which case it is kept in the same browser storage — and it is never transmitted anywhere either way.</li>
+      <li><strong>Price cache</strong> — recent market prices and currency rates, stored locally to limit network requests. If sync is enabled, trade-date quotes and full chart price series are also merged into a separate encrypted cache file; the cache can be rebuilt and is not authoritative portfolio data.</li>
       <li><strong>Backup files</strong> — only where you choose to download or upload them.</li>
     </ul>
 
@@ -104,7 +104,7 @@
       <li><strong>Hosting (Netlify).</strong> This page and the app are static files. Like any web host, Netlify sees standard server logs (IP address, user agent, timestamps).</li>
       <li><strong>Price services.</strong> To show live values the app queries public market data: CoinGecko (coin + currency), Frankfurter/ECB rates (currency pair + date) and Stooq (stock symbol). These are market-data lookups only — your portfolio is never sent. These services see your IP address like any website you visit; their own privacy policies apply.</li>
       <li><strong>Fonts.</strong> The app loads its typefaces from Google Fonts.</li>
-      <li><strong>Sync destinations — only if you enable sync.</strong> Google Drive, Dropbox, MEGA object storage or your own WebDAV server receive a single file encrypted with AES-256-GCM. The provider <strong>cannot read it</strong>: decryption happens only in your browser with your passphrase, which is never transmitted. Google's sign-in helper script loads only at the moment you press Connect.</li>
+      <li><strong>Sync destinations — only if you enable sync.</strong> Google Drive, Dropbox, MEGA object storage or your own WebDAV server receive your encrypted Records Data file and, by default, a separate <code>price-data.plutus.inoculens.com</code> cache file alongside it. The price cache can use a separate provider and destination in Settings. Both files use AES-256-GCM; the provider <strong>cannot read them</strong>: decryption happens only in your browser with your passphrase, which is never transmitted. Google's sign-in helper script loads only at the moment you press Connect.</li>
       <li><strong>Sign-in providers.</strong> When you connect a drive, Google or Dropbox verify your identity for <em>your</em> drive. INOCULENS PLUTUS receives only access tokens, which stay in your browser.</li>
       <li><strong>Analytics — only if you press Accept (Google Analytics 4).</strong> Page views and approximate device data go to Google. Nothing loads when you Decline or ignore the banner. Details in the next section.</li>
     </ul>
@@ -125,7 +125,7 @@
     </ul>
 
     <h2>How sync encryption works</h2>
-    <p>Before anything leaves your browser, your portfolio is encrypted with AES-256-GCM, with the key derived from your passphrase via PBKDF2-SHA256 (600,000 rounds) and a fresh random salt and nonce on every upload. A wrong passphrase or a tampered file fails closed — nothing is decrypted, nothing is overwritten. There is no recovery: if you lose the passphrase, the encrypted copy cannot be opened by anyone, including us.</p>
+    <p>Before Records Data or historical Price Data (trade-date quotes and chart series) leaves your browser, it is encrypted with AES-256-GCM, with the key derived from your passphrase via PBKDF2-SHA256 (600,000 rounds) and a fresh random salt and nonce on every upload. A wrong passphrase or a tampered file fails closed — nothing is decrypted, nothing is overwritten. Price Data is a rebuildable cache and is merged independently, never treated as portfolio records. There is no recovery: if you lose the passphrase, the encrypted files cannot be opened by anyone, including us.</p>
 
     <h2>Your rights (including GDPR)</h2>
     <p>Legal bases: your consent for optional features such as analytics and sync, and our legitimate interest in serving a secure static site. Because we hold no portfolio data about you server-side:</p>

@@ -3535,9 +3535,11 @@ label.sync-check input {
 .history-single-point { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .history-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .history-marker { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.history-tooltip-slot { position: relative; height: 1.9rem; }
 .history-tooltip {
-  display: inline-block;
-  margin: 0.2rem 0 0 5.4rem;
+  position: absolute;
+  top: 0.2rem;
+  left: 5.4rem;
   max-width: calc(100% - 5.6rem);
   padding: 0.35rem 0.55rem;
   overflow: hidden;

@@ -3485,6 +3485,22 @@ label.sync-check input {
 .history-plot-wrap { position: relative; min-width: 0; margin-top: 0.55rem; }
 .history-plot { display: block; width: 100%; height: auto; min-height: 10rem; overflow: visible; touch-action: pan-y; outline: none; }
 .history-plot:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 8px; }
+.history-load-status {
+  position: absolute;
+  z-index: 2;
+  top: 0.2rem;
+  left: 5.4rem;
+  max-width: calc(100% - 5.6rem);
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  pointer-events: none;
+}
+.history-load-status[hidden] { display: none; }
 .history-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 6; }
 .history-axis-label { fill: var(--muted); font: 11px var(--font-ui); font-variant-numeric: tabular-nums; }
 .history-line { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
@@ -3518,49 +3534,26 @@ label.sync-check input {
 .history-navigator-point { fill: var(--gold); }
 .history-navigator-selection { fill: rgba(227, 197, 124, 0.09); stroke: rgba(227, 197, 124, 0.35); stroke-width: 1; }
 .history-navigator-handle { stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.history-range-track {
-  position: relative;
-  height: 1.35rem;
-  margin: 0.1rem 0 0.45rem;
-  border-radius: 999px;
-  touch-action: none;
-}
-.history-range-track::before {
-  content: "";
-  position: absolute;
-  top: 0.56rem;
-  right: 0;
-  left: 0;
-  height: 3px;
-  background: var(--border-strong);
-  border-radius: 999px;
-}
-.history-range-fill {
-  position: absolute;
-  top: 0.56rem;
-  height: 3px;
-  background: var(--gold);
-  border-radius: 999px;
-  pointer-events: none;
-}
+.history-range-track { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .history-range-thumb {
   position: absolute;
-  top: 0.22rem;
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  min-height: 14px;
-  max-width: 14px;
-  max-height: 14px;
+  top: 50%;
+  width: 16px;
+  height: 26px;
+  min-width: 16px;
+  min-height: 26px;
+  max-width: 16px;
+  max-height: 26px;
   margin: 0;
   padding: 0;
   line-height: 1;
   font-size: 0;
   appearance: none;
-  background: var(--surface);
+  background: var(--surface-2);
   border: 2px solid var(--gold);
-  border-radius: 50%;
-  transform: translateX(-50%);
+  border-radius: 5px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
   touch-action: none;
   cursor: ew-resize;
 }

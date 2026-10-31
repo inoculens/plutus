@@ -24,6 +24,7 @@
   var rangeDrag = null;
   var rangeRequestTimer = null;
   var requestSequence = 0;
+  var lastReportedStatus = '';
 
   function loadStore() {
     try {
@@ -219,7 +220,7 @@
 
     var startRange = byId('history-range-start');
     var endRange = byId('history-range-end');
-    var rangeTrack = byId('history-range-track');
+    var rangeTrack = byId('history-navigator-wrap');
     [startRange, endRange].forEach(function (handle, index) {
       if (!handle) return;
       handle.addEventListener('keydown', function (event) {
@@ -295,16 +296,15 @@
       if (active.rangeStart !== null && active.rangeStart !== undefined &&
           active.rangeEnd !== null && active.rangeEnd !== undefined &&
           isFinite(Number(active.rangeStart)) && isFinite(Number(active.rangeEnd))) {
-        return {
-          start: Number(active.rangeStart),
-          end: Math.max(Number(active.rangeStart) + 1, Number(active.rangeEnd))
-        };
+        var customStart = Math.max(oldest, Number(active.rangeStart));
+        return { start: customStart, end: Math.max(customStart + 1, Math.min(now, Number(active.rangeEnd))) };
       }
       var from = dateTimestamp(active.from || dateKey(oldest), false);
       var to = dateTimestamp(active.to || dateKey(now), true);
-      return { start: isFinite(from) ? from : oldest, end: isFinite(to) ? to : now };
+      var customFrom = Math.max(oldest, isFinite(from) ? from : oldest);
+      return { start: customFrom, end: Math.max(customFrom + 1, Math.min(now, isFinite(to) ? to : now)) };
     }
-    return { start: now - PERIODS[active.period], end: now };
+    return { start: Math.max(oldest, now - PERIODS[active.period]), end: now };
   }
 
   function visiblePoints(range) {
@@ -341,7 +341,7 @@
     if (!active || !active.points.length) return;
     var start = byId('history-range-start');
     var end = byId('history-range-end');
-    var min = active.points[0].at;
+    var min = Number(active.historyStart) || active.points[0].at;
     var max = active.points[active.points.length - 1].at;
     var maxValue = 1000;
     var low = rangeValue(start);
@@ -403,12 +403,16 @@
       });
       data.points = compactPoints(Object.keys(byTime).map(function (at) { return byTime[at]; }));
       data.historyStart = Number(result.historyStart) || data.historyStart;
+      if (data.historyStart) {
+        data.points = data.points.filter(function (point) { return point.at >= data.historyStart; });
+      }
       data.signature = data.sourceSignature;
       data.incomplete = !!result.incomplete;
       data.loadMessage = String(result.message || '');
       data.loadedKey = key;
       data.loadingKey = '';
       data.loading = false;
+      if (data.incomplete) reportStatus(data, 'incomplete', key, data.loadMessage);
       saveStore();
       draw();
     }).catch(function (error) {
@@ -418,8 +422,16 @@
       data.incomplete = true;
       data.loadError = String(error && error.message ? error.message : error);
       data.loadedKey = key;
+      reportStatus(data, 'error', key, data.loadError);
       draw();
     });
+  }
+
+  function reportStatus(data, state, key, message) {
+    var statusKey = [data.scopeKey, state, key].join('|');
+    if (statusKey === lastReportedStatus || typeof data.onStatus !== 'function') return;
+    lastReportedStatus = statusKey;
+    data.onStatus({ state: state, message: message, key: key });
   }
 
   function syncRangeInputs(range) {
@@ -431,14 +443,9 @@
       end.disabled = true;
       setRangeValue(start, 0);
       setRangeValue(end, 1000);
-      var emptyFill = byId('history-range-fill');
-      if (emptyFill) {
-        emptyFill.style.left = '0%';
-        emptyFill.style.width = '0%';
-      }
       return;
     }
-    var min = active.points[0].at;
+    var min = Number(active.historyStart) || active.points[0].at;
     var max = active.points[active.points.length - 1].at;
     var hasRange = max > min;
     var span = Math.max(1, max - min);
@@ -454,11 +461,6 @@
     end.disabled = !hasRange;
     start.setAttribute('aria-valuetext', displayDate(min + span * low / 1000, true));
     end.setAttribute('aria-valuetext', displayDate(min + span * high / 1000, true));
-    var fill = byId('history-range-fill');
-    if (fill) {
-      fill.style.left = (low / 10) + '%';
-      fill.style.width = ((high - low) / 10) + '%';
-    }
   }
 
   function renderNavigator() {
@@ -469,7 +471,7 @@
     if (!points.length) return;
     var width = 900;
     var height = 72;
-    var minT = points[0].at;
+    var minT = Number(active.historyStart) || points[0].at;
     var maxT = Math.max(minT + 1, points[points.length - 1].at);
     var values = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); })
       .map(function (point) { return Number(point.value); });
@@ -480,6 +482,7 @@
     var d = '';
     var segmentOpen = false;
     points.forEach(function (point) {
+      if (point.at < minT) return;
       if (point.value === null || !isFinite(Number(point.value))) {
         segmentOpen = false;
         return;
@@ -511,6 +514,8 @@
         x1: x, x2: x, y1: 0, y2: height, 'class': 'history-navigator-handle'
       }));
     });
+    setRangeValue(byId('history-range-start'), x1 / width * 1000);
+    setRangeValue(byId('history-range-end'), x2 / width * 1000);
   }
 
   function drawPlot(points, range) {
@@ -669,6 +674,15 @@
 
     var note = byId('history-note');
     var badge = byId('history-local-badge');
+    var loadStatus = byId('history-load-status');
+    var panel = byId('networth-history');
+    if (panel) panel.setAttribute('aria-busy', active.loading ? 'true' : 'false');
+    if (loadStatus) {
+      loadStatus.hidden = !active.loading;
+      loadStatus.textContent = active.loading
+        ? 'Loading historical prices. The chart may be incomplete until this finishes.'
+        : '';
+    }
     if (badge) badge.textContent = storageMessage ? 'Storage issue' : 'Saved locally';
     if (note) {
       if (storageMessage) note.textContent = storageMessage;
@@ -811,8 +825,13 @@
     }
     active.currency = String(options.currency || 'EUR').toUpperCase();
     active.historyStart = Number(options.historyStart) || active.historyStart;
+    if (active.historyStart) {
+      active.points = active.points.filter(function (point) { return point.at >= active.historyStart; });
+    }
     active.sourceSignature = nextSignature;
     active.loadHistory = options.loadHistory;
+    active.onStatus = options.onStatus;
+    active.scopeKey = String(options.scope || 'default');
     active.updating = !!active.updating;
     active.incomplete = !!active.incomplete;
     record(active, options.value, options.prices);

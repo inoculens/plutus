@@ -6216,10 +6216,32 @@ function netWorthHistoryKinds(st) {
   return kinds;
 }
 
+function netWorthHistoryIncludedAccounts(st) {
+  var filter = selectedTickers(st);
+  var included = {};
+  (st.accounts || []).forEach(function (account) {
+    if (!account || (filter !== null && filter.indexOf(String(account.ticker || '').toUpperCase()) === -1)) return;
+    included[account.id] = true;
+    groupMembers(st, account.id).forEach(function (member) { included[member.id] = true; });
+  });
+  return included;
+}
+
+function netWorthHistoryStart(st, included) {
+  var earliest = Infinity;
+  (st.trades || []).forEach(function (trade) {
+    if (!trade || !included[trade.accountId] || typeof trade.date !== 'string') return;
+    var timestamp = Date.parse(trade.date + 'T00:00:00');
+    if (isFinite(timestamp) && timestamp < earliest) earliest = timestamp;
+  });
+  return isFinite(earliest) ? earliest : null;
+}
+
 var netWorthHistoryFetches = {};
 var netWorthHistoryFailures = {};
 var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
 var netWorthHistorySeriesCache = {};
+var netWorthHistoryRateFetches = {};
 
 function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
   var sym = String(symbol || '').toUpperCase();
@@ -6341,6 +6363,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end) {
   }
 
   return request.then(function (series) {
+    series.points.sort(function (a, b) { return a.at - b.at; });
     netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
     return series;
   }, function (error) {
@@ -6365,35 +6388,24 @@ function netWorthHistorySeriesPrice(series, at, main) {
     else high = mid - 1;
   }
   var picked = points[low];
-  if (!picked || picked.at > at || at - picked.at > 5 * 86400000) return Promise.resolve(null);
+  if (!picked || picked.at > at) return Promise.resolve(null);
   var native = Number(picked.price);
   var from = String(series.currency || main).toUpperCase();
   var to = String(main).toUpperCase();
   if (!isFinite(native) || native <= 0) return Promise.resolve(null);
   if (from === to) return Promise.resolve(native);
-  return fetchEcbRate(netWorthHistoryDate(at), from, to).then(function (rate) {
+  return fetchNetWorthHistoryRate(netWorthHistoryDate(at), from, to).then(function (rate) {
+    if (!rate) return null;
     var converted = native * Number(rate.rate);
     return isFinite(converted) && converted > 0 ? converted : null;
   }, function () { return null; });
 }
 
 function buildNetWorthHistory(st, main, range) {
-  var filter = selectedTickers(st);
-  var included = {};
-  (st.accounts || []).forEach(function (account) {
-    if (account && (filter === null || filter.indexOf(String(account.ticker || '').toUpperCase()) !== -1)) {
-      included[account.id] = true;
-      groupMembers(st, account.id).forEach(function (member) { included[member.id] = true; });
-    }
-  });
-  var earliest = Infinity;
-  (st.trades || []).forEach(function (trade) {
-    if (!trade || !included[trade.accountId] || typeof trade.date !== 'string') return;
-    var timestamp = Date.parse(trade.date + 'T00:00:00');
-    if (isFinite(timestamp) && timestamp < earliest) earliest = timestamp;
-  });
-  if (!isFinite(earliest)) earliest = range.start;
-  var start = range.period === 'ALL' ? Math.min(range.start, earliest) : range.start;
+  var included = netWorthHistoryIncludedAccounts(st);
+  var earliest = netWorthHistoryStart(st, included);
+  if (earliest === null) earliest = range.start;
+  var start = Math.max(range.start, earliest);
   var end = Math.min(range.end, Date.now());
   if (!(end > start)) end = start + 1;
   var span = end - start;
@@ -6470,7 +6482,13 @@ function buildNetWorthHistory(st, main, range) {
       return {
         points: points,
         incomplete: incomplete,
-        message: missing.length ? 'Historical prices unavailable for: ' + missing.join(', ') + '. Values are left as gaps.' : '',
+        message: missing.length
+          ? 'Historical prices unavailable for: ' + missing.map(function (symbol) {
+            var series = seriesBySymbol[symbol];
+            var reason = series && series.error ? ' (' + series.error + ')' : '';
+            return symbol + reason;
+          }).join(', ') + '. Values are left as gaps.'
+          : (incomplete ? 'Some asset prices or fiat conversions are unavailable. Values are left as gaps.' : ''),
         historyStart: earliest
       };
     });
@@ -6510,9 +6528,23 @@ function fetchNetWorthHistoryPrice(symbol, day, main, kind) {
 function fetchNetWorthHistoryRate(day, from, to) {
   var cached = getCachedRate(day, from, to);
   if (cached && isFinite(Number(cached.rate)) && Number(cached.rate) > 0) return Promise.resolve(cached);
+  var key = [day, String(from).toUpperCase(), String(to).toUpperCase()].join('|');
+  if (netWorthHistoryRateFetches[key]) return netWorthHistoryRateFetches[key];
   if (netWorthHistoryFetchBudget.remaining <= 0) return Promise.resolve(null);
   netWorthHistoryFetchBudget.remaining--;
-  return fetchEcbRate(day, from, to).then(function (rate) { return rate; }, function () { return null; });
+  netWorthHistoryRateFetches[key] = fetchEcbRate(day, from, to).then(function (rate) {
+    delete netWorthHistoryRateFetches[key];
+    if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) {
+      cacheRate(day, from, to, Number(rate.rate), rate.source);
+      saveFxCache();
+      return rate;
+    }
+    return null;
+  }, function () {
+    delete netWorthHistoryRateFetches[key];
+    return null;
+  });
+  return netWorthHistoryRateFetches[key];
 }
 
 function netWorthHistoryPointValue(point, st, main, allowFetch) {
@@ -6645,13 +6677,8 @@ function updateNetWorthHistory(st, value, main) {
     var price = Number(livePrices[symbol]);
     if (isFinite(price) && price > 0) prices[String(symbol).toUpperCase()] = price;
   });
-  var historyStart = Infinity;
-  (st.trades || []).forEach(function (trade) {
-    if (!trade || typeof trade.date !== 'string') return;
-    var at = Date.parse(trade.date + 'T00:00:00');
-    if (isFinite(at) && at < historyStart) historyStart = at;
-  });
-  if (!isFinite(historyStart)) historyStart = Date.now() - 30 * 86400000;
+  var historyStart = netWorthHistoryStart(st, netWorthHistoryIncludedAccounts(st));
+  if (historyStart === null) historyStart = Date.now() - 30 * 86400000;
   window.NetWorthHistory.update({
     scope: scope,
     currency: main,
@@ -6659,6 +6686,17 @@ function updateNetWorthHistory(st, value, main) {
     prices: prices,
     signature: signature,
     historyStart: historyStart,
+    onStatus: function (status) {
+      if (!status || (status.state !== 'error' && status.state !== 'incomplete')) return;
+      var message = String(status.message || 'Some historical prices are unavailable.');
+      showBanner(
+        status.state === 'error'
+          ? 'Historical chart data could not be loaded.'
+          : 'Historical chart is incomplete — some values are missing.',
+        'error',
+        { title: 'Historical chart data', lines: [message] }
+      );
+    },
     loadHistory: function (range) { return buildNetWorthHistory(st, main, range); }
   });
 }

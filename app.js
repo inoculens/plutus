@@ -7017,13 +7017,17 @@ function buildTradeTypeFilter(acc, atrades) {
   var wrap = document.createElement('div');
   wrap.className = 'filter-wrap';
   var cur = tradeTypeFilterFor(id); // null = all
+  var dateFilter = tradeDateFilterFor(id);
   var open = !!tradeTypeFilterOpenByAccount[id];
+  var section = tradeFilterSectionByAccount[id] || 'records';
   var btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ghost';
   btn.setAttribute('data-filter-btn', '1');
-  btn.textContent = (cur === null) ? 'Filter' : ('Filter · ' + cur.length);
-  btn.setAttribute('aria-label', 'Filter records by type');
+  btn.textContent = (cur === null)
+    ? (dateFilter ? 'Filter · Date' : 'Filter')
+    : ('Filter · ' + cur.length + (dateFilter ? ' + Date' : ''));
+  btn.setAttribute('aria-label', 'Filter records by type or date');
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   btn.addEventListener('click', function () {
     tradeTypeFilterOpenByAccount[id] = !tradeTypeFilterOpenByAccount[id];
@@ -7035,10 +7039,30 @@ function buildTradeTypeFilter(acc, atrades) {
   panel.className = 'filter-panel';
   panel.setAttribute('data-filter-panel', '1');
   panel.hidden = !open;
+  var tabs = document.createElement('div');
+  tabs.className = 'filter-section-tabs';
+  function sectionButton(label, key) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ghost filter-section-btn' + (section === key ? ' is-active' : '');
+    b.textContent = label;
+    b.setAttribute('aria-pressed', section === key ? 'true' : 'false');
+    b.addEventListener('click', function () {
+      tradeFilterSectionByAccount[id] = key;
+      render();
+    });
+    tabs.appendChild(b);
+  }
+  sectionButton('Records', 'records');
+  sectionButton('Date', 'date');
+  panel.appendChild(tabs);
+
+  var recordsSection = document.createElement('div');
+  recordsSection.hidden = section !== 'records';
   var title = document.createElement('p');
   title.className = 'filter-title';
   title.textContent = 'Show records';
-  panel.appendChild(title);
+  recordsSection.appendChild(title);
   var counts = {};
   (atrades || []).forEach(function (t) {
     var k = tradeUiType(t);
@@ -7075,11 +7099,91 @@ function buildTradeTypeFilter(acc, atrades) {
     });
     return lab;
   }
-  panel.appendChild(optRow('All', cur === null, null));
+  recordsSection.appendChild(optRow('All', cur === null, null));
   uiTypes.forEach(function (x) {
     var n = counts[x] || 0;
-    panel.appendChild(optRow(tradeTypeLabel(x) + (n ? ' · ' + n : ''), cur === null || cur.indexOf(x) !== -1, x));
+    recordsSection.appendChild(optRow(tradeTypeLabel(x) + (n ? ' · ' + n : ''), cur === null || cur.indexOf(x) !== -1, x));
   });
+  panel.appendChild(recordsSection);
+
+  var dateSection = document.createElement('div');
+  dateSection.hidden = section !== 'date';
+  var dateTitle = document.createElement('p');
+  dateTitle.className = 'filter-title';
+  dateTitle.textContent = 'Calculation interval';
+  dateSection.appendChild(dateTitle);
+  var draft = tradeDateDraftByAccount[id];
+  if (!draft) {
+    draft = dateFilter
+      ? { from: dateFilter.from, to: dateFilter.to }
+      : { from: firstRecordedTradeDate(atrades), to: '' };
+    tradeDateDraftByAccount[id] = draft;
+  }
+  var dateFields = document.createElement('div');
+  dateFields.className = 'filter-date-fields';
+  function dateField(labelText, key) {
+    var label = document.createElement('label');
+    label.className = 'filter-date-field';
+    label.textContent = labelText;
+    var input = document.createElement('input');
+    input.type = 'date';
+    input.value = draft[key] || '';
+    input.max = todayStr();
+    input.setAttribute('data-date-filter-' + key, '1');
+    input.addEventListener('input', function () {
+      draft[key] = input.value;
+    });
+    label.appendChild(input);
+    dateFields.appendChild(label);
+    return input;
+  }
+  var fromInput = dateField('From', 'from');
+  var toInput = dateField('To', 'to');
+  dateSection.appendChild(dateFields);
+  var dateHelp = document.createElement('p');
+  dateHelp.className = 'filter-date-help';
+  dateHelp.textContent = 'Leave either date blank to include all records on that side.';
+  dateSection.appendChild(dateHelp);
+  var dateError = document.createElement('p');
+  dateError.className = 'filter-date-error';
+  dateError.setAttribute('role', 'alert');
+  dateError.hidden = true;
+  dateSection.appendChild(dateError);
+  var dateActions = document.createElement('div');
+  dateActions.className = 'filter-date-actions';
+  var applyDate = document.createElement('button');
+  applyDate.type = 'button';
+  applyDate.className = 'ghost';
+  applyDate.textContent = 'Apply interval';
+  applyDate.addEventListener('click', function () {
+    var from = fromInput.value;
+    var to = toInput.value;
+    if ((from && (!isValidDateStr(from) || isFutureDateStr(from))) ||
+        (to && (!isValidDateStr(to) || isFutureDateStr(to)))) {
+      dateError.textContent = 'Choose valid dates that are not in the future.';
+      dateError.hidden = false;
+      return;
+    }
+    if (from && to && from > to) {
+      dateError.textContent = 'The start date must be on or before the end date.';
+      dateError.hidden = false;
+      return;
+    }
+    delete tradeDateDraftByAccount[id];
+    setTradeDateFilter(id, (from || to) ? { from: from, to: to } : null);
+  });
+  dateActions.appendChild(applyDate);
+  var clearDate = document.createElement('button');
+  clearDate.type = 'button';
+  clearDate.className = 'ghost';
+  clearDate.textContent = 'Clear';
+  clearDate.addEventListener('click', function () {
+    delete tradeDateDraftByAccount[id];
+    setTradeDateFilter(id, null);
+  });
+  dateActions.appendChild(clearDate);
+  dateSection.appendChild(dateActions);
+  panel.appendChild(dateSection);
   wrap.appendChild(panel);
   return wrap;
 }
@@ -10102,28 +10206,87 @@ function renderAccountDetail(st, id) {
   }
   var main = st.settings.mainCurrency;
   var method = st.settings.costMethod;
-  var dtrades = convertTrades(st.trades, main);
+  var allDtrades = convertTrades(st.trades, main);
+  var members = groupMembers(st, acc.id);
+  var mainOf = groupMainOf(st, acc.id);
+  var isCashAccD = isCashKind(acc.kind);
+  var dateFilter = tradeDateFilterFor(id);
+  var dtrades = filterTradesByDateRange(allDtrades, dateFilter);
+  var atrades = accountTrades({ trades: dtrades }, acc.id);
+  var scopeIds = [acc.id];
+  members.forEach(function (m) { scopeIds.push(m.id); });
+  var scopeTrades = [];
+  var seenScopeTrades = {};
+  scopeIds.forEach(function (sid) {
+    accountTrades({ trades: dtrades }, sid).forEach(function (t) {
+      if (!t) return;
+      if (t.id) {
+        if (seenScopeTrades[t.id]) return;
+        seenScopeTrades[t.id] = true;
+      }
+      scopeTrades.push(t);
+    });
+  });
+  var rangeIssue = dateFilter ? dateRangeOutflowIssue(scopeTrades, scopeIds, st, dtrades) : null;
+  var historicalEnd = !!(dateFilter && dateFilter.to && dateFilter.to < todayStr());
+  var detailPrices = livePrices;
+  var historySymbols = [];
+  var historyKinds = {};
+  if (historicalEnd) {
+    var historySymbolSet = {};
+    function addHistorySymbol(raw) {
+      var symbol = String(raw || '').trim().toUpperCase();
+      if (symbol && !historySymbolSet[symbol]) {
+        historySymbolSet[symbol] = true;
+        historySymbols.push(symbol);
+      }
+    }
+    (st.accounts || []).forEach(function (a) {
+      if (!a || scopeIds.indexOf(a.id) === -1) return;
+      var symbol = String(a.ticker || '').trim().toUpperCase();
+      if (!symbol) return;
+      addHistorySymbol(symbol);
+      historyKinds[symbol] = a.kind || '';
+    });
+    scopeTrades.forEach(function (t) {
+      addHistorySymbol(t.symbol);
+      if (Array.isArray(t.outputs)) {
+        t.outputs.forEach(function (o) { if (o) addHistorySymbol(o.toSymbol); });
+      }
+      addHistorySymbol(t.toSymbol);
+    });
+    detailPrices = {};
+    historySymbols.forEach(function (symbol) {
+      var hit = getHistoricalExec(symbol, dateFilter.to, main, historyKinds[symbol]);
+      detailPrices[symbol] = hit && isFinite(Number(hit.price)) && Number(hit.price) > 0
+        ? Number(hit.price)
+        : null;
+    });
+    if (!rangeIssue && historySymbols.length) {
+      var historyRequests = historySymbols.map(function (symbol) {
+        return { type: 'buy', symbol: symbol, date: dateFilter.to, qty: 1, accountId: id };
+      });
+      ensureHistoricalExec(historyRequests, main, historyKinds).then(function (changed) {
+        if (changed) render();
+      });
+    }
+  }
   var swapInfo = {};
   try { swapInfo = buildSwapPairMap(dtrades); } catch (e) { swapInfo = {}; }
-  var isCashAccD = isCashKind(acc.kind);
   var rows = [];
   try {
-    var pfDet = computePortfolio(dtrades, livePrices, method);
+    var pfDet = computePortfolio(dtrades, detailPrices, method);
     var mDet = pfDet.byAccount[id];
     if (mDet && !isCashAccD) mDet.forEach(function (r) { rows.push(r); });
     rows.sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
   } catch (e) {
-    rows = isCashAccD ? [] : computePositions(accountTrades({ trades: dtrades }, acc.id), livePrices, method);
+    rows = isCashAccD ? [] : computePositions(accountTrades({ trades: dtrades }, acc.id), detailPrices, method);
   }
-  var atrades = accountTrades({ trades: dtrades }, acc.id);
   // Group role: mains aggregate (merged ledgers + sub cards, no trade
   // history), members show transactions without their Ledgers section.
-  var members = groupMembers(st, acc.id);
-  var mainOf = groupMainOf(st, acc.id);
   // Mains fold member engine rows into the stat grid, and member trades
   // into lifetime denominators — cards describe the group, never the
   // (often empty) main alone.
-  var scopeTrades = atrades;
   if (members.length && !isCashAccD) {
     try {
       if (typeof pfDet !== 'undefined' && pfDet && pfDet.byAccount) {
@@ -10134,28 +10297,10 @@ function renderAccountDetail(st, id) {
         rows.sort(function (a, b) { return a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0; });
       } else {
         members.forEach(function (m) {
-          computePositions(accountTrades({ trades: dtrades }, m.id), livePrices, method).forEach(function (r) { rows.push(r); });
+          computePositions(accountTrades({ trades: dtrades }, m.id), detailPrices, method).forEach(function (r) { rows.push(r); });
         });
       }
     } catch (e) { /* aggregation never breaks the view */ }
-  }
-  if (members.length) {
-    try {
-      scopeTrades = [];
-      var seenSC = {};
-      var scopeIds = [acc.id];
-      members.forEach(function (m) { scopeIds.push(m.id); });
-      scopeIds.forEach(function (sid) {
-        accountTrades({ trades: dtrades }, sid).forEach(function (t) {
-          if (!t) return;
-          if (t.id) {
-            if (seenSC[t.id]) return;
-            seenSC[t.id] = true;
-          }
-          scopeTrades.push(t);
-        });
-      });
-    } catch (e) { scopeTrades = atrades; }
   }
   var assetLedgersShown = false;
   // FIFO lot linkage, resolved once for every visible card: every trade by
@@ -10163,7 +10308,7 @@ function renderAccountDetail(st, id) {
   // every closed lot grouped by opening / closing trade. Average pools cost
   // and links nothing — fifoCtx stays null there.
   var tradeById = {};
-  (dtrades || []).forEach(function (t) {
+  (allDtrades || []).forEach(function (t) {
     if (t && typeof t.id === 'string' && t.id !== '') tradeById[t.id] = t;
   });
   var fifoLinks = { byBuy: {}, byClose: {} };
@@ -10274,7 +10419,7 @@ function renderAccountDetail(st, id) {
       var cn = normalizeTrade(t);
       lifetimeCost += cn.netMain + cn.feeLossMain;
     });
-    if (closed) {
+    if (closed && !rangeIssue) {
       var closedFlag = document.createElement('p');
       closedFlag.className = 'muted closed-flag';
       closedFlag.textContent = 'Closed — nothing held.';
@@ -10289,12 +10434,12 @@ function renderAccountDetail(st, id) {
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
   var tickSym = acc && acc.ticker ? String(acc.ticker).toUpperCase() : '';
-  var lvRaw = (tickSym && typeof livePrices !== 'undefined' && livePrices) ? livePrices[tickSym] : null;
+  var lvRaw = tickSym ? (detailPrices ? detailPrices[tickSym] : null) : null;
   var lvNum = Number(lvRaw);
   var liveShow = pos ? pos.livePrice : ((isFinite(lvNum) && lvNum > 0) ? lvNum : null);
-  var detLoading = isPriceLoading(tickSym);
+  var detLoading = !historicalEnd && isPriceLoading(tickSym);
   stats.appendChild(statCard('Value', mvKnown ? fmtMoney(mv, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), mvKnown ? mv : null, !mvKnown && detLoading));
-  stats.appendChild(statCard('Live price', liveShow !== null ? fmtMoney(liveShow, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), liveShow, liveShow === null && detLoading));
+  stats.appendChild(statCard(historicalEnd ? 'Price on ' + fmtDateDmy(dateFilter.to) : 'Live price', liveShow !== null ? fmtMoney(liveShow, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), liveShow, liveShow === null && detLoading));
   stats.appendChild(statCard('Average entry', (pos && !closed) ? fmtMoney(pos.avgEntry, main) : '—', (pos && !closed) ? pos.avgEntry : null));
   stats.appendChild(statCard('Unrealized', unKnown ? fmtMoney(un, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), unKnown ? un : null, !unKnown && detLoading));
   stats.appendChild(statCard('Realized', fmtMoney(rz, main), rz));
@@ -10316,7 +10461,13 @@ function renderAccountDetail(st, id) {
   var feesSum = 0, incomeSum = 0;
   rows.forEach(function (r) { feesSum += Number(r.fees) || 0; incomeSum += Number(r.income) || 0; });
   if (Math.abs(incomeSum) > 1e-9) stats.appendChild(statCard('Income', fmtMoney(incomeSum, main), incomeSum));
-  if (isCashAccD) {
+  if (rangeIssue) {
+    var rangeWarning = document.createElement('p');
+    rangeWarning.className = 'date-range-warning';
+    rangeWarning.setAttribute('role', 'status');
+    rangeWarning.textContent = dateRangeIssueMessage(rangeIssue);
+    host.appendChild(rangeWarning);
+  } else if (isCashAccD) {
     if (members.length) {
       // Main aggregates the group in the header display fiat — like every
       // other card; the Ledgers table below keeps the group currency.
@@ -10365,8 +10516,10 @@ function renderAccountDetail(st, id) {
   // Group mains: merged ledgers in the group currency plus sub-account
   // cards instead of the spent/fees lines and the trade history below.
   if (members.length) {
-    buildGroupLedgers(st, acc, members, host, dtrades, main);
-    buildGroupSubs(st, members, host, dtrades, main, method);
+    if (!rangeIssue) {
+      buildGroupLedgers(st, acc, members, host, dtrades, main);
+      buildGroupSubs(st, members, host, dtrades, main, method);
+    }
     return;
   }
   // Per-account spent (this account only): lifetime sell proceeds, cash legs
@@ -10398,7 +10551,7 @@ function renderAccountDetail(st, id) {
       }
     });
   } catch (e) { spentSum = 0; }
-  if (!isCashAccD && spentSum > 1e-9) {
+  if (!rangeIssue && !isCashAccD && spentSum > 1e-9) {
     var spentLine = document.createElement('p');
     spentLine.className = 'spent-line';
     spentLine.setAttribute('data-label', 'Spent amount');
@@ -10406,7 +10559,7 @@ function renderAccountDetail(st, id) {
     spentLine.textContent = 'Spent amount: ' + fmtMoney(spentSum, main);
     host.appendChild(spentLine);
   }
-  if (!isCashAccD && Math.abs(feesSum) > 1e-9) {
+  if (!rangeIssue && !isCashAccD && Math.abs(feesSum) > 1e-9) {
     var feesLine = document.createElement('p');
     feesLine.className = 'fees-line';
     feesLine.setAttribute('data-label', 'Total fees paid');
@@ -10420,7 +10573,7 @@ function renderAccountDetail(st, id) {
   tTitle.className = 'section-title';
   tTitle.textContent = 'Trades';
   tHead.appendChild(tTitle);
-  if (atrades.length) {
+  if (atrades.length || dateFilter) {
     var tAdd = document.createElement('button');
     tAdd.type = 'button';
     tAdd.className = 'ghost t-add';
@@ -10441,7 +10594,7 @@ function renderAccountDetail(st, id) {
       if (tradeSelectionMode) cancelTradeSelection();
       else { tradeSelectionMode = true; render(); }
     });
-    tHead.appendChild(tradeSelectBtn);
+    if (atrades.length) tHead.appendChild(tradeSelectBtn);
     tHead.appendChild(buildTradeTypeFilter(acc, atrades));
     // Bootstrap: standalone asset accounts with nothing labeled yet get
     // their + Ledger here (filter … + Ledger … + Record); once the Ledgers
@@ -10477,9 +10630,8 @@ function renderAccountDetail(st, id) {
     // Paged records: sort once, then build DOM only for the visible slice.
     // Off-page records cost nothing per paint (no tradeBlock, no exec-rate
     // resolution, single fragment insert) while totals above still use all.
-    // Record-type filter: view-only multi-select (null = every type). Stats,
-    // totals and P&L above always cover every trade; only this list + its
-    // pager follow the filter.
+    // Record-type filter only changes this list. The date interval also
+    // scopes the calculations above, while both filters remain independent.
     var typeFilter = tradeTypeFilterFor(acc.id);
     // Newest date first. Within one date the engines walk the store slice as
     // execution order, while the list feeds it newest-execution-first: the
@@ -10487,13 +10639,15 @@ function renderAccountDetail(st, id) {
     // a feed the reader reads top-is-latest. The drag translates the displayed
     // order back to execution order before validating/booking (see the drop
     // handler); the store itself is never reordered for display.
-    var fullSorted = reversePerDateBlocks(atrades.slice().sort(function (a, b) {
+    var allAtrades = accountTrades({ trades: allDtrades }, acc.id);
+    var allSorted = reversePerDateBlocks(allAtrades.slice().sort(function (a, b) {
       var da = (a && typeof a.date === 'string') ? a.date : '';
       var db = (b && typeof b.date === 'string') ? b.date : '';
       if (da < db) return 1;
       if (da > db) return -1;
       return 0; // stable: same-date records keep their store order
     }));
+    var fullSorted = filterTradesByDateRange(allSorted, dateFilter);
     var sortedTrades = filterTradesByType(fullSorted, typeFilter);
     var tradeTotal = sortedTrades.length;
     var tradePageCount = tradePageCountFor(tradeTotal);
@@ -10570,17 +10724,18 @@ function renderAccountDetail(st, id) {
         if (sortedTrades[k] && sortedTrades[k].id === id) { idx = k; break; }
       }
       if (idx < 0) {
-        // Not in the filtered view: search the full list. A filtered-out
-        // target clears the type filter so lot-link jumps still land.
+        // Not in the filtered view: clear both filters so lot-link jumps land.
         var fullIdx = -1;
-        for (var k2 = 0; k2 < fullSorted.length; k2++) {
-          if (fullSorted[k2] && fullSorted[k2].id === id) { fullIdx = k2; break; }
+        for (var k2 = 0; k2 < allSorted.length; k2++) {
+          if (allSorted[k2] && allSorted[k2].id === id) { fullIdx = k2; break; }
         }
         if (fullIdx < 0) return;
+        delete tradeDateFilterByAccount[acc.id];
+        delete tradeDateDraftByAccount[acc.id];
         setTradeTypeFilter(acc.id, null);
         var fullPage = Math.floor(fullIdx / tradePageSize);
         if (fullPage !== 0) {
-          tradePageSetFor(acc.id, fullPage, fullSorted.length);
+          tradePageSetFor(acc.id, fullPage, allSorted.length);
           render();
         }
         try {
@@ -11154,8 +11309,8 @@ var ACCOUNT_PAGE_SIZE = 6;
 var accountPage = 0;
 // --- Trade pagination (per-account record list) ---
 // Only the current page is ever built into DOM (DocumentFragment of at most
-// pageSize tradeBlocks). Totals/P&L above still cover every trade; this only
-// bounds the expensive per-record DOM + resolveExecPrice work per paint.
+// pageSize tradeBlocks); this bounds the expensive per-record DOM +
+// resolveExecPrice work per paint.
 var TRADE_PAGE_SIZES = [15, 25, 50, 100];
 var TRADE_PAGE_DEFAULT = 25;
 var TRADE_PAGE_KEY = 'inoculens.tradepagesize.v1';
@@ -11207,11 +11362,105 @@ function tradePageSetFor(accountId, p, total) {
 // View-only multi-select over TRADE_TYPES, mirroring the home asset filter:
 // null/absent = show every record, otherwise exactly these types. In-memory
 // per account (like the page index, and unlike the home asset filter it is
-// deliberately NOT persisted: no settings/export shape change). Totals and
-// P&L above always cover every trade; only the visible list + pager follow.
+// deliberately NOT persisted: no settings/export shape change). The date
+// filter below also stays in-memory, but scopes both calculations and records.
 var tradeTypeFilterByAccount = {}; // accountId -> normalized array of types
 var tradeTypeFilterOpenByAccount = {}; // accountId -> bool (panel stays open across renders)
 var tradeTypeFilterFocus = null; // type to refocus after render, then cleared
+var tradeDateFilterByAccount = {}; // accountId -> {from,to}, inclusive ISO dates
+var tradeDateDraftByAccount = {}; // un-applied date input values
+var tradeFilterSectionByAccount = {}; // accountId -> records | date
+
+function normalizeTradeDateFilter(v) {
+  if (!v || typeof v !== 'object') return null;
+  var from = (typeof v.from === 'string' && isValidDateStr(v.from) && !isFutureDateStr(v.from)) ? v.from : '';
+  var to = (typeof v.to === 'string' && isValidDateStr(v.to) && !isFutureDateStr(v.to)) ? v.to : '';
+  if (!from && !to) return null;
+  if (from && to && from > to) return null;
+  return { from: from, to: to };
+}
+
+function tradeDateFilterFor(accountId) {
+  if (typeof accountId !== 'string' || accountId === '') return null;
+  if (!Object.prototype.hasOwnProperty.call(tradeDateFilterByAccount, accountId)) return null;
+  return normalizeTradeDateFilter(tradeDateFilterByAccount[accountId]);
+}
+
+function setTradeDateFilter(accountId, next) {
+  if (typeof accountId !== 'string' || accountId === '') return;
+  var normalized = normalizeTradeDateFilter(next);
+  if (normalized) tradeDateFilterByAccount[accountId] = normalized;
+  else delete tradeDateFilterByAccount[accountId];
+  if (normalized) tradeDateDraftByAccount[accountId] = { from: normalized.from, to: normalized.to };
+  else delete tradeDateDraftByAccount[accountId];
+  tradePageByAccount[accountId] = 0;
+  render();
+}
+
+function firstRecordedTradeDate(trades) {
+  var first = '';
+  (trades || []).forEach(function (t) {
+    if (!t || typeof t.date !== 'string' || !isValidDateStr(t.date)) return;
+    if (!first || t.date < first) first = t.date;
+  });
+  return first;
+}
+
+function filterTradesByDateRange(trades, filter) {
+  var range = normalizeTradeDateFilter(filter);
+  if (!range) return (trades || []).slice();
+  return (trades || []).filter(function (t) {
+    if (!t || typeof t.date !== 'string' || !isValidDateStr(t.date)) return false;
+    return (!range.from || t.date >= range.from) && (!range.to || t.date <= range.to);
+  });
+}
+
+function dateRangeOutflowIssue(scopeTrades, scopeIds, st, allTrades) {
+  var inScope = {};
+  (scopeIds || []).forEach(function (id) {
+    if (typeof id === 'string' && id !== '') inScope[id] = true;
+  });
+  var transferSources = {};
+  (scopeTrades || []).forEach(function (t) {
+    if (!t || t.type !== 'transfer' || !t.accountId || inScope[t.accountId]) return;
+    var linked = (scopeIds || []).some(function (id) { return transferInvolvesAccount(t, id); });
+    if (!linked) return;
+    var key = timelineHeldKey(t.accountId, ledgerSym(t));
+    var prior = transferSources[key];
+    if (!prior || String(t.date || '') > prior) transferSources[key] = String(t.date || '');
+  });
+  var checkedTrades = (allTrades || scopeTrades || []).map(function (t) {
+    if (!t || t.type !== 'expense' ||
+        !(t.qty === undefined || t.qty === null || String(t.qty).trim() === '')) return t;
+    var acc = accountById(st, t.accountId);
+    var symbol = String(t.symbol || '').toUpperCase();
+    var currency = String(t.currency || '').toUpperCase();
+    var total = Number(t.total);
+    if (!isCashKind(acc && acc.kind) || !symbol || currency !== symbol || !isFinite(total) || total <= 0) return t;
+    var copy = {};
+    Object.keys(t).forEach(function (key) { copy[key] = t[key]; });
+    copy.qty = total;
+    return copy;
+  });
+  var issues = timelineOutflowShortfalls(checkedTrades);
+  for (var i = 0; i < issues.length; i++) {
+    var issue = issues[i];
+    if (inScope[issue.accountId]) return issue;
+    var dependencyKey = timelineHeldKey(issue.accountId, issue.symbol);
+    var transferDate = transferSources[dependencyKey];
+    if (transferDate && String(issue.trade.date || '') <= transferDate) return issue;
+  }
+  return null;
+}
+
+function dateRangeIssueMessage(issue) {
+  var label = issue && issue.trade ? tradeTypeLabel(tradeUiType(issue.trade)) : 'outgoing';
+  var date = issue && issue.trade && issue.trade.date ? fmtDateDmy(issue.trade.date) : 'the selected interval';
+  var symbol = String((issue && issue.symbol) || '').toUpperCase();
+  return 'Calculations are hidden because this interval includes an unfunded ' +
+    label.toLowerCase() + (date ? ' on ' + date : '') + (symbol ? ' (' + symbol + ')' : '') +
+    '. Widen the start date to include earlier purchases, income, or incoming transfers, or choose another interval.';
+}
 
 function normalizeTradeTypeFilter(v) {
   if (v === undefined || v === null) return null;
@@ -11256,6 +11505,9 @@ function filterTradesByType(trades, filter) {
 function clearTradeTypeFilterState(accountId) {
   try { delete tradeTypeFilterByAccount[accountId]; } catch (e) { /* ignore */ }
   try { delete tradeTypeFilterOpenByAccount[accountId]; } catch (e) { /* ignore */ }
+  try { delete tradeDateFilterByAccount[accountId]; } catch (e) { /* ignore */ }
+  try { delete tradeDateDraftByAccount[accountId]; } catch (e) { /* ignore */ }
+  try { delete tradeFilterSectionByAccount[accountId]; } catch (e) { /* ignore */ }
 }
 
 function closeTradeTypeFilter(moveFocus) {
@@ -16120,6 +16372,10 @@ if (typeof window !== 'undefined') {
   window.Inoculens.tradeTypeFilterFor = tradeTypeFilterFor;
   window.Inoculens.setTradeTypeFilter = setTradeTypeFilter;
   window.Inoculens.filterTradesByType = filterTradesByType;
+  window.Inoculens.tradeDateFilterFor = tradeDateFilterFor;
+  window.Inoculens.setTradeDateFilter = setTradeDateFilter;
+  window.Inoculens.filterTradesByDateRange = filterTradesByDateRange;
+  window.Inoculens.dateRangeOutflowIssue = dateRangeOutflowIssue;
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('DOMContentLoaded', init);
   }

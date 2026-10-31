@@ -1368,6 +1368,27 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   box-shadow: var(--shadow);
 }
 
+.filter-section-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.1rem 0 0.6rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.filter-section-btn {
+  flex: 1 1 0;
+  min-height: 2rem;
+  padding: 0.3rem 0.55rem;
+  color: var(--muted);
+}
+
+.filter-section-btn.is-active {
+  color: var(--gold);
+  border-color: var(--hairline-gold);
+  background: var(--gold-soft);
+}
+
 .filter-title {
   margin: 0.25rem 0 0.5rem;
   color: var(--muted);
@@ -1397,6 +1418,43 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   margin: 0;
   accent-color: var(--gold);
   cursor: pointer;
+}
+
+.filter-date-fields { display: grid; gap: 0.55rem; }
+.filter-date-field {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-date-field input { width: 100%; }
+.filter-date-help, .filter-date-error {
+  margin: 0.55rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.filter-date-help { color: var(--muted); }
+.filter-date-error { color: var(--loss); }
+.filter-date-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+.filter-date-actions button { flex: 1 1 0; padding: 0.35rem 0.45rem; }
+
+.date-range-warning {
+  margin: 1rem 0 0.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--hairline-gold);
+  border-radius: var(--radius);
+  background: var(--gold-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.55;
 }
 
 .empty-trades {

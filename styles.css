@@ -1368,6 +1368,13 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
   box-shadow: var(--shadow);
 }
 
+.filter-panel-date {
+  width: 18rem;
+  max-width: calc(100vw - 1.8rem);
+}
+.filter-panel-date .filter-title,
+.filter-date-actions button { white-space: nowrap; }
+
 .filter-section-tabs {
   display: flex;
   gap: 0.4rem;

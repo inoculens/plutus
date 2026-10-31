@@ -7036,7 +7036,7 @@ function buildTradeTypeFilter(acc, atrades) {
   });
   wrap.appendChild(btn);
   var panel = document.createElement('div');
-  panel.className = 'filter-panel';
+  panel.className = 'filter-panel filter-panel-date';
   panel.setAttribute('data-filter-panel', '1');
   panel.hidden = !open;
   var tabs = document.createElement('div');

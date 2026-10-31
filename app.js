@@ -6923,6 +6923,8 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
 
 function updateNetWorthHistory(st, value, main) {
   if (typeof window === 'undefined' || !window.NetWorthHistory || !st || !st.settings) return;
+  var historyStart = netWorthHistoryStart(st, netWorthHistoryIncludedAccounts(st));
+  if (historyStart === null) return;
   var signature = netWorthHistorySignature(st);
   if (netWorthHistoryFetchBudget.signature !== signature) {
     netWorthHistoryFetchBudget = { signature: signature, remaining: 160 };
@@ -6935,8 +6937,6 @@ function updateNetWorthHistory(st, value, main) {
     var price = Number(livePrices[symbol]);
     if (isFinite(price) && price > 0) prices[String(symbol).toUpperCase()] = price;
   });
-  var historyStart = netWorthHistoryStart(st, netWorthHistoryIncludedAccounts(st));
-  if (historyStart === null) historyStart = Date.now() - 30 * 86400000;
   window.NetWorthHistory.update({
     scope: scope,
     currency: main,

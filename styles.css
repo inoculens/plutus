@@ -1006,6 +1006,7 @@ main {
    otherwise hero / summary / accounts glue together with zero space. */
 #view-home, #view-account {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.75rem;
   align-content: start;
   min-width: 0;
@@ -3623,6 +3624,8 @@ label.sync-check input {
 .history-retry[hidden] { display: none; }
 @media (max-width: 560px) {
   .history-panel { padding: 0.9rem 0.75rem 0.7rem; }
+  .history-kicker { white-space: nowrap; }
+  .history-tooltip-slot { width: 0; }
   .history-plot { min-height: 8.5rem; }
   .history-axis-label { font-size: 10px; }
   .history-controls { display: block; }

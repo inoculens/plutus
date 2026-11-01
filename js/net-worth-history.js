@@ -507,7 +507,7 @@
       progress.start = Number(event.start) || progress.start;
       progress.end = Number(event.end) || progress.end;
     }
-    if (event.phase === 'download' && event.symbol) {
+    if ((event.phase === 'download' || event.phase === 'cache') && event.symbol) {
       progress.assets[event.symbol] = {
         provider: event.provider,
         completed: Number(event.completed) || 0,
@@ -578,6 +578,8 @@
     if (data.loading && current && current.phase === 'retry') {
       status.textContent = 'Retrying ' + current.symbol + ' — ' + current.provider +
         ', chunk ' + (Number(current.completed) + 1) + ' of ' + current.total + ' (attempt ' + current.attempt + ').';
+    } else if (data.loading && current && current.phase === 'cache') {
+      status.textContent = 'Reusing saved historical prices for ' + current.symbol + '.';
     } else if (data.loading && current && current.phase === 'download-error') {
       status.textContent = 'Could not load ' + current.symbol + ' chunk ' +
         (Number(current.completed) + 1) + ' of ' + current.total + '; trying another source.';
@@ -632,6 +634,9 @@
     if (current && current.phase === 'download') {
       lines.push('Current download: ' + current.symbol + ' · ' + current.provider);
       lines.push('Chunk range: ' + displayRangeDate(current.start) + ' to ' + displayRangeDate(current.end));
+    } else if (current && current.phase === 'cache') {
+      lines.push('Using saved prices: ' + current.symbol + ' · ' + current.provider);
+      lines.push('Cached range: ' + displayRangeDate(current.start) + ' to ' + displayRangeDate(current.end));
     } else if (current && current.phase === 'retry') {
       lines.push('Retrying: ' + current.symbol + ' · ' + current.provider + ' · attempt ' + current.attempt);
     } else if (current && current.phase === 'download-error') {
@@ -1138,5 +1143,22 @@
     requestHistory();
   }
 
-  root.NetWorthHistory = { update: update };
+  function refresh() {
+    if (!active) return;
+    requestSequence++;
+    if (historyProgressTimer !== null) root.clearInterval(historyProgressTimer);
+    if (historyRetryTimer !== null) root.clearTimeout(historyRetryTimer);
+    historyProgressTimer = null;
+    historyRetryTimer = null;
+    active.loadedKey = '';
+    active.loadingKey = '';
+    active.loading = false;
+    active.incomplete = false;
+    active.loadError = '';
+    active.loadMessage = '';
+    draw();
+    requestHistory();
+  }
+
+  root.NetWorthHistory = { update: update, refresh: refresh };
 }(typeof window !== 'undefined' ? window : this));

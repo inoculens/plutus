@@ -6246,6 +6246,98 @@ var netWorthHistoryFailures = {};
 var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
 var netWorthHistorySeriesCache = {};
 var netWorthHistoryRateFetches = {};
+var priceDataStartupPromise = Promise.resolve();
+
+function netWorthHistorySeriesCovers(series, start, end) {
+  if (!series || !Array.isArray(series.points) || !series.points.length) return false;
+  var maxStale = (series.kind === 'crypto' ? 4 : 10) * 86400000;
+  var maxLookahead = 36 * 60 * 60 * 1000;
+  var previous = null;
+  for (var i = 0; i < series.points.length; i++) {
+    var point = series.points[i];
+    if (!point || !isFinite(Number(point.at)) || !isFinite(Number(point.price)) || Number(point.price) <= 0) continue;
+    var at = Number(point.at);
+    if (at <= start) {
+      previous = at;
+      continue;
+    }
+    if (at > end) {
+      if (previous === null) return at - start <= maxLookahead && at - end <= maxLookahead;
+      break;
+    }
+    if (previous === null) {
+      if (at - start > maxLookahead) return false;
+    } else if (at - previous > maxStale) {
+      return false;
+    }
+    previous = at;
+  }
+  return previous !== null && end - previous <= maxStale;
+}
+
+function netWorthHistoryCompleteSeries(series) {
+  if (!series.error) return series;
+  return {
+    currency: series.currency,
+    kind: series.kind,
+    points: series.points
+  };
+}
+
+function findReusableNetWorthHistorySeries(symbol, kind, currency, start, end) {
+  var best = null;
+  var bestSpan = Infinity;
+  // Shared series are historical data; coverage and point gaps, not file age,
+  // determine whether they can serve a requested interval.
+  Object.keys(netWorthHistorySeriesCache).forEach(function (key) {
+    var parts = key.split('|');
+    if (parts.length !== 5 || parts[0] !== symbol || parts[1] !== kind || parts[2] !== currency) return;
+    var cached = netWorthHistorySeriesCache[key];
+    if (!cached || !cached.series || !cached.series.points || !cached.series.points.length ||
+        !(Date.now() - cached.at < 5 * 60 * 1000 || cached.shared) ||
+        cached.series.kind !== kind ||
+        !netWorthHistorySeriesCovers(cached.series, start, end)) return;
+    var span = Number(parts[4]) - Number(parts[3]);
+    if (!isFinite(span)) span = Infinity;
+    if (!best || span < bestSpan || (span === bestSpan && cached.at > best.at)) {
+      best = cached;
+      bestSpan = span;
+    }
+  });
+  return best ? {
+    at: best.at,
+    shared: best.shared,
+    series: netWorthHistoryCompleteSeries(best.series)
+  } : null;
+}
+
+function netWorthHistoryCachedSeriesPoints(symbol, kind, currency) {
+  var byTime = {};
+  Object.keys(netWorthHistorySeriesCache).forEach(function (key) {
+    var parts = key.split('|');
+    if (parts.length !== 5 || parts[0] !== symbol || parts[1] !== kind || parts[2] !== currency) return;
+    var cached = netWorthHistorySeriesCache[key];
+    if (!cached || !cached.series || !Array.isArray(cached.series.points) ||
+        !(Date.now() - cached.at < 5 * 60 * 1000 || cached.shared)) return;
+    cached.series.points.forEach(function (point) {
+      if (!point || !isFinite(Number(point.at)) || !isFinite(Number(point.price)) || Number(point.price) <= 0) return;
+      var time = String(Number(point.at));
+      var prior = byTime[time];
+      if (!prior || Number(cached.at) >= Number(prior.cacheAt)) {
+        byTime[time] = {
+          point: {
+            at: Number(point.at),
+            price: Number(point.price),
+            currency: String(point.currency || cached.series.currency || currency).toUpperCase()
+          },
+          cacheAt: Number(cached.at) || 0
+        };
+      }
+    });
+  });
+  return Object.keys(byTime).map(function (time) { return byTime[time].point; })
+    .sort(function (a, b) { return a.at - b.at; });
+}
 
 function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) {
   var sym = String(symbol || '').toUpperCase();
@@ -6262,10 +6354,13 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
   var endDay = new Date(end).toISOString().slice(0, 10);
   var cacheKey = [sym, kind, currency, Math.floor(queryStart / 300), Math.floor(queryEnd / 300)].join('|');
   var cached = netWorthHistorySeriesCache[cacheKey];
-  if (cached && (Date.now() - cached.at < 5 * 60 * 1000 ||
-      (cached.shared && Date.now() - cached.at < PRICE_DATA_SERIES_TTL))) {
-    return Promise.resolve(cached.series);
+  if (cached && (Date.now() - cached.at < 5 * 60 * 1000 || cached.shared) &&
+      netWorthHistorySeriesCovers(cached.series, queryStart * 1000, queryEnd * 1000)) {
+    return Promise.resolve(netWorthHistoryCompleteSeries(cached.series));
   }
+  cached = findReusableNetWorthHistorySeries(sym, kind, currency, queryStart * 1000, queryEnd * 1000);
+  if (cached) return Promise.resolve(cached.series);
+  var cachedPoints = netWorthHistoryCachedSeriesPoints(sym, kind, currency);
 
   function report(provider, completed, total, chunk, phase, error, attempt) {
     if (typeof onProgress !== 'function') return;
@@ -6294,9 +6389,16 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
     return chunks;
   }
   function fetchChunks(chunks, provider, fetchChunk) {
-    var points = [];
+    var points = cachedPoints.slice();
     var errors = [];
     var currencyCode = currency;
+    function chunkCached(chunk) {
+      return netWorthHistorySeriesCovers(
+        { kind: kind, points: points },
+        chunk.start * 1000,
+        chunk.end * 1000
+      );
+    }
     function next(index) {
       if (index >= chunks.length) {
         if (!points.length) {
@@ -6321,6 +6423,10 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
         });
       }
       var chunk = chunks[index];
+      if (chunkCached(chunk)) {
+        report(provider, index + 1, chunks.length, chunk, 'cache');
+        return next(index + 1);
+      }
       report(provider, index, chunks.length, chunk);
       function fetchWithRetry(attempt) {
         return fetchChunk(chunk).then(function (result) {
@@ -6496,6 +6602,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
         }
         return providers[index]().then(function (series) {
           combined = mergeSeries(combined, series);
+          cachedPoints = cachedPoints.concat(series.points || []);
           return nextProvider(index + 1);
         }, function (error) {
           combined = mergeSeries(combined, { currency: currency, points: [], error: String(error.message || error) });
@@ -6558,7 +6665,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
   return request.then(function (series) {
     series.points.sort(function (a, b) { return a.at - b.at; });
     series.kind = kind;
-    if (!series.error) {
+    if (series.points.length) {
       netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
       priceDataCacheRevision++;
       try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break rendering */ }
@@ -6960,10 +7067,11 @@ function updateNetWorthHistory(st, value, main) {
     prepareRetry: function () {
       netWorthHistoryFetchBudget = { signature: signature, remaining: 5000 };
       netWorthHistoryFailures = {};
-      netWorthHistorySeriesCache = {};
     },
     loadHistory: function (range) {
-      return buildNetWorthHistory(st, main, range, range.onProgress);
+      return priceDataStartupPromise.then(function () {
+        return buildNetWorthHistory(st, main, range, range.onProgress);
+      });
     }
   });
 }
@@ -17115,7 +17223,6 @@ var PRICE_DATA_FILENAME = 'price-data.plutus.inoculens.com';
 var PRICE_DATA_SERIES_MAX = 24;
 var PRICE_DATA_SERIES_POINTS_MAX = 25000;
 var PRICE_DATA_SERIES_SINGLE_MAX = 5000;
-var PRICE_DATA_SERIES_TTL = 24 * 60 * 60 * 1000;
 var SYNC_OAUTH_KEY = 'inoculens.oauth.v1';
 var SYNC_DEFAULT_BASENAME = 'plutus.inoculens.com';
 var SYNC_DEFAULT_FILENAME = 'plutus.inoculens.com.enc.json';
@@ -18926,6 +19033,8 @@ function priceDataSyncFlow(opts) {
     });
   }
   var local = localPayload();
+  var localSeriesFingerprint = priceDataFingerprint({ records: {}, series: local.series });
+  var historySeriesChanged = false;
   var uploadRevision = priceDataCacheRevision;
   return priceDataReadRemote(cfg, passphrase).then(function (remote) {
     var merged = {
@@ -18941,6 +19050,7 @@ function priceDataSyncFlow(opts) {
       };
       merged.records = priceDataMergeRecords(merged.records, latest.records);
       merged.series = priceDataMergeSeries(merged.series, latest.series);
+      historySeriesChanged = priceDataFingerprint({ records: {}, series: merged.series }) !== localSeriesFingerprint;
       applyPayload(merged);
       uploadRevision = priceDataCacheRevision;
       if (latest.exists && priceDataFingerprint(merged) === priceDataFingerprint(latest)) {
@@ -18967,6 +19077,10 @@ function priceDataSyncFlow(opts) {
     if (status) status.textContent = 'Price Data synced (' + priceCount + ' historical prices, ' + seriesCount + ' chart series).';
     if (priceDataCacheRevision !== uploadRevision) priceDataScheduleUpload();
     try { render(); } catch (e) { /* repaint must not affect a completed cache sync */ }
+    if (historySeriesChanged && typeof window !== 'undefined' && window.NetWorthHistory &&
+        typeof window.NetWorthHistory.refresh === 'function') {
+      window.NetWorthHistory.refresh();
+    }
     return 'synced';
   }, function (err) {
     priceDataSyncBusy = false;
@@ -20068,8 +20182,15 @@ function syncCheckOnLoad() {
         return outcome;
       }, function () { return 'unreachable'; });
     }
-    check.then(function () {
-      if (syncIsConnected(priceDataDestination(cfg))) priceDataSyncFlow({ automatic: true });
+    priceDataStartupPromise = check.then(function () {
+      if (syncIsConnected(priceDataDestination(cfg))) {
+        return priceDataSyncFlow({ automatic: true });
+      }
+      return 'skipped';
+    }).then(function (outcome) {
+      return outcome;
+    }, function () {
+      return 'failed';
     });
   } catch (e) { /* never break boot */ }
 }

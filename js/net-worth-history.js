@@ -2,7 +2,8 @@
   'use strict';
 
   var STORAGE_KEY = 'plutus.networth-history.v1';
-  var MAX_POINTS = 1000;
+  var HISTORY_DB = 'plutus.networth-history';
+  var HISTORY_STORE = 'scopes';
   var PERIODS = {
     '1D': 24 * 60 * 60 * 1000,
     '1W': 7 * 24 * 60 * 60 * 1000,
@@ -21,6 +22,14 @@
   var pinned = false;
   var lastDrawn = [];
   var storeLoaded = false;
+  var pendingUpdateOptions = null;
+  var storageReady = false;
+  var storageReadyPromise = Promise.resolve();
+  var historyDb = null;
+  var pendingStorageWrites = {};
+  var dirtyScopeKeys = {};
+  var storageWriteTimer = null;
+  var legacyStoragePending = false;
   var rangeDrag = null;
   var rangeRequestTimer = null;
   var historyRetryTimer = null;
@@ -28,53 +37,231 @@
   var requestSequence = 0;
   var lastReportedStatus = '';
 
-  function loadStore() {
-    try {
-      var raw = root.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      var parsed = JSON.parse(raw);
-      if (parsed && parsed.scopes && typeof parsed.scopes === 'object' && !Array.isArray(parsed.scopes)) {
-        store = parsed;
-        Object.keys(store.scopes).forEach(function (key) {
-          var data = store.scopes[key];
-          if (!data || typeof data !== 'object') return;
-          delete data.pendingSignature;
-          delete data.pendingContext;
-          data.updating = false;
-        });
-      } else {
-        storageReadWarning = 'Saved graph history could not be read; new history is being stored separately.';
-        storageMessage = storageReadWarning;
-      }
-    } catch (e) {
-      storageReadWarning = 'Local graph history is unavailable in this browser session.';
-      storageMessage = storageReadWarning;
-    }
+  function storedScope(data, key) {
+    return {
+      scopeKey: key,
+      points: normalizePoints(data.points),
+      period: data.period,
+      from: data.from,
+      to: data.to,
+      rangeStart: data.rangeStart,
+      rangeEnd: data.rangeEnd,
+      signature: data.signature,
+      incomplete: !!data.incomplete
+    };
   }
 
-  function saveStore() {
+  function historyDatabase() {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var timeout = root.setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      }, 5000);
+      function finish(db) {
+        if (settled) {
+          if (db) db.close();
+          return;
+        }
+        settled = true;
+        root.clearTimeout(timeout);
+        resolve(db);
+      }
+      try {
+        if (!root.indexedDB) { finish(null); return; }
+        var request = root.indexedDB.open(HISTORY_DB, 1);
+        request.onupgradeneeded = function () {
+          if (!request.result.objectStoreNames.contains(HISTORY_STORE)) {
+            request.result.createObjectStore(HISTORY_STORE);
+          }
+        };
+        request.onsuccess = function () {
+          var db = request.result;
+          db.onversionchange = function () { db.close(); };
+          finish(db);
+        };
+        request.onerror = function () { finish(null); };
+        request.onblocked = function () { finish(null); };
+      } catch (e) {
+        finish(null);
+      }
+    });
+  }
+
+  function replaceScope(target, source) {
+    Object.keys(target).forEach(function (key) { delete target[key]; });
+    Object.keys(source).forEach(function (key) { target[key] = source[key]; });
+  }
+
+  function saveLegacyStore() {
     try {
       var saved = { scopes: {} };
       Object.keys(store.scopes).forEach(function (key) {
-        var data = store.scopes[key];
-        saved.scopes[key] = {
-          points: data.points,
-          period: data.period,
-          from: data.from,
-          to: data.to,
-          rangeStart: data.rangeStart,
-          rangeEnd: data.rangeEnd,
-          signature: data.signature,
-          incomplete: !!data.incomplete
-        };
+        saved.scopes[key] = storedScope(store.scopes[key], key);
+        delete saved.scopes[key].scopeKey;
       });
       root.localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
       storageMessage = storageReadWarning;
       return true;
     } catch (e) {
-      storageMessage = 'Could not save graph history locally. Check available browser storage.';
+      storageMessage = 'Could not save chart history locally. Check available browser storage.';
       return false;
     }
+  }
+
+  function flushStorageWrites() {
+    if (!historyDb || !storageReady) return;
+    var keys = Object.keys(pendingStorageWrites);
+    if (!keys.length) return;
+    var batch = {};
+    keys.forEach(function (key) { batch[key] = pendingStorageWrites[key]; });
+    try {
+      var transaction = historyDb.transaction(HISTORY_STORE, 'readwrite');
+      var objectStore = transaction.objectStore(HISTORY_STORE);
+      keys.forEach(function (key) { objectStore.put(batch[key], key); });
+      transaction.oncomplete = function () {
+        keys.forEach(function (key) {
+          if (pendingStorageWrites[key] === batch[key]) delete pendingStorageWrites[key];
+        });
+        if (legacyStoragePending && !Object.keys(pendingStorageWrites).length) {
+          try { root.localStorage.removeItem(STORAGE_KEY); } catch (e) { /* IDB is authoritative */ }
+          legacyStoragePending = false;
+        }
+        storageMessage = storageReadWarning;
+        if (active) draw();
+        if (Object.keys(pendingStorageWrites).length) scheduleStorageWrite();
+      };
+      transaction.onerror = transaction.onabort = function () {
+        storageMessage = 'Could not save chart history in IndexedDB. Check available browser storage.';
+        if (active) draw();
+      };
+    } catch (e) {
+      storageMessage = 'Could not save chart history in IndexedDB. Check available browser storage.';
+      if (active) draw();
+    }
+  }
+
+  function scheduleStorageWrite() {
+    if (storageWriteTimer !== null) root.clearTimeout(storageWriteTimer);
+    storageWriteTimer = root.setTimeout(function () {
+      storageWriteTimer = null;
+      flushStorageWrites();
+    }, 150);
+  }
+
+  function loadStore() {
+    if (storeLoaded) return storageReadyPromise;
+    storeLoaded = true;
+    try {
+      var raw = root.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.scopes && typeof parsed.scopes === 'object' && !Array.isArray(parsed.scopes)) {
+          store = parsed;
+          legacyStoragePending = true;
+          Object.keys(store.scopes).forEach(function (key) {
+            var data = store.scopes[key];
+            if (!data || typeof data !== 'object') {
+              delete store.scopes[key];
+              return;
+            }
+            data.points = normalizePoints(data.points);
+            delete data.pendingSignature;
+            delete data.pendingContext;
+            data.updating = false;
+          });
+        } else {
+          storageReadWarning = 'Saved graph history could not be read; new history is being stored separately.';
+          storageMessage = storageReadWarning;
+        }
+      }
+    } catch (e) {
+      storageReadWarning = 'Local graph history is unavailable in this browser session.';
+      storageMessage = storageReadWarning;
+    }
+    storageReadyPromise = historyDatabase().then(function (db) {
+      historyDb = db;
+      if (!db) {
+        storageReady = true;
+        storageReadWarning = storageReadWarning ||
+          'IndexedDB is unavailable; chart history is using limited local browser storage.';
+        storageMessage = storageReadWarning;
+        return false;
+      }
+      return new Promise(function (resolve) {
+        try {
+          var request = db.transaction(HISTORY_STORE, 'readonly').objectStore(HISTORY_STORE).getAll();
+          request.onsuccess = function () {
+            var records = Array.isArray(request.result) ? request.result : [];
+            var storedKeys = {};
+            storageReadWarning = '';
+            storageMessage = '';
+            records.forEach(function (record) {
+              if (!record || typeof record.scopeKey !== 'string' || !record.scopeKey) return;
+              storedKeys[record.scopeKey] = true;
+              if (dirtyScopeKeys[record.scopeKey]) return;
+              var current = store.scopes[record.scopeKey];
+              var normalized = storedScope(record, record.scopeKey);
+              if (current) replaceScope(current, normalized);
+              else store.scopes[record.scopeKey] = normalized;
+            });
+            if (legacyStoragePending) {
+              Object.keys(store.scopes).forEach(function (key) {
+                if (storedKeys[key] || dirtyScopeKeys[key]) return;
+                pendingStorageWrites[key] = storedScope(store.scopes[key], key);
+              });
+            }
+            storageReady = true;
+            if (legacyStoragePending && !Object.keys(pendingStorageWrites).length) {
+              try { root.localStorage.removeItem(STORAGE_KEY); } catch (e) { /* IDB is authoritative */ }
+              legacyStoragePending = false;
+            }
+            if (Object.keys(pendingStorageWrites).length) scheduleStorageWrite();
+            resolve(true);
+          };
+          request.onerror = function () {
+            storageReadWarning = 'IndexedDB chart history could not be read; saved values may need to be rebuilt.';
+            storageMessage = storageReadWarning;
+            try { db.close(); } catch (e) { /* ignore */ }
+            historyDb = null;
+            storageReady = true;
+            resolve(false);
+          };
+        } catch (e) {
+          storageReadWarning = 'IndexedDB chart history could not be read; saved values may need to be rebuilt.';
+          storageMessage = storageReadWarning;
+          try { db.close(); } catch (e2) { /* ignore */ }
+          historyDb = null;
+          storageReady = true;
+          resolve(false);
+        }
+      });
+    }).then(function (loaded) {
+      if (!loaded && !historyDb) saveLegacyStore();
+      if (pendingUpdateOptions) {
+        var options = pendingUpdateOptions;
+        pendingUpdateOptions = null;
+        update(options);
+      }
+      return loaded;
+    });
+    return storageReadyPromise;
+  }
+
+  function saveStore(data) {
+    data = data || active;
+    if (!data) return true;
+    var key = String(data.scopeKey || (active && active.scopeKey) || 'default');
+    data.scopeKey = key;
+    dirtyScopeKeys[key] = true;
+    pendingStorageWrites[key] = storedScope(data, key);
+    if (!storageReady) return true;
+    if (historyDb) {
+      scheduleStorageWrite();
+      return true;
+    }
+    return saveLegacyStore();
   }
 
   function byId(id) {
@@ -145,21 +332,7 @@
   }
 
   function compactPoints(points) {
-    var sorted = normalizePoints(points);
-    var latest = sorted.length ? sorted[sorted.length - 1].at : Date.now();
-    var recentCutoff = latest - 24 * 60 * 60 * 1000;
-    var recent = sorted.filter(function (point) { return point.at >= recentCutoff; });
-    var older = sorted.filter(function (point) { return point.at < recentCutoff; });
-    var budget = Math.max(0, MAX_POINTS - recent.length);
-    if (older.length > budget && budget > 0) {
-      var reduced = [];
-      var stride = older.length / budget;
-      for (var i = 0; i < budget; i++) reduced.push(older[Math.floor(i * stride)]);
-      older = reduced;
-    } else if (budget === 0) {
-      older = [];
-    }
-    return older.concat(recent);
+    return normalizePoints(points);
   }
 
   function scopeData(scope) {
@@ -168,6 +341,7 @@
       store.scopes[key] = { points: [], period: '1M', from: '', to: '', signature: '' };
     }
     var data = store.scopes[key];
+    data.scopeKey = key;
     data.points = normalizePoints(data.points);
     if (!PERIODS[data.period] && data.period !== 'ALL' && data.period !== 'CUSTOM') data.period = '1M';
     return data;
@@ -187,7 +361,7 @@
         active.rangeEnd = null;
         active.from = '';
         active.to = '';
-        saveStore();
+        saveStore(active);
         draw();
         requestHistory();
       });
@@ -203,7 +377,7 @@
       active.rangeEnd = null;
       active.from = fromInput.value;
       if (active.to && active.from > active.to) active.to = active.from;
-      saveStore();
+      saveStore(active);
       draw();
       requestHistory();
     });
@@ -215,7 +389,7 @@
       active.rangeEnd = null;
       active.to = toInput.value;
       if (active.from && active.to < active.from) active.from = active.to;
-      saveStore();
+      saveStore(active);
       draw();
       requestHistory();
     });
@@ -386,7 +560,7 @@
     active.from = dateKey(active.rangeStart);
     active.to = dateKey(active.rangeEnd);
     active.loadedKey = '';
-    saveStore();
+    saveStore(active);
     draw();
     if (rangeRequestTimer !== null) root.clearTimeout(rangeRequestTimer);
     rangeRequestTimer = root.setTimeout(function () {
@@ -435,18 +609,22 @@
       if (active === data && data.loading) renderLoadDetails(data);
     }, 1000);
     Promise.resolve().then(function () {
-      return data.loadHistory({
-        period: data.period,
-        start: range.start,
-        end: range.end,
-        onProgress: function (progress) {
-          if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
-          updateLoadProgress(data, progress);
-          draw();
-        }
+      return storageReadyPromise.then(function () {
+        if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return null;
+        return data.loadHistory({
+          period: data.period,
+          start: range.start,
+          end: range.end,
+          onProgress: function (progress) {
+            if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
+            updateLoadProgress(data, progress);
+            draw();
+          }
+        });
       });
     }).then(function (result) {
       if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
+      if (!result) return;
       if (!result || !Array.isArray(result.points)) throw new Error('History provider returned no points.');
       var byTime = {};
       result.points.forEach(function (point) { byTime[point.at] = pointCopy(point); });
@@ -475,7 +653,7 @@
       } else if (data.retryCounts) {
         delete data.retryCounts[key];
       }
-      saveStore();
+      saveStore(data);
       draw();
     }).catch(function (error) {
       if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
@@ -995,13 +1173,16 @@
     var start = currentRange().start;
     var end = Math.max(start + 1, currentRange().end);
     var target = start + (x - 82) / (948 - 82) * (end - start);
-    var nearest = lastDrawn[0];
-    var distance = Math.abs(nearest.at - target);
-    lastDrawn.forEach(function (point) {
-      var next = Math.abs(point.at - target);
-      if (next < distance) { nearest = point; distance = next; }
-    });
-    return nearest;
+    var low = 0;
+    var high = lastDrawn.length - 1;
+    while (low < high) {
+      var middle = Math.floor((low + high) / 2);
+      if (lastDrawn[middle].at < target) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0 && Math.abs(lastDrawn[low - 1].at - target) <
+        Math.abs(lastDrawn[low].at - target)) low--;
+    return lastDrawn[low];
   }
 
   function onPlotMove(event) {
@@ -1049,7 +1230,7 @@
         data.pendingContext = null;
         data.updating = false;
         data.incomplete = incomplete;
-        saveStore();
+        saveStore(data);
         draw();
         return;
       }
@@ -1074,7 +1255,7 @@
           incomplete = true;
         }
         if (result && result.complete === false) incomplete = true;
-        if (index % 10 === 0) saveStore();
+        if (index % 10 === 0) saveStore(data);
         root.setTimeout(next, 0);
       }, function () {
         incomplete = true;
@@ -1104,7 +1285,10 @@
     if (!root.document || !options) return;
     if (!storeLoaded) {
       loadStore();
-      storeLoaded = true;
+    }
+    if (!storageReady) {
+      pendingUpdateOptions = options;
+      return;
     }
     buildUi();
     var panel = byId('networth-history');
@@ -1137,7 +1321,7 @@
     active.updating = !!active.updating;
     active.incomplete = !!active.incomplete;
     record(active, options.value, options.prices);
-    saveStore();
+    saveStore(active);
     panel.hidden = false;
     draw();
     requestHistory();

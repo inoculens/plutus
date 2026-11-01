@@ -6250,7 +6250,7 @@ var priceDataStartupPromise = Promise.resolve();
 
 function netWorthHistorySeriesCovers(series, start, end) {
   if (!series || !Array.isArray(series.points) || !series.points.length) return false;
-  var maxStale = (series.kind === 'crypto' ? 4 : 10) * 86400000;
+  var maxStale = (series.kind === 'crypto' ? 1.5 : 5) * 86400000;
   var maxLookahead = 36 * 60 * 60 * 1000;
   var previous = null;
   for (var i = 0; i < series.points.length; i++) {
@@ -6569,10 +6569,11 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
       if (!series || !series.points.length) return false;
       series.points.sort(function (a, b) { return a.at - b.at; });
       var tolerance = 48 * 60 * 60 * 1000;
+      var maxGap = 36 * 60 * 60 * 1000;
       if (series.points[0].at > start + tolerance ||
           series.points[series.points.length - 1].at < end - tolerance) return false;
       for (var i = 1; i < series.points.length; i++) {
-        if (series.points[i].at - series.points[i - 1].at > 4 * 86400000) return false;
+        if (series.points[i].at - series.points[i - 1].at > maxGap) return false;
       }
       return true;
     }
@@ -6697,7 +6698,7 @@ function netWorthHistorySeriesPrice(series, at, main) {
   } else if (!picked) {
     return Promise.resolve(null);
   } else {
-    var maxStale = series.kind === 'crypto' ? 4 * 86400000 : 10 * 86400000;
+    var maxStale = (series.kind === 'crypto' ? 1.5 : 5) * 86400000;
     if (at - picked.at > maxStale) return Promise.resolve(null);
   }
   var native = Number(picked.price);
@@ -6719,18 +6720,24 @@ function buildNetWorthHistory(st, main, range, onProgress) {
   var start = Math.max(range.start, earliest);
   var end = Math.min(range.end, Date.now());
   if (!(end > start)) end = start + 1;
-  var span = end - start;
-  var count = 30;
-  if (range.period === '1D') count = 24;
-  else if (range.period === '1W') count = 42;
-  else if (range.period === '1M') count = 31;
-  else if (range.period === '3M' || range.period === '6M') count = 39;
-  else if (range.period === '1Y') count = 52;
-  else if (range.period === '5Y') count = 60;
-  else count = Math.max(2, Math.min(60, Math.ceil(span / (30 * 86400000))));
   var times = [];
-  for (var i = 0; i < count; i++) times.push(start + span * i / (count - 1));
-  if (times[times.length - 1] < end) times.push(end);
+  if (range.period === '1D') {
+    var daySpan = end - start;
+    for (var dayIndex = 0; dayIndex < 24; dayIndex++) {
+      times.push(start + daySpan * dayIndex / 23);
+    }
+  } else {
+    var sampleDay = new Date(start);
+    sampleDay.setHours(0, 0, 0, 0);
+    while (sampleDay.getTime() <= end) {
+      var close = new Date(sampleDay.getTime());
+      close.setHours(23, 59, 59, 999);
+      if (close.getTime() >= start && close.getTime() <= end) times.push(close.getTime());
+      sampleDay.setDate(sampleDay.getDate() + 1);
+      sampleDay.setHours(0, 0, 0, 0);
+    }
+    if (!times.length || times[times.length - 1] < end) times.push(end);
+  }
 
   var kinds = netWorthHistoryKinds(st);
   var symbols = {};
@@ -6759,7 +6766,7 @@ function buildNetWorthHistory(st, main, range, onProgress) {
   }
   netWorthHistoryFetchBudget.remaining = Math.max(
     netWorthHistoryFetchBudget.remaining,
-    Math.min(5000, times.length * Math.max(1, names.length + Object.keys(historyCashIds).length) + 100)
+    Math.min(25000, times.length * Math.max(1, names.length + Object.keys(historyCashIds).length) + 100)
   );
   var seriesBySymbol = {};
   var nextSymbol = 0;
@@ -6891,9 +6898,33 @@ function fetchNetWorthHistoryPrice(symbol, day, main, kind) {
 }
 
 function fetchNetWorthHistoryRate(day, from, to) {
+  var source = String(from || '').toUpperCase();
+  var target = String(to || '').toUpperCase();
   var cached = getCachedRate(day, from, to);
-  if (cached && isFinite(Number(cached.rate)) && Number(cached.rate) > 0) return Promise.resolve(cached);
-  var key = [day, String(from).toUpperCase(), String(to).toUpperCase()].join('|');
+  if (cached && isFinite(Number(cached.rate)) && Number(cached.rate) > 0) {
+    netWorthHistorySaveRate(day, source, target, Number(cached.rate));
+    return Promise.resolve(cached);
+  }
+  var shared = netWorthHistorySharedRate(day, source, target);
+  if (shared) {
+    cacheRate(day, source, target, shared.rate, 'Price Data');
+    return Promise.resolve(shared);
+  }
+  for (var lookback = 1; lookback <= FX_MAX_LOOKBACK_DAYS; lookback++) {
+    var previousDay = fxShiftDate(day, -lookback);
+    var previousRate = getCachedRate(previousDay, source, target) ||
+      netWorthHistorySharedRate(previousDay, source, target);
+    if (!previousRate || !isFinite(Number(previousRate.rate)) || Number(previousRate.rate) <= 0) continue;
+    cacheRate(day, source, target, Number(previousRate.rate), previousRate.source);
+    netWorthHistorySaveRate(day, source, target, Number(previousRate.rate));
+    saveFxCache();
+    return Promise.resolve({
+      rate: Number(previousRate.rate),
+      source: previousRate.source,
+      interpolated: true
+    });
+  }
+  var key = [day, source, target].join('|');
   if (netWorthHistoryRateFetches[key]) return netWorthHistoryRateFetches[key];
   if (netWorthHistoryFetchBudget.remaining <= 0) return Promise.resolve(null);
   netWorthHistoryFetchBudget.remaining--;
@@ -6901,6 +6932,7 @@ function fetchNetWorthHistoryRate(day, from, to) {
     delete netWorthHistoryRateFetches[key];
     if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) {
       cacheRate(day, from, to, Number(rate.rate), rate.source);
+      netWorthHistorySaveRate(day, source, target, Number(rate.rate));
       saveFxCache();
       return rate;
     }
@@ -6910,6 +6942,63 @@ function fetchNetWorthHistoryRate(day, from, to) {
     return null;
   });
   return netWorthHistoryRateFetches[key];
+}
+
+function netWorthHistoryRateSeriesKey(from, to) {
+  return ['FX-' + from + '-' + to, 'commodity', to, '0', '4102444800'].join('|');
+}
+
+function netWorthHistorySharedRate(day, from, to) {
+  var dayAt = Date.parse(day + 'T00:00:00Z');
+  if (!isFinite(dayAt)) return null;
+  var entry = netWorthHistorySeriesCache[netWorthHistoryRateSeriesKey(from, to)];
+  if (!entry || !entry.series || !Array.isArray(entry.series.points)) return null;
+  var points = entry.series.points;
+  var low = 0;
+  var high = points.length - 1;
+  while (low <= high) {
+    var middle = Math.floor((low + high) / 2);
+    var at = Number(points[middle].at);
+    if (at < dayAt) low = middle + 1;
+    else if (at > dayAt) high = middle - 1;
+    else {
+      var rate = Number(points[middle].price);
+      return isFinite(rate) && rate > 0 ? { rate: rate, source: 'Price Data' } : null;
+    }
+  }
+  return null;
+}
+
+function netWorthHistorySaveRate(day, from, to, rate) {
+  if (!/^[A-Z]{2,10}$/.test(from) || !/^[A-Z]{2,10}$/.test(to) ||
+      from === to || !isValidDateStr(day) || !isFinite(Number(rate)) || Number(rate) <= 0) return;
+  var at = Date.parse(day + 'T00:00:00Z');
+  var key = netWorthHistoryRateSeriesKey(from, to);
+  var cached = netWorthHistorySeriesCache[key];
+  var points = cached && cached.series && Array.isArray(cached.series.points)
+    ? cached.series.points : [];
+  var low = 0;
+  var high = points.length;
+  while (low < high) {
+    var middle = Math.floor((low + high) / 2);
+    if (Number(points[middle].at) < at) low = middle + 1;
+    else high = middle;
+  }
+  var changed = true;
+  if (low < points.length && Number(points[low].at) === at) {
+    if (Number(points[low].price) === Number(rate)) changed = false;
+    else points[low] = { at: at, price: Number(rate), currency: to };
+  } else {
+    points.splice(low, 0, { at: at, price: Number(rate), currency: to });
+  }
+  if (!changed) return;
+  netWorthHistorySeriesCache[key] = {
+    at: Date.now(),
+    series: { currency: to, kind: 'commodity', points: points },
+    shared: !!(cached && cached.shared)
+  };
+  priceDataCacheRevision++;
+  try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break valuation */ }
 }
 
 function netWorthHistoryPointValue(point, st, main, allowFetch) {
@@ -7065,7 +7154,7 @@ function updateNetWorthHistory(st, value, main) {
       );
     },
     prepareRetry: function () {
-      netWorthHistoryFetchBudget = { signature: signature, remaining: 5000 };
+      netWorthHistoryFetchBudget = { signature: signature, remaining: 25000 };
       netWorthHistoryFailures = {};
     },
     loadHistory: function (range) {
@@ -17220,9 +17309,9 @@ var SYNC_STORAGE_KEY = 'inoculens.sync.v1';
 var PRICE_DATA_STORAGE_KEY = 'inoculens.price-data-sync.v1';
 var PRICE_DATA_APP = 'plutus.price-data.inoculens.com';
 var PRICE_DATA_FILENAME = 'price-data.plutus.inoculens.com';
-var PRICE_DATA_SERIES_MAX = 24;
-var PRICE_DATA_SERIES_POINTS_MAX = 25000;
-var PRICE_DATA_SERIES_SINGLE_MAX = 5000;
+var PRICE_DATA_SERIES_MAX = 100;
+var PRICE_DATA_SERIES_POINTS_MAX = 250000;
+var PRICE_DATA_SERIES_SINGLE_MAX = 20000;
 var SYNC_OAUTH_KEY = 'inoculens.oauth.v1';
 var SYNC_DEFAULT_BASENAME = 'plutus.inoculens.com';
 var SYNC_DEFAULT_FILENAME = 'plutus.inoculens.com.enc.json';

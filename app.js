@@ -19509,9 +19509,13 @@ function syncCurrentHash(st) {
 // icon share this so they can never disagree.
 function syncIsConnected(cfg) {
   if (!cfg) return false;
-  if (cfg.provider === 'webdav') return !!(cfg.url && (cfg.password || syncMemSecrets.password));
+  if (cfg.provider === 'webdav') {
+    var password = cfg.priceDataAuth ? syncMemSecrets.pricePassword : syncMemSecrets.password;
+    return !!(cfg.url && (cfg.password || password));
+  }
   if (cfg.provider === 'megas3') {
-    return !!(cfg.endpoint && cfg.bucket && cfg.accessKey && (cfg.secretKey || syncMemSecrets.secretKey));
+    var secretKey = cfg.priceDataAuth ? syncMemSecrets.priceSecretKey : syncMemSecrets.secretKey;
+    return !!(cfg.endpoint && cfg.bucket && cfg.accessKey && (cfg.secretKey || secretKey));
   }
   return !!(cfg.tokens && cfg.tokens.access);
 }
@@ -20217,14 +20221,12 @@ function syncAnnouncePull() {
   } catch (e3) { /* ignore */ }
 }
 
-// --- Background watcher: an open device follows the drive without a reload ---
+// --- Background watchers: open devices follow both drive files without reloads ---
 // The page-load check only runs once, so a second device left open would sit
-// on stale numbers forever. Every SYNC_WATCH_MS this asks the provider for a
-// cheap change stamp (ETag / rev / modifiedTime) and only pays for a full
-// download + decrypt when that stamp moved. Pull-only and silent: a remote
-// copy is adopted only when this device has no unsynced work; local work is
-// never overwritten and conflicts just raise the stale cloud. Paused while a
-// dialog, confirm or text field owns the screen so it can never yank the UI.
+// on stale data forever. Every SYNC_WATCH_MS the provider is asked for a
+// cheap change stamp (ETag / rev / modifiedTime); Price Data is downloaded
+// and merged only when its own destination stamp changes. Paused while a
+// dialog, confirm or text field owns the screen.
 var SYNC_WATCH_MS = 10000;
 var SYNC_WATCH_UNKNOWN_EVERY = 6; // providers with no cheap stamp: full check ~1/min
 var syncWatchTimer = null;
@@ -20234,6 +20236,11 @@ var syncWatchSeen = false;
 var syncWatchUnknown = 0;
 var syncWatchLoc = '';
 var syncWatchQuietNext = false;
+var priceDataWatchBusy = false;
+var priceDataWatchStamp = '';
+var priceDataWatchSeen = false;
+var priceDataWatchUnknown = 0;
+var priceDataWatchLoc = '';
 
 function syncWatchDelay(ms) {
   if (ms !== undefined && isFinite(Number(ms)) && Number(ms) > 0) {
@@ -20286,6 +20293,63 @@ function syncWatchFlush() {
     syncAfterCheck = '';
     try { syncPushFlow({ auto: auto }); } catch (e) { /* ignore */ }
   }
+}
+
+function priceDataWatchTick() {
+  if (syncBusy || syncChecking || priceDataSyncBusy || priceDataWatchBusy) return Promise.resolve('busy');
+  try {
+    if (typeof document === 'undefined' || document.hidden) return Promise.resolve('hidden');
+    if (syncWatchDialogBusy() || syncWatchInputBusy()) return Promise.resolve('ui-busy');
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve('offline');
+    var rd = syncReadForm();
+    var cfg = priceDataDestination(rd.cfg);
+    var pass = rd.passphrase;
+    if (!syncIsConnected(cfg) || !pass || !syncCryptoAvailable()) return Promise.resolve('skipped');
+    var locKey = syncLocationKey(cfg);
+    if (locKey !== priceDataWatchLoc) {
+      priceDataWatchLoc = locKey;
+      priceDataWatchStamp = '';
+      priceDataWatchSeen = false;
+      priceDataWatchUnknown = 0;
+    }
+    priceDataWatchBusy = true;
+    return syncRemoteStamp(cfg).then(function (stamp) {
+      stamp = stamp || '';
+      if (stamp && priceDataWatchSeen && stamp === priceDataWatchStamp) return 'same';
+      if (!stamp) {
+        priceDataWatchUnknown++;
+        if (priceDataWatchSeen && (priceDataWatchUnknown % SYNC_WATCH_UNKNOWN_EVERY) !== 0) return 'throttled';
+      } else {
+        priceDataWatchUnknown = 0;
+      }
+      priceDataWatchStamp = stamp;
+      priceDataWatchSeen = true;
+      return priceDataSyncFlow({ automatic: true }).then(function (outcome) {
+        if (outcome === 'failed' || outcome === 'skipped' || outcome === 'busy') priceDataWatchSeen = false;
+        return outcome;
+      });
+    }).then(function (outcome) {
+      priceDataWatchBusy = false;
+      return outcome;
+    }, function () {
+      priceDataWatchBusy = false;
+      priceDataWatchSeen = false;
+      return 'unreachable';
+    });
+  } catch (e) {
+    priceDataWatchBusy = false;
+    return Promise.resolve('unavailable');
+  }
+}
+
+function syncWatchTickAll() {
+  return Promise.resolve().then(function () {
+    return syncWatchTick();
+  }).then(function () {
+    return priceDataWatchTick();
+  }, function () {
+    return priceDataWatchTick();
+  });
 }
 
 function syncWatchTick() {
@@ -20368,19 +20432,19 @@ function syncWatchStart() {
       syncWatchWired = true;
       try {
         document.addEventListener('visibilitychange', function () {
-          if (!document.hidden) { try { syncWatchTick(); } catch (e) { /* ignore */ } }
+          if (!document.hidden) { try { syncWatchTickAll(); } catch (e) { /* ignore */ } }
         });
       } catch (e) { /* ignore */ }
       try {
-        window.addEventListener('focus', function () { try { syncWatchTick(); } catch (e) { /* ignore */ } });
+        window.addEventListener('focus', function () { try { syncWatchTickAll(); } catch (e) { /* ignore */ } });
       } catch (e) { /* ignore */ }
       try {
-        window.addEventListener('pageshow', function () { try { syncWatchTick(); } catch (e) { /* ignore */ } });
+        window.addEventListener('pageshow', function () { try { syncWatchTickAll(); } catch (e) { /* ignore */ } });
       } catch (e) { /* ignore */ }
     }
     if (syncWatchTimer) return true;
     syncWatchTimer = setInterval(function () {
-      try { syncWatchTick(); } catch (e) { /* a tick never breaks the page */ }
+      try { syncWatchTickAll(); } catch (e) { /* a tick never breaks the page */ }
     }, SYNC_WATCH_MS);
     return true;
   } catch (e) {

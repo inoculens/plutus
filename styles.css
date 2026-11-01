@@ -3537,24 +3537,6 @@ label.sync-check input {
 .history-single-point { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .history-crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .history-marker { fill: var(--surface); stroke: var(--gold); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
-.history-tooltip-slot { position: relative; width: min(22rem, 70vw); height: 1.9rem; }
-.history-tooltip {
-  position: absolute;
-  top: 0.2rem;
-  right: 0;
-  max-width: min(22rem, calc(100vw - 3rem));
-  padding: 0.35rem 0.55rem;
-  overflow: hidden;
-  color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 0.72rem;
-  font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-}
 .history-empty { min-height: 1.2em; margin: -0.6rem 0 0.35rem; color: var(--muted); font-size: 0.78rem; text-align: center; }
 .history-navigator-wrap { position: relative; margin: 0.1rem 0 0.8rem; }
 .history-navigator { display: block; width: 100%; height: 2.4rem; overflow: visible; }
@@ -3625,7 +3607,6 @@ label.sync-check input {
 @media (max-width: 560px) {
   .history-panel { padding: 0.9rem 0.75rem 0.7rem; }
   .history-kicker { white-space: nowrap; }
-  .history-tooltip-slot { width: 0; }
   .history-plot { min-height: 8.5rem; }
   .history-axis-label { font-size: 10px; }
   .history-controls { display: block; }

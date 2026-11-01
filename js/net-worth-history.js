@@ -302,17 +302,14 @@
     if (plot) {
       plot.addEventListener('pointermove', onPlotMove);
       plot.addEventListener('pointerdown', onPlotDown);
-      plot.addEventListener('pointerleave', function () {
-        if (!pinned) {
-          hoverPoint = null;
-          draw();
-        }
+      plot.addEventListener('pointerleave', function (event) {
+        if (event.pointerType === 'touch' || !pinned) clearPlotHover();
       });
+      plot.addEventListener('pointerup', clearTouchHover);
+      plot.addEventListener('pointercancel', clearTouchHover);
       plot.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') {
-          pinned = false;
-          hoverPoint = null;
-          draw();
+          clearPlotHover();
         }
       });
     }
@@ -963,17 +960,10 @@
         changeNode.classList.toggle('gain', change >= 0);
         changeNode.classList.toggle('loss', change < 0);
       }
-      var tooltip = byId('history-tooltip');
-      if (tooltip) {
-        tooltip.hidden = !hoverPoint;
-        tooltip.textContent = hoverPoint ? (money(hoverPoint.value, active.currency) + ' · ' + displayDate(hoverPoint.at, false)) : '';
-      }
     } else {
       setText('history-value', '—');
       setText('history-date', '');
       setText('history-change', '');
-      var noTooltip = byId('history-tooltip');
-      if (noTooltip) noTooltip.hidden = true;
     }
 
     var note = byId('history-note');
@@ -1026,6 +1016,16 @@
     if (!point) return;
     pinned = true;
     hoverPoint = point;
+    draw();
+  }
+
+  function clearTouchHover(event) {
+    if (event.pointerType === 'touch') clearPlotHover();
+  }
+
+  function clearPlotHover() {
+    pinned = false;
+    hoverPoint = null;
     draw();
   }
 

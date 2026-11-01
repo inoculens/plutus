@@ -1160,7 +1160,7 @@
       else if (active.incomplete) note.textContent = active.loadMessage ||
         'Some assets have no historical prices for this interval. Their values are shown as gaps.';
       else if (active.points.length === 1) note.textContent = 'Only one value is available for this interval.';
-      else note.textContent = 'Portfolio history is rebuilt from historical market prices and saved on this device.';
+      else note.textContent = 'Portfolio history is saved on this device.';
     }
   }
 

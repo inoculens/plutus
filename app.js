@@ -6292,6 +6292,8 @@ function netWorthHistoryStart(st, included) {
 var netWorthHistoryFetches = {};
 var netWorthHistoryFailures = {};
 var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
+var NET_WORTH_LOADING_BANNER = 'Loading historical chart prices — the graph may be incomplete.';
+var netWorthHistoryLoadingBannerShown = false;
 var netWorthHistorySeriesCache = {};
 var netWorthHistoryRateFetches = {};
 var priceDataStartupPromise = Promise.resolve();
@@ -7189,11 +7191,24 @@ function updateNetWorthHistory(st, value, main) {
     signature: signature,
     historyStart: historyStart,
     onStatus: function (status) {
-      if (!status || (status.state !== 'loading' && status.state !== 'error' && status.state !== 'incomplete')) return;
+      if (!status) return;
+      if (status.state === 'complete') {
+        // The load that raised the "may be incomplete" notice finished
+        // cleanly: retire it, but never a different message.
+        if (netWorthHistoryLoadingBannerShown) {
+          netWorthHistoryLoadingBannerShown = false;
+          var shown = document.getElementById('banner-text');
+          var bannerEl = document.getElementById('banner');
+          if (shown && bannerEl && !bannerEl.hidden && shown.textContent === NET_WORTH_LOADING_BANNER) dismissBanner();
+        }
+        return;
+      }
+      if (status.state !== 'loading' && status.state !== 'error' && status.state !== 'incomplete') return;
+      netWorthHistoryLoadingBannerShown = (status.state === 'loading');
       var message = String(status.message || 'Some historical prices are unavailable.');
       showBanner(
         status.state === 'loading'
-          ? 'Loading historical chart prices — the graph may be incomplete.'
+          ? NET_WORTH_LOADING_BANNER
           : (status.state === 'error'
             ? 'Historical chart data could not be loaded.'
             : 'Historical chart is incomplete — some values are missing.'),

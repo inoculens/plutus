@@ -602,7 +602,10 @@
     var details = byId('history-load-details');
     if (infoButton) infoButton.setAttribute('aria-expanded', 'false');
     if (details) details.hidden = true;
-    reportStatus(data, 'loading', key, 'Loading historical market prices for the selected interval.');
+    // No banner yet: a load served from saved prices is instant and the
+    // chart is already complete. 'loading' is reported only once a real
+    // download/retry starts (see updateLoadProgress).
+    data.loadingReported = false;
     draw();
     if (historyProgressTimer !== null) root.clearInterval(historyProgressTimer);
     historyProgressTimer = root.setInterval(function () {
@@ -650,9 +653,12 @@
       if (data.incomplete) {
         reportStatus(data, 'incomplete', key, data.loadMessage);
         scheduleHistoryRetry(data, key);
-      } else if (data.retryCounts) {
-        delete data.retryCounts[key];
+      } else {
+        if (data.retryCounts) delete data.retryCounts[key];
+        // Finished cleanly: retire the "loading" banner if one was shown.
+        if (data.loadingReported) reportStatus(data, 'complete', key, '');
       }
+      data.loadingReported = false;
       saveStore(data);
       draw();
     }).catch(function (error) {
@@ -676,6 +682,11 @@
     var progress = data.progress;
     progress.phase = event.phase || progress.phase;
     progress.current = event;
+    if (data.loading && !data.loadingReported &&
+        (event.phase === 'download' || event.phase === 'retry' || event.phase === 'download-error')) {
+      data.loadingReported = true;
+      reportStatus(data, 'loading', data.loadingKey, 'Loading historical market prices for the selected interval.');
+    }
     if (Array.isArray(event.symbols)) {
       progress.symbols = event.symbols.slice();
       progress.totalAssets = Number(event.totalAssets) || event.symbols.length;

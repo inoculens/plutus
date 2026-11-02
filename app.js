@@ -14459,7 +14459,7 @@ function addSourceRow(data) {
     '</div>' +
     '<button type="button" class="src-remove quiet">Remove</button>';
   list.appendChild(row);
-  function changed() { try { syncSourceRowMode(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
+  function changed() { try { syncSourceRowMode(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
   var acct = row.querySelector('.src-account');
   if (acct) acct.addEventListener('change', changed);
   ['.src-qty', '.src-fee'].forEach(function (sel) {
@@ -14531,12 +14531,8 @@ function refreshSourceAccounts() {
         (st.accounts || []).forEach(function (a) {
           if (!a || a.id === primaryId) return;
           if (used[a.id]) return;
-          if (isCash) {
-            if (!isCashKind(a.kind)) return;
-          } else {
-            if (isCashKind(a.kind)) return;
-            if (String(a.ticker).toUpperCase() !== symU) return;
-          }
+          if (isCashKind(a.kind) !== isCash) return;
+          if (String(a.ticker || '').toUpperCase() !== symU) return;
           var oo = document.createElement('option');
           oo.value = a.id;
           oo.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
@@ -14553,6 +14549,7 @@ function refreshSourceAccounts() {
           sel.appendChild(keep);
           sel.value = cur;
         } else if (sel.options.length > 1) sel.selectedIndex = 1;
+        if (sel.value) used[sel.value] = true;
         syncSourceRowMode(row);
       })(rows[i]);
     }

@@ -6763,6 +6763,70 @@ function netWorthHistorySeriesPrice(series, at, main) {
   }, function () { return null; });
 }
 
+// Periods in which each symbol is actually HELD (qty > 0 after that day's
+// trades), as [{from, to}] in ms. Chart prices are only needed inside these:
+// a sold-out asset is valued at zero, and its live value comes from live
+// prices, not history. Short gaps between holdings are merged so a quick
+// sell/re-buy does not fragment downloads. Returns null when the ledger is
+// too large to scan cheaply (caller then falls back to first trade -> end).
+var NET_WORTH_HELD_GAP_MS = 14 * 86400000;
+var NET_WORTH_HELD_MAX_DATES = 600;
+function netWorthHistoryHeldPeriods(st, included, main) {
+  var allTrades = (st.trades || []).filter(function (trade) {
+    return trade && typeof trade.date === 'string';
+  });
+  var dateMap = {};
+  allTrades.forEach(function (trade) { dateMap[trade.date] = true; });
+  var dates = Object.keys(dateMap).sort();
+  if (!dates.length || dates.length > NET_WORTH_HELD_MAX_DATES) return null;
+  var heldBySymbol = {};
+  var state = {};
+  dates.forEach(function (day, index) {
+    var portfolio = computePortfolio(convertTrades(allTrades.filter(function (trade) {
+      return trade.date <= day;
+    }), main), {}, st.settings.costMethod);
+    var heldNow = {};
+    Object.keys(included).forEach(function (accountId) {
+      var rows = portfolio.byAccount[accountId];
+      if (!rows) return;
+      rows.forEach(function (row, symbol) {
+        if (Number(row.qtyHeld) > 0) heldNow[String(symbol).toUpperCase()] = true;
+      });
+    });
+    Object.keys(heldNow).forEach(function (symbol) {
+      if (state[symbol] === undefined) state[symbol] = null;
+      if (state[symbol] === null) {
+        state[symbol] = { from: Date.parse(day + 'T00:00:00') };
+      }
+    });
+    Object.keys(state).forEach(function (symbol) {
+      if (state[symbol] !== null && !heldNow[symbol]) {
+        // Sold out on `day`: keep that whole day (its early hours are still held).
+        (heldBySymbol[symbol] = heldBySymbol[symbol] || []).push({
+          from: state[symbol].from,
+          to: Date.parse(day + 'T00:00:00') + 86400000
+        });
+        state[symbol] = null;
+      }
+    });
+  });
+  Object.keys(state).forEach(function (symbol) {
+    if (state[symbol] !== null) {
+      (heldBySymbol[symbol] = heldBySymbol[symbol] || []).push({ from: state[symbol].from, to: Infinity });
+    }
+  });
+  Object.keys(heldBySymbol).forEach(function (symbol) {
+    var merged = [];
+    heldBySymbol[symbol].forEach(function (period) {
+      var last = merged[merged.length - 1];
+      if (last && period.from - last.to <= NET_WORTH_HELD_GAP_MS) last.to = Math.max(last.to, period.to);
+      else merged.push({ from: period.from, to: period.to });
+    });
+    heldBySymbol[symbol] = merged;
+  });
+  return heldBySymbol;
+}
+
 function buildNetWorthHistory(st, main, range, onProgress) {
   var included = netWorthHistoryIncludedAccounts(st);
   var earliest = netWorthHistoryStart(st, included);
@@ -6821,14 +6885,78 @@ function buildNetWorthHistory(st, main, range, onProgress) {
   var seriesBySymbol = {};
   var nextSymbol = 0;
   var completedSymbols = {};
-  function loadNextSeries() {
-    if (nextSymbol >= names.length) return Promise.resolve();
-    var symbol = names[nextSymbol++];
+  var heldPeriods = null;
+  try { heldPeriods = netWorthHistoryHeldPeriods(st, included, main); } catch (e) { heldPeriods = null; }
+  // Needed download windows per symbol, clipped to the requested range.
+  // null periods (scan skipped) = legacy behaviour: first trade -> range end.
+  var neededBySymbol = {};
+  names.forEach(function (symbol) {
     var firstTradeAt = firstTradeBySymbol[symbol]
       ? Date.parse(firstTradeBySymbol[symbol] + 'T00:00:00')
       : NaN;
-    var symbolStart = isFinite(firstTradeAt) ? Math.max(start, firstTradeAt) : start;
-    return fetchNetWorthHistorySeries(symbol, symbols[symbol], main, symbolStart, end, onProgress).then(function (series) {
+    var base = isFinite(firstTradeAt) ? Math.max(start, firstTradeAt) : start;
+    if (!heldPeriods) {
+      neededBySymbol[symbol] = [{ from: base, to: end }];
+      return;
+    }
+    var windows = [];
+    (heldPeriods[symbol] || []).forEach(function (period) {
+      var from = Math.max(start, period.from);
+      var to = Math.min(end, period.to);
+      if (to > from) windows.push({ from: from, to: to });
+      else if (to === from && period.to !== Infinity) windows.push({ from: from, to: from + 86400000 });
+    });
+    neededBySymbol[symbol] = windows;
+  });
+  function neededAt(symbol, at) {
+    var windows = neededBySymbol[symbol] || [];
+    for (var i = 0; i < windows.length; i++) {
+      if (at >= windows[i].from && at <= windows[i].to) return true;
+    }
+    return false;
+  }
+  function mergeSeries(parts, symbol, kind) {
+    var seen = {};
+    var points = [];
+    var errors = [];
+    var currencyCode = '';
+    parts.forEach(function (part) {
+      if (!part) return;
+      currencyCode = currencyCode || part.currency || '';
+      if (part.error) errors.push(part.error);
+      (part.points || []).forEach(function (point) {
+        var key = String(point.at);
+        if (seen[key]) return;
+        seen[key] = true;
+        points.push(point);
+      });
+    });
+    points.sort(function (a, b) { return a.at - b.at; });
+    return {
+      currency: currencyCode || String(main).toUpperCase(),
+      points: points,
+      kind: kind,
+      error: errors.length ? errors.join('; ').slice(0, 800) : ''
+    };
+  }
+  function loadNextSeries() {
+    if (nextSymbol >= names.length) return Promise.resolve();
+    var symbol = names[nextSymbol++];
+    var windows = neededBySymbol[symbol] || [];
+    var parts = [];
+    function loadWindow(index) {
+      if (index >= windows.length) return Promise.resolve();
+      return fetchNetWorthHistorySeries(symbol, symbols[symbol], main, windows[index].from, windows[index].to, onProgress)
+        .then(function (part) {
+          parts.push(part);
+          return loadWindow(index + 1);
+        });
+    }
+    var symbolStart = windows.length ? windows[0].from : start;
+    return loadWindow(0).then(function () {
+      // Nothing held inside this range: no download, and not a gap.
+      var series = windows.length ? mergeSeries(parts, symbol, symbols[symbol])
+        : { currency: String(main).toUpperCase(), points: [], kind: symbols[symbol], error: '' };
       seriesBySymbol[symbol] = series;
       completedSymbols[symbol] = true;
       if (typeof onProgress === 'function') {
@@ -6841,7 +6969,7 @@ function buildNetWorthHistory(st, main, range, onProgress) {
           end: end,
           assetStart: symbolStart,
           assetEnd: end,
-          failed: !series.points.length,
+          failed: windows.length > 0 && !series.points.length,
           error: series.error || ''
         });
       }
@@ -6852,12 +6980,15 @@ function buildNetWorthHistory(st, main, range, onProgress) {
   for (var worker = 0; worker < Math.min(3, names.length); worker++) workers.push(loadNextSeries());
 
   return Promise.all(workers).then(function () {
+    function needsSeries(symbol) { return (neededBySymbol[symbol] || []).length > 0; }
     var incomplete = names.some(function (symbol) {
-      return !seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length || !!seriesBySymbol[symbol].error;
+      return needsSeries(symbol) &&
+        (!seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length || !!seriesBySymbol[symbol].error);
     });
     var missingSymbols = {};
     names.forEach(function (symbol) {
-      if (!seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length || seriesBySymbol[symbol].error) {
+      if (needsSeries(symbol) &&
+          (!seriesBySymbol[symbol] || !seriesBySymbol[symbol].points.length || seriesBySymbol[symbol].error)) {
         missingSymbols[symbol] = true;
       }
     });
@@ -6871,7 +7002,7 @@ function buildNetWorthHistory(st, main, range, onProgress) {
         var priceJobs = names.map(function (symbol) {
           return netWorthHistorySeriesPrice(seriesBySymbol[symbol], at, main).then(function (price) {
             if (price !== null) prices[symbol] = price;
-            else if (firstTradeBySymbol[symbol] &&
+            else if (firstTradeBySymbol[symbol] && neededAt(symbol, at) &&
                 new Date(at).toISOString().slice(0, 10) >= firstTradeBySymbol[symbol]) {
               incomplete = true;
               missingSymbols[symbol] = true;

@@ -707,75 +707,43 @@ var TRANSFER_LABEL_MAX = 80;
 // Both the per-source sums and the anchor rule must match the record, so a
 // corrupt imported list can never move money out of an arbitrary account.
 function transferSourcesOf(t) {
-  if (!t || t.type !== 'transfer' || !Array.isArray(t.sources) || !t.sources.length) return null;
-  if (t.sources.length > TRANSFER_MAX_SOURCES) return null;
-  var out = [];
-  var seen = {};
-  var sumQ = 0, sumF = 0;
-  for (var i = 0; i < t.sources.length; i++) {
-    var s = t.sources[i];
-    if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
-    if (typeof s.accountId !== 'string' || s.accountId.trim() === '') return null;
-    var id = s.accountId.trim();
-    if (seen[id]) return null;
-    seen[id] = true;
-    if (typeof s.qty !== 'number' && typeof s.qty !== 'string') return null;
-    var q = Number(s.qty);
-    if (!isFinite(q) || q <= 0) return null;
-    var rawF = (s.fee === undefined || s.fee === null || String(s.fee).trim() === '') ? 0 : s.fee;
-    if (typeof rawF !== 'number' && typeof rawF !== 'string') return null;
-    var f = Number(rawF);
-    if (!isFinite(f) || f < 0 || f >= q) return null;
-    sumQ += q;
-    sumF += f;
-    out.push({ accountId: id, qty: q, fee: f, qtyRaw: s.qty, feeRaw: rawF });
+  if(!t||t.type!=='transfer'||t.sources===undefined||t.sources===null)return null;
+  if(!Array.isArray(t.sources)||!t.sources.length||t.sources.length>TRANSFER_MAX_SOURCES)return false;
+  var out=[],seen={},sumQ=0n,sumF=0n,dec=qtyDecimals(t.symbol);
+  for(var i=0;i<t.sources.length;i++){
+    var s=t.sources[i];if(!s||typeof s!=='object'||Array.isArray(s))return false;
+    if(typeof s.accountId!=='string'||s.accountId.trim()==='')return false;
+    var id=s.accountId.trim();if(seen[id])return false;seen[id]=true;
+    if(typeof s.qty!=='number'&&typeof s.qty!=='string')return false;if(qtyOverPrecise(s.qty,t.symbol))return false;
+    var q=Number(s.qty),qSc=exactScaledOf(s.qty,dec);if(!isFinite(q)||q<=0||qSc===null||qSc<=0n)return false;
+    var rawF=(s.fee===undefined||s.fee===null||String(s.fee).trim()==='')?0:s.fee;
+    if(typeof rawF!=='number'&&typeof rawF!=='string')return false;if(qtyOverPrecise(rawF,t.symbol))return false;
+    var f=Number(rawF),fSc=exactScaledOf(rawF,dec);if(!isFinite(f)||f<0||f>=q||fSc===null||fSc<0n||fSc>=qSc)return false;
+    sumQ+=qSc;sumF+=fSc;out.push({accountId:id,qty:q,fee:f,qtyRaw:s.qty,feeRaw:rawF});
   }
-  if (out[0].accountId !== String(t.accountId || '')) return null;
-  var tq = Number(t.qty);
-  var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
-  if (!isFinite(tq) || !isFinite(nfRaw)) return null;
-  if (Math.abs(sumQ - tq) > Math.max(1e-12, Math.abs(tq) * 1e-12)) return null;
-  if (Math.abs(sumF - nfRaw) > Math.max(1e-12, Math.abs(nfRaw) * 1e-12)) return null;
-  return out;
+  if(out[0].accountId!==String(t.accountId||''))return false;
+  if(typeof t.qty!=='number'&&typeof t.qty!=='string')return false;if(qtyOverPrecise(t.qty,t.symbol))return false;
+  var tq=Number(t.qty),tqSc=exactScaledOf(t.qty,dec);
+  var nfRaw=(t.networkFee===undefined||t.networkFee===null||String(t.networkFee).trim()==='')?0:t.networkFee;
+  if(typeof nfRaw!=='number'&&typeof nfRaw!=='string')return false;if(qtyOverPrecise(nfRaw,t.symbol))return false;
+  var nf=Number(nfRaw),nfSc=exactScaledOf(nfRaw,dec);
+  if(!isFinite(tq)||tq<=0||tqSc===null||tqSc<=0n)return false;
+  if(!isFinite(nf)||nf<0||nf>=tq||nfSc===null||nfSc<0n||nfSc>=tqSc)return false;
+  if(sumQ!==tqSc||sumF!==nfSc)return false;return out;
 }
 
 // Every source account id of a transfer (primary first), or [] otherwise.
-function transferSourceIds(t) {
-  if (!t || t.type !== 'transfer' || typeof t.accountId !== 'string' || t.accountId === '') return [];
-  var explicit = transferSourcesOf(t);
-  var out = [];
-  var seen = {};
-  function add(id) {
-    var s = String(id === undefined || id === null ? '' : id).trim();
-    if (!s || seen[s]) return;
-    seen[s] = true;
-    out.push(s);
-  }
-  if (explicit) explicit.forEach(function (s) { add(s.accountId); });
-  add(t.accountId);
-  return out;
-}
+function transferSourceIds(t){if(!t||t.type!=='transfer'||typeof t.accountId!=='string'||t.accountId==='')return[];var explicit=transferSourcesOf(t);if(explicit===false)return[];var out=[],seen={};function add(id){var s=String(id===undefined||id===null?'':id).trim();if(!s||seen[s])return;seen[s]=true;out.push(s);}if(explicit)explicit.forEach(function(s){add(s.accountId);});add(t.accountId);return out;}
 
 // Source legs in record order: numeric qty/fee plus the net contribution
 // (qty - fee) and its share of the record's total net. Outputs and returned
 // remainders are apportioned by these shares, so attributing a fee to one
 // source genuinely shifts who funds the recipients.
-function transferSourceLegs(t) {
-  if (!t || t.type !== 'transfer') return [];
-  var explicit = transferSourcesOf(t);
-  if (explicit) {
-    var totalNet = 0;
-    explicit.forEach(function (s) { totalNet += s.qty - s.fee; });
-    return explicit.map(function (s) {
-      var net = s.qty - s.fee;
-      return { accountId: s.accountId, qty: s.qty, fee: s.fee, net: net, share: totalNet > 0 ? net / totalNet : 0 };
-    });
-  }
-  var q = Number(t.qty);
-  var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
-  var nf = isFinite(nfRaw) && nfRaw >= 0 ? nfRaw : 0;
-  if (!isFinite(q) || q <= 0 || !isFinite(nf) || nf >= q) return [];
-  return [{ accountId: String(t.accountId || ''), qty: q, fee: nf, net: q - nf, share: 1 }];
+function transferSourceLegs(t){
+ if(!t||t.type!=='transfer')return[];var explicit=transferSourcesOf(t);if(explicit===false)return[];
+ if(explicit){var totalNet=0;explicit.forEach(function(s){totalNet+=s.qty-s.fee;});return explicit.map(function(s){var net=s.qty-s.fee;return{accountId:s.accountId,qty:s.qty,fee:s.fee,net:net,share:totalNet>0?net/totalNet:0};});}
+ var q=Number(t.qty),nfRaw=(t.networkFee===undefined||t.networkFee===null||String(t.networkFee).trim()==='')?0:Number(t.networkFee),nf=isFinite(nfRaw)&&nfRaw>=0?nfRaw:0;
+ if(!isFinite(q)||q<=0||!isFinite(nf)||nf>=q)return[];return[{accountId:String(t.accountId||''),qty:q,fee:nf,net:q-nf,share:1}];
 }
 
 function transferSourceQtyFor(t, accountId) {
@@ -904,30 +872,10 @@ function transferSelfQtyOf(t) {
 // Portion of a transfer that returns to the source account: explicit selfQty
 // on multi-output records, or the legacy same-account move (no outputs, no
 // destination) where sent - fee stayed in place.
-function transferSelfArrivalOf(t) {
-  if (!t || t.type !== 'transfer') return 0;
-  var outs = transferOutputsOf(t);
-  if (outs.length) return transferSelfQtyOf(t);
-  var hasTo = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
-  if (hasTo) return 0;
-  var sent = Number(t.qty);
-  var nfRaw = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
-  var nf = (isFinite(nfRaw) && nfRaw >= 0) ? nfRaw : 0;
-  var net = sent - nf;
-  return (isFinite(net) && net > 0) ? net : 0;
-}
+function transferSelfArrivalOf(t){if(!t||t.type!=='transfer')return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;var outs=transferOutputsOf(t);if(outs.length)return transferSelfQtyOf(t);var hasTo=t.toAccountId!==undefined&&t.toAccountId!==null&&String(t.toAccountId).trim()!=='';if(hasTo)return 0;var sent=Number(t.qty),nfRaw=(t.networkFee===undefined||t.networkFee===null||String(t.networkFee).trim()==='')?0:Number(t.networkFee),nf=isFinite(nfRaw)&&nfRaw>=0?nfRaw:0,net=sent-nf;return isFinite(net)&&net>0?net:0;}
 
 // External recipient amount: value genuinely leaving the portfolio.
-function transferExternalQtyOf(t) {
-  if (!t || t.type !== 'transfer' || !(Array.isArray(t.outputs) && t.outputs.length)) return 0;
-  var q = 0;
-  t.outputs.forEach(function (o) {
-    if (!o || isTransferOutputInternal(o)) return;
-    var rq = Number(o.qty);
-    if (isFinite(rq) && rq > 0) q += rq;
-  });
-  return q;
-}
+function transferExternalQtyOf(t){if(!t||t.type!=='transfer'||!(Array.isArray(t.outputs)&&t.outputs.length))return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;var q=0;t.outputs.forEach(function(o){if(!o||isTransferOutputInternal(o))return;var rq=Number(o.qty);if(isFinite(rq)&&rq>0)q+=rq;});return q;}
 
 // Normalized recipient list: stored outputs win; otherwise a legacy single
 // destination degrades to one row; no destination at all means a
@@ -971,45 +919,16 @@ function transferDestIds(t) {
   return out;
 }
 
-function transferInvolvesAccount(t, id) {
-  if (!t || typeof id !== 'string' || id === '') return false;
-  if (t.accountId === id) return true;
-  if (transferSourceIds(t).indexOf(id) !== -1) return true;
-  return transferDestIds(t).indexOf(id) !== -1;
-}
+function transferInvolvesAccount(t,id){if(!t||typeof id!=='string'||id==='')return false;if(t.type==='transfer'&&t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return false;if(t.accountId===id)return true;if(transferSourceIds(t).indexOf(id)!==-1)return true;return transferDestIds(t).indexOf(id)!==-1;}
 
 // Check if a trade involves any of the given account IDs (as primary,
 // source, or destination). Used for ledger label propagation and
 // scope-aware tree building.
-function tradeTouchesAccounts(t, accountIds) {
-  if (!t || !Array.isArray(accountIds) || !accountIds.length) return false;
-  var inScope = {};
-  accountIds.forEach(function (id) { if (typeof id === 'string' && id !== '') inScope[id] = true; });
-  if (t.accountId && inScope[t.accountId]) return true;
-  if (t.type === 'transfer') {
-    var srcs = transferSourceIds(t);
-    for (var i = 0; i < srcs.length; i++) if (inScope[srcs[i]]) return true;
-    var dests = transferDestIds(t);
-    for (var i = 0; i < dests.length; i++) if (inScope[dests[i]]) return true;
-  }
-  return false;
-}
+function tradeTouchesAccounts(t,accountIds){if(!t||!Array.isArray(accountIds)||!accountIds.length)return false;if(t.type==='transfer'){for(var i=0;i<accountIds.length;i++)if(transferInvolvesAccount(t,accountIds[i]))return true;return false;}var inScope={};accountIds.forEach(function(id){if(typeof id==='string'&&id!=='')inScope[id]=true;});return !!(t.accountId&&inScope[t.accountId]);}
 
 // Amount of this transfer credited to one internal destination (0 when the
 // account is not a recipient). Covers legacy single-dest trades too.
-function transferArrivalFor(t, accountId) {
-  if (!t || t.type !== 'transfer' || typeof accountId !== 'string' || accountId === '') return 0;
-  if (t.accountId === accountId) return 0;
-  var sum = 0;
-  var outs = transferOutputsOf(t);
-  for (var i = 0; i < outs.length; i++) {
-    var o = outs[i];
-    if (isTransferOutputInternal(o) && String(o.toAccountId).trim() === accountId) {
-      sum += transferRowArrival(o, t.symbol);
-    }
-  }
-  return sum;
-}
+function transferArrivalFor(t,accountId){if(!t||t.type!=='transfer'||typeof accountId!=='string'||accountId==='')return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;if(t.accountId===accountId)return 0;var sum=0,outs=transferOutputsOf(t);for(var i=0;i<outs.length;i++){var o=outs[i];if(isTransferOutputInternal(o)&&String(o.toAccountId).trim()===accountId)sum+=transferRowArrival(o,t.symbol);}return sum;}
 
 // Structural check for one recipient row. accountIds (when supplied) is the
 // known-account roster; sourceId guards the no-self-payment rule and
@@ -1073,63 +992,16 @@ function transferSourceIdsOfRaw(t) {
 // the known-account roster (strict import paths); accounts (when supplied)
 // additionally proves every source is the same ticker and cash/asset class
 // as the primary — sources may never cross assets.
-function transferSourcesStructuralError(t, accountIds, accounts) {
-  if (!t || t.type !== 'transfer') return null;
-  if (t.sources === undefined || t.sources === null) return null;
-  if (!Array.isArray(t.sources) || !t.sources.length) return 'sources must be a non-empty array';
-  if (t.sources.length > TRANSFER_MAX_SOURCES) return 'too many transfer sources';
-  var seen = {};
-  var sumQ = 0;
-  var sumF = 0;
-  var primary = null;
-  if (Array.isArray(accounts)) {
-    for (var ai = 0; ai < accounts.length; ai++) {
-      var pa = accounts[ai];
-      if (pa && pa.id === t.accountId) { primary = pa; break; }
-    }
-    if (!primary) return 'transfer source account not found';
-  }
-  for (var i = 0; i < t.sources.length; i++) {
-    var s = t.sources[i];
-    if (!s || typeof s !== 'object' || Array.isArray(s)) return 'source ' + (i + 1) + ' is invalid';
-    if (typeof s.accountId !== 'string' || s.accountId.trim() === '') return 'source ' + (i + 1) + ' needs an account';
-    var id = s.accountId.trim();
-    if (seen[id]) return 'each source account may appear only once';
-    seen[id] = true;
-    if (i === 0 && id !== String(t.accountId || '')) return 'the primary source must be the transfer account';
-    if (typeof s.qty !== 'number' && typeof s.qty !== 'string') return 'source qty must be > 0';
-    var q = Number(s.qty);
-    if (!isFinite(q) || q <= 0) return 'source qty must be > 0';
-    var rawF = (s.fee === undefined || s.fee === null || String(s.fee).trim() === '') ? 0 : s.fee;
-    if (typeof rawF !== 'number' && typeof rawF !== 'string') return 'source fee must be >= 0';
-    var f = Number(rawF);
-    if (!isFinite(f) || f < 0) return 'source fee must be >= 0';
-    if (f >= q) return 'each source fee must be < its qty';
-    sumQ += q;
-    sumF += f;
-    if (accountIds !== undefined) {
-      if (!Array.isArray(accountIds)) return 'accounts must be an array';
-      if (accountIds.indexOf(id) === -1) return 'source account not found';
-    }
-    if (Array.isArray(accounts)) {
-      var sa = null;
-      for (var sj = 0; sj < accounts.length; sj++) {
-        if (accounts[sj] && accounts[sj].id === id) { sa = accounts[sj]; break; }
-      }
-      if (!sa) return 'source account not found';
-      if (String(sa.ticker || '').trim().toUpperCase() !== String(t.symbol || '').trim().toUpperCase()) {
-        return 'every source must hold the same asset';
-      }
-      if (isCashKind(sa.kind) !== isCashKind(primary.kind)) {
-        return 'cash and asset accounts cannot share a transfer';
-      }
-    }
-  }
-  var tq = Number(t.qty);
-  var nf = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
-  if (!isFinite(tq) || Math.abs(sumQ - tq) > 1e-8) return 'source qtys must sum to the sent amount';
-  if (!isFinite(nf) || Math.abs(sumF - nf) > 1e-8) return 'source fees must sum to the transfer fee';
-  return null;
+function transferSourcesStructuralError(t,accountIds,accounts){
+ if(!t||t.type!=='transfer'||t.sources===undefined||t.sources===null)return null;
+ var explicit=transferSourcesOf(t);if(!explicit)return'sources are invalid or their totals do not match the transfer';
+ var primary=null;if(Array.isArray(accounts)){for(var ai=0;ai<accounts.length;ai++){var pa=accounts[ai];if(pa&&pa.id===t.accountId){primary=pa;break;}}if(!primary)return'transfer source account not found';}
+ for(var i=0;i<explicit.length;i++){
+  var id=explicit[i].accountId;if(accountIds!==undefined){if(!Array.isArray(accountIds))return'accounts must be an array';if(accountIds.indexOf(id)===-1)return'source account not found';}
+  if(Array.isArray(accounts)){var sa=null;for(var sj=0;sj<accounts.length;sj++)if(accounts[sj]&&accounts[sj].id===id){sa=accounts[sj];break;}
+   if(!sa)return'source account not found';if(String(sa.ticker||'').trim().toUpperCase()!==String(t.symbol||'').trim().toUpperCase())return'every source must hold the same asset';
+   if(isCashKind(sa.kind)!==isCashKind(primary.kind))return'cash and asset accounts cannot share a transfer';}
+ }return null;
 }
 
 function isValidImportTrade(t, accountIds, accounts) {
@@ -1313,27 +1185,18 @@ function normalizeTradeForStore(t) {
   if (typeof c.currency === 'string' && c.currency.trim() !== '') c.currency = c.currency.trim().toUpperCase();
   if (typeof c.feeCurrency === 'string' && c.feeCurrency.trim() !== '') c.feeCurrency = c.feeCurrency.trim().toUpperCase();
   if (typeof c.txid === 'string' && c.txid.trim() !== '') c.txid = c.txid.trim();
-  // Multi-source transfers: normalize the account ids and drop the field for
-  // a single-source record, so legacy rows never gain a redundant list.
-  if (c.sources !== undefined && c.sources !== null) {
-    if (c.type === 'transfer' && Array.isArray(c.sources)) {
-      var __srcs = [];
-      c.sources.forEach(function (s) {
-        if (!s || typeof s !== 'object' || Array.isArray(s)) return;
-        if (typeof s.accountId !== 'string' || s.accountId.trim() === '') return;
-        var n = { accountId: s.accountId.trim(), qty: s.qty };
-        if (s.fee !== undefined && s.fee !== null && String(s.fee).trim() !== '') n.fee = s.fee;
-        __srcs.push(n);
-      });
-      if (__srcs.length > 1) c.sources = __srcs;
-      else { try { delete c.sources; } catch (e) { c.sources = undefined; } }
-      if (__srcs.length > 1 && Array.isArray(c.sourceFeeAuto) && c.sourceFeeAuto.length === __srcs.length && c.sourceFeeAuto.every(function (v) { return typeof v === 'boolean'; })) {
-        c.sourceFeeAuto = c.sourceFeeAuto.slice();
-      } else { try { delete c.sourceFeeAuto; } catch (e) { c.sourceFeeAuto = undefined; } }
-    } else {
-      try { delete c.sources; } catch (e) { c.sources = undefined; }
-      try { delete c.sourceFeeAuto; } catch (e) { c.sourceFeeAuto = undefined; }
-    }
+  // Normalize only exact valid source lists. Malformed explicit lists remain
+  // explicit so accounting functions fail closed rather than falling back.
+  if(c.sources!==undefined&&c.sources!==null){
+    if(c.type==='transfer'){
+      var __validSources=transferSourcesOf(c);
+      if(__validSources&&__validSources.length>1){
+        c.sources=__validSources.map(function(s){var n={accountId:s.accountId,qty:s.qtyRaw};if(s.fee>0)n.fee=s.feeRaw;return n;});
+        if(Array.isArray(c.sourceFeeAuto)&&c.sourceFeeAuto.length===__validSources.length&&c.sourceFeeAuto.every(function(v){return typeof v==='boolean';}))c.sourceFeeAuto=c.sourceFeeAuto.slice();
+        else{try{delete c.sourceFeeAuto;}catch(e){c.sourceFeeAuto=undefined;}}
+      }else if(__validSources&&__validSources.length===1){try{delete c.sources;}catch(e){c.sources=undefined;}try{delete c.sourceFeeAuto;}catch(e){c.sourceFeeAuto=undefined;}}
+      else{try{delete c.sourceFeeAuto;}catch(e){c.sourceFeeAuto=undefined;}}
+    }else{try{delete c.sources;}catch(e){c.sources=undefined;}try{delete c.sourceFeeAuto;}catch(e){c.sourceFeeAuto=undefined;}}
   }
   // Multi-recipient transfers: normalize rows (trim labels, uppercase the
   // arrival fiat); an empty list degrades to the legacy shape. Legacy
@@ -14238,48 +14101,23 @@ function syncRecipientRowMode(row) {
 // crypto, every other cash account for cash (a different-fiat pick turns
 // the row into a cross-fiat arrival). The current pick is always kept so
 // edits of older records never lose their destination.
-function refreshRecipientAccounts() {
-  try {
-    var list = document.getElementById('t-rec-list');
-    if (!list || !list.querySelectorAll) return;
-    var st = loadState();
-    var fromId = uiVal('t-account', '');
-    var fromAcc = accountById(st, fromId);
-    var symU = fromAcc ? String(fromAcc.ticker || '').toUpperCase() : '';
-    var isCash = !!(fromAcc && isCashKind(fromAcc.kind));
-    var sourceIds = {};
-    readSourceRows().forEach(function (source) { if (source.accountId) sourceIds[source.accountId] = true; });
-    var rows = list.querySelectorAll('.rec-row');
-    for (var i = 0; i < rows.length; i++) {
-      (function (row) {
-        var sel = row.querySelector('.rec-account');
-        if (!sel) return;
-        var cur = sel.value;
-        sel.innerHTML = '';
-        (st.accounts || []).forEach(function (a) {
-          if (!a || a.id === fromId || sourceIds[a.id]) return;
-          if (isCashKind(a.kind) !== isCash) return;
-          if (String(a.ticker || '').toUpperCase() !== symU) return;
-          var o = document.createElement('option');
-          o.value = a.id;
-          o.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
-          sel.appendChild(o);
-        });
-        var has = false;
-        for (var k = 0; k < sel.options.length; k++) if (sel.options[k].value === cur) { has = true; break; }
-        if (cur && has) sel.value = cur;
-        else if (cur && !has && accountById(st, cur)) {
-          var keep = document.createElement('option');
-          var ka = accountById(st, cur);
-          keep.value = cur;
-          keep.textContent = ka.name + ' · ' + String(ka.ticker).toUpperCase();
-          sel.appendChild(keep);
-          sel.value = cur;
-        } else if (sel.options.length) sel.selectedIndex = 0;
-        syncRecipientRowMode(row);
-      })(rows[i]);
-    }
-  } catch (e) { /* ignore */ }
+function transferRecipientAccountCompatible(fromAccount,candidateAccount){if(!fromAccount||!candidateAccount)return false;var cash=isCashKind(fromAccount.kind);if(isCashKind(candidateAccount.kind)!==cash)return false;return cash||String(candidateAccount.ticker||'').toUpperCase()===String(fromAccount.ticker||'').toUpperCase();}
+function refreshRecipientAccounts(){
+ try{
+  var list=document.getElementById('t-rec-list');if(!list||!list.querySelectorAll)return;
+  var st=loadState(),fromId=uiVal('t-account',''),fromAcc=accountById(st,fromId),sourceIds={};
+  readSourceRows().forEach(function(s){if(s.accountId)sourceIds[s.accountId]=true;});
+  var rows=list.querySelectorAll('.rec-row');
+  for(var i=0;i<rows.length;i++)(function(row){
+   var sel=row.querySelector('.rec-account');if(!sel)return;var cur=sel.value;sel.innerHTML='';
+   (st.accounts||[]).forEach(function(a){if(!a||a.id===fromId||sourceIds[a.id]||!transferRecipientAccountCompatible(fromAcc,a))return;var o=document.createElement('option');o.value=a.id;o.textContent=a.name+' · '+String(a.ticker).toUpperCase();sel.appendChild(o);});
+   var has=false;for(var k=0;k<sel.options.length;k++)if(sel.options[k].value===cur){has=true;break;}
+   if(cur&&has)sel.value=cur;else if(cur&&sourceIds[cur])sel.value='';
+   else if(cur){var keepAccount=accountById(st,cur);if(transferRecipientAccountCompatible(fromAcc,keepAccount)){var keep=document.createElement('option');keep.value=cur;keep.textContent=keepAccount.name+' · '+String(keepAccount.ticker).toUpperCase();sel.appendChild(keep);sel.value=cur;}else if(sel.options.length)sel.selectedIndex=0;}
+   else if(sel.options.length)sel.selectedIndex=0;
+   syncRecipientRowMode(row);
+  })(rows[i]);
+ }catch(e){/* ignore */}
 }
 
 // Stored outputs from validated recipient rows: internal rows name the
@@ -14411,6 +14249,8 @@ function readSourceRows() {
 // Validate + build the `sources` array from source rows. Returns {sources, error}.
 // qty > 0 per source, 0 <= fee < qty per source, unique accounts, anchor
 // account (first row) is always included.
+function transferHasAdditionalSources(rows){return Array.isArray(rows)&&rows.length>1;}
+
 function buildTransferSources(rows, symbol) {
   var sources = [];
   var seen = {};
@@ -14470,7 +14310,7 @@ function addSourceRow(data) {
     '<label class="src-max-wrap"><button type="button" class="src-max quiet">Max</button></label>' +
     '<label class="src-auto-wrap"><input type="checkbox" class="src-auto" checked> Auto fee</label>' +
     '</div>' +
-    '<button type="button" class="src-remove quiet">Remove</button>';
+    '<button type="button" class="src-remove quiet"' + (!list.querySelector('.src-row') ? ' hidden disabled' : '') + '>Remove</button>';
   list.appendChild(row);
   function changed() { try { syncSourceRowMode(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
   var acct = row.querySelector('.src-account');
@@ -14619,6 +14459,9 @@ function splitFeeEvenlyUI() {
     syncTransferFeePreview();
   } catch (e) { /* ignore */ }
 }
+function syncTradeTypeUI() {
+  var sideEl = document.getElementById('t-side');
+  var type = sideEl ? sideEl.value : 'buy';
   function setHidden(id, hide) { var el = document.getElementById(id); if (el) el.hidden = !!hide; }
   function setLabel(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
   // Cash accounts are bookkeeping ledgers: only money-movement types.
@@ -15047,6 +14890,7 @@ function exactQtyHeldMap(allTrades) {
     var totalNetSc = sc - nfSc;
     var exactLegs = [];
     var explicitExact = transferSourcesOf(t);
+    if (t.sources !== undefined && t.sources !== null && explicitExact === false) continue;
     if (explicitExact) {
       for (var eli = 0; eli < explicitExact.length; eli++) {
         var exs = explicitExact[eli];
@@ -15232,6 +15076,19 @@ function syncTransferFeePreview() {
       return;
     }
     if (qtyEl) qtyEl.value = exactToStringTrim(srcTotalQ, symDec);
+    if (srcRows.length === 1 && rows.length === 1 && rows[0].kind === 'internal' && rows[0].toSymbol) {
+      if (selfSc >= srcTotalQ) {
+        feeInput.value = '';
+        if (hint) hint.textContent = 'Received back must be less than sent when another account receives funds.';
+        return;
+      }
+      feeInput.value = '0';
+      if (hint) {
+        hint.textContent = 'Converted at the trade-date rate — enter what arrives in the destination fiat'
+          + (selfSc > 0n ? '; ' + exactToStringTrim(selfSc, symDec) + sym + ' stayed here.' : '.');
+      }
+      return;
+    }
     var srcIds = {};
     srcRows.forEach(function(r){if(r.accountId)srcIds[r.accountId]=true;});
     var recConflict = null;
@@ -16378,7 +16235,7 @@ function onTradeSubmit(ev) {
   if (side === 'transfer') {
     var srcRows = readSourceRows();
     var recRows = readRecipientRows();
-    var multiSource = srcRows.length > 0;
+    var multiSource = transferHasAdditionalSources(srcRows);
     var srcBuilt = null;
     if (multiSource) {
       var sb = buildTransferSources(srcRows, symbol);
@@ -16447,7 +16304,7 @@ function onTradeSubmit(ev) {
     if (crossN > 0 && recRows.length > 1) { tradeFormError('Cross-fiat moves stay single-recipient — split the same-fiat rows into their own record.'); return; }
     var selfRawSub = String(uiVal('t-selfrecv', '')).trim();
     var selfScSub = 0n;
-    if (recRows.length && selfRawSub !== '') {
+    if (selfRawSub !== '') {
       var selfScRaw = exactScaledOf(selfRawSub, symDecSave);
       if (selfScRaw === null || selfScRaw < 0n) { tradeFormError('Received back must be a number >= 0.'); return; }
       selfScSub = selfScRaw;

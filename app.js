@@ -928,7 +928,7 @@ function tradeTouchesAccounts(t,accountIds){if(!t||!Array.isArray(accountIds)||!
 
 // Amount of this transfer credited to one internal destination (0 when the
 // account is not a recipient). Covers legacy single-dest trades too.
-function transferArrivalFor(t,accountId){if(!t||t.type!=='transfer'||typeof accountId!=='string'||accountId==='')return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;if(t.accountId===accountId)return 0;var sum=0,outs=transferOutputsOf(t);for(var i=0;i<outs.length;i++){var o=outs[i];if(isTransferOutputInternal(o)&&String(o.toAccountId).trim()===accountId)sum+=transferRowArrival(o,t.symbol);}return sum;}
+function transferArrivalFor(t,accountId){if(!t||t.type!=='transfer'||typeof accountId!=='string'||accountId==='')return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;var sum=0,outs=transferOutputsOf(t);for(var i=0;i<outs.length;i++){var o=outs[i];if(isTransferOutputInternal(o)&&String(o.toAccountId).trim()===accountId)sum+=transferRowArrival(o,t.symbol);}return sum;}
 
 // Structural check for one recipient row. accountIds (when supplied) is the
 // known-account roster; sourceId guards the no-self-payment rule and
@@ -1039,6 +1039,7 @@ function isValidImportTrade(t, accountIds, accounts) {
     if (!isFinite(tnf) || tnf < 0 || tnf >= tq) return false; // net received must stay > 0
     if (transferSourcesStructuralError(t, accountIds, accounts)) return false;
     var sourceIds = transferSourceIdsOfRaw(t);
+    var sourceOverlapAllowed = Array.isArray(t.sources) && t.sources.length > 1;
     if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '') {
       var tt = Number(t.total);
       if (!isFinite(tt) || tt < 0) return false;
@@ -1059,7 +1060,7 @@ function isValidImportTrade(t, accountIds, accounts) {
       if (t.toQty !== undefined && t.toQty !== null && String(t.toQty).trim() !== '') return false;
       if (t.toSymbol !== undefined && t.toSymbol !== null && String(t.toSymbol).trim() !== '') return false;
       for (var oi = 0; oi < t.outputs.length; oi++) {
-        if (!isValidTransferOutput(t.outputs[oi], t.symbol, t.accountId, accountIds, sourceIds)) return false;
+        if (!isValidTransferOutput(t.outputs[oi], t.symbol, sourceOverlapAllowed ? null : t.accountId, accountIds, sourceOverlapAllowed ? null : sourceIds)) return false;
       }
       var selfQ = 0;
       if (t.selfQty !== undefined && t.selfQty !== null && String(t.selfQty).trim() !== '') {
@@ -3056,7 +3057,7 @@ function cashReceivedOf(t, accountId) {
 }
 
 function cashSignedNative(t, accountId) {
-  if (!t || t.accountId !== accountId) {
+  if (!t || (t.accountId !== accountId && t.type !== 'transfer')) {
     return transferArrivalFor(t, accountId);
   }
   var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
@@ -3070,8 +3071,7 @@ function cashSignedNative(t, accountId) {
   }
   if (t.type === 'sell') return (isFinite(q) && q > 0) ? -q : 0;
   if (t.type === 'transfer') {
-    var sq = transferSourceQtyFor(t, accountId);
-    return (isFinite(sq) && sq > 0) ? -sq : 0;
+    return transferArrivalFor(t, accountId) - transferSourceQtyFor(t, accountId);
   }
   return 0;
 }
@@ -3122,13 +3122,12 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
   (allTrades || []).forEach(function (t) {
     if (!t) return;
     var isSrc = (t.type === 'transfer') ? (transferSourceIds(t).indexOf(accountId) !== -1) : (t.accountId === accountId);
-    var isDest = (!isSrc && transferArrivalFor(t, accountId) > 0);
+    var isDest = transferArrivalFor(t, accountId) > 0;
     if (!isSrc && !isDest) return;
     if (isSrc && !ticker && t.symbol) ticker = String(t.symbol).toUpperCase();
-    var signed = isDest ? cashReceivedOf(t, accountId) : cashSignedNative(t, accountId);
-    // A transfer debits the full sent amount above, but the part that lands
-    // back in the source account never left it. This also fixes legacy
-    // same-account cash sweeps, which used to lose the whole amount.
+    var signed = isSrc && isDest ? cashSignedNative(t, accountId) : (isDest ? cashReceivedOf(t, accountId) : cashSignedNative(t, accountId));
+    // Legacy same-account sweeps have no output row, so add back the net
+    // remainder that stayed in the source account.
     if (isSrc && t.type === 'transfer') {
       var selfBack = transferSelfArrivalFor(t, accountId);
       if (isFinite(selfBack) && selfBack > 0) signed += selfBack;
@@ -3143,7 +3142,7 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
       var rv = realMap.get(t);
       if (isFinite(Number(rv))) { inMain += Number(rv); return; }
     }
-    var leg = legRate(t, isDest, accountId);
+    var leg = legRate(t, isDest && !isSrc, accountId);
     if (doFloat && !isDest && t.type === 'income' && !(realMap && realMap.has(t))) {
       try { leg = cashIncomeRate(t, main); } catch (e) { /* keep frozen leg */ }
     }
@@ -3685,6 +3684,7 @@ function validateTrade(t, heldQty) {
     var srcErrV = transferSourcesStructuralError(t);
     if (srcErrV) return srcErrV;
     var srcIdsV = transferSourceIdsOfRaw(t);
+    var sourceOverlapAllowedV = Array.isArray(t.sources) && t.sources.length > 1;
     var hasToV = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
     var outsV = (t.outputs !== undefined && t.outputs !== null && Array.isArray(t.outputs) && t.outputs.length) ? t.outputs : null;
     if (outsV) {
@@ -3692,7 +3692,7 @@ function validateTrade(t, heldQty) {
       if (hasToV) return 'transfer has both a destination and recipients';
       var sumQV = 0, sumFV = 0, selfVV = 0;
       for (var vi = 0; vi < outsV.length; vi++) {
-        if (!isValidTransferOutput(outsV[vi], t.symbol, t.accountId, undefined, srcIdsV)) return 'recipient ' + (vi + 1) + ' is invalid';
+        if (!isValidTransferOutput(outsV[vi], t.symbol, sourceOverlapAllowedV ? null : t.accountId, undefined, sourceOverlapAllowedV ? null : srcIdsV)) return 'recipient ' + (vi + 1) + ' is invalid';
         sumQV += Number(outsV[vi].qty);
         if (outsV[vi].fee !== undefined && outsV[vi].fee !== null && String(outsV[vi].fee).trim() !== '') sumFV += Number(outsV[vi].fee);
       }
@@ -14105,15 +14105,15 @@ function transferRecipientAccountCompatible(fromAccount,candidateAccount){if(!fr
 function refreshRecipientAccounts(){
  try{
   var list=document.getElementById('t-rec-list');if(!list||!list.querySelectorAll)return;
-  var st=loadState(),fromId=uiVal('t-account',''),fromAcc=accountById(st,fromId),sourceIds={};
+  var st=loadState(),fromId=uiVal('t-account',''),fromAcc=accountById(st,fromId),sourceIds={},allowSourceOverlap=readSourceRows().length>1;
   readSourceRows().forEach(function(s){if(s.accountId)sourceIds[s.accountId]=true;});
   var rows=list.querySelectorAll('.rec-row');
   for(var i=0;i<rows.length;i++)(function(row){
    var sel=row.querySelector('.rec-account');if(!sel)return;var cur=sel.value;sel.innerHTML='';
-   (st.accounts||[]).forEach(function(a){if(!a||a.id===fromId||sourceIds[a.id]||!transferRecipientAccountCompatible(fromAcc,a))return;var o=document.createElement('option');o.value=a.id;o.textContent=a.name+' · '+String(a.ticker).toUpperCase();sel.appendChild(o);});
+   (st.accounts||[]).forEach(function(a){if(!a||(!allowSourceOverlap&&(a.id===fromId||sourceIds[a.id]))||!transferRecipientAccountCompatible(fromAcc,a))return;var o=document.createElement('option');o.value=a.id;o.textContent=a.name+' · '+String(a.ticker).toUpperCase();sel.appendChild(o);});
    var has=false;for(var k=0;k<sel.options.length;k++)if(sel.options[k].value===cur){has=true;break;}
-   if(cur&&has)sel.value=cur;else if(cur&&sourceIds[cur])sel.value='';
-   else if(cur){var keepAccount=accountById(st,cur);if(transferRecipientAccountCompatible(fromAcc,keepAccount)){var keep=document.createElement('option');keep.value=cur;keep.textContent=keepAccount.name+' · '+String(keepAccount.ticker).toUpperCase();sel.appendChild(keep);sel.value=cur;}else if(sel.options.length)sel.selectedIndex=0;}
+   if(cur&&has)sel.value=cur;
+   else if(cur){var keepAccount=accountById(st,cur);if(transferRecipientAccountCompatible(fromAcc,keepAccount)&&(allowSourceOverlap||(cur!==fromId&&!sourceIds[cur]))){var keep=document.createElement('option');keep.value=cur;keep.textContent=keepAccount.name+' · '+String(keepAccount.ticker).toUpperCase();sel.appendChild(keep);sel.value=cur;}else if(sel.options.length)sel.selectedIndex=0;}
    else if(sel.options.length)sel.selectedIndex=0;
    syncRecipientRowMode(row);
   })(rows[i]);
@@ -14209,8 +14209,8 @@ function addRecipientRow(data) {
 // and remove. Auto mode derives fees from an even split water-filled to
 // per-source caps (fee < qty); manual mode lets the user attribute the fee
 // to any source in full or partially. t-qty stays read-only and derived
-// (sum of source qty). Recipients and sources are mutually exclusive per
-// account — an account cannot both fund and receive in the same record.
+// (sum of source qty). In multi-source transfers, an account can be both a
+// source and a destination; its net balance reflects both legs.
 
 function clearSourceRows() {
   try {
@@ -14341,7 +14341,7 @@ function addSourceRow(data) {
     if (data.fee !== undefined) row.querySelector('.src-fee').value = data.fee;
     if (data.auto === false && auto) auto.checked = false;
   } catch (e) { /* ignore */ }
-  try { refreshSourceAccounts(); } catch (e) { /* ignore */ }
+  try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ }
   try { syncSourceRowMode(row); } catch (e) { /* ignore */ }
   return row;
 }
@@ -14349,7 +14349,7 @@ function addSourceRow(data) {
 // Rebuild every source row's account dropdown: same asset class as the
 // primary account (same ticker for non-cash, any cash for cash). The
 // primary row is fixed to the current account; extra rows exclude accounts
-// already picked and the current recipients' accounts.
+// already picked as sources.
 function refreshSourceAccounts() {
   try {
     var list = document.getElementById('t-source-list');
@@ -14362,8 +14362,7 @@ function refreshSourceAccounts() {
     var rows = list.querySelectorAll('.src-row');
     var used = {};
     if (primaryId) used[primaryId] = true;
-    // A recipient cannot also fund this transfer.
-    readRecipientRows().forEach(function (rr) {
+    if (rows.length === 1) readRecipientRows().forEach(function (rr) {
       if (rr.kind === 'internal' && rr.accountId) used[rr.accountId] = true;
     });
     for (var i = 0; i < rows.length; i++) {
@@ -15092,8 +15091,8 @@ function syncTransferFeePreview() {
     var srcIds = {};
     srcRows.forEach(function(r){if(r.accountId)srcIds[r.accountId]=true;});
     var recConflict = null;
-    rows.forEach(function(r){if(r.kind==='internal'&&srcIds[r.accountId])recConflict=r.accountId;});
-    if(recConflict){feeInput.value='';if(hint)hint.textContent='An account cannot both fund and receive in the same transfer.';return;}
+    if(srcRows.length===1)rows.forEach(function(r){if(r.kind==='internal'&&srcIds[r.accountId])recConflict=r.accountId;});
+    if(recConflict){feeInput.value='';if(hint)hint.textContent='An account cannot both fund and receive in a single-source transfer.';return;}
     var recSum=0n,recFeeSum=0n,recOk=true;
     rows.forEach(function(r){
       var rq=rowScaled(r.qty);if(rq<=0n)recOk=false;else recSum+=rq;
@@ -16241,16 +16240,6 @@ function onTradeSubmit(ev) {
       var sb = buildTransferSources(srcRows, symbol);
       if (sb.error) { tradeFormError(sb.error); return; }
       srcBuilt = sb.sources;
-      // Mutual exclusion: no recipient may be a source account.
-      var srcIds = {};
-      srcBuilt.forEach(function (s) { srcIds[s.accountId] = true; });
-      for (var ri2 = 0; ri2 < recRows.length; ri2++) {
-        var rr2 = recRows[ri2];
-        if (rr2.kind === 'internal' && srcIds[rr2.accountId]) {
-          tradeFormError('An account cannot both fund and receive in the same transfer.');
-          return;
-        }
-      }
     }
     var sentChk = Number(qtyRaw);
     var symDecSave = qtyDecimals(symbol);
@@ -16272,7 +16261,7 @@ function onTradeSubmit(ev) {
         if (rr.kind === 'internal') {
           var accPick = accountById(st0, rr.accountId);
           if (!accPick) return fail(label + ' account not found.');
-          if (accPick.id === accountId) return fail(label + ' must differ from the source.');
+          if (accPick.id === accountId && !multiSource) return fail(label + ' must differ from the source.');
           if (seenAcc[accPick.id]) return fail('Pick each account once — merge the amounts instead.');
           seenAcc[accPick.id] = true;
           var pickTick = String(accPick.ticker).toUpperCase();

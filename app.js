@@ -14415,6 +14415,11 @@ function buildTransferSources(rows, symbol) {
   var sources = [];
   var seen = {};
   var symDec = qtyDecimals(symbol);
+  var currentState = loadState();
+  var primaryAccount = accountById(currentState, uiVal('t-account', ''));
+  if (!primaryAccount) return { sources: null, error: 'Choose a valid primary source account.' };
+  var cashClass = isCashKind(primaryAccount.kind);
+  if (String(primaryAccount.ticker || '').toUpperCase() !== String(symbol || '').toUpperCase()) return { sources: null, error: 'Primary source ticker does not match the transfer asset.' };
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     if (!r) return { sources: null, error: 'Source row ' + (i + 1) + ' is invalid.' };
@@ -14422,6 +14427,12 @@ function buildTransferSources(rows, symbol) {
     if (!id) return { sources: null, error: 'Source row ' + (i + 1) + ' needs an account.' };
     if (seen[id]) return { sources: null, error: 'Pick each source account once — merge the amounts instead.' };
     seen[id] = true;
+    var sourceAccount = accountById(currentState, id);
+    if (!sourceAccount) return { sources: null, error: 'Source row ' + (i + 1) + ' account not found.' };
+    if (isCashKind(sourceAccount.kind) !== cashClass || String(sourceAccount.ticker || '').toUpperCase() !== String(symbol || '').toUpperCase()) {
+      return { sources: null, error: 'Every source must have the same ticker and cash/asset class as the primary account.' };
+    }
+    if (i === 0 && id !== primaryAccount.id) return { sources: null, error: 'The first source must be the primary account.' };
     var qSc = exactScaledOf(r.qty, symDec);
     if (qSc === null || qSc <= 0n) return { sources: null, error: 'Source row ' + (i + 1) + ' needs a quantity > 0.' };
     var fSc = 0n;

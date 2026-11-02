@@ -18035,8 +18035,18 @@ function syncDefaultConfig() {
 function syncSanitizeConfig(raw) {
   var d = syncDefaultConfig();
   var c = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  var repairedRecordsFilename = false;
   if (syncIsProvider(c.provider)) d.provider = c.provider;
-  if (typeof c.filename === 'string' && c.filename.trim() !== '') d.filename = syncSanitizeFilename(c.filename);
+  if (typeof c.filename === 'string' && c.filename.trim() !== '') {
+    d.filename = syncSanitizeFilename(c.filename);
+    // Older Price Data token refreshes saved the chart filename over the
+    // Records destination. Repair only that known collision; keep custom
+    // Records filenames unchanged.
+    if (d.filename === PRICE_DATA_FILENAME) {
+      d.filename = SYNC_DEFAULT_FILENAME;
+      repairedRecordsFilename = true;
+    }
+  }
   if (typeof c.url === 'string') d.url = c.url.trim().slice(0, 512);
   if (typeof c.username === 'string') d.username = c.username.slice(0, 256);
   if (typeof c.password === 'string') d.password = c.password.slice(0, 512);
@@ -18076,6 +18086,9 @@ function syncSanitizeConfig(raw) {
     folderFromKey = syncNormalizeFolder(segs.join('/'));
   }
   d.objectKey = syncSanitizeFilename(d.objectKey);
+  if (repairedRecordsFilename && d.objectKey === PRICE_DATA_FILENAME) {
+    d.objectKey = SYNC_DEFAULT_FILENAME;
+  }
   d.folder = syncNormalizeFolder(c.folder) || folderFromKey;
   if (typeof c.lastLocation === 'string' && c.lastLocation !== '') d.lastLocation = c.lastLocation.slice(0, 512);
   d.locV = (c.locV === SYNC_LOC_V) ? SYNC_LOC_V : null;
@@ -18086,6 +18099,16 @@ function syncSanitizeConfig(raw) {
   if (typeof c.lastSyncedHash === 'string' && c.lastSyncedHash !== '') d.lastSyncedHash = c.lastSyncedHash.slice(0, 64);
   if (typeof c.lastSyncAt === 'string' && isFinite(Date.parse(c.lastSyncAt))) d.lastSyncAt = c.lastSyncAt;
   if (typeof c.lastRemoteAt === 'string' && isFinite(Date.parse(c.lastRemoteAt))) d.lastRemoteAt = c.lastRemoteAt;
+  // Keep the baseline only if it was recorded against this Records path.
+  // A hash from the misdirected Price Data path is not a safe merge point.
+  if (repairedRecordsFilename && d.lastLocation !== syncLocationKey(d)) {
+    d.lastLocation = null;
+    d.lastIdentity = null;
+    d.locV = null;
+    d.lastSyncedHash = null;
+    d.lastSyncAt = null;
+    d.lastRemoteAt = null;
+  }
   return d;
 }
 

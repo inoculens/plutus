@@ -14307,10 +14307,10 @@ function addSourceRow(data) {
     '<label>Account<select class="src-account"></select></label>' +
     '<label>Qty<input class="src-qty" inputmode="decimal" placeholder="e.g. 0.1"></label>' +
     '<label>Fee<input class="src-fee" inputmode="decimal" placeholder="e.g. 0.0001"></label>' +
-    '<label class="src-max-wrap"><button type="button" class="src-max quiet">Max</button></label>' +
+    '<div class="src-actions"><button type="button" class="src-max quiet">Max</button>' +
+    '<button type="button" class="src-remove quiet"' + (!list.querySelector('.src-row') ? ' hidden disabled' : '') + '>Remove</button></div>' +
     '<label class="src-auto-wrap"><input type="checkbox" class="src-auto" checked> Auto fee</label>' +
-    '</div>' +
-    '<button type="button" class="src-remove quiet"' + (!list.querySelector('.src-row') ? ' hidden disabled' : '') + '>Remove</button>';
+    '</div>';
   list.appendChild(row);
   function changed() { try { syncSourceRowMode(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
   var acct = row.querySelector('.src-account');

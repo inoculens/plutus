@@ -1327,8 +1327,12 @@ function normalizeTradeForStore(t) {
       });
       if (__srcs.length > 1) c.sources = __srcs;
       else { try { delete c.sources; } catch (e) { c.sources = undefined; } }
+      if (__srcs.length > 1 && Array.isArray(c.sourceFeeAuto) && c.sourceFeeAuto.length === __srcs.length && c.sourceFeeAuto.every(function (v) { return typeof v === 'boolean'; })) {
+        c.sourceFeeAuto = c.sourceFeeAuto.slice();
+      } else { try { delete c.sourceFeeAuto; } catch (e) { c.sourceFeeAuto = undefined; } }
     } else {
       try { delete c.sources; } catch (e) { c.sources = undefined; }
+      try { delete c.sourceFeeAuto; } catch (e) { c.sourceFeeAuto = undefined; }
     }
   }
   // Multi-recipient transfers: normalize rows (trim labels, uppercase the
@@ -15643,12 +15647,13 @@ function openEditTrade(tradeId) {
       srcRowsBuilt = tr.sources;
       transferSourcesAuto = false; // explicit fees: manual mode
       clearSourceRows();
+      var storedAutoModes = (Array.isArray(tr.sourceFeeAuto) && tr.sourceFeeAuto.length === srcRowsBuilt.length && tr.sourceFeeAuto.every(function (v) { return typeof v === 'boolean'; })) ? tr.sourceFeeAuto : null;
       srcRowsBuilt.forEach(function (s, sidx) {
         addSourceRow({
           accountId: s.accountId,
           qty: s.qty !== undefined ? s.qty : '',
           fee: s.fee !== undefined ? s.fee : '',
-          auto: !s.fee
+          auto: storedAutoModes ? storedAutoModes[sidx] : !s.fee
         });
       });
     } else {
@@ -16347,6 +16352,7 @@ function onTradeSubmit(ev) {
   // transferRowsBuilt feeds the save paths below so both agree exactly.
   var transferRowsBuilt = null;
   var transferSourcesBuilt = null;
+  var transferSourceAutoBuilt = null;
   var transferSelfBuilt = 0;
   var toAccId = (side === 'swap') ? uiVal('t-toaccount', '') : '';
   var toAccCash = null;
@@ -16496,6 +16502,7 @@ function onTradeSubmit(ev) {
     transferRowsBuilt = recRows;
     if (multiSource) {
       transferSourcesBuilt = srcBuilt;
+      transferSourceAutoBuilt = srcRows.map(function (r) { return !!r.auto; });
     }
   }
   if (!symbol || !/^[A-Z0-9._-]{1,12}$/.test(symbol)) { tradeFormError('Account ticker looks invalid.'); return; }
@@ -16661,6 +16668,7 @@ function onTradeSubmit(ev) {
       if (side === 'transfer') {
         trade.networkFee = networkFee;
         if (transferSourcesBuilt) trade.sources = transferSourcesBuilt;
+        if (transferSourceAutoBuilt) trade.sourceFeeAuto = transferSourceAutoBuilt.slice();
         var outsEdit = buildTransferOutputs(transferRowsBuilt, symbol);
         if (outsEdit.length) {
           trade.outputs = outsEdit;
@@ -16746,6 +16754,7 @@ function onTradeSubmit(ev) {
     if (side === 'transfer') {
       trade.networkFee = networkFee;
       if (transferSourcesBuilt) trade.sources = transferSourcesBuilt;
+      if (transferSourceAutoBuilt) trade.sourceFeeAuto = transferSourceAutoBuilt.slice();
       var outsNew = buildTransferOutputs(transferRowsBuilt, symbol);
       if (outsNew.length) {
         trade.outputs = outsNew;

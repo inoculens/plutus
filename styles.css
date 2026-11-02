@@ -3744,3 +3744,16 @@ label.sync-check input {
   .history-periods button { min-height: 2.15rem; padding: 0.3rem 0.38rem; font-size: 0.68rem; }
   .history-custom { margin-top: 0.45rem; }
 }
+
+
+/* Multi-source transfer editor */
+.src-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; padding:10px; margin:8px 0; border:1px solid var(--line,#333); border-radius:10px; background:var(--panel,transparent); }
+.src-grid { display:grid; grid-template-columns:minmax(110px,1.4fr) minmax(90px,1fr) minmax(90px,1fr) auto; gap:8px; align-items:end; min-width:0; }
+.src-grid label { display:grid; gap:5px; min-width:0; font-size:.82rem; }
+.src-grid input,.src-grid select { width:100%; min-width:0; }
+.src-max-wrap { align-self:end; }
+.src-auto-wrap { display:flex!important; grid-column:1/-1; align-items:center; gap:7px!important; }
+.src-auto-wrap input { width:auto; }
+.src-remove { align-self:center; white-space:nowrap; }
+#t-source-add,#t-source-split { margin:6px 8px 0 0; }
+@media (max-width:560px) { .src-row { grid-template-columns:minmax(0,1fr); } .src-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .src-remove { justify-self:end; } }

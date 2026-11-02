@@ -16258,6 +16258,7 @@ function onTradeSubmit(ev) {
     var sentOkSave = sentScSave !== null && sentScSave > 0n;
     if (!sentOkSave) { tradeFormError('Enter how much you sent (> 0).'); return; }
     var precBad = qtyOverPrecise(qtyRaw, symbol) || qtyOverPrecise(uiVal('t-selfrecv', ''), symbol);
+    srcRows.forEach(function (sr) { if (qtyOverPrecise(sr.qty, symbol) || qtyOverPrecise(sr.fee, symbol)) precBad = true; });
     recRows.forEach(function (rr) { if (qtyOverPrecise(rr.qty, symbol) || qtyOverPrecise(rr.fee, symbol)) precBad = true; });
     if (precBad) { tradeFormError(qtyPrecisionError(symbol)); return; }
     if (recRows.length > TRANSFER_MAX_OUTPUTS) { tradeFormError('Too many recipients (max 20).'); return; }
@@ -16373,6 +16374,15 @@ function onTradeSubmit(ev) {
     var nfChkSave = Number(networkFee);
     var nfScChk = exactScaledOf(networkFee, symDecSave);
     if (nfScChk === null || nfScChk < 0n || nfScChk >= sentScSave) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
+    // With exactly one source, a manual source fee is the full tx fee.
+    // Enforce the previewed relationship on save; auto mode derives it.
+    if (!multiSource && srcRows.length === 1 && !srcRows[0].auto) {
+      var singleSourceFeeSc = exactScaledOf(String(srcRows[0].fee || '').trim() === '' ? '0' : srcRows[0].fee, symDecSave);
+      if (singleSourceFeeSc === null || singleSourceFeeSc < 0n || singleSourceFeeSc !== nfScChk) {
+        tradeFormError('With one source, its manual fee must equal the full transfer fee. Turn on Auto fee to derive it.');
+        return;
+      }
+    }
     uiSetVal('t-networkfee', exactToStringTrim(exactScaledOf(networkFee, symDecSave), symDecSave));
     transferRowsBuilt = recRows;
     if (multiSource) {

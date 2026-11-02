@@ -994,6 +994,31 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   margin: 0;
 }
 
+/* Busy state while a record is being saved: spinner + label, not clickable. */
+#t-submit.is-busy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  cursor: progress;
+  pointer-events: none;
+}
+#t-submit.is-busy:disabled { opacity: 0.88; }
+.btn-spin {
+  flex-shrink: 0;
+  width: 1.05em;
+  height: 1.05em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btnSpin 0.7s linear infinite;
+}
+@keyframes btnSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  /* Feedback, not decoration: keep it turning (slower) under reduced motion. */
+  .btn-spin { animation: btnSpin 1.6s linear infinite !important; }
+}
+
 .t-err {
   position: absolute;
   left: 0.75rem;

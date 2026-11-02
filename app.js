@@ -14568,7 +14568,7 @@ function resetTradeForm() {
   var toSel = document.getElementById('t-toaccount');
   if (toSel) toSel.innerHTML = '';
   var submitBtn0 = document.getElementById('t-submit');
-  if (submitBtn0) { submitBtn0.textContent = 'Add record'; submitBtn0.disabled = false; }
+  if (submitBtn0) { setTradeSubmitBusy(submitBtn0, false, 'Add record'); }
   var titleEl0 = document.getElementById('trade-dialog-title');
   if (titleEl0) titleEl0.textContent = 'Add record';
   var dd = document.getElementById('t-date');
@@ -14779,7 +14779,7 @@ function openEditTrade(tradeId) {
   } catch (e) { /* ignore */ }
   try { syncTransferFeePreview(); } catch (e) { /* ignore */ }
   var submitBtn2 = document.getElementById('t-submit');
-  if (submitBtn2) { submitBtn2.textContent = 'Save changes'; submitBtn2.disabled = false; }
+  if (submitBtn2) { setTradeSubmitBusy(submitBtn2, false, 'Save changes'); }
   var titleEl2 = document.getElementById('trade-dialog-title');
   if (titleEl2) titleEl2.textContent = swapPair ? 'Edit swap' : 'Edit record';
   tradeFormError(null);
@@ -14821,6 +14821,38 @@ function tErrDismiss() {
     var pn = document.getElementById('t-error-panel');
     if (pn && pn.classList.contains('hide')) tErrClear();
   }, BANNER_OUT_MS + 50);
+}
+
+// Busy state of the record submit button: spinner + "Saving…", disabled, and
+// aria-busy so the press is visibly acknowledged and cannot be repeated while
+// the save runs (ECB fetch, attachment hashing). Passing a label on unlock
+// restores it; without one the pre-busy label comes back.
+var tradeSubmitBusy = false;
+function setTradeSubmitBusy(btn, busy, label) {
+  if (!btn) return;
+  tradeSubmitBusy = !!busy;
+  if (busy) {
+    if (!btn.classList.contains('is-busy')) btn.setAttribute('data-idle-label', btn.textContent || '');
+    btn.classList.add('is-busy');
+    btn.setAttribute('aria-busy', 'true');
+    btn.disabled = true;
+    btn.textContent = '';
+    var spin = document.createElement('span');
+    spin.className = 'btn-spin';
+    spin.setAttribute('aria-hidden', 'true');
+    var txt = document.createElement('span');
+    txt.textContent = label || 'Saving…';
+    btn.appendChild(spin);
+    btn.appendChild(txt);
+    return;
+  }
+  var idle = btn.getAttribute('data-idle-label');
+  btn.classList.remove('is-busy');
+  btn.removeAttribute('aria-busy');
+  btn.removeAttribute('data-idle-label');
+  btn.disabled = false;
+  if (label) btn.textContent = label;
+  else if (btn.querySelector('.btn-spin')) btn.textContent = idle || 'Add record';
 }
 
 function tradeFormError(msg) {
@@ -14965,6 +14997,7 @@ function learnLedgerLabel(st, trade) {
 
 function onTradeSubmit(ev) {
   if (ev && ev.preventDefault) ev.preventDefault();
+  if (tradeSubmitBusy) return; // a save is already running: ignore repeat presses / Enter
   tradeFormError(null);
   var st0 = loadState();
   var main = st0.settings.mainCurrency;
@@ -14984,9 +15017,7 @@ function onTradeSubmit(ev) {
   }
   var submitBtn = document.getElementById('t-submit');
   function lockSubmit(locked, label) {
-    if (!submitBtn) return;
-    submitBtn.disabled = !!locked;
-    if (label) submitBtn.textContent = label;
+    setTradeSubmitBusy(submitBtn, !!locked, label);
   }
   var dateRaw = uiVal('t-date', '').trim();
   var date = dateRaw ? parseDateInput(dateRaw) : todayStr();

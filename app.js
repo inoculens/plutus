@@ -7742,7 +7742,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
   var cashTrades = 0;
   (dtrCash || []).forEach(function (t) {
     if (!t) return;
-    if ((t.accountId && cashVisible(t.accountId)) || transferDestIds(t).some(function (id) { return cashVisible(id); })) cashTrades++;
+    if (Object.keys(cashIdsS).some(function (id) { return cashVisible(id) && transferInvolvesAccount(t, id); })) cashTrades++;
   });
   var cashBalTotal = 0;
   var cashBalKnown = false;
@@ -8262,7 +8262,8 @@ function buildAccountAction() {
       // Owned trades go; transfers pointing into the set go too — otherwise
       // the next load would silently drop the survivors' half of the move.
       s2.trades = (s2.trades || []).filter(function (t) {
-        return !t || (!inSet[t.accountId] && !transferDestIds(t).some(function (id) { return !!inSet[id]; }));
+        if (!t) return true;
+        return !Object.keys(inSet).some(function (id) { return transferInvolvesAccount(t, id); });
       });
       s2.accounts = (s2.accounts || []).filter(function (a) { return !a || !inSet[a.id]; });
       selectedAccounts = {};
@@ -8678,7 +8679,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var seenTrade = {};
   (dtrades || []).forEach(function (t) {
     if (!t) return;
-    if (!scopeSet[t.accountId] && !transferDestIds(t).some(function (id) { return !!scopeSet[id]; })) return;
+    if (!Object.keys(scopeSet).some(function (id) { return transferInvolvesAccount(t, id); })) return;
     if (t.id) {
       if (seenTrade[t.id]) return;
       seenTrade[t.id] = true;
@@ -10191,7 +10192,7 @@ function setTradeCardOpen(box, open) {
   try { syncInfoDots(); } catch (e) { /* the ⓘ gate never breaks a tap */ }
 }
 
-function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
+function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScopeIds) {
   var n = normalizeTrade(t);
   // The two key numbers per type stay visible on a collapsed phone card
   // (buy: Paid + Amount; sell: Received + Amount sold; transfer: Moved +
@@ -10229,11 +10230,17 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
   // itself as a rail along the left edge (dots ride in the rail's vertical
   // middle; positioning lives in styles.css), and the drop target decides
   // which records may swap, not any selection.
-  var grip = document.createElement('span');
-  grip.className = 'drag-handle';
-  grip.title = 'Drag to reorder (same date only)';
-  grip.setAttribute('aria-hidden', 'true');
-  box.appendChild(grip);
+  var sourceLegsForGrip = (t.type === 'transfer') ? transferSourceLegs(t) : [];
+  var scopeForGrip = Array.isArray(viewScopeIds) ? viewScopeIds : [];
+  var visibleSource = sourceLegsForGrip.some(function (leg) { return scopeForGrip.indexOf(leg.accountId) !== -1; });
+  var primaryVisible = scopeForGrip.indexOf(t.accountId) !== -1;
+  if (!(sourceLegsForGrip.length > 1 && visibleSource && !primaryVisible)) {
+    var grip = document.createElement('span');
+    grip.className = 'drag-handle';
+    grip.title = 'Drag to reorder (same date only)';
+    grip.setAttribute('aria-hidden', 'true');
+    box.appendChild(grip);
+  }
   var when = document.createElement('span');
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');
@@ -10468,6 +10475,15 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo) {
     var tSym = String(t.symbol || '').toUpperCase();
     var outsC = transferOutputsOf(t);
     box.appendChild(primary(statRow('Moved', fmtQty(t.qty, tSym) + ' ' + tSym, t.qty, false)));
+    var currentScopeIds = Array.isArray(viewScopeIds) ? viewScopeIds : [];
+    var currentSourceLegs = transferSourceLegs(t).filter(function (leg) { return currentScopeIds.indexOf(leg.accountId) !== -1; });
+    if (transferSourceLegs(t).length > 1 && currentSourceLegs.length) {
+      var ownQty = currentSourceLegs.reduce(function (sum, leg) { return sum + leg.qty; }, 0);
+      var ownFee = currentSourceLegs.reduce(function (sum, leg) { return sum + leg.fee; }, 0);
+      var ownText = fmtQty(ownQty, tSym) + ' ' + tSym;
+      if (ownFee > 0) ownText += ' · fee ' + fmtQty(ownFee, tSym) + ' ' + tSym;
+      box.appendChild(statRow('From this account', ownText, ownQty, false));
+    }
     if (xferFee > 0) {
       var feeTxtT = fmtQty(t.networkFee, tSym) + ' ' + tSym;
       if (xferRate !== null) feeTxtT += ' (≈ ' + fmtMoney(xferFee * xferRate.price, xferRate.ccy) + ')';
@@ -11965,25 +11981,31 @@ function renderAccountDetail(st, id) {
   var spentSum = 0;
   try {
     atrades.forEach(function (t) {
-      if (!t || t.accountId !== acc.id) return; // source outflows only
+      if (!t) return;
       var sn = normalizeTrade(t);
-      if (t.type === 'sell') {
-        if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
-      } else if (t.type === 'expense' || t.type === 'transfer') {
-        if (isFinite(sn.netMain) && sn.netMain > 0) spentSum += sn.netMain;
-        var cq;
-        if (t.type === 'transfer') {
-          var nfSpent = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
-          cq = (isFinite(nfSpent) && nfSpent > 0 ? nfSpent : 0) + transferExternalQtyOf(t);
-        } else {
-          cq = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? 0 : Number(t.qty);
-        }
+      if (t.type === 'transfer') {
+        var sourceQty = transferSourceQtyFor(t, acc.id);
+        if (!(sourceQty > 0)) return; // destination-only views do not count as spending
+        var sourceShare = transferSourceShareOf(t, acc.id);
+        // Any fiat-valued transfer fields follow the source's net contribution.
+        if (isFinite(sn.netMain) && sn.netMain > 0) spentSum += sn.netMain * sourceShare;
+        var sourceFee = transferSourceFeeFor(t, acc.id);
+        var externalShare = transferExternalQtyOf(t) * sourceShare;
+        var cq = sourceFee + externalShare;
         if (isFinite(cq) && cq > 0) {
           var kr = null;
           try { kr = resolveExecPrice(t, main, accKind); } catch (e) { kr = null; }
-          if (kr !== null && isFinite(Number(kr.price)) && Number(kr.price) > 0) {
-            spentSum += cq * Number(kr.price);
-          }
+          if (kr !== null && isFinite(Number(kr.price)) && Number(kr.price) > 0) spentSum += cq * Number(kr.price);
+        }
+      } else if (t.accountId === acc.id && t.type === 'sell') {
+        if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
+      } else if (t.accountId === acc.id && t.type === 'expense') {
+        if (isFinite(sn.netMain) && sn.netMain > 0) spentSum += sn.netMain;
+        var cqExpense = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? 0 : Number(t.qty);
+        if (isFinite(cqExpense) && cqExpense > 0) {
+          var krExpense = null;
+          try { krExpense = resolveExecPrice(t, main, accKind); } catch (e) { krExpense = null; }
+          if (krExpense !== null && isFinite(Number(krExpense.price)) && Number(krExpense.price) > 0) spentSum += cqExpense * Number(krExpense.price);
         }
       }
     });
@@ -12210,7 +12232,7 @@ function renderAccountDetail(st, id) {
       ? { links: fifoLinks, byId: tradeById, main: main, go: gotoTrade }
       : null;
     for (var ti = tradeStart; ti < tradeEnd; ti++) {
-      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind, fifoCtx, swapInfo);
+      var tb = tradeBlock(sortedTrades[ti], main, nameById, accKind, fifoCtx, swapInfo, scopeIds);
       if (frag) frag.appendChild(tb);
       else host.appendChild(tb);
     }

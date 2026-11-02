@@ -15214,8 +15214,15 @@ function syncTransferFeePreview() {
       manualFeeTotal += f; srcEntries.push({q:q,f:f});
     }
   }
-  if (srcRows.length && srcOk) {
-    if (qtyEl) { qtyEl.readOnly = true; qtyEl.value = exactToStringTrim(srcTotalQ, symDec); }
+  if (srcRows.length) {
+    if (qtyEl) qtyEl.readOnly = true;
+    if (!srcOk) {
+      if (qtyEl) qtyEl.value = '';
+      feeInput.value = '';
+      if (hint) hint.textContent = 'Complete every source account, quantity and fee before setting the total.';
+      return;
+    }
+    if (qtyEl) qtyEl.value = exactToStringTrim(srcTotalQ, symDec);
     var srcIds = {};
     srcRows.forEach(function(r){if(r.accountId)srcIds[r.accountId]=true;});
     var recConflict = null;

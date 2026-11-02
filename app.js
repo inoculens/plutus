@@ -14512,54 +14512,56 @@ function refreshSourceAccounts() {
     var isCash = !!(primaryAcc && isCashKind(primaryAcc.kind));
     var rows = list.querySelectorAll('.src-row');
     var used = {};
-    used[primaryId] = true;
-    // Exclude accounts that appear as recipients (internal output rows).
-    var recRows = readRecipientRows();
-    recRows.forEach(function (rr) {
+    if (primaryId) used[primaryId] = true;
+    // A recipient cannot also fund this transfer.
+    readRecipientRows().forEach(function (rr) {
       if (rr.kind === 'internal' && rr.accountId) used[rr.accountId] = true;
     });
     for (var i = 0; i < rows.length; i++) {
-      (function (row) {
+      (function (row, index) {
         var sel = row.querySelector('.src-account');
         if (!sel) return;
         var cur = sel.value;
         sel.innerHTML = '';
-        // Primary row: fixed to the current account, no choice.
-        var isPrimary = (i === 0);
-        var opt = document.createElement('option');
-        opt.value = primaryId;
-        opt.textContent = primaryAcc ? primaryAcc.name + ' · ' + String(primaryAcc.ticker).toUpperCase() : primaryId;
-        sel.appendChild(opt);
-        if (isPrimary) { sel.disabled = true; sel.value = primaryId; syncSourceRowMode(row); return; }
+        if (index === 0) {
+          var primaryOption = document.createElement('option');
+          primaryOption.value = primaryId;
+          primaryOption.textContent = primaryAcc ? primaryAcc.name + ' · ' + symU : primaryId;
+          sel.appendChild(primaryOption);
+          sel.disabled = true;
+          sel.value = primaryId;
+          syncSourceRowMode(row);
+          return;
+        }
         sel.disabled = false;
-        (st.accounts || []).forEach(function (a) {
-          if (!a || a.id === primaryId) return;
-          if (used[a.id]) return;
-          if (isCashKind(a.kind) !== isCash) return;
-          if (String(a.ticker || '').toUpperCase() !== symU) return;
-          var oo = document.createElement('option');
-          oo.value = a.id;
-          oo.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
-          sel.appendChild(oo);
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Choose account';
+        sel.appendChild(placeholder);
+        (st.accounts || []).forEach(function (account) {
+          if (!account || !account.id || used[account.id]) return;
+          if (isCashKind(account.kind) !== isCash) return;
+          if (String(account.ticker || '').toUpperCase() !== symU) return;
+          var option = document.createElement('option');
+          option.value = account.id;
+          option.textContent = account.name + ' · ' + String(account.ticker).toUpperCase();
+          sel.appendChild(option);
         });
-        var has = false;
-        for (var k = 0; k < sel.options.length; k++) if (sel.options[k].value === cur) { has = true; break; }
-        if (cur && has) sel.value = cur;
-        else if (cur && !has && accountById(st, cur)) {
-          var keep = document.createElement('option');
-          var ka = accountById(st, cur);
-          keep.value = cur;
-          keep.textContent = ka.name + ' · ' + String(ka.ticker).toUpperCase();
-          sel.appendChild(keep);
-          sel.value = cur;
-        } else if (sel.options.length > 1) sel.selectedIndex = 1;
+        var canKeep = !!cur && !used[cur] && accountById(st, cur);
+        if (canKeep) {
+          var exists = false;
+          for (var k = 0; k < sel.options.length; k++) {
+            if (sel.options[k].value === cur) { exists = true; break; }
+          }
+          if (exists) sel.value = cur;
+        }
+        if (!sel.value) sel.value = '';
         if (sel.value) used[sel.value] = true;
         syncSourceRowMode(row);
-      })(rows[i]);
+      })(rows[i], i);
     }
   } catch (e) { /* ignore */ }
 }
-
 // Show/hide the fee input vs auto chip per source row based on the auto
 // checkbox. Manual rows keep their typed fee; auto rows show a read-only
 // chip derived from the even split.

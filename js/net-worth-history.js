@@ -1006,12 +1006,16 @@
     var validPoints = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); });
     lastDrawn = validPoints;
     if (!validPoints.length) {
-      setText('history-empty', active && active.points.length
-        ? 'No saved values with complete price coverage fall within this interval yet.'
-        : 'History starts collecting once a portfolio value is available.');
+      setText('history-empty', active && active.loading
+        ? 'Updating portfolio history…'
+        : (active && active.points.length
+          ? 'No saved values with complete price coverage fall within this interval yet.'
+          : 'History starts collecting once a portfolio value is available.'));
       return;
     }
-    setText('history-empty', '');
+    setText('history-empty', active && active.loading && validPoints.length === 1
+      ? 'Updating portfolio history…'
+      : '');
 
     var width = 960;
     var height = 260;

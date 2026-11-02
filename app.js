@@ -14247,6 +14247,8 @@ function refreshRecipientAccounts() {
     var fromAcc = accountById(st, fromId);
     var symU = fromAcc ? String(fromAcc.ticker || '').toUpperCase() : '';
     var isCash = !!(fromAcc && isCashKind(fromAcc.kind));
+    var sourceIds = {};
+    readSourceRows().forEach(function (source) { if (source.accountId) sourceIds[source.accountId] = true; });
     var rows = list.querySelectorAll('.rec-row');
     for (var i = 0; i < rows.length; i++) {
       (function (row) {
@@ -14255,13 +14257,9 @@ function refreshRecipientAccounts() {
         var cur = sel.value;
         sel.innerHTML = '';
         (st.accounts || []).forEach(function (a) {
-          if (!a || a.id === fromId) return;
-          if (isCash) {
-            if (!isCashKind(a.kind)) return;
-          } else {
-            if (isCashKind(a.kind)) return;
-            if (String(a.ticker).toUpperCase() !== symU) return;
-          }
+          if (!a || a.id === fromId || sourceIds[a.id]) return;
+          if (isCashKind(a.kind) !== isCash) return;
+          if (String(a.ticker || '').toUpperCase() !== symU) return;
           var o = document.createElement('option');
           o.value = a.id;
           o.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
@@ -14329,7 +14327,7 @@ function addRecipientRow(data) {
     '<label class="rec-spend-wrap" hidden><input type="checkbox" class="rec-spend" checked> Spend (counts as expense — untick for a neutral hand-over)</label>' +
     '<button type="button" class="rec-remove quiet">Remove</button>';
   list.appendChild(row);
-  function changed() { try { syncRecipientRowMode(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
+  function changed() { try { syncRecipientRowMode(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
   var kind = row.querySelector('.rec-kind');
   if (kind) kind.addEventListener('change', function () { try { refreshRecipientAccounts(); } catch (e) { /* ignore */ } changed(); });
   ['.rec-account', '.rec-qty', '.rec-fee', '.rec-toqty', '.rec-label'].forEach(function (sel) {
@@ -14340,7 +14338,7 @@ function addRecipientRow(data) {
   var sp = row.querySelector('.rec-spend');
   if (sp) sp.addEventListener('change', changed);
   var rm = row.querySelector('.rec-remove');
-  if (rm) rm.addEventListener('click', function () { try { row.parentNode.removeChild(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
+  if (rm) rm.addEventListener('click', function () { try { row.parentNode.removeChild(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); refreshRecipientAccounts(); syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   try {
     if (data.kind === 'external' && kind) kind.value = 'external';
     if (data.accountId) {
@@ -14463,7 +14461,7 @@ function addSourceRow(data) {
     '</div>' +
     '<button type="button" class="src-remove quiet">Remove</button>';
   list.appendChild(row);
-  function changed() { try { syncSourceRowMode(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
+  function changed() { try { syncSourceRowMode(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } }
   var acct = row.querySelector('.src-account');
   if (acct) acct.addEventListener('change', changed);
   ['.src-qty', '.src-fee'].forEach(function (sel) {
@@ -14476,7 +14474,7 @@ function addSourceRow(data) {
   if (maxBtn) maxBtn.addEventListener('click', function () {
     try { fillSourceMax(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   var rm = row.querySelector('.src-remove');
-  if (rm) rm.addEventListener('click', function () { try { row.parentNode.removeChild(row); } catch (e) { /* ignore */ } try { syncTransferFeePreview(); } catch (e) { /* ignore */ } });
+  if (rm) rm.addEventListener('click', function () { try { row.parentNode.removeChild(row); } catch (e) { /* ignore */ } try { refreshSourceAccounts(); refreshRecipientAccounts(); syncTransferFeePreview(); } catch (e) { /* ignore */ } });
   try {
     if (data.accountId) {
       var sel0 = row.querySelector('.src-account');
@@ -15680,7 +15678,7 @@ function openEditTrade(tradeId) {
         if (ai) ai.checked = !(tr.networkFee !== undefined && tr.networkFee !== null && Number(tr.networkFee) > 0);
       }
     }
-    try { refreshSourceAccounts(); } catch (e) { /* ignore */ }
+    try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ }
     try {
       var allRows = srcList ? srcList.querySelectorAll('.src-row') : [];
       if (allRows.length) syncSourceRowMode(allRows[0]);

@@ -16669,7 +16669,7 @@ function buildSettings() {
     '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-data password in this browser</label>' +
     '</div>' +
     '<div id="pd-g-oauth" hidden>' +
-    '<p class="muted set-blurb">Google Drive and Dropbox use the existing OAuth sign-in infrastructure. The price-data file is encrypted with the Sync passphrase above.</p>' +
+    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name. Google Drive and Dropbox use the existing OAuth sign-in infrastructure. The price-data file is encrypted with the Sync passphrase above.</p>' +
     '</div>' +
     '<div id="pd-g-megas3" hidden>' +
     '<label for="pd-endpoint">MEGA S4 endpoint</label>' +
@@ -17660,7 +17660,7 @@ var SYNC_VERSION = 1;
 var SYNC_STORAGE_KEY = 'inoculens.sync.v1';
 var PRICE_DATA_STORAGE_KEY = 'inoculens.price-data-sync.v1';
 var PRICE_DATA_APP = 'plutus.price-data.inoculens.com';
-var PRICE_DATA_FILENAME = 'price-data.plutus.inoculens.com';
+var PRICE_DATA_FILENAME = 'price-data.plutus.inoculens.com.enc.json';
 var PRICE_DATA_SERIES_MAX = 100;
 var PRICE_DATA_SERIES_POINTS_MAX = 250000;
 var PRICE_DATA_SERIES_SINGLE_MAX = 20000;
@@ -18112,10 +18112,11 @@ function syncSaveConfig(cfg) {
 }
 
 function priceDataSanitizeFilename(value) {
-  var name = String(value == null ? '' : value).trim();
-  name = name.replace(/^[/\\.\s]+/, '').replace(/[\/\\'"]/g, '');
-  name = name.replace(/[^\x20-\xFF]/g, '_').replace(/[. ]+$/, '').slice(0, 100);
-  return name || PRICE_DATA_FILENAME;
+  // Same rule as the Records file: user-editable basename, fixed '.enc.json'
+  // extension (also upgrades older saved extension-less names).
+  var raw = String(value == null ? '' : value).trim();
+  if (!raw) return PRICE_DATA_FILENAME;
+  return syncSanitizeFilename(raw);
 }
 
 function priceDataDefaultConfig() {
@@ -19403,17 +19404,36 @@ function priceDataMergeRecords(first, second) {
 }
 
 function priceDataReadRemote(cfg, passphrase) {
-  return syncRemoteDownload(cfg).then(function (text) {
-    return syncDecryptEnvelope(text, passphrase).then(function (plain) {
-      var payload = priceDataParsePayload(plain);
-      payload.exists = true;
-      return payload;
+  function read(target) {
+    return syncRemoteDownload(target).then(function (text) {
+      return syncDecryptEnvelope(text, passphrase).then(function (plain) {
+        var payload = priceDataParsePayload(plain);
+        payload.exists = true;
+        return payload;
+      });
     });
-  }, function (err) {
-    if (err && err.message && err.message.indexOf('no backup found') !== -1) {
-      return { exists: false, records: {}, series: {} };
-    }
-    throw err;
+  }
+  function isMissing(err) {
+    return !!(err && err.message && err.message.indexOf('no backup found') !== -1);
+  }
+  var none = function () { return { exists: false, records: {}, series: {} }; };
+  return read(cfg).then(null, function (err) {
+    if (!isMissing(err)) throw err;
+    // Migration: earlier versions stored this cache WITHOUT the .enc.json
+    // ending. Read it once so nothing is lost; exists stays false so the
+    // merged result is saved under the proper .enc.json name.
+    var legacyName = String(cfg.filename || '').replace(/\.enc\.json$/i, '');
+    if (!legacyName || legacyName === cfg.filename) return none();
+    var legacy = priceDataCloneConfig(cfg);
+    legacy.filename = legacyName;
+    legacy.objectKey = legacyName;
+    return read(legacy).then(function (payload) {
+      payload.exists = false;
+      return payload;
+    }, function (legacyErr) {
+      if (isMissing(legacyErr)) return none();
+      throw legacyErr;
+    });
   });
 }
 
@@ -21264,7 +21284,7 @@ function priceDataRefreshPanel() {
   var independent = document.getElementById('pd-independent');
   if (independent) independent.hidden = !!cfg.sameAsRecords;
   priceDataSetVal('pd-provider', cfg.provider);
-  priceDataSetVal('pd-filename', cfg.filename);
+  priceDataSetVal('pd-filename', syncDisplayBasename(cfg.filename));
   priceDataSetVal('pd-folder', cfg.folder);
   priceDataSetVal('pd-url', cfg.url);
   priceDataSetVal('pd-user', cfg.username);

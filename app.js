@@ -14359,7 +14359,6 @@ function readSourceRows() {
         var autoEl = q('.src-auto');
         var auto = !autoEl || autoEl.checked;
         var feeVal = v('.src-fee');
-        if (auto) feeVal = '';
         rows.push({
           index: idx,
           accountId: v('.src-account'),
@@ -15448,6 +15447,8 @@ function resetTradeForm() {
   uiSetVal('t-toqty', '');
   uiSetVal('t-selfrecv', '');
   clearRecipientRows();
+  clearSourceRows();
+  transferSourcesAuto = true;
   uiSetVal('t-total', '');
   var ccy = document.getElementById('t-currency');
   if (ccy) ccy.value = 'EUR';
@@ -16348,6 +16349,7 @@ function onTradeSubmit(ev) {
   var isCrossFiat = false;
   if (side === 'transfer') {
     var srcRows = readSourceRows();
+    var recRows = readRecipientRows();
     var multiSource = srcRows.length > 0;
     var srcBuilt = null;
     if (multiSource) {
@@ -16365,7 +16367,6 @@ function onTradeSubmit(ev) {
         }
       }
     }
-    var recRows = readRecipientRows();
     var sentChk = Number(qtyRaw);
     var symDecSave = qtyDecimals(symbol);
     var sentScSave = exactScaledOf(qtyRaw, symDecSave);

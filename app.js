@@ -13428,9 +13428,13 @@ function buildTradeForm() {
     '<label for="t-manual-price">Manual exec price (optional, this trade only, in trade fiat)</label>' +
     '<input id="t-manual-price" inputmode="decimal" placeholder="e.g. 67000">' +
     '</details>' +
-    '<div class="fld-error-row"><p id="t-error" class="banner-error" role="alert" hidden></p>' +
-    '<button type="button" id="t-error-close" aria-label="Dismiss this message" hidden>✕</button></div>' +
+    '<div class="t-dock">' +
+    '<div id="t-error-panel" class="t-err" role="alert" aria-live="assertive" hidden>' +
+    '<div class="t-err-row"><p id="t-error" class="banner-error"></p>' +
+    '<button type="button" id="t-error-close" aria-label="Dismiss this message">✕</button></div>' +
+    '<div class="t-err-progress"><div id="t-err-bar"></div></div></div>' +
     '<button class="primary" type="submit" id="t-submit">Add record</button>' +
+    '</div>' +
     '</form>';
   host.appendChild(wrap);
   var form = document.getElementById('trade-form');
@@ -14783,25 +14787,71 @@ function openEditTrade(tradeId) {
   openDialog('trade-dialog');
 }
 
-function tradeFormError(msg) {
+// Add/Edit record validation error: a red panel that rises from behind the
+// fixed submit button (same bounce + draining timer bar as the page banner,
+// reusing its BANNER_* timings). tradeFormError(null) clears instantly (dialog
+// open/reset/success); an on-screen panel updates in place without re-rising.
+var tErrTimer = null;      // starts the animated exit when the bar runs out
+var tErrOutTimer = null;   // really hides the panel after the exit animation
+
+function tErrCancelTimers() {
+  if (tErrTimer) { clearTimeout(tErrTimer); tErrTimer = null; }
+  if (tErrOutTimer) { clearTimeout(tErrOutTimer); tErrOutTimer = null; }
+}
+
+function tErrClear() {
+  tErrCancelTimers();
+  var panel = document.getElementById('t-error-panel');
   var p = document.getElementById('t-error');
-  if (!p) return;
+  if (p) p.textContent = '';
+  if (panel) {
+    panel.classList.remove('show', 'hide', 'run');
+    panel.hidden = true;
+  }
+}
+
+function tErrDismiss() {
+  if (tErrTimer) { clearTimeout(tErrTimer); tErrTimer = null; }
+  var panel = document.getElementById('t-error-panel');
+  if (!panel || panel.hidden || panel.classList.contains('hide')) return;
+  panel.classList.remove('show'); // 'run' stays so the bar does not snap back to full during the exit
+  panel.classList.add('hide');
+  tErrOutTimer = setTimeout(function () {
+    tErrOutTimer = null;
+    var pn = document.getElementById('t-error-panel');
+    if (pn && pn.classList.contains('hide')) tErrClear();
+  }, BANNER_OUT_MS + 50);
+}
+
+function tradeFormError(msg) {
+  var panel = document.getElementById('t-error-panel');
+  var p = document.getElementById('t-error');
+  if (!panel || !p) return;
+  if (!msg) { tErrClear(); return; }
   var x = document.getElementById('t-error-close');
-  if (!msg) {
-    p.textContent = '';
-    p.hidden = true;
-    if (x) x.hidden = true;
-    return;
+  if (x && !x.getAttribute('data-wired')) {
+    x.setAttribute('data-wired', '1');
+    x.addEventListener('click', function () { tErrDismiss(); });
   }
   p.textContent = String(msg);
-  p.hidden = false;
-  if (x) {
-    x.hidden = false;
-    if (!x.getAttribute('data-wired')) {
-      x.setAttribute('data-wired', '1');
-      x.addEventListener('click', function () { tradeFormError(null); });
-    }
-  }
+  var wasShowing = !panel.hidden && panel.classList.contains('show');
+  tErrCancelTimers();
+  panel.hidden = false;
+  panel.classList.remove('hide');
+  if (!wasShowing) { panel.classList.remove('show'); void panel.offsetWidth; panel.classList.add('show'); }
+  // Timer bar waits for the rise (lead), then drains over BANNER_DWELL_MS;
+  // the exit starts exactly when it runs out.
+  var lead = wasShowing ? 0 : BANNER_IN_MS;
+  try {
+    panel.style.setProperty('--banner-in', BANNER_IN_MS + 'ms');
+    panel.style.setProperty('--banner-out', BANNER_OUT_MS + 'ms');
+    panel.style.setProperty('--banner-dwell', BANNER_DWELL_MS + 'ms');
+    panel.style.setProperty('--banner-lead', lead + 'ms');
+  } catch (e) { /* ignore */ }
+  panel.classList.remove('run');
+  void panel.offsetWidth; // restart the bar animation
+  panel.classList.add('run');
+  tErrTimer = setTimeout(tErrDismiss, lead + BANNER_DWELL_MS);
 }
 
 // One calm line for a timeline conflict. A draft that is itself short keeps

@@ -952,17 +952,118 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 
 .banner-error { color: var(--loss); font-weight: 600; }
-.fld-error-row { display: flex; align-items: center; gap: 0.6rem; }
-.fld-error-row #t-error { flex: 1; margin: 0; }
+
+/* ————— Add/Edit record: fixed submit dock + error panel rising from behind it —————
+   The dock sticks to the bottom of the dialog's scroll area on every screen
+   size. The red error panel sits BEHIND the button (button is z-index 2),
+   rests hidden, and rises above it with the banner's bounce; the bar along
+   its bottom edge drains over the same dwell time as the page banner.
+   Resting states are static (like #banner) so reduced-motion still shows it. */
+.t-dock {
+  --t-btn-h: 3.1rem;
+  --t-gap: 0.45rem;
+  --t-pad-b: 0.5rem;
+  --t-rise: calc(-1 * (var(--t-btn-h) + var(--t-gap)));
+  position: sticky;
+  /* Sticky offsets stop at the dialog's inner padding edge; pull the dock down
+     by exactly that padding so it sits flush with the dialog's bottom edge and
+     no scrolled field shows beneath it. */
+  bottom: var(--t-stick, -1.5rem);
+  z-index: 2;
+  margin-top: 1.1rem;
+  padding: 0.6rem 0 var(--t-pad-b);
+  background: var(--surface-2);
+}
+/* Soft fade so scrolled fields do not end in a hard edge above the dock. */
+.t-dock::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 0.9rem;
+  background: linear-gradient(rgba(20, 27, 37, 0), var(--surface-2));
+  pointer-events: none;
+  z-index: -1;
+}
+#trade-form .t-dock button.primary {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  min-height: var(--t-btn-h);
+  margin: 0;
+}
+
+.t-err {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: var(--t-pad-b); /* aligned with the button's bottom edge: fully behind it at rest */
+  z-index: 0;
+  min-height: 2.5rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: var(--radius);
+  background: linear-gradient(rgba(248, 113, 113, 0.14), rgba(248, 113, 113, 0.14)), var(--surface-2);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  transform: translateY(0);
+  will-change: transform;
+  pointer-events: none;
+}
+.t-err[hidden] { display: none; }
+.t-err.show { transform: translateY(var(--t-rise)); pointer-events: auto; animation: tErrIn var(--banner-in, 600ms) both; }
+.t-err.hide { transform: translateY(0); pointer-events: none; animation: tErrOut var(--banner-out, 550ms) both; }
+
+/* Mirror of bannerIn/bannerOut flipped to rise from the bottom: overshoot
+   upward, settle just above the button. Opacity fades in during the first
+   quarter so a tall (wrapped) message never peeks out above the button. */
+@keyframes tErrIn {
+  0%   { transform: translateY(0); opacity: 0; animation-timing-function: ease-out; }
+  25%  { opacity: 1; }
+  55%  { transform: translateY(calc(var(--t-rise) - 8px)); animation-timing-function: ease-in-out; }
+  78%  { transform: translateY(calc(var(--t-rise) + 3px)); animation-timing-function: ease-in-out; }
+  100% { transform: translateY(var(--t-rise)); opacity: 1; }
+}
+@keyframes tErrOut {
+  0%   { transform: translateY(var(--t-rise)); opacity: 1; animation-timing-function: ease-out; }
+  25%  { transform: translateY(calc(var(--t-rise) - 8px)); animation-timing-function: ease-in; }
+  75%  { opacity: 1; }
+  100% { transform: translateY(0); opacity: 0; }
+}
+
+.t-err-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.35rem 0.3rem 0.8rem; flex: 1; }
+#t-error { flex: 1; min-width: 0; margin: 0; font-size: 0.86rem; line-height: 1.3; overflow-wrap: anywhere; }
 #t-error-close {
   flex-shrink: 0;
-  min-height: 2rem;
-  padding: 0.25rem 0.6rem;
+  min-height: 1.8rem;
+  min-width: 1.8rem;
+  padding: 0.1rem 0.45rem;
   background: none;
   border-color: transparent;
+  color: var(--text);
   font-weight: 700;
+  border-radius: 6px;
 }
-#t-error-close[hidden] { display: none; }
+#t-error-close:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* Time-remaining bar: red accent, drains right-to-left after the rise. */
+.t-err-progress { width: 100%; height: 3px; background: rgba(255, 255, 255, 0.06); flex-shrink: 0; }
+#t-err-bar {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, var(--loss), rgba(248, 113, 113, 0.55));
+  transform: scaleX(1);
+  transform-origin: left;
+}
+.t-err.run #t-err-bar { animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Timer, not decoration: exempt it from the global animation:none rule. */
+  .t-err.run #t-err-bar {
+    animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both !important; }
+}
 
 /* ————— Error-details popup: fixed box, scrolling list ————— */
 #error-dialog[open] {
@@ -3026,6 +3127,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     position: sticky; bottom: 0;
     min-height: 3.25rem; font-size: 1.02rem; z-index: 1;
   }
+  /* The record form's button lives in .t-dock (sticky on every screen size);
+     phones just get the taller target + the safe-area inset. */
+  .t-dock { --t-btn-h: 3.25rem; --t-pad-b: calc(0.5rem + env(safe-area-inset-bottom, 0px)); --t-stick: calc(-1.25rem - env(safe-area-inset-bottom, 0px)); }
+  #trade-form .t-dock button.primary { font-size: 1.02rem; }
   details.adv summary, details.opt summary { min-height: 2.75rem; line-height: 2.75rem; font-size: 0.92rem; }
   /* — Ledger rows go two-line: name (+ arrow) on top, amount + actions below. — */
   .ledger-row { flex-wrap: wrap; row-gap: 0.2rem; }

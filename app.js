@@ -18332,7 +18332,14 @@ function syncEnsureAccessToken(cfg) {
   return syncOAuthRefresh(cfg.provider, cfg).then(function (n) {
     cfg.tokens = n;
     if (cfg.priceDataAuth) priceDataSaveConfig(cfg);
-    else syncSaveConfig(cfg);
+    else if (cfg.priceDataFile) {
+      // Price Data shares the Records sign-in: persist ONLY the refreshed
+      // tokens into the Records config. Saving this whole clone would
+      // overwrite the Records file name with the price-data name (+ .enc.json).
+      var own = syncLoadConfig();
+      own.tokens = n;
+      syncSaveConfig(own);
+    } else syncSaveConfig(cfg);
     return n.access;
   });
 }
@@ -19034,6 +19041,7 @@ function priceDataDestination(syncCfg) {
   cfg.filename = PRICE_DATA_FILENAME;
   cfg.objectKey = PRICE_DATA_FILENAME;
   cfg.priceDataAuth = !saved.sameAsRecords;
+  cfg.priceDataFile = true;
   if (!saved.sameAsRecords) {
     cfg.filename = saved.filename;
     cfg.objectKey = saved.objectKey;

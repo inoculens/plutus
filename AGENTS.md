@@ -67,6 +67,14 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Smoke-test the app in a browser when changing user-facing behavior.
 - Verify `stamp-version.sh` is committed as mode `100755` (see above).
 
+## Push cadence — mandatory for every agent
+- Push each commit to `dev` as soon as it is finished and verified, with its
+  complete message and technical overview (see Commit messages), even while
+  the overall implementation is still in progress.
+- Never keep finished commits local until the end of the task or reply and
+  then push them all at once.
+- Every push still follows "Verify before every push" and "Push replies".
+
 ## Invariants — do not break
 - `isValidImportTrade` must keep accepting plain buy/sell trades; export
   envelope keys stay exactly

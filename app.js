@@ -15761,6 +15761,17 @@ function heldConflictMessage(conflict, draftList, state) {
   if (!conflict) return '';
   var drafts = Array.isArray(draftList) ? draftList : [draftList];
   if (drafts.indexOf(conflict.trade) !== -1) {
+    // A transfer can spend from several accounts: say which one is short.
+    var multi = false;
+    try { multi = !!(conflict.trade && conflict.trade.type === 'transfer' && transferSourceIds(conflict.trade).length > 1); } catch (e) { multi = false; }
+    if (multi) {
+      var shortName = '';
+      try {
+        var sa = accountById(state || loadState(), conflict.accountId);
+        if (sa && sa.name) shortName = String(sa.name);
+      } catch (e) { shortName = ''; }
+      if (shortName) return 'oversell: ' + shortName + ' can spend at most ' + conflict.available;
+    }
     return 'oversell: max sellable is ' + conflict.available;
   }
   var label = tradeTypeLabel(conflict.trade && conflict.trade.type);

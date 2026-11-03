@@ -37,6 +37,11 @@ jobs:
       - name: Install CCXT
         run: python -m pip install --disable-pip-version-check "ccxt>=4.4,<5"
 
+      - name: Verify collector and application syntax
+        run: |
+          python -m py_compile scripts/collect-market-history.py
+          node --check app.js
+
       - name: Collect daily market history
         run: python scripts/collect-market-history.py
 

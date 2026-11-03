@@ -25,7 +25,7 @@ MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
 MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 1.0
-COLLECTOR_VERSION = 4
+COLLECTOR_VERSION = 5
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
@@ -147,6 +147,11 @@ def validate_archive(archive: dict, today: datetime | None = None) -> None:
             stamp, price, confidence = int(row[0]), float(row[1]), int(row[2])
             if not math.isfinite(price) or price <= 0 or confidence < MIN_TRUSTED_EXCHANGES:
                 raise ValueError(f'{symbol}: invalid price or insufficient source confidence')
+            sources = row[3] if len(row) > 3 else None
+            if not isinstance(sources, list) or len(sources) != confidence:
+                raise ValueError(f'{symbol}: missing or inconsistent per-day exchange provenance')
+            if len(set(sources)) != len(sources) or not set(sources).issubset(TRUSTED_EXCHANGES):
+                raise ValueError(f'{symbol}: untrusted or duplicate per-day exchange provenance')
             if stamp % DAY_MS != DAY_MS - 1:
                 raise ValueError(f'{symbol}: timestamp is not a UTC daily close')
             day = stamp // DAY_MS
@@ -209,7 +214,7 @@ def main() -> int:
     archive = {
         "schema": 1, "collectorVersion": COLLECTOR_VERSION, "currency": "USD",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "source": "CCXT public spot OHLCV; minimum two trusted exchanges; trusted-only unweighted outlier screen and winsorized volume-weighted median (equal-weight midpoint for two venues); USDT/USDC treated at USD parity",
+        "source": "CCXT public spot OHLCV; minimum two trusted exchanges; trusted-only unweighted outlier screen and winsorized volume-weighted median (equal-weight midpoint for two venues); USDT/USDC treated at USD parity; each daily point includes contributing exchange IDs",
         "rangeStart": initial_start.isoformat(), "assets": {}, "coverage": {},
     }
 
@@ -267,7 +272,7 @@ def main() -> int:
                 if close is None:
                     continue
                 # Row[2] stores independent venue count as a confidence score.
-                new_row = [day * DAY_MS + DAY_MS - 1, round(close, 12), len(venues)]
+                new_row = [day * DAY_MS + DAY_MS - 1, round(close, 12), len(venues), sorted(venues)]
                 old_row = old_by_day.get(day)
                 if old_row and len(old_row) > 2 and int(old_row[2]) > len(venues):
                     continue

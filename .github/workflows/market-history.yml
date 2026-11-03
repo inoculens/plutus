@@ -5,7 +5,7 @@ on:
     - cron: "25 4 * * *"
   workflow_dispatch:
   push:
-    branches: [dev]
+    branches: [dev, main]
     paths:
       - "app.js"
       - "scripts/collect-market-history.py"

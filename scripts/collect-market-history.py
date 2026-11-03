@@ -23,6 +23,9 @@ MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 3.0
+COLLECTOR_VERSION = 2
+TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
+MIN_TRUSTED_EXCHANGES = {"XMR": 2}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -43,6 +46,19 @@ def median(values: list[float]) -> float | None:
         return None
     middle = len(values) // 2
     return values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2
+
+
+def filter_observations(rows: list[tuple[float, float, str]], symbol: str) -> list[tuple[float, float, str]]:
+    # Trusted venues establish the reference price. Long-tail exchanges may
+    # corroborate it, but can never establish a price on their own.
+    anchors = [row for row in rows if row[2] in TRUSTED_EXCHANGES]
+    minimum = MIN_TRUSTED_EXCHANGES.get(symbol, 1)
+    if len({row[2] for row in anchors}) < minimum:
+        return []
+    reference = median([row[0] for row in anchors])
+    if reference is None:
+        return []
+    return [row for row in rows if abs(row[0] / reference - 1) <= MAX_DEVIATION]
 
 
 def weighted_median(rows: list[tuple[float, float]]) -> float | None:
@@ -90,20 +106,24 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
             for day, values in sorted(rows_by_day.items())]
 
 
-def load_previous() -> tuple[dict, dict]:
+def load_previous() -> tuple[dict, dict, int]:
     if not OUTPUT.exists():
         return {}, {}
     try:
         previous = json.loads(OUTPUT.read_text(encoding="utf-8"))
-        return previous.get("assets", {}), previous.get("coverage", {})
+        return previous.get("assets", {}), previous.get("coverage", {}), int(previous.get("collectorVersion", 0))
     except (OSError, ValueError, AttributeError):
         log.warning("Previous archive could not be read; starting a clean collection")
-        return {}, {}
+        return {}, {}, 0
 
 
 def main() -> int:
     symbols = symbols_from_app()
-    old_assets, old_coverage = load_previous()
+    old_assets, old_coverage, previous_version = load_previous()
+    rebuild_archive = previous_version < COLLECTOR_VERSION
+    if rebuild_archive:
+        log.info("Collector version changed; rebuilding all historical observations with the current validation policy")
+        old_assets, old_coverage = {}, {}
     now = datetime.now(timezone.utc).date()
     initial_start = now - timedelta(days=INITIAL_DAYS)
     clients = {}
@@ -137,9 +157,9 @@ def main() -> int:
             )
 
     archive = {
-        "schema": 1, "currency": "USD",
+        "schema": 1, "collectorVersion": COLLECTOR_VERSION, "currency": "USD",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "source": "CCXT public spot OHLCV; unweighted cross-exchange outlier screen, capped-volume weighted median",
+        "source": "CCXT public spot OHLCV; trusted-exchange price anchor, independent venue corroboration, capped-volume weighted median; USDT/USDC treated at USD parity",
         "rangeStart": initial_start.isoformat(), "assets": {}, "coverage": {},
     }
 
@@ -148,7 +168,7 @@ def main() -> int:
             old_rows = old_assets.get(symbol, {}).get("points", [])
             old_by_day = {int(row[0]) // DAY_MS: row for row in old_rows
                           if isinstance(row, list) and len(row) >= 2}
-            if old_by_day:
+            if old_by_day and not rebuild_archive:
                 last_day = max(old_by_day)
                 start_date = max(initial_start, datetime.fromtimestamp(last_day * DAY_MS / 1000, timezone.utc).date() - timedelta(days=3))
             else:
@@ -183,12 +203,10 @@ def main() -> int:
 
             sources = set()
             for day, observations in sorted(by_day.items()):
-                # Outlier detection is deliberately unweighted: fake reported
-                # volume cannot move the reference price used to reject a venue.
-                reference = median([row[0] for row in observations])
-                if reference is None:
-                    continue
-                accepted = [row for row in observations if abs(row[0] / reference - 1) <= MAX_DEVIATION]
+                # A trusted venue set establishes identity/price context before
+                # any volume is considered. Long-tail venues cannot set the
+                # reference even when they report fabricated trading volume.
+                accepted = filter_observations(observations, symbol)
                 venues = {row[2] for row in accepted}
                 if len(venues) < MIN_INDEPENDENT_EXCHANGES:
                     continue

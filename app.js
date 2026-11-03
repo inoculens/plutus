@@ -3707,7 +3707,7 @@ function validateTrade(t, heldQty) {
 }
 
 // === Prices ===
-// Live crypto prices via CoinGecko simple/price with manual fallback.
+// Live crypto prices via CoinGecko simple/price with exchange fallbacks.
 // Resolution order per symbol: (1) manual override from live
 // loadState().priceOverrides (wins, no network), (2) CoinGecko
 // simple/price for mapped symbols with a 60s in-memory cache,
@@ -4044,10 +4044,9 @@ function yahooProxyUrls(sym, query) {
     'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(base)];
 }
 
-// Crypto live fallbacks when CoinGecko is rate-limited: Kraken then
-// Coinbase (both free, no key, CORS-open — the same hosts the history path
-// already uses). USD spot only; the caller bridges into the display fiat.
-// Never throw: null on any miss, and non-listed majors cost zero network.
+// Crypto live fallbacks when CoinGecko is rate-limited: Kraken, Coinbase,
+// then Binance's public USD/USDT/USDC spot tickers. The caller bridges USD
+// prices into the display fiat. Never throw; misses stay unknown.
 function fetchKrakenLiveUsd(sym, fetchImpl) {
   var s = String(sym || '').trim().toUpperCase();
   if (KRAKEN_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
@@ -4055,7 +4054,7 @@ function fetchKrakenLiveUsd(sym, fetchImpl) {
   if (!f) return Promise.resolve(null);
   var url = 'https://api.kraken.com/0/public/Ticker?pair=' + encodeURIComponent(s + 'USD');
   try {
-    return f(url).then(function (res) {
+    return fetchWithTimeout(f, url).then(function (res) {
       if (!res || !res.ok) throw new Error('kraken-http-' + (res && res.status));
       return res.json();
     }).then(function (data) {
@@ -4080,7 +4079,7 @@ function fetchCoinbaseLiveUsd(sym, fetchImpl) {
   if (!f) return Promise.resolve(null);
   var url = 'https://api.exchange.coinbase.com/products/' + encodeURIComponent(s + '-USD') + '/ticker';
   try {
-    return f(url).then(function (res) {
+    return fetchWithTimeout(f, url).then(function (res) {
       if (!res || !res.ok) throw new Error('coinbase-http-' + (res && res.status));
       return res.json();
     }).then(function (data) {
@@ -4091,11 +4090,75 @@ function fetchCoinbaseLiveUsd(sym, fetchImpl) {
   } catch (e) { return Promise.resolve(null); }
 }
 
+var binanceLiveTickerPromise = null;
+var binanceLiveTickerFetchedAt = 0;
+function fetchBinanceLiveUsd(sym, fetchImpl) {
+  var s = String(sym || '').trim().toUpperCase();
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  var now = Date.now();
+  if (!binanceLiveTickerPromise || now - binanceLiveTickerFetchedAt >= 60000) {
+    binanceLiveTickerFetchedAt = now;
+    var request = fetchWithTimeout(f, 'https://api.binance.com/api/v3/ticker/price').then(function (res) {
+      if (!res || !res.ok) throw new Error('binance-http-' + (res && res.status));
+      return res.json();
+    }).then(function (rows) {
+      if (!Array.isArray(rows)) throw new Error('binance-invalid-ticker-response');
+      var prices = Object.create(null);
+      rows.forEach(function (row) {
+        var pair = String(row && row.symbol || '').toUpperCase();
+        var price = Number(row && row.price);
+        if (!/^[A-Z0-9]+(?:USD|USDT|USDC)$/.test(pair) || !isFinite(price) || price <= 0) return;
+        prices[pair] = price;
+      });
+      return prices;
+    });
+    var cachedRequest = request.then(function (prices) {
+      if (binanceLiveTickerPromise === cachedRequest) binanceLiveTickerFetchedAt = Date.now();
+      return prices;
+    }, function (error) {
+      if (binanceLiveTickerPromise === cachedRequest) {
+        binanceLiveTickerPromise = null;
+        binanceLiveTickerFetchedAt = 0;
+      }
+      throw error;
+    });
+    binanceLiveTickerPromise = cachedRequest;
+  }
+  return binanceLiveTickerPromise.then(function (prices) {
+    var price = Number(prices[s + 'USD']);
+    // USDT/USDC quote pairs are treated at USD parity, as in the archive.
+    if (!isFinite(price) || price <= 0) price = Number(prices[s + 'USDT']);
+    if (s === 'USDT' && (!isFinite(price) || price <= 0)) price = Number(prices.USDTUSDC);
+    return isFinite(price) && price > 0 ? price : null;
+  }, function () { return null; });
+}
+
 function fetchCryptoFallbackUsd(sym, fetchImpl) {
-  return fetchKrakenLiveUsd(sym, fetchImpl).then(function (p) {
-    if (isFinite(Number(p)) && Number(p) > 0) return Number(p);
-    return fetchCoinbaseLiveUsd(sym, fetchImpl);
-  }, function () { return fetchCoinbaseLiveUsd(sym, fetchImpl); });
+  return Promise.all([
+    fetchKrakenLiveUsd(sym, fetchImpl),
+    fetchCoinbaseLiveUsd(sym, fetchImpl),
+    fetchBinanceLiveUsd(sym, fetchImpl)
+  ]).then(function (prices) {
+    for (var i = 0; i < prices.length; i++) {
+      var price = Number(prices[i]);
+      if (isFinite(price) && price > 0) return price;
+    }
+    return null;
+  });
+}
+
+function fetchCryptoFallbackPrice(sym, currency, fetchImpl) {
+  var cur = String(currency || 'USD').toUpperCase();
+  return fetchCryptoFallbackUsd(sym, fetchImpl).then(function (usd) {
+    usd = Number(usd);
+    if (!isFinite(usd) || usd <= 0) return null;
+    if (cur === 'USD') return usd;
+    return fetchEcbRate(todayStr(), 'USD', cur).then(function (rate) {
+      var converted = usd * Number(rate.rate);
+      return isFinite(converted) && converted > 0 ? converted : null;
+    }, function () { return null; });
+  });
 }
 
 // First URL that answers ok + parses as JSON; rejects when all fail.
@@ -4411,7 +4474,7 @@ function fetchBatchPrices(syms, vs) {
     });
     return Promise.resolve(done(off, offE));
   }
-  return capturedFetch(url).then(function (res) {
+  return fetchWithTimeout(capturedFetch, url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
   }).then(function (data) {
@@ -4516,7 +4579,7 @@ function fetchLivePrice(symbol, vs, kind) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
-  return capturedFetch(url).then(function (res) {
+  return fetchWithTimeout(capturedFetch, url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
   }).then(function (data) {
@@ -4550,33 +4613,20 @@ function fetchLivePrice(symbol, vs, kind) {
         });
       });
     }
+    if (curLow === 'usd') throw new Error('price-missing');
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
     return null;
   }).then(null, function () {
-    // CoinGecko error / 429 / bad payload: exchange fallbacks for majors
-    // (Kraken, then Coinbase), then last cached or null. Never throws.
-    return fetchCryptoFallbackUsd(sym, capturedFetch).then(function (fu) {
-      fu = Number(fu);
-      if (!isFinite(fu) || fu <= 0) {
+    // CoinGecko error / 429 / bad payload: independent exchange fallbacks,
+    // then last cached or null. Never throws.
+    return fetchCryptoFallbackPrice(sym, cur, capturedFetch).then(function (fallbackPrice) {
+      fallbackPrice = Number(fallbackPrice);
+      if (!isFinite(fallbackPrice) || fallbackPrice <= 0) {
         if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
         return null;
       }
-      if (curLow === 'usd') {
-        priceCache[key] = { price: fu, at: Date.now() };
-        return fu;
-      }
-      return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
-        var v = fu * Number(r.rate);
-        if (!isFinite(v) || v <= 0) {
-          if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-          return null;
-        }
-        priceCache[key] = { price: v, at: Date.now() };
-        return v;
-      }, function () {
-        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-        return null;
-      });
+      priceCache[key] = { price: fallbackPrice, at: Date.now() };
+      return fallbackPrice;
     });
   });
 }
@@ -4673,15 +4723,34 @@ function refreshAllPrices(symbols, vs, kinds) {
     })).then(function () { /* mapped into out/errors above */ }));
   }
   if (crypto.length) {
+    var cryptoFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+    function useCryptoFallbacks(failureMessage) {
+      return Promise.all(crypto.map(function (sym) {
+        if (isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
+        return fetchCryptoFallbackPrice(sym, cur, cryptoFetch).then(function (price) {
+          if (isFinite(Number(price)) && Number(price) > 0) {
+            out[sym] = Number(price);
+            delete errors[sym];
+            priceCache[priceCacheKey(sym, cur)] = { price: Number(price), at: Date.now() };
+            return;
+          }
+          var c = priceCache[priceCacheKey(sym, cur)];
+          if (c && isFinite(Number(c.price)) && Number(c.price) > 0) {
+            out[sym] = Number(c.price);
+            delete errors[sym];
+          } else {
+            out[sym] = null;
+            errors[sym] = errors[sym] || failureMessage;
+          }
+        });
+      }));
+    }
     jobs.push(fetchBatchPrices(crypto, cur).then(function (res) {
       Object.keys(res.prices).forEach(function (k) { out[k] = res.prices[k]; });
       Object.keys(res.errors).forEach(function (k) { errors[k] = res.errors[k]; });
+      return useCryptoFallbacks('no live exchange quote — try a manual override in Settings');
     }, function () {
-      crypto.forEach(function (sym) {
-        var c = priceCache[priceCacheKey(sym, cur)];
-        if (c && isFinite(Number(c.price)) && Number(c.price) > 0) out[sym] = Number(c.price);
-        else { out[sym] = null; errors[sym] = 'CoinGecko request failed (network or rate limit)'; }
-      });
+      return useCryptoFallbacks('CoinGecko and live exchange requests failed');
     }));
   }
   if (stocks.length) {

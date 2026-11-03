@@ -25,10 +25,16 @@ MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
 MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 1.0
-COLLECTOR_VERSION = 6
+COLLECTOR_VERSION = 7
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
 TRUSTED_EXCHANGES = set(EXCHANGES)
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
+# These venues' OHLCV endpoints only return candles inside
+# [since, since + limit days) (ccxt sets an explicit end bound). A short or
+# empty page therefore does NOT mean the history has ended: it is normal for
+# assets listed after `since`. The pager must step to the next window instead.
+WINDOWED_EXCHANGES = frozenset({"kucoin", "okx", "coinbase"})
+MAX_OHLCV_PAGES = 100
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plutus-market-history")
@@ -101,24 +107,33 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
     cursor = since_ms
     end_ms = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
     rows_by_day: dict[int, list[tuple[float, float]]] = {}
+    seen_stamps: set[int] = set()
     pages = 0
     page_limit = min(int(exchange.options.get("fetchOHLCVLimit", PAGE_LIMITS.get(exchange.id, 1000)) or PAGE_LIMITS.get(exchange.id, 1000)), PAGE_LIMITS.get(exchange.id, 1000))
-    while cursor < end_ms and pages < 100:
+    windowed = exchange.id in WINDOWED_EXCHANGES
+    # One day of overlap between windows so an exclusive/inclusive boundary
+    # difference between venues can never drop a candle; duplicates are skipped.
+    window_step_ms = max(DAY_MS, (page_limit - 1) * DAY_MS)
+    while cursor < end_ms and pages < MAX_OHLCV_PAGES:
         batch = exchange.fetch_ohlcv(market, timeframe="1d", since=cursor, limit=page_limit)
         pages += 1
-        if not batch:
-            break
         advanced = cursor
-        for row in batch:
+        for row in batch or []:
             if not row or len(row) < 6:
                 continue
             stamp, close, volume = int(row[0]), float(row[4] or 0), float(row[5] or 0)
             if not math.isfinite(close) or not math.isfinite(volume) or close <= 0 or volume < 0 or stamp < since_ms or stamp >= end_ms:
                 continue
+            advanced = max(advanced, stamp + DAY_MS)
+            if stamp in seen_stamps:
+                continue
+            seen_stamps.add(stamp)
             day = stamp // DAY_MS
             rows_by_day.setdefault(day, []).append((close, max(close * volume, 1e-12)))
-            advanced = max(advanced, stamp + DAY_MS)
-        if advanced <= cursor:
+        if windowed:
+            cursor += window_step_ms
+            continue
+        if not batch or advanced <= cursor:
             break
         cursor = advanced
         if len(batch) < page_limit:

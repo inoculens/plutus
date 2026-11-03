@@ -22,10 +22,10 @@ EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "gateio", "mexc",
 MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
+MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 3.0
 COLLECTOR_VERSION = 2
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
-MIN_TRUSTED_EXCHANGES = {"XMR": 2}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -52,13 +52,21 @@ def filter_observations(rows: list[tuple[float, float, str]], symbol: str) -> li
     # Trusted venues establish the reference price. Long-tail exchanges may
     # corroborate it, but can never establish a price on their own.
     anchors = [row for row in rows if row[2] in TRUSTED_EXCHANGES]
-    minimum = MIN_TRUSTED_EXCHANGES.get(symbol, 1)
-    if len({row[2] for row in anchors}) < minimum:
+    if len({row[2] for row in anchors}) < MIN_TRUSTED_EXCHANGES:
         return []
     reference = median([row[0] for row in anchors])
     if reference is None:
         return []
-    return [row for row in rows if abs(row[0] / reference - 1) <= MAX_DEVIATION]
+    # Only trusted anchors contribute to the published price. Long-tail
+    # venues cannot influence the published price.
+    return [row for row in anchors if abs(row[0] / reference - 1) <= MAX_DEVIATION]
+
+
+def market_matches_symbol(market: dict, symbol: str) -> bool:
+    base = str(market.get("base") or "").upper()
+    base_id = str(market.get("baseId") or "").upper()
+    # Both normalized base and exchange-native asset ID must match.
+    return base == symbol and base_id == symbol
 
 
 def weighted_median(rows: list[tuple[float, float]]) -> float | None:
@@ -150,7 +158,7 @@ def main() -> int:
                 continue
             # Require the exchange's normalized base identifier to match the
             # application ticker exactly; never infer identity from display names.
-            if str(base).upper() not in symbols:
+            if str(base).upper() not in symbols or not market_matches_symbol(market, str(base).upper()):
                 continue
             market_index[str(base).upper()].append(
                 (quote_rank[quote] * 10 + exchange_rank[exchange_id], market["symbol"], client)
@@ -159,7 +167,7 @@ def main() -> int:
     archive = {
         "schema": 1, "collectorVersion": COLLECTOR_VERSION, "currency": "USD",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "source": "CCXT public spot OHLCV; trusted-exchange price anchor, independent venue corroboration, capped-volume weighted median; USDT/USDC treated at USD parity",
+        "source": "CCXT public spot OHLCV; minimum two trusted exchanges; trusted-only unweighted outlier screen and capped-volume weighted median; USDT/USDC treated at USD parity",
         "rangeStart": initial_start.isoformat(), "assets": {}, "coverage": {},
     }
 

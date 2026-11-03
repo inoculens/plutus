@@ -28,7 +28,6 @@ MAX_WEIGHT_MULTIPLE = 1.0
 COLLECTOR_VERSION = 4
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
-BASE_ID_ALIASES = {"BTC": {"XBT"}}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -52,8 +51,8 @@ def median(values: list[float]) -> float | None:
 
 
 def filter_observations(rows: list[tuple[float, float, str]], symbol: str) -> list[tuple[float, float, str]]:
-    # Trusted venues establish the reference price. Long-tail exchanges may
-    # corroborate it, but can never establish a price on their own.
+    # Two trusted venues establish the reference price. Long-tail venues
+    # cannot establish or influence the published price.
     anchors = [row for row in rows if row[2] in TRUSTED_EXCHANGES]
     if len({row[2] for row in anchors}) < MIN_TRUSTED_EXCHANGES:
         return []

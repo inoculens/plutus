@@ -45,6 +45,19 @@ jobs:
           python -m unittest discover -s tests -p 'test_market_history_collector.py'
           node --check app.js
 
+      - name: Restore prior archive for incremental collection
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/plutus-market-history
+          if git ls-remote --exit-code --heads origin market-history >/dev/null 2>&1; then
+            git fetch origin market-history
+            git show FETCH_HEAD:market-history/daily.json > /tmp/plutus-market-history/previous.json
+            mkdir -p market-history
+            cp /tmp/plutus-market-history/previous.json market-history/daily.json
+          else
+            echo "No previous market-history archive exists; starting initial collection."
+          fi
+
       - name: Collect daily market history
         run: python scripts/collect-market-history.py
 
@@ -53,6 +66,7 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/plutus-market-history
           cp market-history/daily.json /tmp/plutus-market-history/daily.json
+          rm -rf market-history
 
           for attempt in 1 2 3; do
             if git ls-remote --exit-code --heads origin market-history >/dev/null 2>&1; then

@@ -38,6 +38,22 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         accepted = COLLECTOR.filter_observations(rows, "BTC")
         self.assertNotIn(3.0, [row[0] for row in accepted])
 
+
+    def test_long_tail_venue_cannot_contribute_even_with_two_trusted_anchors(self):
+        rows = [(100.0, 10.0, 'kraken'), (101.0, 20.0, 'coinbase'), (100.5, 1000000000.0, 'mexc')]
+        accepted = COLLECTOR.filter_observations(rows, 'BTC')
+        self.assertEqual({row[2] for row in accepted}, {'kraken', 'coinbase'})
+
+    def test_one_trusted_exchange_plus_long_tail_is_not_enough(self):
+        rows = [(100.0, 10.0, 'kraken'), (100.5, 20.0, 'mexc')]
+        self.assertEqual(COLLECTOR.filter_observations(rows, 'BTC'), [])
+
+    def test_market_identity_requires_normalized_base_and_native_id(self):
+        self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'BTC'}, 'BTC'))
+        self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'OTHER'}, 'BTC'))
+        self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC'}, 'BTC'))
+        self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'WRAPPEDBTC', 'baseId': 'BTC'}, 'BTC'))
+
     def test_weighted_median_respects_capped_weights_after_validation(self):
         self.assertEqual(COLLECTOR.weighted_median([(100.0, 1.0), (101.0, 50.0)]), 101.0)
 

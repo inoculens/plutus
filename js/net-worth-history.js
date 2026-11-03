@@ -34,6 +34,7 @@
   var rangeRequestTimer = null;
   var historyRetryTimer = null;
   var historyProgressTimer = null;
+  var navigatorCache = null;
   var requestSequence = 0;
   var lastReportedStatus = '';
 
@@ -515,9 +516,54 @@
   }
 
   function visiblePoints(range) {
-    return (active ? active.points : []).filter(function (point) {
-      return point.at >= range.start && point.at <= range.end;
+    var points = active ? active.points : [];
+    var low = 0;
+    var high = points.length;
+    while (low < high) {
+      var middle = Math.floor((low + high) / 2);
+      if (points[middle].at < range.start) low = middle + 1;
+      else high = middle;
+    }
+    var start = low;
+    high = points.length;
+    while (low < high) {
+      var upperMiddle = Math.floor((low + high) / 2);
+      if (points[upperMiddle].at <= range.end) low = upperMiddle + 1;
+      else high = upperMiddle;
+    }
+    return points.slice(start, low);
+  }
+
+  function samplePoints(points, start, end, width) {
+    var bucketCount = Math.max(1, Math.floor(width));
+    if (points.length <= bucketCount * 2) return points;
+    var span = Math.max(1, end - start);
+    var buckets = [];
+    points.forEach(function (point, index) {
+      var bucketIndex = Math.max(0, Math.min(bucketCount - 1,
+        Math.floor((point.at - start) / span * bucketCount)));
+      var bucket = buckets[bucketIndex];
+      var value = Number(point.value);
+      if (!bucket) {
+        buckets[bucketIndex] = { min: index, max: index };
+      } else {
+        if (value < Number(points[bucket.min].value)) bucket.min = index;
+        if (value > Number(points[bucket.max].value)) bucket.max = index;
+      }
     });
+    var indexes = [0];
+    buckets.forEach(function (bucket) {
+      if (!bucket) return;
+      if (indexes[indexes.length - 1] !== bucket.min) indexes.push(bucket.min);
+      if (indexes[indexes.length - 1] !== bucket.max) indexes.push(bucket.max);
+    });
+    if (indexes[indexes.length - 1] !== points.length - 1) indexes.push(points.length - 1);
+    indexes.sort(function (a, b) { return a - b; });
+    var sampled = [];
+    indexes.forEach(function (index) {
+      if (!sampled.length || sampled[sampled.length - 1] !== points[index]) sampled.push(points[index]);
+    });
+    return sampled;
   }
 
   function setText(id, text) {
@@ -927,25 +973,43 @@
     var height = 72;
     var minT = Number(active.historyStart) || points[0].at;
     var maxT = Math.max(minT + 1, points[points.length - 1].at);
-    var validPoints = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); });
-    var values = validPoints
-      .map(function (point) { return Number(point.value); });
-    if (!values.length) return;
-    var minV = Math.min.apply(Math, values);
-    var maxV = Math.max.apply(Math, values);
-    if (minV === maxV) { minV -= 1; maxV += 1; }
-    var d = '';
-    var segmentOpen = false;
-    validPoints.forEach(function (point) {
-      if (point.at < minT) return;
-      var x = (point.at - minT) / (maxT - minT) * width;
-      var y = height - 6 - ((Number(point.value) - minV) / (maxV - minV)) * (height - 12);
-      d += (segmentOpen ? ' L ' : 'M ') + x.toFixed(2) + ' ' + y.toFixed(2);
-      segmentOpen = true;
-    });
-    if (d) svg.appendChild(svgElement('path', { d: d, 'class': 'history-navigator-line' }));
-    if (values.length === 1) {
-      var only = validPoints[0];
+    if (!navigatorCache || navigatorCache.active !== active ||
+        navigatorCache.points !== points || navigatorCache.minT !== minT ||
+        navigatorCache.maxT !== maxT) {
+      var validPoints = points.filter(function (point) {
+        return point.value !== null && isFinite(Number(point.value));
+      });
+      var minV = Infinity;
+      var maxV = -Infinity;
+      validPoints.forEach(function (point) {
+        var value = Number(point.value);
+        minV = Math.min(minV, value);
+        maxV = Math.max(maxV, value);
+      });
+      if (minV === maxV) { minV -= 1; maxV += 1; }
+      var pathPoints = samplePoints(validPoints, minT, maxT, width);
+      var path = '';
+      var segmentOpen = false;
+      pathPoints.forEach(function (point) {
+        if (point.at < minT) return;
+        var x = (point.at - minT) / (maxT - minT) * width;
+        var y = height - 6 - ((Number(point.value) - minV) / (maxV - minV)) * (height - 12);
+        path += (segmentOpen ? ' L ' : 'M ') + x.toFixed(2) + ' ' + y.toFixed(2);
+        segmentOpen = true;
+      });
+      navigatorCache = {
+        active: active,
+        points: points,
+        minT: minT,
+        maxT: maxT,
+        path: path,
+        onlyPoint: validPoints.length === 1 ? validPoints[0] : null
+      };
+    }
+    if (!navigatorCache.path) return;
+    svg.appendChild(svgElement('path', { d: navigatorCache.path, 'class': 'history-navigator-line' }));
+    if (navigatorCache.onlyPoint) {
+      var only = navigatorCache.onlyPoint;
       svg.appendChild(svgElement('circle', {
         cx: (only.at - minT) / (maxT - minT) * width,
         cy: height / 2,
@@ -1014,7 +1078,7 @@
 
   function drawPlot(points, range) {
     var svg = byId('history-plot');
-    if (!svg) return;
+    if (!svg) return [];
     clear(svg);
     var validPoints = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); });
     lastDrawn = validPoints;
@@ -1024,7 +1088,7 @@
         : (active && active.points.length
           ? 'No saved values with complete price coverage fall within this interval yet.'
           : 'History starts collecting once a portfolio value is available.'));
-      return;
+      return validPoints;
     }
     setText('history-empty', active && active.loading && validPoints.length === 1
       ? 'Updating portfolio history…'
@@ -1036,9 +1100,13 @@
     var right = 948;
     var top = 14;
     var bottom = 220;
-    var vals = validPoints.map(function (point) { return Number(point.value); });
-    var min = Math.min.apply(Math, vals);
-    var max = Math.max.apply(Math, vals);
+    var min = Infinity;
+    var max = -Infinity;
+    validPoints.forEach(function (point) {
+      var value = Number(point.value);
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    });
     var padding = Math.max((max - min) * 0.12, Math.max(Math.abs(min), Math.abs(max), 1) * 0.004);
     min = min >= 0 ? Math.max(0, min - padding) : min - padding;
     max += padding;
@@ -1057,7 +1125,8 @@
       svg.appendChild(label);
     }
 
-    var d = smoothLinePath(validPoints, xAt, yAt);
+    var pathPoints = samplePoints(validPoints, start, end, right - left);
+    var d = smoothLinePath(pathPoints, xAt, yAt);
     var positive = Number(validPoints[validPoints.length - 1].value) >= Number(validPoints[0].value);
     if (d) svg.appendChild(svgElement('path', { d: d, 'class': 'history-line ' + (positive ? 'is-positive' : 'is-negative') }));
     if (validPoints.length === 1) {
@@ -1104,13 +1173,14 @@
       svg.appendChild(svgElement('line', { x1: hx, x2: hx, y1: top, y2: bottom, 'class': 'history-crosshair' }));
       svg.appendChild(svgElement('circle', { cx: hx, cy: hy, r: 5, 'class': 'history-marker' }));
     }
+    return validPoints;
   }
 
   function draw() {
     if (!active) return;
     var range = currentRange();
     var points = visiblePoints(range);
-    drawPlot(points, range);
+    var validPoints = drawPlot(points, range);
     renderNavigator();
     syncRangeInputs(range);
 
@@ -1149,7 +1219,6 @@
       to.max = '';
     }
 
-    var validPoints = points.filter(function (point) { return point.value !== null && isFinite(Number(point.value)); });
     var shown = hoverPoint && validPoints.indexOf(hoverPoint) !== -1
       ? hoverPoint : (validPoints.length ? validPoints[validPoints.length - 1] : null);
     if (shown) {
@@ -1245,6 +1314,7 @@
     data.pendingContext = context;
     data.updating = true;
     data.incomplete = false;
+    navigatorCache = null;
     draw();
 
     var points = data.points.slice();
@@ -1258,6 +1328,7 @@
         data.pendingContext = null;
         data.updating = false;
         data.incomplete = incomplete;
+        navigatorCache = null;
         saveStore(data);
         draw();
         return;

@@ -15924,6 +15924,14 @@ function setTradeSubmitBusy(btn, busy, label) {
   else if (btn.querySelector('.btn-spin')) btn.textContent = idle || 'Add record';
 }
 
+function deferTradeSubmitWork(callback) {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function () { setTimeout(callback, 0); });
+    return;
+  }
+  setTimeout(callback, 0);
+}
+
 function tradeFormError(msg) {
   var panel = document.getElementById('t-error-panel');
   var p = document.getElementById('t-error');
@@ -16165,15 +16173,17 @@ function onTradeSubmit(ev) {
     }
     lockSubmit(true, 'Saving…');
     function proceedSwapCreateWithAttachment(lock) {
-      try {
-        attResolveForSave(function (err, meta) {
-          if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
-          proceedSwapCreate(lock, meta);
-        });
-      } catch (e) {
-        tradeFormError('Could not save the attachment — record was not saved.');
-        lockSubmit(false, 'Add record');
-      }
+      deferTradeSubmitWork(function () {
+        try {
+          attResolveForSave(function (err, meta) {
+            if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
+            proceedSwapCreate(lock, meta);
+          });
+        } catch (e) {
+          tradeFormError('Could not save the attachment — record was not saved.');
+          lockSubmit(false, 'Add record');
+        }
+      });
     }
     function proceedSwapCreate(lock, attMeta) {
       var st = loadState();
@@ -16302,15 +16312,17 @@ function onTradeSubmit(ev) {
     } catch (e) { /* validation continues; engine clamps anyway */ }
     function proceedSwapEditWithAttachment(lock) {
       lockSubmit(true, 'Saving…');
-      try {
-        attResolveForSave(function (err, meta) {
-          if (err) { tradeFormError(err); lockSubmit(false, 'Save changes'); return; }
-          proceedSwapEdit(lock, meta);
-        });
-      } catch (e) {
-        tradeFormError('Could not save the attachment — record was not saved.');
-        lockSubmit(false, 'Save changes');
-      }
+      deferTradeSubmitWork(function () {
+        try {
+          attResolveForSave(function (err, meta) {
+            if (err) { tradeFormError(err); lockSubmit(false, 'Save changes'); return; }
+            proceedSwapEdit(lock, meta);
+          });
+        } catch (e) {
+          tradeFormError('Could not save the attachment — record was not saved.');
+          lockSubmit(false, 'Save changes');
+        }
+      });
     }
     function proceedSwapEdit(lock, attMeta) {
       var st = loadState();
@@ -16715,13 +16727,15 @@ function onTradeSubmit(ev) {
     function proceed(lock) {
       var __lock = lock;
       lockSubmit(true, 'Saving…');
-      try {
-        attResolveForSave(function (err, meta) {
-          if (err) { tradeFormError(err); lockSubmit(false, isEditing ? 'Save changes' : 'Add record'); return; }
-          pendingAttachResolved = meta;
-          try { proceedSave(__lock); } catch (e) { lockSubmit(false, 'Add record'); throw e; }
-        });
-      } catch (e) { tradeFormError('Could not save the attachment — record was not saved.'); lockSubmit(false, 'Add record'); }
+      deferTradeSubmitWork(function () {
+        try {
+          attResolveForSave(function (err, meta) {
+            if (err) { tradeFormError(err); lockSubmit(false, isEditing ? 'Save changes' : 'Add record'); return; }
+            pendingAttachResolved = meta;
+            try { proceedSave(__lock); } catch (e) { lockSubmit(false, 'Add record'); throw e; }
+          });
+        } catch (e) { tradeFormError('Could not save the attachment — record was not saved.'); lockSubmit(false, 'Add record'); }
+      });
     }
     function proceedSave(lock) {
     var st = loadState();

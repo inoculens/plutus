@@ -51,13 +51,18 @@ class MarketHistoryCollectorTests(unittest.TestCase):
 
     def test_market_identity_requires_normalized_base_and_native_id(self):
         self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'BTC'}, 'BTC'))
+        self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'XBT'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'OTHER'}, 'BTC'))
         self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'XBT'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'WRAPPEDBTC', 'baseId': 'BTC'}, 'BTC'))
 
-    def test_weighted_median_respects_capped_weights_after_validation(self):
-        self.assertEqual(COLLECTOR.weighted_median([(100.0, 1.0), (101.0, 50.0)]), 101.0)
+    def test_two_venues_use_midpoint_not_reported_volume(self):
+        self.assertEqual(COLLECTOR.weighted_median([(100.0, 1.0), (101.0, 1000000000.0)]), 100.5)
+
+    def test_single_extreme_volume_cannot_dominate_three_venues(self):
+        rows = [(100.0, 1.0), (101.0, 1.0), (102.0, 1000000000.0)]
+        self.assertEqual(COLLECTOR.weighted_median(rows), 101.0)
 
     def test_weighted_median_handles_empty_input(self):
         self.assertIsNone(COLLECTOR.weighted_median([]))

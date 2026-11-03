@@ -6729,10 +6729,16 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
         var url = 'https://api.coingecko.com/api/v3/coins/' + encodeURIComponent(SYMBOL_MAP[sym]) +
           '/market_chart/range?vs_currency=' + encodeURIComponent(vs.toLowerCase()) +
           '&from=' + chunk.start + '&to=' + chunk.end;
-        return fetchWithTimeout(window.fetch.bind(window), url).then(function (response) {
-          if (!response.ok) throw new Error('market data HTTP ' + response.status);
-          return response.json();
-        }).then(function (data) {
+        // Try the browser's direct route first, then two independent CORS
+        // relays. VPN exit nodes and regional IP ranges are sometimes
+        // throttled or blocked by CoinGecko even when the API is healthy.
+        // These relays are already allowed by the site's connect-src policy.
+        var urls = [
+          url,
+          'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+          'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url)
+        ];
+        return fetchFirstJson(urls, window.fetch.bind(window)).then(function (data) {
           var prices = data && Array.isArray(data.prices) ? data.prices : [];
           var points = prices.filter(function (row) {
             return Array.isArray(row) && isFinite(Number(row[0])) && isFinite(Number(row[1])) && Number(row[1]) > 0;

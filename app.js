@@ -4049,7 +4049,7 @@ function yahooProxyUrls(sym, query) {
 // prices into the display fiat. Never throw; misses stay unknown.
 function fetchKrakenLiveUsd(sym, fetchImpl) {
   var s = String(sym || '').trim().toUpperCase();
-  if (KRAKEN_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
+  if (KRAKEN_LIVE_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
   var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
   if (!f) return Promise.resolve(null);
   var url = 'https://api.kraken.com/0/public/Ticker?pair=' + encodeURIComponent(s + 'USD');
@@ -4579,6 +4579,7 @@ function fetchLivePrice(symbol, vs, kind) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
+  var xmrExchangePrice = sym === 'XMR' ? fetchCryptoFallbackPrice(sym, cur, capturedFetch) : null;
   return fetchWithTimeout(capturedFetch, url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
@@ -4586,6 +4587,20 @@ function fetchLivePrice(symbol, vs, kind) {
     var p = data && data[id] && data[id][curLow];
     p = Number(p);
     if (isFinite(p) && p > 0) {
+      if (xmrExchangePrice) {
+        return xmrExchangePrice.then(function (exchangePrice) {
+          exchangePrice = Number(exchangePrice);
+          if (isFinite(exchangePrice) && exchangePrice > 0) {
+            priceCache[key] = { price: exchangePrice, at: Date.now() };
+            return exchangePrice;
+          }
+          priceCache[key] = { price: p, at: Date.now() };
+          return p;
+        }, function () {
+          priceCache[key] = { price: p, at: Date.now() };
+          return p;
+        });
+      }
       priceCache[key] = { price: p, at: Date.now() };
       return p;
     }
@@ -4619,7 +4634,7 @@ function fetchLivePrice(symbol, vs, kind) {
   }).then(null, function () {
     // CoinGecko error / 429 / bad payload: independent exchange fallbacks,
     // then last cached or null. Never throws.
-    return fetchCryptoFallbackPrice(sym, cur, capturedFetch).then(function (fallbackPrice) {
+    return (xmrExchangePrice || fetchCryptoFallbackPrice(sym, cur, capturedFetch)).then(function (fallbackPrice) {
       fallbackPrice = Number(fallbackPrice);
       if (!isFinite(fallbackPrice) || fallbackPrice <= 0) {
         if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
@@ -4724,10 +4739,13 @@ function refreshAllPrices(symbols, vs, kinds) {
   }
   if (crypto.length) {
     var cryptoFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+    var xmrExchangePrice = crypto.indexOf('XMR') !== -1
+      ? fetchCryptoFallbackPrice('XMR', cur, cryptoFetch) : null;
     function useCryptoFallbacks(failureMessage) {
       return Promise.all(crypto.map(function (sym) {
-        if (isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
-        return fetchCryptoFallbackPrice(sym, cur, cryptoFetch).then(function (price) {
+        var verifyXmr = sym === 'XMR' && xmrExchangePrice;
+        if (!verifyXmr && isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
+        return (verifyXmr || fetchCryptoFallbackPrice(sym, cur, cryptoFetch)).then(function (price) {
           if (isFinite(Number(price)) && Number(price) > 0) {
             out[sym] = Number(price);
             delete errors[sym];
@@ -5221,6 +5239,7 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
 // Kraken public OHLC, daily close (no key, CORS-enabled). Majors only;
 // USD/EUR direct, other fiats via the USD pivot + historical ECB.
 var KRAKEN_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
+var KRAKEN_LIVE_SYMBOLS = KRAKEN_SYMBOLS.concat(['XMR']);
 function fetchKrakenHistory(sym, dateStr, vs) {
   var s = String(sym || '').trim().toUpperCase();
   var c = String(vs || '').trim().toUpperCase();

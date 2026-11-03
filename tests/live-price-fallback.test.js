@@ -75,6 +75,42 @@ async function main() {
   assert.equal(binanceRequests, 1, 'concurrent fallbacks share one ticker-list request');
   assert.equal(await blockedCoinGecko.fetchLivePrice('ADA', 'USD', 'crypto'), 0.5);
 
+  function mismatchedXmrFeed(url) {
+    if (url.includes('api.coingecko.com')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ monero: { eur: 100 }, bitcoin: { eur: 60000 } })
+      });
+    }
+    if (url.includes('api.kraken.com')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ result: { XXMRZUSD: { c: ['600'] } } })
+      });
+    }
+    if (url.includes('api.frankfurter.dev')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ date: new Date().toISOString().slice(0, 10), rates: { EUR: 0.9 } })
+      });
+    }
+    if (url.includes('api.exchange.coinbase.com')) return Promise.resolve({ ok: false, status: 404 });
+    if (url.includes('api.binance.com')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  }
+  const mismatchedXmr = createApp(mismatchedXmrFeed);
+  const correctedBatch = await mismatchedXmr.refreshAllPrices(
+    ['XMR', 'BTC'], 'EUR', { XMR: 'crypto', BTC: 'crypto' }
+  );
+  assert.equal(correctedBatch.XMR, 540, 'the independent Kraken quote replaces a bad XMR batch quote');
+  assert.equal(correctedBatch.BTC, 60000, 'other CoinGecko prices are unchanged by the XMR check');
+
+  const mismatchedSingleXmr = createApp(mismatchedXmrFeed);
+  assert.equal(await mismatchedSingleXmr.fetchLivePrice('XMR', 'EUR', 'crypto'), 540,
+    'the independent Kraken quote replaces a bad single-symbol XMR quote');
+
   const emptyCoinGecko = createApp(url => {
     if (url.includes('api.coingecko.com')) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ bitcoin: {} }) });

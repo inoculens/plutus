@@ -19,7 +19,11 @@ OUTPUT = ROOT / "market-history" / "daily.json"
 INITIAL_DAYS = 6 * 365 + 2
 DAY_MS = 86_400_000
 QUOTES = ("USD", "USDT", "USDC")
-EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit")
+# GitHub-hosted runners are refused by Binance (HTTP 451, restricted location)
+# and Bybit (HTTP 403), so listing them only produced a startup warning and an
+# unreachable "trusted" venue. To add an exchange, put it here: it becomes both
+# a data source and an accepted provenance value in validate_archive.
+EXCHANGES = ("kraken", "coinbase", "okx", "kucoin", "bitfinex")
 MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
@@ -28,7 +32,7 @@ MAX_WEIGHT_MULTIPLE = 1.0
 COLLECTOR_VERSION = 7
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
 TRUSTED_EXCHANGES = set(EXCHANGES)
-PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
+PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720}
 # These venues' OHLCV endpoints only return candles inside
 # [since, since + limit days) (ccxt sets an explicit end bound). A short or
 # empty page therefore does NOT mean the history has ended: it is normal for

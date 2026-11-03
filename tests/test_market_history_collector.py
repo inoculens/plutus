@@ -178,6 +178,15 @@ class MarketHistoryCollectorTests(unittest.TestCase):
             self.assertEqual(len(calls), 1, exchange_id)
             self.assertEqual(len(rows), 4)
 
+    def test_runner_blocked_exchanges_are_not_collected_or_trusted(self):
+        for blocked in ("binance", "bybit"):
+            self.assertNotIn(blocked, COLLECTOR.EXCHANGES)
+            archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2, ['kraken', blocked]]]}}}
+            with self.assertRaises(ValueError):
+                COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+        # Every venue with a paging rule must still be a collected venue.
+        self.assertTrue(COLLECTOR.WINDOWED_EXCHANGES.issubset(COLLECTOR.EXCHANGES))
+
     def test_collector_version_forces_rebuild_of_gapped_archives(self):
         # v6 archives contain permanent 1000-day holes for late-listed assets.
         self.assertGreaterEqual(COLLECTOR.COLLECTOR_VERSION, 7)

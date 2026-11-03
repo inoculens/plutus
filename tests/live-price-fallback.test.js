@@ -169,6 +169,36 @@ async function main() {
   const missingPrice = await missingPair.refreshAllPrices(['KAS'], 'USD', { KAS: 'crypto' });
   assert.equal(missingPrice.KAS, null, 'missing exchange quotes stay unknown rather than becoming zero');
 
+  let lazyBinanceRequests = 0;
+  const krakenAnswers = createApp(url => {
+    if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
+    if (url.includes('api.kraken.com')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ result: { XXBTZUSD: { c: ['65100'] } } }) });
+    }
+    if (url.includes('api.exchange.coinbase.com')) return Promise.resolve({ ok: false, status: 451 });
+    if (url.includes('api.binance.com')) lazyBinanceRequests++;
+    return Promise.resolve({ ok: false, status: 451 });
+  });
+  assert.equal((await krakenAnswers.refreshAllPrices(['BTC'], 'USD', { BTC: 'crypto' })).BTC, 65100);
+  assert.equal(lazyBinanceRequests, 0, 'Binance is not contacted when Kraken already answered');
+
+  let reusedTickerRequests = 0;
+  const reusedTicker = createApp(url => {
+    if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
+    if (url.includes('api.binance.com')) {
+      reusedTickerRequests++;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([{ symbol: 'MATICUSDT', price: '0.4' }]) });
+    }
+    return Promise.resolve({ ok: false, status: 451 });
+  });
+  assert.equal(reusedTicker.BINANCE_LIVE_SYMBOLS.includes('MATIC'), false);
+  assert.equal((await reusedTicker.refreshAllPrices(['MATIC'], 'USD', { MATIC: 'crypto' })).MATIC, null,
+    'a renamed or migrated ticker is never priced from a same-named Binance pair');
+  assert.equal(reusedTickerRequests, 0, 'non-whitelisted tickers do not cost a Binance request');
+  const mappedTickers = Object.keys(reusedTicker.SYMBOL_MAP);
+  reusedTicker.BINANCE_LIVE_SYMBOLS.forEach(symbol => assert(mappedTickers.includes(symbol),
+    symbol + ' must have a verified SYMBOL_MAP entry before it can use a live exchange fallback'));
+
   const historyApp = createApp(() => Promise.reject(new Error('unexpected network request')));
   const historyEnd = Date.now();
   const currentHistory = await historyApp.buildNetWorthHistory({

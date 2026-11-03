@@ -4090,10 +4090,27 @@ function fetchCoinbaseLiveUsd(sym, fetchImpl) {
   } catch (e) { return Promise.resolve(null); }
 }
 
+// Binance's ticker list is keyed by bare ticker, so a symbol is only trusted
+// when its Binance market is the same asset as the CoinGecko id in SYMBOL_MAP.
+// Tickers that were renamed, migrated, wrapped or delisted (MATIC, FTM, EOS,
+// XMR, MKR, WBTC, WSTETH, DAI, LRC, ...) are left out on purpose: a stale or
+// reused pair must read as unknown, never as another asset's price. A symbol
+// missing here simply falls through to the manual-override path.
+var BINANCE_LIVE_SYMBOLS = [
+  'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT',
+  'LTC', 'BCH', 'XLM', 'ATOM', 'UNI', 'TRX', 'NEAR', 'ARB', 'OP', 'USDC',
+  'USDT', 'POL', 'APT', 'INJ', 'SUI', 'SEI', 'TIA', 'PEPE', 'SHIB', 'TON',
+  'ICP', 'FIL', 'ETC', 'HBAR', 'VET', 'RENDER', 'FET', 'AAVE', 'CRV', 'LDO',
+  'SAND', 'MANA', 'AXS', 'CHZ', 'ENJ', 'BAT', 'ZEC', 'DASH', 'XTZ', 'KSM',
+  'ALGO', 'THETA', 'GRT', 'QNT', 'EGLD', 'FLOW', 'GALA', 'APE', 'ENS', 'IMX',
+  'COMP', 'SNX', 'YFI', 'SUSHI', 'RUNE', 'WIF', 'BONK', 'FLOKI', 'PENDLE',
+  'ENA', 'STRK', 'JUP', 'PYTH', 'ONDO', 'TAO', 'W', 'ZK'
+];
 var binanceLiveTickerPromise = null;
 var binanceLiveTickerFetchedAt = 0;
 function fetchBinanceLiveUsd(sym, fetchImpl) {
   var s = String(sym || '').trim().toUpperCase();
+  if (BINANCE_LIVE_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
   var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
   if (!f) return Promise.resolve(null);
   var now = Date.now();
@@ -4135,16 +4152,19 @@ function fetchBinanceLiveUsd(sym, fetchImpl) {
 }
 
 function fetchCryptoFallbackUsd(sym, fetchImpl) {
+  // Kraken and Coinbase are small per-symbol requests, so they race in
+  // parallel (Kraken wins ties). Binance returns its whole public ticker list
+  // and is the most region-blocked venue, so it is only asked when neither of
+  // the others produced a price.
   return Promise.all([
     fetchKrakenLiveUsd(sym, fetchImpl),
-    fetchCoinbaseLiveUsd(sym, fetchImpl),
-    fetchBinanceLiveUsd(sym, fetchImpl)
+    fetchCoinbaseLiveUsd(sym, fetchImpl)
   ]).then(function (prices) {
     for (var i = 0; i < prices.length; i++) {
       var price = Number(prices[i]);
       if (isFinite(price) && price > 0) return price;
     }
-    return null;
+    return fetchBinanceLiveUsd(sym, fetchImpl);
   });
 }
 

@@ -30,10 +30,10 @@ log = logging.getLogger("plutus-market-history")
 
 def symbols_from_app() -> list[str]:
     source = APP_JS.read_text(encoding="utf-8")
-    match = re.search(r"var\\s+SYMBOL_MAP\\s*=\\s*\\{([\\s\\S]*?)\\n\\};", source)
+    match = re.search(r"var\s+SYMBOL_MAP\s*=\s*\{([\s\S]*?)\n\};", source)
     if not match:
         raise RuntimeError("Could not read SYMBOL_MAP from app.js")
-    return list(dict.fromkeys(re.findall(r"^\\s*([A-Z0-9]+)\\s*:", match.group(1), re.M)))
+    return list(dict.fromkeys(re.findall(r"^\s*([A-Z0-9]+)\s*:", match.group(1), re.M)))
 
 
 def median(values: list[float]) -> float | None:

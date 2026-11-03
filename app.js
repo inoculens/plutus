@@ -4074,7 +4074,7 @@ function fetchKrakenLiveUsd(sym, fetchImpl) {
 
 function fetchCoinbaseLiveUsd(sym, fetchImpl) {
   var s = String(sym || '').trim().toUpperCase();
-  if (COINBASE_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
+  if (COINBASE_LIVE_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
   var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
   if (!f) return Promise.resolve(null);
   var url = 'https://api.exchange.coinbase.com/products/' + encodeURIComponent(s + '-USD') + '/ticker';
@@ -5239,7 +5239,7 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
 // Kraken public OHLC, daily close (no key, CORS-enabled). Majors only;
 // USD/EUR direct, other fiats via the USD pivot + historical ECB.
 var KRAKEN_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
-var KRAKEN_LIVE_SYMBOLS = KRAKEN_SYMBOLS.concat(['XMR']);
+var KRAKEN_LIVE_SYMBOLS = KRAKEN_SYMBOLS.concat(['XMR', 'AAVE']);
 function fetchKrakenHistory(sym, dateStr, vs) {
   var s = String(sym || '').trim().toUpperCase();
   var c = String(vs || '').trim().toUpperCase();
@@ -5339,6 +5339,7 @@ function fetchStooqCryptoHistory(sym, dateStr, vs) {
 // other fiats via USD + historical ECB. Majors with USD/EUR/GBP
 // books; other fiats via USD + historical ECB.
 var COINBASE_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
+var COINBASE_LIVE_SYMBOLS = COINBASE_SYMBOLS.concat(['AAVE']);
 function fetchCoinbaseHistory(sym, dateStr, vs) {
   var s = String(sym || '').trim().toUpperCase();
   var c = String(vs || '').trim().toUpperCase();

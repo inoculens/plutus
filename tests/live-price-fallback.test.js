@@ -111,6 +111,37 @@ async function main() {
   assert.equal(await mismatchedSingleXmr.fetchLivePrice('XMR', 'EUR', 'crypto'), 540,
     'the independent Kraken quote replaces a bad single-symbol XMR quote');
 
+  function aaveFallbackFeed(krakenAvailable, coinbaseAvailable) {
+    return url => {
+      if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
+      if (url.includes('api.kraken.com')) {
+        return Promise.resolve(krakenAvailable
+          ? { ok: true, json: () => Promise.resolve({ result: { AAVEUSD: { c: ['127.45'] } } }) }
+          : { ok: false, status: 451 });
+      }
+      if (url.includes('api.exchange.coinbase.com')) {
+        return Promise.resolve(coinbaseAvailable
+          ? { ok: true, json: () => Promise.resolve({ price: '127.44' }) }
+          : { ok: false, status: 451 });
+      }
+      if (url.includes('api.binance.com')) return Promise.resolve({ ok: false, status: 451 });
+      throw new Error('Unexpected request: ' + url);
+    };
+  }
+  const krakenAave = createApp(aaveFallbackFeed(true, false));
+  assert.equal(krakenAave.SYMBOL_MAP.AAVE, 'aave', 'AAVE keeps its correct CoinGecko ID');
+  assert.equal(krakenAave.KRAKEN_SYMBOLS.includes('AAVE'), false,
+    'live Kraken coverage does not change historical-source coverage');
+  assert.equal(await krakenAave.fetchLivePrice('AAVE', 'USD', 'crypto'), 127.45,
+    'single-symbol AAVE pricing falls back to Kraken when CoinGecko is unavailable');
+
+  const coinbaseAave = createApp(aaveFallbackFeed(false, true));
+  assert.equal(coinbaseAave.COINBASE_SYMBOLS.includes('AAVE'), false,
+    'live Coinbase coverage does not change historical-source coverage');
+  const aaveBatch = await coinbaseAave.refreshAllPrices(['AAVE'], 'USD', { AAVE: 'crypto' });
+  assert.equal(aaveBatch.AAVE, 127.44,
+    'batched AAVE pricing falls back to Coinbase when CoinGecko and Kraken are unavailable');
+
   const emptyCoinGecko = createApp(url => {
     if (url.includes('api.coingecko.com')) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ bitcoin: {} }) });

@@ -53,7 +53,6 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'BTC'}, 'BTC'))
         self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'XBT'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'OTHER'}, 'BTC'))
-        self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'XBT'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'WRAPPEDBTC', 'baseId': 'BTC'}, 'BTC'))
 

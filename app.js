@@ -17825,11 +17825,25 @@ function transferCsvDest(t, accName) {
   return parts.join('; ');
 }
 
+// Per-source breakdown of a multi-source transfer for the trades CSV:
+// "Account:qty:fee; Account:qty:fee". Empty for every other record, so the
+// existing columns keep their meaning and single-source rows stay unchanged.
+function transferCsvSources(t, accName) {
+  try {
+    var legs = (t && t.type === 'transfer') ? transferSourcesOf(t) : null;
+    if (!legs || legs.length < 2) return '';
+    return legs.map(function (l) {
+      var nm = (accName && accName[l.accountId]) || l.accountId;
+      return nm + ':' + l.qtyRaw + ':' + l.feeRaw;
+    }).join('; ');
+  } catch (e) { return ''; }
+}
+
 function downloadTradesCsv() {
   var st = loadState();
   var accName = {};
   (st.accounts || []).forEach(function (a) { accName[a.id] = a.name; });
-  var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'txid', 'fxRate', 'fxSource']];
+  var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'txid', 'fxRate', 'fxSource', 'sources']];
   ledgerSortByDate(st.trades || []).forEach(function (t) {
     rows.push([
       t.id || '', fmtDateDmy(t.date || ''), t.type || '', String(t.symbol || '').toUpperCase(),
@@ -17842,7 +17856,8 @@ function downloadTradesCsv() {
       { text: t.note || '' },
       { text: t.txid || '' },
       (t.fxLock && t.fxLock.rate) || '',
-      fmtEcbInText((t.fxLock && t.fxLock.source) || '')
+      fmtEcbInText((t.fxLock && t.fxLock.source) || ''),
+      { text: transferCsvSources(t, accName) }
     ]);
   });
   downloadTextFile('plutus.inoculens.com-trades-' + backupStamp() + '.csv', rows.map(function (r) {

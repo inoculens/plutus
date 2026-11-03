@@ -320,7 +320,12 @@
       if (isFinite(value) && value > 0) prices[symbol] = value;
     });
     var value = (point.value === null || point.value === undefined) ? null : Number(point.value);
-    return { at: Number(point.at), value: isFinite(value) ? value : null, prices: prices };
+    return {
+      at: Number(point.at),
+      value: isFinite(value) ? value : null,
+      prices: prices,
+      live: point.live === true
+    };
   }
 
   function normalizePoints(points) {
@@ -630,8 +635,16 @@
       if (!result) return;
       if (!result || !Array.isArray(result.points)) throw new Error('History provider returned no points.');
       var byTime = {};
-      result.points.forEach(function (point) { byTime[point.at] = pointCopy(point); });
+      var historyDays = {};
+      result.points.forEach(function (point) {
+        var copy = pointCopy(point);
+        byTime[copy.at] = copy;
+        if (!copy.live) historyDays[dateKey(copy.at)] = true;
+      });
+      var today = dateKey(Date.now());
       data.points.forEach(function (point) {
+        var pointDay = dateKey(point.at);
+        if (point.live && pointDay < today && historyDays[pointDay]) return;
         if (!Object.prototype.hasOwnProperty.call(byTime, point.at)) {
           byTime[point.at] = pointCopy(point);
         }
@@ -1290,9 +1303,11 @@
       if (isFinite(price) && price > 0) cleanPrices[String(symbol).toUpperCase()] = price;
     });
     var last = data.points.length ? data.points[data.points.length - 1] : null;
-    var nextPoint = { at: bucket, value: Number(value), prices: cleanPrices };
-    if (last && last.at === bucket) data.points[data.points.length - 1] = nextPoint;
-    else data.points.push(nextPoint);
+    var nextPoint = { at: bucket, value: Number(value), prices: cleanPrices, live: true };
+    if (last && last.at >= bucket && last.at < bucket + 5 * 60 * 1000) {
+      nextPoint.at = last.at;
+      data.points[data.points.length - 1] = nextPoint;
+    } else data.points.push(nextPoint);
     data.points = compactPoints(data.points);
   }
 

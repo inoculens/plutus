@@ -9,27 +9,39 @@ SPEC.loader.exec_module(COLLECTOR)
 
 
 class MarketHistoryCollectorTests(unittest.TestCase):
-    def test_unweighted_median_cannot_be_moved_by_fake_volume(self):
-        # Kraken 100, Coinbase 101, malicious venue 3 with huge volume.
-        self.assertEqual(COLLECTOR.median([100.0, 101.0, 3.0]), 100.0)
+    def test_fake_volume_cannot_move_trusted_reference(self):
+        rows = [
+            (100.0, 1.0, "kraken"),
+            (101.0, 50.0, "coinbase"),
+            (3.0, 1000000000.0, "mexc"),
+        ]
+        accepted = COLLECTOR.filter_observations(rows, "BTC")
+        self.assertEqual([row[0] for row in accepted], [100.0, 101.0])
 
-    def test_outlier_filter_uses_unweighted_reference(self):
-        prices = [100.0, 101.0, 3.0]
-        reference = COLLECTOR.median(prices)
-        accepted = [price for price in prices if abs(price / reference - 1) <= COLLECTOR.MAX_DEVIATION]
-        self.assertEqual(accepted, [100.0, 101.0])
+    def test_long_tail_exchanges_cannot_establish_price_without_trusted_anchor(self):
+        rows = [(100.0, 10.0, "mexc"), (101.0, 20.0, "htx")]
+        self.assertEqual(COLLECTOR.filter_observations(rows, "BTC"), [])
 
-    def test_weighted_median_respects_volume_after_outlier_filter(self):
+    def test_xmr_requires_two_trusted_exchange_anchors(self):
+        one_anchor = [(100.0, 10.0, "kraken"), (100.5, 20.0, "mexc")]
+        two_anchors = one_anchor + [(101.0, 30.0, "kucoin")]
+        self.assertEqual(COLLECTOR.filter_observations(one_anchor, "XMR"), [])
+        self.assertEqual(len(COLLECTOR.filter_observations(two_anchors, "XMR")), 3)
+
+    def test_outlier_filter_rejects_price_far_from_trusted_anchor(self):
+        rows = [
+            (100.0, 1.0, "kraken"),
+            (101.0, 1.0, "coinbase"),
+            (3.0, 1000000000.0, "mexc"),
+        ]
+        accepted = COLLECTOR.filter_observations(rows, "BTC")
+        self.assertNotIn(3.0, [row[0] for row in accepted])
+
+    def test_weighted_median_respects_capped_weights_after_validation(self):
         self.assertEqual(COLLECTOR.weighted_median([(100.0, 1.0), (101.0, 50.0)]), 101.0)
 
     def test_weighted_median_handles_empty_input(self):
         self.assertIsNone(COLLECTOR.weighted_median([]))
-
-    def test_single_exchange_is_not_enough_to_publish(self):
-        self.assertLess(1, COLLECTOR.MIN_INDEPENDENT_EXCHANGES)
-
-    def test_market_count_is_limited_per_asset(self):
-        self.assertEqual(COLLECTOR.MAX_MARKETS_PER_ASSET, 5)
 
     def test_symbol_list_is_read_from_the_application_map(self):
         symbols = COLLECTOR.symbols_from_app()

@@ -9,6 +9,7 @@ on:
     paths:
       - "app.js"
       - "scripts/collect-market-history.py"
+      - "tests/test_market_history_collector.py"
       - ".github/workflows/market-history.yml"
 
 permissions:
@@ -40,6 +41,7 @@ jobs:
       - name: Verify collector and application syntax
         run: |
           python -m py_compile scripts/collect-market-history.py
+          python -m unittest discover -s tests -p 'test_market_history_collector.py'
           node --check app.js
 
       - name: Collect daily market history

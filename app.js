@@ -3474,16 +3474,9 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       if (!code) return;
       var sent = Number(t.qty);
       if (!isFinite(sent) || sent <= 0) return;
-      var mainU = String(main || '').toUpperCase();
-      var srcRate = t.fromFxLock ? ledgerFxRate(t.fromFxLock) : ledgerFxRate(t.fxLock);
-      var toSym = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
-        ? String(t.symbol || '').toUpperCase()
-        : String(t.toSymbol).trim().toUpperCase();
-      var dstRate = (toSym === mainU) ? 1 : (t.toFxLock ? ledgerFxRate(t.toFxLock) : ledgerFxRate(t.fxLock));
-      var hasOutputsL = Array.isArray(t.outputs) && t.outputs.length > 0;
-      var outsL = hasOutputsL ? t.outputs : transferOutputsOf(t);
-      if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
-      // Multi-source: debit each in-scope source leg, credit self/arrivals per leg
+      // Multi-source: debit each in-scope source leg, credit self/arrivals per
+      // leg. A code is only opened below, once something in this scope posts
+      // to it, so a transfer elsewhere never adds an empty code here.
       var legsL = transferSourceLegs(t);
       if (!legsL.length) return;
       var hasOutputsL = Array.isArray(t.outputs) && t.outputs.length > 0;
@@ -3498,10 +3491,6 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       }
       if (!anyInScope) return;
       var mainU = String(main || '').toUpperCase();
-      var toSymL = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
-        ? String(t.symbol || '').toUpperCase()
-        : String(t.toSymbol).trim().toUpperCase();
-      var baseDstRate = (toSymL === mainU) ? 1 : (t.toFxLock ? ledgerFxRate(t.toFxLock) : ledgerFxRate(t.fxLock));
       legsL.forEach(function (leg) {
         if (!inScope[leg.accountId]) return;
         var srcRateL = t.fromFxLock ? ledgerFxRate(t.fromFxLock) : ledgerFxRate(t.fxLock);

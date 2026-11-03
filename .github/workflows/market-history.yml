@@ -10,6 +10,7 @@ on:
       - "app.js"
       - "scripts/collect-market-history.py"
       - "tests/test_market_history_collector.py"
+      - "tests/live-price-fallback.test.js"
       - ".github/workflows/market-history.yml"
 
 permissions:
@@ -46,6 +47,7 @@ jobs:
           python -m py_compile scripts/collect-market-history.py
           python -m unittest discover -s tests -p 'test_market_history_collector.py'
           node --check app.js
+          node tests/live-price-fallback.test.js
 
       - name: Restore prior archive for incremental collection
         run: |

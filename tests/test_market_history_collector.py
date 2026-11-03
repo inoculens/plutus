@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 from pathlib import Path
 
@@ -63,6 +64,26 @@ class MarketHistoryCollectorTests(unittest.TestCase):
     def test_missing_archive_starts_at_collector_version_zero(self):
         with patch.object(COLLECTOR, "OUTPUT", Path("/tmp/plutus-no-such-archive/daily.json")):
             self.assertEqual(COLLECTOR.load_previous(), ({}, {}, 0))
+
+    def test_archive_validator_accepts_well_formed_daily_points(self):
+        stamp = 1604361599999
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[stamp, 100.0, 2]]}}}
+        COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    def test_archive_validator_rejects_single_source_confidence(self):
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 1]]}}}
+        with self.assertRaises(ValueError):
+            COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    def test_archive_validator_rejects_duplicate_or_unsorted_days(self):
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2], [1604361599999, 101.0, 2]]}}}
+        with self.assertRaises(ValueError):
+            COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    def test_archive_validator_rejects_future_points(self):
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1798761599999, 100.0, 2]]}}}
+        with self.assertRaises(ValueError):
+            COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     def test_symbol_list_is_read_from_the_application_map(self):
         symbols = COLLECTOR.symbols_from_app()

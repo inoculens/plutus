@@ -52,6 +52,7 @@ class MarketHistoryCollectorTests(unittest.TestCase):
     def test_market_identity_requires_normalized_base_and_native_id(self):
         self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'BTC'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'OTHER'}, 'BTC'))
+        self.assertTrue(COLLECTOR.market_matches_symbol({'base': 'BTC', 'baseId': 'XBT'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'BTC'}, 'BTC'))
         self.assertFalse(COLLECTOR.market_matches_symbol({'base': 'WRAPPEDBTC', 'baseId': 'BTC'}, 'BTC'))
 

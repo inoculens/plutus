@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "collect-market-history.py"
@@ -42,6 +43,10 @@ class MarketHistoryCollectorTests(unittest.TestCase):
 
     def test_weighted_median_handles_empty_input(self):
         self.assertIsNone(COLLECTOR.weighted_median([]))
+
+    def test_missing_archive_starts_at_collector_version_zero(self):
+        with patch.object(COLLECTOR, "OUTPUT", Path("/tmp/plutus-no-such-archive/daily.json")):
+            self.assertEqual(COLLECTOR.load_previous(), ({}, {}, 0))
 
     def test_symbol_list_is_read_from_the_application_map(self):
         symbols = COLLECTOR.symbols_from_app()

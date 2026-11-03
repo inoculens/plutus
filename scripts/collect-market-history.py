@@ -22,7 +22,7 @@ EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "gateio", "mexc",
 MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
-MAX_WEIGHT_MULTIPLE = 3.0
+MAX_WEIGHT_MULTIPLE = 3.0\nPAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plutus-market-history")
@@ -62,7 +62,7 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
     end_ms = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
     rows_by_day: dict[int, list[tuple[float, float]]] = {}
     pages = 0
-    page_limit = min(int(exchange.options.get("fetchOHLCVLimit", 1000) or 1000), 1000)
+    page_limit = min(int(exchange.options.get("fetchOHLCVLimit", PAGE_LIMITS.get(exchange.id, 1000)) or PAGE_LIMITS.get(exchange.id, 1000)), PAGE_LIMITS.get(exchange.id, 1000))
     while cursor < end_ms and pages < 100:
         batch = exchange.fetch_ohlcv(market, timeframe="1d", since=cursor, limit=page_limit)
         pages += 1

@@ -72,7 +72,7 @@ class MarketHistoryCollectorTests(unittest.TestCase):
 
     def test_archive_validator_accepts_well_formed_daily_points(self):
         stamp = 1604361599999
-        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[stamp, 100.0, 2]]}}}
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[stamp, 100.0, 2, ['kraken', 'coinbase']]]}}}
         COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     def test_archive_validator_rejects_single_source_confidence(self):
@@ -87,6 +87,17 @@ class MarketHistoryCollectorTests(unittest.TestCase):
 
     def test_archive_validator_rejects_future_points(self):
         archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1798761599999, 100.0, 2]]}}}
+        with self.assertRaises(ValueError):
+            COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+
+    def test_archive_validator_requires_per_day_trusted_exchange_provenance(self):
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2]]}}}
+        with self.assertRaises(ValueError):
+            COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    def test_archive_validator_rejects_untrusted_provenance(self):
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2, ['kraken', 'mexc']]]}}}
         with self.assertRaises(ValueError):
             COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 

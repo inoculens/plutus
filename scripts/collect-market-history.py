@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import sys
 from collections import defaultdict
@@ -24,7 +25,7 @@ MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
 MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 3.0
-COLLECTOR_VERSION = 2
+COLLECTOR_VERSION = 3
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
@@ -113,6 +114,33 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
              sum(weight for _, weight in values)]
             for day, values in sorted(rows_by_day.items())]
 
+
+def validate_archive(archive: dict, today: datetime | None = None) -> None:
+    if archive.get('schema') != 1 or archive.get('currency') != 'USD':
+        raise ValueError('Archive schema or currency is invalid')
+    assets = archive.get('assets')
+    if not isinstance(assets, dict) or not assets:
+        raise ValueError('Archive contains no assets')
+    current_day = (today or datetime.now(timezone.utc)).date()
+    for symbol, asset in assets.items():
+        points = asset.get('points') if isinstance(asset, dict) else None
+        if not isinstance(points, list) or not points:
+            raise ValueError(f'{symbol}: missing daily points')
+        previous_day = None
+        for row in points:
+            if not isinstance(row, list) or len(row) < 3:
+                raise ValueError(f'{symbol}: malformed point')
+            stamp, price, confidence = int(row[0]), float(row[1]), int(row[2])
+            if not math.isfinite(price) or price <= 0 or confidence < MIN_TRUSTED_EXCHANGES:
+                raise ValueError(f'{symbol}: invalid price or insufficient source confidence')
+            if stamp % DAY_MS != DAY_MS - 1:
+                raise ValueError(f'{symbol}: timestamp is not a UTC daily close')
+            day = stamp // DAY_MS
+            if previous_day is not None and day <= previous_day:
+                raise ValueError(f'{symbol}: daily points are not strictly ordered')
+            if datetime.fromtimestamp(stamp / 1000, timezone.utc).date() > current_day:
+                raise ValueError(f'{symbol}: future-dated observation')
+            previous_day = day
 
 def load_previous() -> tuple[dict, dict, int]:
     if not OUTPUT.exists():
@@ -253,6 +281,7 @@ def main() -> int:
 
     if not archive["assets"]:
         raise RuntimeError("Collector produced an empty archive; refusing to overwrite last good data")
+    validate_archive(archive)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     temp = OUTPUT.with_suffix(".json.tmp")
     temp.write_text(json.dumps(archive, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")

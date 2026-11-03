@@ -6607,7 +6607,7 @@ function fetchPlutusDailyCryptoSeries(symbol, start, end) {
   }
   if (!netWorthPublicArchivePromise) {
     netWorthPublicArchivePromise = fetchWithTimeout(
-      window.fetch.bind(window), '/market-history/daily.json', 20000
+      window.fetch.bind(window), 'https://raw.githubusercontent.com/inoculens/plutus/market-history/market-history/daily.json', 20000
     ).then(function (response) {
       if (!response || !response.ok) throw new Error('Plutus market archive HTTP ' + (response && response.status));
       return response.json();

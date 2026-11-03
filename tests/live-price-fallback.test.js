@@ -19,7 +19,7 @@ function createApp(fetchImpl) {
     apply: () => el()
   });
   const context = {
-    console, setTimeout: noop, clearTimeout: noop, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
+    console, setTimeout, clearTimeout, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
     localStorage: {
       getItem: key => store.has(key) ? store.get(key) : null,
       setItem: (key, value) => store.set(key, String(value)),
@@ -218,10 +218,23 @@ async function main() {
   assert.notEqual(pastHistory.points[pastHistory.points.length - 1].value, 9876.54,
     'past chart endpoints remain based on historical market data');
 
+  completed = true;
   console.log('live price fallback checks passed');
+  // The app schedules long-lived timers on load; end explicitly once done.
+  process.exit(0);
 }
+
+// A promise that never settles lets Node exit with code 0 mid-test. Fail
+// loudly instead of reporting a false pass.
+let completed = false;
+process.on('exit', code => {
+  if (!completed && code === 0) {
+    console.error('live price fallback test exited before completing');
+    process.exitCode = 1;
+  }
+});
 
 main().catch(error => {
   console.error(error);
-  process.exitCode = 1;
+  process.exit(1);
 });

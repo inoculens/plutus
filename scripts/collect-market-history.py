@@ -19,7 +19,7 @@ OUTPUT = ROOT / "market-history" / "daily.json"
 INITIAL_DAYS = 6 * 365 + 2
 DAY_MS = 86_400_000
 QUOTES = ("USD", "USDT", "USDC")
-EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "gateio", "mexc", "bitfinex", "htx", "bybit")
+EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit")
 MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
@@ -27,7 +27,7 @@ MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 1.0
 COLLECTOR_VERSION = 5
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
-TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
+TRUSTED_EXCHANGES = set(EXCHANGES)
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

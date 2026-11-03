@@ -23,7 +23,7 @@ OUTPUT = ROOT / "market-history" / "daily.json"
 START = datetime.now(timezone.utc).date() - timedelta(days=6 * 365 + 2)
 DAY_MS = 86_400_000
 QUOTES = ("USD", "USDT", "USDC")
-EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "gateio")
+EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "gateio", "mexc", "bitfinex", "htx", "bybit")
 MAX_MARKETS_PER_ASSET = 3
 MAX_DEVIATION = 0.08
 

@@ -7161,6 +7161,8 @@ function netWorthHistorySeriesPrice(series, at, main) {
 var NET_WORTH_HELD_GAP_MS = 14 * 86400000;
 var NET_WORTH_HELD_MAX_DATES = 600;
 var NET_WORTH_HELD_MAX_WORK = 50000;
+// Longest stretch of chart valuation work before yielding to the browser.
+var NET_WORTH_HISTORY_SLICE_MS = 12;
 var netWorthHistoryHeldPeriodsCacheKey = '';
 var netWorthHistoryHeldPeriodsCache = null;
 var netWorthHistoryHeldPeriodsPending = {};
@@ -7413,6 +7415,7 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
     });
     var points = [];
     var batchSize = 1;
+    var sliceStartedAt = Date.now();
     function valueNextBatch(offset) {
       if (typeof isCurrent === 'function' && !isCurrent()) return Promise.resolve(points);
       if (offset >= times.length) return Promise.resolve(points);
@@ -7437,8 +7440,13 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
           });
         });
       })).then(function (batchPoints) {
-        points = points.concat(batchPoints);
-        if (typeof onProgress === 'function') {
+        Array.prototype.push.apply(points, batchPoints);
+        var nextOffset = offset + batch.length;
+        // Hand the main thread back after a short slice of work rather than
+        // after every point: a timer wait per point costs several ms each in
+        // a foreground tab and a full second each in a hidden one.
+        var yieldNow = Date.now() - sliceStartedAt >= NET_WORTH_HISTORY_SLICE_MS;
+        if (typeof onProgress === 'function' && (yieldNow || nextOffset >= times.length)) {
           onProgress({
             phase: 'valuation',
             completed: points.length,
@@ -7447,8 +7455,12 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
             end: end
           });
         }
+        if (!yieldNow) return valueNextBatch(nextOffset);
         return new Promise(function (resolve) {
-          setTimeout(function () { resolve(valueNextBatch(offset + batch.length)); }, 0);
+          setTimeout(function () {
+            sliceStartedAt = Date.now();
+            resolve(valueNextBatch(nextOffset));
+          }, 0);
         });
       });
     }

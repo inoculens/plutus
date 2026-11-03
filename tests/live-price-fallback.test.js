@@ -223,6 +223,30 @@ async function main() {
     'the current chart endpoint uses the same live valuation snapshot as the balance');
   assert.equal(currentHistory.points[currentHistory.points.length - 1].prices.BTC, 65000);
 
+  // Valuation yields to the browser after a time slice, not after every point.
+  let yields = 0;
+  const realSetTimeout = setTimeout;
+  historyApp.setTimeout = function (callback, delay) { yields++; return realSetTimeout(callback, delay); };
+  let progressCalls = 0;
+  const longHistory = await historyApp.buildNetWorthHistory({
+    accounts: [],
+    trades: [],
+    settings: { mainCurrency: 'USD', costMethod: 'average' }
+  }, 'USD', {
+    period: '1Y',
+    start: historyEnd - 365 * 86400000,
+    end: historyEnd
+  }, function (progress) { if (progress.phase === 'valuation') progressCalls++; }, null);
+  assert(longHistory.points.length >= 365, 'a one-year chart has a point per day');
+  for (let i = 1; i < longHistory.points.length; i++) {
+    assert(longHistory.points[i].at > longHistory.points[i - 1].at, 'points stay in time order');
+  }
+  assert(yields < longHistory.points.length / 4,
+    'valuation yields per time slice, not per point (' + yields + ' yields for ' + longHistory.points.length + ' points)');
+  assert(progressCalls >= 1 && progressCalls < longHistory.points.length / 4,
+    'progress is reported per slice and at completion (' + progressCalls + ' calls)');
+  historyApp.setTimeout = realSetTimeout;
+
   const unknownHistory = await historyApp.buildNetWorthHistory({
     accounts: [],
     trades: [],

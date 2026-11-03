@@ -22,7 +22,8 @@ EXCHANGES = ("binance", "kraken", "coinbase", "okx", "kucoin", "gateio", "mexc",
 MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
-MAX_WEIGHT_MULTIPLE = 3.0\nPAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
+MAX_WEIGHT_MULTIPLE = 3.0
+PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plutus-market-history")

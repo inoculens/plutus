@@ -7129,63 +7129,93 @@ function netWorthHistorySeriesPrice(series, at, main) {
 // too large to scan cheaply (caller then falls back to first trade -> end).
 var NET_WORTH_HELD_GAP_MS = 14 * 86400000;
 var NET_WORTH_HELD_MAX_DATES = 600;
-function netWorthHistoryHeldPeriods(st, included, main) {
+var NET_WORTH_HELD_MAX_WORK = 50000;
+var netWorthHistoryHeldPeriodsCacheKey = '';
+var netWorthHistoryHeldPeriodsCache = null;
+var netWorthHistoryHeldPeriodsPending = {};
+function netWorthHistoryHeldPeriods(st, included, main, signature) {
+  var cacheKey = String(signature || '') + '|' + String(main).toUpperCase();
+  if (netWorthHistoryHeldPeriodsCacheKey === cacheKey && netWorthHistoryHeldPeriodsCache) {
+    return Promise.resolve(netWorthHistoryHeldPeriodsCache);
+  }
+  if (netWorthHistoryHeldPeriodsPending[cacheKey]) return netWorthHistoryHeldPeriodsPending[cacheKey];
   var allTrades = (st.trades || []).filter(function (trade) {
     return trade && typeof trade.date === 'string';
   });
   var dateMap = {};
   allTrades.forEach(function (trade) { dateMap[trade.date] = true; });
   var dates = Object.keys(dateMap).sort();
-  if (!dates.length || dates.length > NET_WORTH_HELD_MAX_DATES) return null;
+  if (!dates.length || dates.length > NET_WORTH_HELD_MAX_DATES ||
+      dates.length * allTrades.length > NET_WORTH_HELD_MAX_WORK) return Promise.resolve(null);
   var heldBySymbol = {};
   var state = {};
-  dates.forEach(function (day, index) {
-    var portfolio = computePortfolio(convertTrades(allTrades.filter(function (trade) {
-      return trade.date <= day;
-    }), main), {}, st.settings.costMethod);
-    var heldNow = {};
-    Object.keys(included).forEach(function (accountId) {
-      var rows = portfolio.byAccount[accountId];
-      if (!rows) return;
-      rows.forEach(function (row, symbol) {
-        if (Number(row.qtyHeld) > 0) heldNow[String(symbol).toUpperCase()] = true;
-      });
-    });
-    Object.keys(heldNow).forEach(function (symbol) {
-      if (state[symbol] === undefined) state[symbol] = null;
-      if (state[symbol] === null) {
-        state[symbol] = { from: Date.parse(day + 'T00:00:00') };
-      }
-    });
+  function finish() {
     Object.keys(state).forEach(function (symbol) {
-      if (state[symbol] !== null && !heldNow[symbol]) {
-        // Sold out on `day`: keep that whole day (its early hours are still held).
-        (heldBySymbol[symbol] = heldBySymbol[symbol] || []).push({
-          from: state[symbol].from,
-          to: Date.parse(day + 'T00:00:00') + 86400000
-        });
-        state[symbol] = null;
+      if (state[symbol] !== null) {
+        (heldBySymbol[symbol] = heldBySymbol[symbol] || []).push({ from: state[symbol].from, to: Infinity });
       }
     });
-  });
-  Object.keys(state).forEach(function (symbol) {
-    if (state[symbol] !== null) {
-      (heldBySymbol[symbol] = heldBySymbol[symbol] || []).push({ from: state[symbol].from, to: Infinity });
-    }
-  });
-  Object.keys(heldBySymbol).forEach(function (symbol) {
-    var merged = [];
-    heldBySymbol[symbol].forEach(function (period) {
-      var last = merged[merged.length - 1];
-      if (last && period.from - last.to <= NET_WORTH_HELD_GAP_MS) last.to = Math.max(last.to, period.to);
-      else merged.push({ from: period.from, to: period.to });
+    Object.keys(heldBySymbol).forEach(function (symbol) {
+      var merged = [];
+      heldBySymbol[symbol].forEach(function (period) {
+        var last = merged[merged.length - 1];
+        if (last && period.from - last.to <= NET_WORTH_HELD_GAP_MS) last.to = Math.max(last.to, period.to);
+        else merged.push({ from: period.from, to: period.to });
+      });
+      heldBySymbol[symbol] = merged;
     });
-    heldBySymbol[symbol] = merged;
+    netWorthHistoryHeldPeriodsCacheKey = cacheKey;
+    netWorthHistoryHeldPeriodsCache = heldBySymbol;
+    delete netWorthHistoryHeldPeriodsPending[cacheKey];
+    return heldBySymbol;
+  }
+  var promise = new Promise(function (resolve) {
+    var index = 0;
+    function processNextDate() {
+      if (index >= dates.length) {
+        resolve(finish());
+        return;
+      }
+      var day = dates[index++];
+      try {
+        var portfolio = computePortfolio(convertTrades(allTrades.filter(function (trade) {
+          return trade.date <= day;
+        }), main), {}, st.settings.costMethod);
+        var heldNow = {};
+        Object.keys(included).forEach(function (accountId) {
+          var rows = portfolio.byAccount[accountId];
+          if (!rows) return;
+          rows.forEach(function (row, symbol) {
+            if (Number(row.qtyHeld) > 0) heldNow[String(symbol).toUpperCase()] = true;
+          });
+        });
+        Object.keys(heldNow).forEach(function (symbol) {
+          if (state[symbol] === undefined) state[symbol] = null;
+          if (state[symbol] === null) state[symbol] = { from: Date.parse(day + 'T00:00:00') };
+        });
+        Object.keys(state).forEach(function (symbol) {
+          if (state[symbol] !== null && !heldNow[symbol]) {
+            (heldBySymbol[symbol] = heldBySymbol[symbol] || []).push({
+              from: state[symbol].from,
+              to: Date.parse(day + 'T00:00:00') + 86400000
+            });
+            state[symbol] = null;
+          }
+        });
+      } catch (error) {
+        delete netWorthHistoryHeldPeriodsPending[cacheKey];
+        resolve(null);
+        return;
+      }
+      setTimeout(processNextDate, 0);
+    }
+    processNextDate();
   });
-  return heldBySymbol;
+  netWorthHistoryHeldPeriodsPending[cacheKey] = promise;
+  return promise;
 }
 
-function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot) {
+function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, signature, isCurrent) {
   var included = netWorthHistoryIncludedAccounts(st);
   var earliest = netWorthHistoryStart(st, included);
   if (earliest === null) earliest = range.start;
@@ -7243,8 +7273,8 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot) {
   var seriesBySymbol = {};
   var nextSymbol = 0;
   var completedSymbols = {};
-  var heldPeriods = null;
-  try { heldPeriods = netWorthHistoryHeldPeriods(st, included, main); } catch (e) { heldPeriods = null; }
+  return netWorthHistoryHeldPeriods(st, included, main, signature).then(function (heldPeriods) {
+  if (typeof isCurrent === 'function' && !isCurrent()) return { points: [], stale: true };
   // Needed download windows per symbol, clipped to the requested range.
   // null periods (scan skipped) = legacy behaviour: first trade -> range end.
   var neededBySymbol = {};
@@ -7351,8 +7381,9 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot) {
       }
     });
     var points = [];
-    var batchSize = 6;
+    var batchSize = 1;
     function valueNextBatch(offset) {
+      if (typeof isCurrent === 'function' && !isCurrent()) return Promise.resolve(points);
       if (offset >= times.length) return Promise.resolve(points);
       var batch = times.slice(offset, offset + batchSize);
       return Promise.all(batch.map(function (at) {
@@ -7385,7 +7416,9 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot) {
             end: end
           });
         }
-        return valueNextBatch(offset + batch.length);
+        return new Promise(function (resolve) {
+          setTimeout(function () { resolve(valueNextBatch(offset + batch.length)); }, 0);
+        });
       });
     }
     return valueNextBatch(0).then(function () {
@@ -7415,6 +7448,7 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot) {
         historyStart: earliest
       };
     });
+  });
   });
 }
 
@@ -7726,7 +7760,7 @@ function updateNetWorthHistory(st, value, main) {
         return buildNetWorthHistory(st, main, range, range.onProgress, {
           value: value,
           prices: prices
-        });
+        }, signature, range.isCurrent);
       });
     }
   });

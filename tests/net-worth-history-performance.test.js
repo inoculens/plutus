@@ -13,7 +13,10 @@ const instrumented = src.replace(marker, [
   '  root.__netWorthHistoryTest = {',
   '    samplePoints: samplePoints,',
   '    setActive: function (data) { active = data; },',
-  '    visiblePoints: visiblePoints',
+  '    visiblePoints: visiblePoints,',
+  '    setStore: function (value) { store = value; },',
+  '    getStore: function () { return store; },',
+  '    scopeData: scopeData,',
   '  };',
   marker
 ].join('\n'));
@@ -23,6 +26,19 @@ vm.createContext(context);
 vm.runInContext(instrumented, context, { filename: 'net-worth-history.js' });
 
 const chart = context.__netWorthHistoryTest;
+const inactivePoints = [{ at: 2, value: 2 }, { at: 1, value: 1 }];
+chart.setStore({
+  scopes: {
+    active: { points: [{ at: 2, value: 2 }, { at: 1, value: 1 }] },
+    inactive: { points: inactivePoints, pointsNormalized: false }
+  }
+});
+const activeScope = chart.scopeData('active');
+assert.equal(activeScope.points[0].at, 1, 'active data should be normalized and sorted');
+assert.equal(chart.getStore().scopes.inactive.points, inactivePoints,
+  'inactive scopes should not be normalized during active-scope access');
+assert.equal(chart.getStore().scopes.inactive.pointsNormalized, false);
+
 const points = Array.from({ length: 100000 }, function (_, index) {
   return { at: index, value: Math.sin(index / 300) };
 });

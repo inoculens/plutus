@@ -2,6 +2,7 @@
   'use strict';
 
   var STORAGE_KEY = 'plutus.networth-history.v1';
+  var RANGE_STORAGE_KEY = 'plutus.networth-history-ranges.v1';
   var HISTORY_DB = 'plutus.networth-history';
   var HISTORY_STORE = 'scopes';
   var PERIODS = {
@@ -14,6 +15,7 @@
     '5Y': 1826 * 24 * 60 * 60 * 1000
   };
   var store = { scopes: {} };
+  var rangePreferences = {};
   var active = null;
   var svgNS = 'http://www.w3.org/2000/svg';
   var storageMessage = '';
@@ -29,6 +31,7 @@
   var pendingStorageWrites = {};
   var dirtyScopeKeys = {};
   var storageWriteTimer = null;
+  var rangeStorageTimer = null;
   var legacyStoragePending = false;
   var rangeDrag = null;
   var rangeRequestTimer = null;
@@ -41,7 +44,21 @@
   function storedScope(data, key) {
     return {
       scopeKey: key,
-      points: normalizePoints(data.points),
+      points: Array.isArray(data.points) ? data.points : [],
+      period: data.period,
+      from: data.from,
+      to: data.to,
+      rangeStart: data.rangeStart,
+      rangeEnd: data.rangeEnd,
+      signature: data.signature,
+      incomplete: !!data.incomplete
+    };
+  }
+
+  function scopeSnapshot(data, key) {
+    return {
+      scopeKey: key,
+      points: data.points,
       period: data.period,
       from: data.from,
       to: data.to,
@@ -99,7 +116,7 @@
     try {
       var saved = { scopes: {} };
       Object.keys(store.scopes).forEach(function (key) {
-        saved.scopes[key] = storedScope(store.scopes[key], key);
+        saved.scopes[key] = scopeSnapshot(store.scopes[key], key);
         delete saved.scopes[key].scopeKey;
       });
       root.localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
@@ -147,7 +164,8 @@
     if (storageWriteTimer !== null) root.clearTimeout(storageWriteTimer);
     storageWriteTimer = root.setTimeout(function () {
       storageWriteTimer = null;
-      flushStorageWrites();
+      if (historyDb) flushStorageWrites();
+      else if (storageReady) saveLegacyStore();
     }, 150);
   }
 
@@ -155,6 +173,17 @@
     if (storeLoaded) return storageReadyPromise;
     storeLoaded = true;
     try {
+      var ranges = root.localStorage.getItem(RANGE_STORAGE_KEY);
+      if (ranges) {
+        try {
+          var parsedRanges = JSON.parse(ranges);
+          if (parsedRanges && typeof parsedRanges === 'object' && !Array.isArray(parsedRanges)) {
+            rangePreferences = parsedRanges;
+          }
+        } catch (rangeError) {
+          storageReadWarning = 'Saved chart range preferences could not be read.';
+        }
+      }
       var raw = root.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         var parsed = JSON.parse(raw);
@@ -167,7 +196,7 @@
               delete store.scopes[key];
               return;
             }
-            data.points = normalizePoints(data.points);
+            data.pointsNormalized = true;
             delete data.pendingSignature;
             delete data.pendingContext;
             data.updating = false;
@@ -204,13 +233,14 @@
               if (dirtyScopeKeys[record.scopeKey]) return;
               var current = store.scopes[record.scopeKey];
               var normalized = storedScope(record, record.scopeKey);
+              normalized.pointsNormalized = true;
               if (current) replaceScope(current, normalized);
               else store.scopes[record.scopeKey] = normalized;
             });
             if (legacyStoragePending) {
               Object.keys(store.scopes).forEach(function (key) {
                 if (storedKeys[key] || dirtyScopeKeys[key]) return;
-                pendingStorageWrites[key] = storedScope(store.scopes[key], key);
+                pendingStorageWrites[key] = scopeSnapshot(store.scopes[key], key);
               });
             }
             storageReady = true;
@@ -239,7 +269,6 @@
         }
       });
     }).then(function (loaded) {
-      if (!loaded && !historyDb) saveLegacyStore();
       if (pendingUpdateOptions) {
         var options = pendingUpdateOptions;
         pendingUpdateOptions = null;
@@ -250,19 +279,55 @@
     return storageReadyPromise;
   }
 
+  function applyRangePreference(data) {
+    var preference = rangePreferences[data.scopeKey];
+    if (!preference || typeof preference !== 'object') return;
+    if (PERIODS[preference.period] || preference.period === 'ALL' || preference.period === 'CUSTOM') {
+      data.period = preference.period;
+    }
+    if (typeof preference.from === 'string') data.from = preference.from;
+    if (typeof preference.to === 'string') data.to = preference.to;
+    data.rangeStart = preference.rangeStart !== null && isFinite(Number(preference.rangeStart))
+      ? Number(preference.rangeStart) : null;
+    data.rangeEnd = preference.rangeEnd !== null && isFinite(Number(preference.rangeEnd))
+      ? Number(preference.rangeEnd) : null;
+  }
+
+  function saveRangePreference(data) {
+    var key = String(data.scopeKey || 'default');
+    rangePreferences[key] = {
+      period: data.period,
+      from: data.from,
+      to: data.to,
+      rangeStart: data.rangeStart,
+      rangeEnd: data.rangeEnd
+    };
+    if (rangeStorageTimer !== null) root.clearTimeout(rangeStorageTimer);
+    rangeStorageTimer = root.setTimeout(function () {
+      rangeStorageTimer = null;
+      try {
+        root.localStorage.setItem(RANGE_STORAGE_KEY, JSON.stringify(rangePreferences));
+      } catch (e) {
+        storageMessage = 'Could not save chart range locally. Check available browser storage.';
+        if (active) draw();
+      }
+    }, 150);
+  }
+
   function saveStore(data) {
     data = data || active;
     if (!data) return true;
     var key = String(data.scopeKey || (active && active.scopeKey) || 'default');
     data.scopeKey = key;
     dirtyScopeKeys[key] = true;
-    pendingStorageWrites[key] = storedScope(data, key);
+    pendingStorageWrites[key] = scopeSnapshot(data, key);
     if (!storageReady) return true;
     if (historyDb) {
       scheduleStorageWrite();
       return true;
     }
-    return saveLegacyStore();
+    scheduleStorageWrite();
+    return true;
   }
 
   function byId(id) {
@@ -331,10 +396,18 @@
 
   function normalizePoints(points) {
     if (!Array.isArray(points)) return [];
-    return points.filter(function (point) {
-      return point && isFinite(Number(point.at)) &&
-        (point.value === null || (point.value !== undefined && isFinite(Number(point.value))));
-    }).map(pointCopy).sort(function (a, b) { return a.at - b.at; });
+    var normalized = [];
+    var needsSort = false;
+    for (var i = 0; i < points.length; i++) {
+      var point = points[i];
+      if (!point || !isFinite(Number(point.at)) ||
+          (point.value !== null && (point.value === undefined || !isFinite(Number(point.value))))) continue;
+      var copy = pointCopy(point);
+      if (normalized.length && normalized[normalized.length - 1].at > copy.at) needsSort = true;
+      normalized.push(copy);
+    }
+    if (needsSort) normalized.sort(function (a, b) { return a.at - b.at; });
+    return normalized;
   }
 
   function compactPoints(points) {
@@ -344,11 +417,15 @@
   function scopeData(scope) {
     var key = String(scope || 'default');
     if (!store.scopes[key] || typeof store.scopes[key] !== 'object') {
-      store.scopes[key] = { points: [], period: '1M', from: '', to: '', signature: '' };
+      store.scopes[key] = { points: [], pointsNormalized: true, period: '1M', from: '', to: '', signature: '' };
     }
     var data = store.scopes[key];
     data.scopeKey = key;
-    data.points = normalizePoints(data.points);
+    if (!data.pointsNormalized) {
+      data.points = normalizePoints(data.points);
+      data.pointsNormalized = true;
+    } else if (!Array.isArray(data.points)) data.points = [];
+    applyRangePreference(data);
     if (!PERIODS[data.period] && data.period !== 'ALL' && data.period !== 'CUSTOM') data.period = '1M';
     return data;
   }
@@ -367,7 +444,7 @@
         active.rangeEnd = null;
         active.from = '';
         active.to = '';
-        saveStore(active);
+        saveRangePreference(active);
         draw();
         requestHistory();
       });
@@ -383,7 +460,7 @@
       active.rangeEnd = null;
       active.from = fromInput.value;
       if (active.to && active.from > active.to) active.to = active.from;
-      saveStore(active);
+      saveRangePreference(active);
       draw();
       requestHistory();
     });
@@ -395,7 +472,7 @@
       active.rangeEnd = null;
       active.to = toInput.value;
       if (active.from && active.to < active.from) active.from = active.to;
-      saveStore(active);
+      saveRangePreference(active);
       draw();
       requestHistory();
     });
@@ -611,7 +688,7 @@
     active.from = dateKey(active.rangeStart);
     active.to = dateKey(active.rangeEnd);
     active.loadedKey = '';
-    saveStore(active);
+    saveRangePreference(active);
     draw();
     if (rangeRequestTimer !== null) root.clearTimeout(rangeRequestTimer);
     rangeRequestTimer = root.setTimeout(function () {
@@ -662,40 +739,73 @@
     historyProgressTimer = root.setInterval(function () {
       if (active === data && data.loading) renderLoadDetails(data);
     }, 1000);
-    Promise.resolve().then(function () {
-      return storageReadyPromise.then(function () {
-        if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return null;
-        return data.loadHistory({
-          period: data.period,
-          start: range.start,
-          end: range.end,
-          onProgress: function (progress) {
-            if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
-            updateLoadProgress(data, progress);
-            draw();
+    Promise.resolve(storageReadyPromise).then(function () {
+      return new Promise(function (resolve, reject) {
+        function startLoad() {
+          if (sequence !== requestSequence || active !== data || data.loadingKey !== key) {
+            resolve(null);
+            return;
           }
-        });
+          try {
+            Promise.resolve(data.loadHistory({
+              period: data.period,
+              start: range.start,
+              end: range.end,
+              isCurrent: function () {
+                return sequence === requestSequence && active === data && data.loadingKey === key;
+              },
+              onProgress: function (progress) {
+                if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
+                updateLoadProgress(data, progress);
+                draw();
+              }
+            })).then(resolve, reject);
+          } catch (error) {
+            reject(error);
+          }
+        }
+        if (typeof root.requestAnimationFrame === 'function') {
+          root.requestAnimationFrame(function () { root.setTimeout(startLoad, 0); });
+        } else {
+          root.setTimeout(startLoad, 0);
+        }
       });
     }).then(function (result) {
       if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
       if (!result) return;
       if (!result || !Array.isArray(result.points)) throw new Error('History provider returned no points.');
-      var byTime = {};
       var historyDays = {};
-      result.points.forEach(function (point) {
-        var copy = pointCopy(point);
-        byTime[copy.at] = copy;
-        if (!copy.live) historyDays[dateKey(copy.at)] = true;
+      var incoming = normalizePoints(result.points);
+      incoming.forEach(function (point) {
+        if (!point.live) historyDays[dateKey(point.at)] = true;
       });
       var today = dateKey(Date.now());
-      data.points.forEach(function (point) {
-        var pointDay = dateKey(point.at);
-        if (point.live && pointDay < today && historyDays[pointDay]) return;
-        if (!Object.prototype.hasOwnProperty.call(byTime, point.at)) {
-          byTime[point.at] = pointCopy(point);
+      var merged = [];
+      var existingIndex = 0;
+      var incomingIndex = 0;
+      while (existingIndex < data.points.length || incomingIndex < incoming.length) {
+        var existing = existingIndex < data.points.length ? data.points[existingIndex] : null;
+        var next = incomingIndex < incoming.length ? incoming[incomingIndex] : null;
+        if (existing && existing.live && dateKey(existing.at) < today &&
+            historyDays[dateKey(existing.at)]) {
+          existingIndex++;
+          continue;
         }
-      });
-      data.points = compactPoints(Object.keys(byTime).map(function (at) { return byTime[at]; }));
+        if (existing && next && existing.at === next.at) {
+          merged.push(next);
+          existingIndex++;
+          incomingIndex++;
+        } else if (!existing || (next && next.at < existing.at)) {
+          merged.push(next);
+          incomingIndex++;
+        } else {
+          merged.push(existing);
+          existingIndex++;
+        }
+      }
+      data.points = merged;
+      data.pointsNormalized = true;
+      navigatorCache = null;
       data.historyStart = Number(result.historyStart) || data.historyStart;
       if (data.historyStart) {
         data.points = data.points.filter(function (point) { return point.at >= data.historyStart; });
@@ -1378,8 +1488,14 @@
     if (last && last.at >= bucket && last.at < bucket + 5 * 60 * 1000) {
       nextPoint.at = last.at;
       data.points[data.points.length - 1] = nextPoint;
-    } else data.points.push(nextPoint);
-    data.points = compactPoints(data.points);
+    } else if (!last || last.at < bucket) {
+      data.points.push(nextPoint);
+    } else {
+      data.points.push(nextPoint);
+      data.points = compactPoints(data.points);
+    }
+    data.pointsNormalized = true;
+    navigatorCache = null;
   }
 
   function update(options) {
@@ -1397,7 +1513,9 @@
     active = scopeData(options.scope);
     var nextSignature = String(options.signature || '');
     if (active.signature !== nextSignature) {
+      navigatorCache = null;
       active.points = [];
+      active.pointsNormalized = true;
       active.rangeStart = null;
       active.rangeEnd = null;
       active.from = '';
@@ -1411,8 +1529,10 @@
     }
     active.currency = String(options.currency || 'EUR').toUpperCase();
     active.historyStart = Number(options.historyStart) || active.historyStart;
-    if (active.historyStart) {
+    if (active.historyStart && active.points.length && active.points[0].at < active.historyStart) {
       active.points = active.points.filter(function (point) { return point.at >= active.historyStart; });
+      active.pointsNormalized = true;
+      navigatorCache = null;
     }
     active.sourceSignature = nextSignature;
     active.loadHistory = options.loadHistory;

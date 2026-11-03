@@ -18,7 +18,9 @@ permissions:
 # One writer at a time, including scheduled/manual/dev-triggered runs.
 concurrency:
   group: plutus-market-history-archive
-  cancel-in-progress: false
+  # A newer source push supersedes an obsolete queued/backfill run. Scheduled
+  # and manually dispatched runs are allowed to finish unless a source push arrives.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   collect:

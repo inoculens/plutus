@@ -108,7 +108,7 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
 
 def load_previous() -> tuple[dict, dict, int]:
     if not OUTPUT.exists():
-        return {}, {}
+        return {}, {}, 0
     try:
         previous = json.loads(OUTPUT.read_text(encoding="utf-8"))
         return previous.get("assets", {}), previous.get("coverage", {}), int(previous.get("collectorVersion", 0))

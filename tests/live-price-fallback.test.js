@@ -102,6 +102,55 @@ async function main() {
   const missingPrice = await missingPair.refreshAllPrices(['KAS'], 'USD', { KAS: 'crypto' });
   assert.equal(missingPrice.KAS, null, 'missing exchange quotes stay unknown rather than becoming zero');
 
+  const historyApp = createApp(() => Promise.reject(new Error('unexpected network request')));
+  const historyEnd = Date.now();
+  const currentHistory = await historyApp.buildNetWorthHistory({
+    accounts: [],
+    trades: [],
+    settings: { mainCurrency: 'USD', costMethod: 'average' }
+  }, 'USD', {
+    period: '1Y',
+    start: historyEnd - 2 * 86400000,
+    end: historyEnd
+  }, null, {
+    value: 9876.54,
+    prices: { BTC: 65000 }
+  });
+  assert.equal(currentHistory.points[currentHistory.points.length - 1].value, 9876.54,
+    'the current chart endpoint uses the same live valuation snapshot as the balance');
+  assert.equal(currentHistory.points[currentHistory.points.length - 1].prices.BTC, 65000);
+
+  const unknownHistory = await historyApp.buildNetWorthHistory({
+    accounts: [],
+    trades: [],
+    settings: { mainCurrency: 'USD', costMethod: 'average' }
+  }, 'USD', {
+    period: '1Y',
+    start: historyEnd - 2 * 86400000,
+    end: historyEnd
+  }, null, {
+    value: null,
+    prices: {}
+  });
+  assert.equal(unknownHistory.points[unknownHistory.points.length - 1].value, null,
+    'unknown current valuations remain a gap instead of becoming zero');
+
+  const pastEnd = historyEnd - 86400000;
+  const pastHistory = await historyApp.buildNetWorthHistory({
+    accounts: [],
+    trades: [],
+    settings: { mainCurrency: 'USD', costMethod: 'average' }
+  }, 'USD', {
+    period: 'CUSTOM',
+    start: pastEnd - 86400000,
+    end: pastEnd
+  }, null, {
+    value: 9876.54,
+    prices: { BTC: 65000 }
+  });
+  assert.notEqual(pastHistory.points[pastHistory.points.length - 1].value, 9876.54,
+    'past chart endpoints remain based on historical market data');
+
   console.log('live price fallback checks passed');
 }
 

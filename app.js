@@ -7166,7 +7166,7 @@ function netWorthHistoryHeldPeriods(st, included, main) {
   return heldBySymbol;
 }
 
-function buildNetWorthHistory(st, main, range, onProgress) {
+function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot) {
   var included = netWorthHistoryIncludedAccounts(st);
   var earliest = netWorthHistoryStart(st, included);
   if (earliest === null) earliest = range.start;
@@ -7370,6 +7370,18 @@ function buildNetWorthHistory(st, main, range, onProgress) {
       });
     }
     return valueNextBatch(0).then(function () {
+      var completedAt = Date.now();
+      if (points.length && currentSnapshot &&
+          completedAt >= end && completedAt - end <= 5 * 60 * 1000) {
+        var snapshotValue = currentSnapshot.value === null || currentSnapshot.value === undefined
+          ? NaN : Number(currentSnapshot.value);
+        points[points.length - 1] = {
+          at: end,
+          value: isFinite(snapshotValue) ? snapshotValue : null,
+          prices: currentSnapshot.prices || {},
+          live: true
+        };
+      }
       var missing = Object.keys(missingSymbols);
       return {
         points: points,
@@ -7692,7 +7704,10 @@ function updateNetWorthHistory(st, value, main) {
     },
     loadHistory: function (range) {
       return priceDataStartupPromise.then(function () {
-        return buildNetWorthHistory(st, main, range, range.onProgress);
+        return buildNetWorthHistory(st, main, range, range.onProgress, {
+          value: value,
+          prices: prices
+        });
       });
     }
   });

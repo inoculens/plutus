@@ -19,7 +19,7 @@ function createApp(fetchImpl) {
     apply: () => el()
   });
   const context = {
-    console, setTimeout: noop, clearTimeout: noop, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
+    console, setTimeout, clearTimeout, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
     localStorage: {
       getItem: key => store.has(key) ? store.get(key) : null,
       setItem: (key, value) => store.set(key, String(value)),
@@ -111,6 +111,12 @@ async function main() {
   assert.equal(await mismatchedSingleXmr.fetchLivePrice('XMR', 'EUR', 'crypto'), 540,
     'the independent Kraken quote replaces a bad single-symbol XMR quote');
 
+  assert.equal(mismatchedXmr.prefersExchangePrice('xmr'), true);
+  assert.equal(mismatchedXmr.prefersExchangePrice('BTC'), false,
+    'only listed symbols let an exchange quote replace CoinGecko');
+  mismatchedXmr.EXCHANGE_PREFERRED_SYMBOLS.forEach(symbol => assert(mismatchedXmr.SYMBOL_MAP[symbol],
+    symbol + ' must have a verified SYMBOL_MAP entry'));
+
   function aaveFallbackFeed(krakenAvailable, coinbaseAvailable) {
     return url => {
       if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
@@ -169,6 +175,36 @@ async function main() {
   const missingPrice = await missingPair.refreshAllPrices(['KAS'], 'USD', { KAS: 'crypto' });
   assert.equal(missingPrice.KAS, null, 'missing exchange quotes stay unknown rather than becoming zero');
 
+  let lazyBinanceRequests = 0;
+  const krakenAnswers = createApp(url => {
+    if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
+    if (url.includes('api.kraken.com')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ result: { XXBTZUSD: { c: ['65100'] } } }) });
+    }
+    if (url.includes('api.exchange.coinbase.com')) return Promise.resolve({ ok: false, status: 451 });
+    if (url.includes('api.binance.com')) lazyBinanceRequests++;
+    return Promise.resolve({ ok: false, status: 451 });
+  });
+  assert.equal((await krakenAnswers.refreshAllPrices(['BTC'], 'USD', { BTC: 'crypto' })).BTC, 65100);
+  assert.equal(lazyBinanceRequests, 0, 'Binance is not contacted when Kraken already answered');
+
+  let reusedTickerRequests = 0;
+  const reusedTicker = createApp(url => {
+    if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
+    if (url.includes('api.binance.com')) {
+      reusedTickerRequests++;
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([{ symbol: 'MATICUSDT', price: '0.4' }]) });
+    }
+    return Promise.resolve({ ok: false, status: 451 });
+  });
+  assert.equal(reusedTicker.BINANCE_LIVE_SYMBOLS.includes('MATIC'), false);
+  assert.equal((await reusedTicker.refreshAllPrices(['MATIC'], 'USD', { MATIC: 'crypto' })).MATIC, null,
+    'a renamed or migrated ticker is never priced from a same-named Binance pair');
+  assert.equal(reusedTickerRequests, 0, 'non-whitelisted tickers do not cost a Binance request');
+  const mappedTickers = Object.keys(reusedTicker.SYMBOL_MAP);
+  reusedTicker.BINANCE_LIVE_SYMBOLS.forEach(symbol => assert(mappedTickers.includes(symbol),
+    symbol + ' must have a verified SYMBOL_MAP entry before it can use a live exchange fallback'));
+
   const historyApp = createApp(() => Promise.reject(new Error('unexpected network request')));
   const historyEnd = Date.now();
   const currentHistory = await historyApp.buildNetWorthHistory({
@@ -186,6 +222,30 @@ async function main() {
   assert.equal(currentHistory.points[currentHistory.points.length - 1].value, 9876.54,
     'the current chart endpoint uses the same live valuation snapshot as the balance');
   assert.equal(currentHistory.points[currentHistory.points.length - 1].prices.BTC, 65000);
+
+  // Valuation yields to the browser after a time slice, not after every point.
+  let yields = 0;
+  const realSetTimeout = setTimeout;
+  historyApp.setTimeout = function (callback, delay) { yields++; return realSetTimeout(callback, delay); };
+  let progressCalls = 0;
+  const longHistory = await historyApp.buildNetWorthHistory({
+    accounts: [],
+    trades: [],
+    settings: { mainCurrency: 'USD', costMethod: 'average' }
+  }, 'USD', {
+    period: '1Y',
+    start: historyEnd - 365 * 86400000,
+    end: historyEnd
+  }, function (progress) { if (progress.phase === 'valuation') progressCalls++; }, null);
+  assert(longHistory.points.length >= 365, 'a one-year chart has a point per day');
+  for (let i = 1; i < longHistory.points.length; i++) {
+    assert(longHistory.points[i].at > longHistory.points[i - 1].at, 'points stay in time order');
+  }
+  assert(yields < longHistory.points.length / 4,
+    'valuation yields per time slice, not per point (' + yields + ' yields for ' + longHistory.points.length + ' points)');
+  assert(progressCalls >= 1 && progressCalls < longHistory.points.length / 4,
+    'progress is reported per slice and at completion (' + progressCalls + ' calls)');
+  historyApp.setTimeout = realSetTimeout;
 
   const unknownHistory = await historyApp.buildNetWorthHistory({
     accounts: [],
@@ -218,10 +278,23 @@ async function main() {
   assert.notEqual(pastHistory.points[pastHistory.points.length - 1].value, 9876.54,
     'past chart endpoints remain based on historical market data');
 
+  completed = true;
   console.log('live price fallback checks passed');
+  // The app schedules long-lived timers on load; end explicitly once done.
+  process.exit(0);
 }
+
+// A promise that never settles lets Node exit with code 0 mid-test. Fail
+// loudly instead of reporting a false pass.
+let completed = false;
+process.on('exit', code => {
+  if (!completed && code === 0) {
+    console.error('live price fallback test exited before completing');
+    process.exitCode = 1;
+  }
+});
 
 main().catch(error => {
   console.error(error);
-  process.exitCode = 1;
+  process.exit(1);
 });

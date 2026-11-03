@@ -24,11 +24,11 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         rows = [(100.0, 10.0, "mexc"), (101.0, 20.0, "htx")]
         self.assertEqual(COLLECTOR.filter_observations(rows, "BTC"), [])
 
-    def test_xmr_requires_two_trusted_exchange_anchors(self):
+    def test_all_assets_require_two_trusted_exchange_anchors(self):
         one_anchor = [(100.0, 10.0, "kraken"), (100.5, 20.0, "mexc")]
         two_anchors = one_anchor + [(101.0, 30.0, "kucoin")]
-        self.assertEqual(COLLECTOR.filter_observations(one_anchor, "XMR"), [])
-        self.assertEqual(len(COLLECTOR.filter_observations(two_anchors, "XMR")), 3)
+        self.assertEqual(COLLECTOR.filter_observations(one_anchor, "BTC"), [])
+        self.assertEqual(len(COLLECTOR.filter_observations(two_anchors, "XMR")), 2)
 
     def test_outlier_filter_rejects_price_far_from_trusted_anchor(self):
         rows = [

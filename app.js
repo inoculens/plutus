@@ -14512,6 +14512,19 @@ function syncTradeTypeUI() {
   setHidden('t-recipients', !isTransfer);
   setHidden('t-selfrecv-row', !isTransfer);
   setHidden('t-sources-row', !isTransfer);
+  // While a transfer is being built its source rows own the total, so the
+  // quantity box is read-only and filled by syncTransferFeePreview. Every
+  // other type edits the quantity directly: unlock it and drop the derived
+  // total so it never leaks into a buy, sell, income, expense or swap.
+  if (!isTransfer) {
+    try {
+      var qtyUnlock = document.getElementById('t-qty');
+      if (qtyUnlock && qtyUnlock.readOnly) {
+        qtyUnlock.readOnly = false;
+        qtyUnlock.value = '';
+      }
+    } catch (e) { /* ignore */ }
+  }
   setHidden('t-networkfee-row', !(isTransfer));
   // Transfers carry no fiat of their own: the network fee IS the fee, valued
   // in fiat at the frozen historical rate. Fiat fee + total + currency stay
@@ -15326,6 +15339,10 @@ function resetTradeForm() {
   if (sideReset) sideReset.disabled = false;
   uiSetVal('t-side', 'buy');
   uiSetVal('t-qty', '');
+  try {
+    var qtyReset = document.getElementById('t-qty');
+    if (qtyReset) qtyReset.readOnly = false; // a transfer may have locked it
+  } catch (e) { /* ignore */ }
   uiSetVal('t-toqty', '');
   uiSetVal('t-selfrecv', '');
   clearRecipientRows();

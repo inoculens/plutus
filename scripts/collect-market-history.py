@@ -198,7 +198,11 @@ def main() -> int:
     exchange_rank = {name: i for i, name in enumerate(EXCHANGES)}
     for exchange_id, client in clients.items():
         for market in client.markets.values():
-            if not market.get("spot") or market.get("active") is False:
+            # Keep inactive/delisted spot markets in the candidate set too:
+            # some exchanges retain historical OHLCV after trading is disabled.
+            # Fetch failures are isolated per market below; active status alone
+            # is not a reason to discard otherwise correctly identified history.
+            if not market.get("spot"):
                 continue
             base, quote = market.get("base"), market.get("quote")
             if not base or quote not in quote_rank:

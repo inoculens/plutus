@@ -54,38 +54,43 @@ jobs:
           mkdir -p /tmp/plutus-market-history
           cp market-history/daily.json /tmp/plutus-market-history/daily.json
 
-          if git ls-remote --exit-code --heads origin market-history >/dev/null 2>&1; then
-            git fetch origin market-history
-            git checkout -B market-history FETCH_HEAD
-          else
-            git checkout --orphan market-history
-            git rm -rf . >/dev/null 2>&1 || true
-          fi
-
-          mkdir -p market-history
-          cp /tmp/plutus-market-history/daily.json market-history/daily.json
-          git add market-history/daily.json
-          if git diff --cached --quiet; then
-            echo "Dedicated archive branch is already current."
-            exit 0
-          fi
-
-          git config user.name "sebaptcd"
-          git config user.email "dev@sebastian.ghiveci.com"
-          git commit -m "Refresh daily public market history" \
-            -m "Technical overview: publish the CCXT-aggregated daily USD archive to the dedicated market-history branch, keeping generated data out of dev/main application history and avoiding merge conflicts." \
-            -m "Commit made with GPT-6"
-
-          # If another writer moves the data branch, rebase the archive
-          # commit onto its latest head and retry instead of losing the run.
           for attempt in 1 2 3; do
+            if git ls-remote --exit-code --heads origin market-history >/dev/null 2>&1; then
+              git fetch origin market-history
+              git checkout -B market-history FETCH_HEAD
+              remote_exists=1
+            else
+              remote_exists=0
+              if git show-ref --verify --quiet refs/heads/market-history; then
+                git checkout market-history
+              else
+                git checkout --orphan market-history
+                git rm -rf . >/dev/null 2>&1 || true
+              fi
+            fi
+
+            mkdir -p market-history
+            cp /tmp/plutus-market-history/daily.json market-history/daily.json
+            git add market-history/daily.json
+
+            if ! git diff --cached --quiet; then
+              git config user.name "sebaptcd"
+              git config user.email "dev@sebastian.ghiveci.com"
+              git commit -m "Refresh daily public market history" \
+                -m "Technical overview: publish the CCXT-aggregated daily USD archive to the dedicated market-history branch, keeping generated data out of dev/main application history and avoiding merge conflicts." \
+                -m "Commit made with GPT-6"
+            elif [ "$remote_exists" -eq 1 ]; then
+              echo "Dedicated archive branch is already current."
+              exit 0
+            fi
+
+            # Re-read the remote on every retry. If another writer moved it,
+            # the next iteration rebuilds this archive commit on the new head.
             if git push origin HEAD:market-history; then
               exit 0
             fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "Archive push failed after three attempts." >&2
-              exit 1
-            fi
-            git fetch origin market-history
-            git rebase FETCH_HEAD
+            echo "Archive push attempt $attempt failed; refreshing remote state."
           done
+
+          echo "Archive push failed after three attempts." >&2
+          exit 1

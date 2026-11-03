@@ -14231,7 +14231,9 @@ function readSourceRows() {
         function q(sel) { var el = row.querySelector(sel); return el ? el : null; }
         function v(sel) { var el = q(sel); return el ? el.value : ''; }
         var autoEl = q('.src-auto');
-        var auto = !autoEl || autoEl.checked;
+        // A lone source has nothing to share the fee with: it always derives
+        // the fee (sent - recipients - received back), never a typed value.
+        var auto = els.length === 1 || !autoEl || autoEl.checked;
         var feeVal = v('.src-fee');
         rows.push({
           index: idx,
@@ -14417,10 +14419,20 @@ function syncSourceRowMode(row) {
   if (!row) return;
   var auto = row.querySelector('.src-auto');
   var feeIn = row.querySelector('.src-fee');
-  var autoFlag = !auto || auto.checked;
+  // With a single source row the fee is always derived: lock the row to auto
+  // and hide the toggle (a manual fee would only restate the derived one).
+  var siblings = row.parentNode && row.parentNode.querySelectorAll ? row.parentNode.querySelectorAll('.src-row') : [];
+  var single = siblings.length === 1;
+  if (single && auto) auto.checked = true;
+  var autoFlag = single || !auto || auto.checked;
   if (feeIn) feeIn.disabled = autoFlag;
   var wrap = row.querySelector('.src-auto-wrap');
-  if (wrap) wrap.style.opacity = autoFlag ? '0.55' : '1';
+  if (wrap) {
+    wrap.style.opacity = autoFlag ? '0.55' : '1';
+    // .src-auto-wrap sets display with !important, so hide it the same way.
+    if (single) wrap.style.setProperty('display', 'none', 'important');
+    else wrap.style.removeProperty('display');
+  }
 }
 
 // Fill a source row's qty with everything the account holds (at the record
@@ -15556,10 +15568,12 @@ function openEditTrade(tradeId) {
         if (si) si.value = tr.accountId;
         var qi = first.querySelector('.src-qty');
         if (qi) qi.value = String(tr.qty !== undefined ? tr.qty : '');
+        // A single source derives its fee from the recipients, so the old
+        // stored fee is recomputed by the preview rather than typed back in.
         var fi = first.querySelector('.src-fee');
-        if (fi) fi.value = (tr.networkFee !== undefined && tr.networkFee !== null && Number(tr.networkFee) > 0) ? String(tr.networkFee) : '';
+        if (fi) fi.value = '';
         var ai = first.querySelector('.src-auto');
-        if (ai) ai.checked = !(tr.networkFee !== undefined && tr.networkFee !== null && Number(tr.networkFee) > 0);
+        if (ai) ai.checked = true;
       }
     }
     try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ }
@@ -16380,15 +16394,6 @@ function onTradeSubmit(ev) {
     var nfChkSave = Number(networkFee);
     var nfScChk = exactScaledOf(networkFee, symDecSave);
     if (nfScChk === null || nfScChk < 0n || nfScChk >= sentScSave) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
-    // With exactly one source, a manual source fee is the full tx fee.
-    // Enforce the previewed relationship on save; auto mode derives it.
-    if (!multiSource && srcRows.length === 1 && !srcRows[0].auto) {
-      var singleSourceFeeSc = exactScaledOf(String(srcRows[0].fee || '').trim() === '' ? '0' : srcRows[0].fee, symDecSave);
-      if (singleSourceFeeSc === null || singleSourceFeeSc < 0n || singleSourceFeeSc !== nfScChk) {
-        tradeFormError('With one source, its manual fee must equal the full transfer fee. Turn on Auto fee to derive it.');
-        return;
-      }
-    }
     uiSetVal('t-networkfee', exactToStringTrim(exactScaledOf(networkFee, symDecSave), symDecSave));
     transferRowsBuilt = recRows;
     if (multiSource) {

@@ -233,7 +233,7 @@ function loadState() {
     : [];
   var accountIds = accounts.map(function (a) { return a.id; });
   var trades = Array.isArray(parsed.trades)
-    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds); }).map(normalizeTradeForStore)
+    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
     : [];
   try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
   var priceOverrides = {};
@@ -1280,7 +1280,7 @@ function exportState(s) {
     : [];
   var accountIds = accounts.map(function (a) { return a.id; });
   var trades = Array.isArray(st.trades)
-    ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds); }).map(normalizeTradeForStore)
+    ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
     : [];
   var priceOverrides = {};
   if (st.priceOverrides && typeof st.priceOverrides === 'object' && !Array.isArray(st.priceOverrides) && isValidPriceOverrides(st.priceOverrides)) {
@@ -1422,7 +1422,7 @@ function importStateV1(data) {
   // so a grouping bug can never silently persist a dangling trade.
   var accountIds = accounts.map(function (a) { return a.id; });
   for (var vi = 0; vi < trades.length; vi++) {
-    if (!isValidImportTrade(trades[vi], accountIds)) {
+    if (!isValidImportTrade(trades[vi], accountIds, accounts)) {
       throw new Error('import failed: invalid trade at index ' + vi);
     }
   }
@@ -3474,16 +3474,9 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       if (!code) return;
       var sent = Number(t.qty);
       if (!isFinite(sent) || sent <= 0) return;
-      var mainU = String(main || '').toUpperCase();
-      var srcRate = t.fromFxLock ? ledgerFxRate(t.fromFxLock) : ledgerFxRate(t.fxLock);
-      var toSym = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
-        ? String(t.symbol || '').toUpperCase()
-        : String(t.toSymbol).trim().toUpperCase();
-      var dstRate = (toSym === mainU) ? 1 : (t.toFxLock ? ledgerFxRate(t.toFxLock) : ledgerFxRate(t.fxLock));
-      var hasOutputsL = Array.isArray(t.outputs) && t.outputs.length > 0;
-      var outsL = hasOutputsL ? t.outputs : transferOutputsOf(t);
-      if (!own[code]) own[code] = { code: code, amount: 0, count: 0 };
-      // Multi-source: debit each in-scope source leg, credit self/arrivals per leg
+      // Multi-source: debit each in-scope source leg, credit self/arrivals per
+      // leg. A code is only opened below, once something in this scope posts
+      // to it, so a transfer elsewhere never adds an empty code here.
       var legsL = transferSourceLegs(t);
       if (!legsL.length) return;
       var hasOutputsL = Array.isArray(t.outputs) && t.outputs.length > 0;
@@ -3498,10 +3491,6 @@ function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
       }
       if (!anyInScope) return;
       var mainU = String(main || '').toUpperCase();
-      var toSymL = (t.toSymbol === undefined || t.toSymbol === null || String(t.toSymbol).trim() === '')
-        ? String(t.symbol || '').toUpperCase()
-        : String(t.toSymbol).trim().toUpperCase();
-      var baseDstRate = (toSymL === mainU) ? 1 : (t.toFxLock ? ledgerFxRate(t.toFxLock) : ledgerFxRate(t.fxLock));
       legsL.forEach(function (leg) {
         if (!inScope[leg.accountId]) return;
         var srcRateL = t.fromFxLock ? ledgerFxRate(t.fromFxLock) : ledgerFxRate(t.fxLock);
@@ -8115,7 +8104,7 @@ function buildAccountAction() {
     var extra = full.length - picked.length;
     confirmAction('Delete accounts', 'Delete ' + full.length + (full.length === 1 ? ' account' : ' accounts') +
       (extra > 0 ? ' (including ' + extra + ' sub-account' + (extra === 1 ? '' : 's') + ')' : '') +
-      ' and all their trades? This cannot be undone.', 'Delete', true).then(function (ok) {
+      ' and all their trades?' + sharedTransfersNote(sharedTransfersOutside(s0, full)) + ' This cannot be undone.', 'Delete', true).then(function (ok) {
       if (!ok) return;
       var s2 = loadState();
       var inSet = {};
@@ -11407,9 +11396,14 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel, scopeIds
   if (!newLabel) return 'Ledger needs a label (e.g. Projects).';
   if (!isValidLedgerLabel(newLabel)) return 'Ledger label is too long — up to 80 characters.';
   var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  // A transfer also belongs to every secondary source account, so a ledger
+  // rename/delete reaches records shared into this scope, not just owned ones.
   function inScope(t) {
     if (!t) return false;
-    for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) return true;
+    for (var i = 0; i < scope.length; i++) {
+      if (t.accountId === scope[i]) return true;
+      if (t.type === 'transfer' && transferSourceIds(t).indexOf(scope[i]) !== -1) return true;
+    }
     return false;
   }
   function violationsUnion(s) {
@@ -11464,9 +11458,14 @@ function deleteAccountLedger(accountId, code, scopeIds) {
   code = String(code).trim();
   if (!code || code === '—') return;
   var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  // A transfer also belongs to every secondary source account, so a ledger
+  // rename/delete reaches records shared into this scope, not just owned ones.
   function inScope(t) {
     if (!t) return false;
-    for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) return true;
+    for (var i = 0; i < scope.length; i++) {
+      if (t.accountId === scope[i]) return true;
+      if (t.type === 'transfer' && transferSourceIds(t).indexOf(scope[i]) !== -1) return true;
+    }
     return false;
   }
   var st = loadState();
@@ -12292,6 +12291,32 @@ function renameAccount(id, name) {
   render();
 }
 
+// Transfers that touch a doomed account AND an account that survives.
+// Deleting the account removes these records from the surviving accounts
+// too (a shared transfer cannot exist half-way), so the confirm dialogs
+// say so. Pure: st + array of account ids.
+function sharedTransfersOutside(st, doomedIds) {
+  var doomed = {};
+  (doomedIds || []).forEach(function (id) { doomed[id] = true; });
+  var n = 0;
+  (st.trades || []).forEach(function (t) {
+    if (!t || t.type !== 'transfer') return;
+    var ids = [];
+    try {
+      ids = transferSourceIds(t).concat(transferDestIds(t));
+      if (typeof t.accountId === 'string' && t.accountId) ids.push(t.accountId);
+    } catch (e) { return; }
+    var hitsDoomed = false, hitsOther = false;
+    ids.forEach(function (id) { if (doomed[id]) hitsDoomed = true; else if (accountById(st, id)) hitsOther = true; });
+    if (hitsDoomed && hitsOther) n++;
+  });
+  return n;
+}
+
+function sharedTransfersNote(n) {
+  return n ? ' ' + n + ' transfer' + (n === 1 ? ' is' : 's are') + ' shared with other accounts and will be removed from them too.' : '';
+}
+
 function deleteAccount(id) {
   if (!id) return;
   var st = loadState();
@@ -12302,7 +12327,7 @@ function deleteAccount(id) {
   var msg = 'Delete account "' + acc.name + '" (' + acc.ticker + ')' +
     (n ? ' and its ' + n + ' trade' + (n === 1 ? '' : 's') : '') +
     (doomedSubs.length ? ' and delete ' + doomedSubs.length + ' sub-account' + (doomedSubs.length === 1 ? '' : 's') + ' with all their trades' : '') +
-    '? This cannot be undone.';
+    '?' + sharedTransfersNote(sharedTransfersOutside(st, expandDeleteIds(st, [id]))) + ' This cannot be undone.';
   confirmAction('Delete account', msg, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();
@@ -14231,7 +14256,9 @@ function readSourceRows() {
         function q(sel) { var el = row.querySelector(sel); return el ? el : null; }
         function v(sel) { var el = q(sel); return el ? el.value : ''; }
         var autoEl = q('.src-auto');
-        var auto = !autoEl || autoEl.checked;
+        // A lone source has nothing to share the fee with: it always derives
+        // the fee (sent - recipients - received back), never a typed value.
+        var auto = els.length === 1 || !autoEl || autoEl.checked;
         var feeVal = v('.src-fee');
         rows.push({
           index: idx,
@@ -14417,14 +14444,44 @@ function syncSourceRowMode(row) {
   if (!row) return;
   var auto = row.querySelector('.src-auto');
   var feeIn = row.querySelector('.src-fee');
-  var autoFlag = !auto || auto.checked;
+  // With a single source row the fee is always derived: lock the row to auto
+  // and hide the toggle (a manual fee would only restate the derived one).
+  var siblings = row.parentNode && row.parentNode.querySelectorAll ? row.parentNode.querySelectorAll('.src-row') : [];
+  var single = siblings.length === 1;
+  if (single && auto) auto.checked = true;
+  var autoFlag = single || !auto || auto.checked;
   if (feeIn) feeIn.disabled = autoFlag;
   var wrap = row.querySelector('.src-auto-wrap');
-  if (wrap) wrap.style.opacity = autoFlag ? '0.55' : '1';
+  if (wrap) {
+    wrap.style.opacity = autoFlag ? '0.55' : '1';
+    // .src-auto-wrap sets display with !important, so hide it the same way.
+    if (single) wrap.style.setProperty('display', 'none', 'important');
+    else wrap.style.removeProperty('display');
+  }
 }
 
-// Fill a source row's qty with everything the account holds (at the record
-// date, approximate: current held qty). Used by the Max button.
+// Most an account can spend on one date: what it held at that point of the
+// ledger, as a plain decimal string ('' when nothing). Records dated after
+// isoDate are ignored (they run later), and so is the record being edited:
+// its own spend is about to be replaced, so it must not shrink the answer.
+// Same-date records stay in, because a new record executes after them.
+function transferSourceMaxQty(trades, accountId, symbol, isoDate, excludeId) {
+  var sym = String(symbol || '').trim().toUpperCase();
+  var list = (trades || []).filter(function (t) {
+    if (!t) return false;
+    if (excludeId && t.id === excludeId) return false;
+    if (isoDate && typeof t.date === 'string' && t.date > isoDate) return false;
+    return true;
+  });
+  var txt = exactQtyHeldString(list, accountId, sym);
+  if (txt === null) return '';
+  var ui = qtyUiText(txt, sym);
+  if (!ui || ui.charAt(0) === '-' || !/[1-9]/.test(ui)) return '';
+  return ui;
+}
+
+// Fill a source row's qty with everything the account held on the record's
+// date (not today's balance). Used by the Max button.
 function fillSourceMax(row) {
   try {
     var sel = row.querySelector('.src-account');
@@ -14433,9 +14490,17 @@ function fillSourceMax(row) {
     var acc = accountById(st, sel.value);
     if (!acc) return;
     var sym = String(acc.ticker || '').toUpperCase();
-    var held = heldForAccount(st.trades || [], sel.value, sym);
+    var dateRaw = uiVal('t-date', '').trim();
+    var iso = dateRaw ? parseDateInput(dateRaw) : todayStr();
+    if (!iso || !isValidDateStr(iso)) iso = null;
+    var maxTxt = transferSourceMaxQty(st.trades || [], sel.value, sym, iso, editingTradeId);
     var inp = row.querySelector('.src-qty');
-    if (inp && held > 0) inp.value = qtyUiText(held, sym);
+    if (!inp) return;
+    if (!maxTxt) {
+      tradeFormError(acc.name + ' holds no ' + sym + (iso ? ' on ' + fmtDateDmy(iso) : '') + '.');
+      return;
+    }
+    inp.value = maxTxt;
   } catch (e) { /* ignore */ }
 }
 
@@ -14512,6 +14577,19 @@ function syncTradeTypeUI() {
   setHidden('t-recipients', !isTransfer);
   setHidden('t-selfrecv-row', !isTransfer);
   setHidden('t-sources-row', !isTransfer);
+  // While a transfer is being built its source rows own the total, so the
+  // quantity box is read-only and filled by syncTransferFeePreview. Every
+  // other type edits the quantity directly: unlock it and drop the derived
+  // total so it never leaks into a buy, sell, income, expense or swap.
+  if (!isTransfer) {
+    try {
+      var qtyUnlock = document.getElementById('t-qty');
+      if (qtyUnlock && qtyUnlock.readOnly) {
+        qtyUnlock.readOnly = false;
+        qtyUnlock.value = '';
+      }
+    } catch (e) { /* ignore */ }
+  }
   setHidden('t-networkfee-row', !(isTransfer));
   // Transfers carry no fiat of their own: the network fee IS the fee, valued
   // in fiat at the frozen historical rate. Fiat fee + total + currency stay
@@ -15326,6 +15404,10 @@ function resetTradeForm() {
   if (sideReset) sideReset.disabled = false;
   uiSetVal('t-side', 'buy');
   uiSetVal('t-qty', '');
+  try {
+    var qtyReset = document.getElementById('t-qty');
+    if (qtyReset) qtyReset.readOnly = false; // a transfer may have locked it
+  } catch (e) { /* ignore */ }
   uiSetVal('t-toqty', '');
   uiSetVal('t-selfrecv', '');
   clearRecipientRows();
@@ -15539,10 +15621,12 @@ function openEditTrade(tradeId) {
         if (si) si.value = tr.accountId;
         var qi = first.querySelector('.src-qty');
         if (qi) qi.value = String(tr.qty !== undefined ? tr.qty : '');
+        // A single source derives its fee from the recipients, so the old
+        // stored fee is recomputed by the preview rather than typed back in.
         var fi = first.querySelector('.src-fee');
-        if (fi) fi.value = (tr.networkFee !== undefined && tr.networkFee !== null && Number(tr.networkFee) > 0) ? String(tr.networkFee) : '';
+        if (fi) fi.value = '';
         var ai = first.querySelector('.src-auto');
-        if (ai) ai.checked = !(tr.networkFee !== undefined && tr.networkFee !== null && Number(tr.networkFee) > 0);
+        if (ai) ai.checked = true;
       }
     }
     try { refreshSourceAccounts(); refreshRecipientAccounts(); } catch (e) { /* ignore */ }
@@ -15713,6 +15797,17 @@ function heldConflictMessage(conflict, draftList, state) {
   if (!conflict) return '';
   var drafts = Array.isArray(draftList) ? draftList : [draftList];
   if (drafts.indexOf(conflict.trade) !== -1) {
+    // A transfer can spend from several accounts: say which one is short.
+    var multi = false;
+    try { multi = !!(conflict.trade && conflict.trade.type === 'transfer' && transferSourceIds(conflict.trade).length > 1); } catch (e) { multi = false; }
+    if (multi) {
+      var shortName = '';
+      try {
+        var sa = accountById(state || loadState(), conflict.accountId);
+        if (sa && sa.name) shortName = String(sa.name);
+      } catch (e) { shortName = ''; }
+      if (shortName) return 'oversell: ' + shortName + ' can spend at most ' + conflict.available;
+    }
     return 'oversell: max sellable is ' + conflict.available;
   }
   var label = tradeTypeLabel(conflict.trade && conflict.trade.type);
@@ -16363,15 +16458,6 @@ function onTradeSubmit(ev) {
     var nfChkSave = Number(networkFee);
     var nfScChk = exactScaledOf(networkFee, symDecSave);
     if (nfScChk === null || nfScChk < 0n || nfScChk >= sentScSave) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
-    // With exactly one source, a manual source fee is the full tx fee.
-    // Enforce the previewed relationship on save; auto mode derives it.
-    if (!multiSource && srcRows.length === 1 && !srcRows[0].auto) {
-      var singleSourceFeeSc = exactScaledOf(String(srcRows[0].fee || '').trim() === '' ? '0' : srcRows[0].fee, symDecSave);
-      if (singleSourceFeeSc === null || singleSourceFeeSc < 0n || singleSourceFeeSc !== nfScChk) {
-        tradeFormError('With one source, its manual fee must equal the full transfer fee. Turn on Auto fee to derive it.');
-        return;
-      }
-    }
     uiSetVal('t-networkfee', exactToStringTrim(exactScaledOf(networkFee, symDecSave), symDecSave));
     transferRowsBuilt = recRows;
     if (multiSource) {
@@ -17775,11 +17861,25 @@ function transferCsvDest(t, accName) {
   return parts.join('; ');
 }
 
+// Per-source breakdown of a multi-source transfer for the trades CSV:
+// "Account:qty:fee; Account:qty:fee". Empty for every other record, so the
+// existing columns keep their meaning and single-source rows stay unchanged.
+function transferCsvSources(t, accName) {
+  try {
+    var legs = (t && t.type === 'transfer') ? transferSourcesOf(t) : null;
+    if (!legs || legs.length < 2) return '';
+    return legs.map(function (l) {
+      var nm = (accName && accName[l.accountId]) || l.accountId;
+      return nm + ':' + l.qtyRaw + ':' + l.feeRaw;
+    }).join('; ');
+  } catch (e) { return ''; }
+}
+
 function downloadTradesCsv() {
   var st = loadState();
   var accName = {};
   (st.accounts || []).forEach(function (a) { accName[a.id] = a.name; });
-  var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'txid', 'fxRate', 'fxSource']];
+  var rows = [['id', 'date', 'type', 'symbol', 'qty', 'total', 'currency', 'fee', 'feeCurrency', 'networkFee', 'account', 'toAccount', 'note', 'txid', 'fxRate', 'fxSource', 'sources']];
   ledgerSortByDate(st.trades || []).forEach(function (t) {
     rows.push([
       t.id || '', fmtDateDmy(t.date || ''), t.type || '', String(t.symbol || '').toUpperCase(),
@@ -17792,7 +17892,8 @@ function downloadTradesCsv() {
       { text: t.note || '' },
       { text: t.txid || '' },
       (t.fxLock && t.fxLock.rate) || '',
-      fmtEcbInText((t.fxLock && t.fxLock.source) || '')
+      fmtEcbInText((t.fxLock && t.fxLock.source) || ''),
+      { text: transferCsvSources(t, accName) }
     ]);
   });
   downloadTextFile('plutus.inoculens.com-trades-' + backupStamp() + '.csv', rows.map(function (r) {

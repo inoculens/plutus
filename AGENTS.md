@@ -5,13 +5,21 @@ Local-first portfolio tracker. Static site: `index.html`, `app.js`,
 `stamp-version.sh`.
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
+## Branches — mandatory for every agent
+- Make ALL changes on the `dev` branch. Commit and push to `dev` only.
+- The owner reviews and merges `dev` into `main`. Agents never do.
+- Never commit to, push to, or merge into `main` unless the owner
+  explicitly tells you to.
+
 ## Session start — always work on latest
-- Before ANY work: `git fetch origin`, then compare `HEAD` vs
-  `origin/main` (`git rev-parse HEAD`, `git rev-parse origin/main`,
+- Before ANY work: `git fetch origin`, switch to `dev`, then compare `HEAD`
+  vs `origin/dev` (`git rev-parse HEAD`, `git rev-parse origin/dev`,
   or `git status -sb`).
-- If the local checkout is behind: FIRST fast-forward it
-  (`git pull --ff-only`) on a clean tree, re-verify, and only then
-  start editing.
+- If the local files are not up to date with the remote `dev` branch
+  (behind `origin/dev`, or no local `dev` yet): FIRST sync with `dev` on a
+  clean tree (`git checkout dev`, then `git pull --ff-only origin dev`),
+  re-verify, and only then start editing. Never sync from or base work on
+  `main`.
 - If the tree is dirty or the pull would overwrite local work: STOP and
   ask the owner before touching anything.
 - Windows exception: a mode-only worktree difference on `stamp-version.sh`
@@ -59,6 +67,14 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Smoke-test the app in a browser when changing user-facing behavior.
 - Verify `stamp-version.sh` is committed as mode `100755` (see above).
 
+## Push cadence — mandatory for every agent
+- Push each commit to `dev` as soon as it is finished and verified, with its
+  complete message and technical overview (see Commit messages), even while
+  the overall implementation is still in progress.
+- Never keep finished commits local until the end of the task or reply and
+  then push them all at once.
+- Every push still follows "Verify before every push" and "Push replies".
+
 ## Invariants — do not break
 - `isValidImportTrade` must keep accepting plain buy/sell trades; export
   envelope keys stay exactly
@@ -95,11 +111,12 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - `main` must never create a stacking context (`position: relative` only,
   no `z-index`): the fixed mobile bottom-sheet menus (`.filter-panel`) must
   paint above the footer and the FAB.
-- Commit each change separately with a clear message and push to `main`.
+- Commit each change separately with a clear message and push to `dev`
+  (never `main`; see Branches).
 
 ## Push replies — mandatory for every agent, no prompting needed
 - Every reply that reports a push must START with the confirmation line
-  `Pushed to <branch> #<short-hash>`, e.g. `Pushed to main #f993f82`.
+  `Pushed to <branch> #<short-hash>`, e.g. `Pushed to dev #f993f82`.
   Nothing before it: no greeting, no preamble.
 - The owner must never have to ask for this format again; AGENTS.md carries
   it, and coding agents load this file automatically.
@@ -118,3 +135,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   naming an AI assistant; agents must not appear as author or committer.
 - Strip any agent co-author trailers before pushing; history must show only
   human authorship.
+- This applies to every agent (Claude, Copilot, Codex, Cursor, or any
+  other). Besides the signature line above, add no agent attribution to
+  commits: no session-ID lines, no "Generated with <tool>" footers.
+- Pull request titles and descriptions carry no agent attribution.

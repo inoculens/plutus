@@ -12,7 +12,6 @@ assert(s.includes('var multiSource = transferHasAdditionalSources(srcRows);'));
 assert(s.includes("if (selfRawSub !== '')"));
 assert(s.includes('srcRows.length === 1 && rows.length === 1'));
 assert(s.includes('srcRows.forEach(function (sr) { if (qtyOverPrecise(sr.qty, symbol) || qtyOverPrecise(sr.fee, symbol)) precBad = true; });'));
-assert(s.includes('singleSourceFeeSc !== nfScChk'));
 assert(s.includes("allowSourceOverlap=readSourceRows().length>1"));
 assert(s.includes("if(srcRows.length===1)rows.forEach(function(r){if(r.kind==='internal'&&srcIds[r.accountId])recConflict=r.accountId;});"));
 assert(s.includes("if (accPick.id === accountId && !multiSource)"));

@@ -27,6 +27,7 @@ MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 3.0
 COLLECTOR_VERSION = 3
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
+BASE_ID_ALIASES = {"BTC": {"XBT"}}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -67,7 +68,7 @@ def market_matches_symbol(market: dict, symbol: str) -> bool:
     base = str(market.get("base") or "").upper()
     base_id = str(market.get("baseId") or "").upper()
     # Both normalized base and exchange-native asset ID must match.
-    return base == symbol and base_id == symbol
+    return base == symbol and base_id in ({symbol} | BASE_ID_ALIASES.get(symbol, set()))
 
 
 def weighted_median(rows: list[tuple[float, float]]) -> float | None:

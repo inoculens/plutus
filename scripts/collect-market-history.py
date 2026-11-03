@@ -25,7 +25,8 @@ MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
 MIN_TRUSTED_EXCHANGES = 2
 MAX_WEIGHT_MULTIPLE = 3.0
-COLLECTOR_VERSION = 3
+COLLECTOR_VERSION = 4
+BASE_ID_ALIASES = {"BTC": {"XBT"}}
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
 PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720, "bybit": 1000}
@@ -43,7 +44,7 @@ def symbols_from_app() -> list[str]:
 
 
 def median(values: list[float]) -> float | None:
-    values = sorted(value for value in values if value > 0)
+    values = sorted(value for value in values if math.isfinite(value) and value > 0)
     if not values:
         return None
     middle = len(values) // 2
@@ -72,9 +73,22 @@ def market_matches_symbol(market: dict, symbol: str) -> bool:
 
 
 def weighted_median(rows: list[tuple[float, float]]) -> float | None:
-    valid = sorted((price, max(weight, 1e-12)) for price, weight in rows if price > 0 and weight >= 0)
+    valid = sorted(
+        (price, max(weight, 1e-12))
+        for price, weight in rows
+        if math.isfinite(price) and price > 0 and math.isfinite(weight) and weight >= 0
+    )
     if not valid:
         return None
+    # With two venues, trading volume cannot break the tie: use the ordinary
+    # midpoint so one venue's reported volume cannot choose the whole result.
+    if len(valid) == 2:
+        return (valid[0][0] + valid[1][0]) / 2
+    if len(valid) >= 3:
+        # Winsorize at the median venue volume. A single venue can never have
+        # more weight than the combined weight of the other accepted venues.
+        volume_cap = median([weight for _, weight in valid]) or 1e-12
+        valid = [(price, min(weight, volume_cap)) for price, weight in valid]
     total = sum(weight for _, weight in valid)
     running = 0.0
     for price, weight in valid:
@@ -100,7 +114,7 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
             if not row or len(row) < 6:
                 continue
             stamp, close, volume = int(row[0]), float(row[4] or 0), float(row[5] or 0)
-            if close <= 0 or stamp < since_ms or stamp >= end_ms:
+            if not math.isfinite(close) or not math.isfinite(volume) or close <= 0 or volume < 0 or stamp < since_ms or stamp >= end_ms:
                 continue
             day = stamp // DAY_MS
             rows_by_day.setdefault(day, []).append((close, max(close * volume, 1e-12)))
@@ -196,7 +210,7 @@ def main() -> int:
     archive = {
         "schema": 1, "collectorVersion": COLLECTOR_VERSION, "currency": "USD",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "source": "CCXT public spot OHLCV; minimum two trusted exchanges; trusted-only unweighted outlier screen and capped-volume weighted median; USDT/USDC treated at USD parity",
+        "source": "CCXT public spot OHLCV; minimum two trusted exchanges; trusted-only unweighted outlier screen and winsorized volume-weighted median (equal-weight midpoint for two venues); USDT/USDC treated at USD parity",
         "rangeStart": initial_start.isoformat(), "assets": {}, "coverage": {},
     }
 

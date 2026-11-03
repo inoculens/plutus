@@ -111,6 +111,12 @@ async function main() {
   assert.equal(await mismatchedSingleXmr.fetchLivePrice('XMR', 'EUR', 'crypto'), 540,
     'the independent Kraken quote replaces a bad single-symbol XMR quote');
 
+  assert.equal(mismatchedXmr.prefersExchangePrice('xmr'), true);
+  assert.equal(mismatchedXmr.prefersExchangePrice('BTC'), false,
+    'only listed symbols let an exchange quote replace CoinGecko');
+  mismatchedXmr.EXCHANGE_PREFERRED_SYMBOLS.forEach(symbol => assert(mismatchedXmr.SYMBOL_MAP[symbol],
+    symbol + ' must have a verified SYMBOL_MAP entry'));
+
   function aaveFallbackFeed(krakenAvailable, coinbaseAvailable) {
     return url => {
       if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });

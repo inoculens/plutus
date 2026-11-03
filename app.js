@@ -4181,6 +4181,14 @@ function fetchCryptoFallbackPrice(sym, currency, fetchImpl) {
   });
 }
 
+// Symbols whose CoinGecko quote has been seen to disagree with the market.
+// For these, a live exchange quote (when one answers) replaces the CoinGecko
+// quote; CoinGecko is still used when every exchange is unreachable.
+var EXCHANGE_PREFERRED_SYMBOLS = ['XMR'];
+function prefersExchangePrice(sym) {
+  return EXCHANGE_PREFERRED_SYMBOLS.indexOf(String(sym || '').trim().toUpperCase()) !== -1;
+}
+
 // First URL that answers ok + parses as JSON; rejects when all fail.
 // Each attempt fails fast (12s race) so one hanging proxy cannot stick the
 // UI on "loading" for minutes. Never throws synchronously.
@@ -4599,7 +4607,7 @@ function fetchLivePrice(symbol, vs, kind) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
-  var xmrExchangePrice = sym === 'XMR' ? fetchCryptoFallbackPrice(sym, cur, capturedFetch) : null;
+  var preferredExchangePrice = prefersExchangePrice(sym) ? fetchCryptoFallbackPrice(sym, cur, capturedFetch) : null;
   return fetchWithTimeout(capturedFetch, url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
@@ -4607,8 +4615,8 @@ function fetchLivePrice(symbol, vs, kind) {
     var p = data && data[id] && data[id][curLow];
     p = Number(p);
     if (isFinite(p) && p > 0) {
-      if (xmrExchangePrice) {
-        return xmrExchangePrice.then(function (exchangePrice) {
+      if (preferredExchangePrice) {
+        return preferredExchangePrice.then(function (exchangePrice) {
           exchangePrice = Number(exchangePrice);
           if (isFinite(exchangePrice) && exchangePrice > 0) {
             priceCache[key] = { price: exchangePrice, at: Date.now() };
@@ -4654,7 +4662,7 @@ function fetchLivePrice(symbol, vs, kind) {
   }).then(null, function () {
     // CoinGecko error / 429 / bad payload: independent exchange fallbacks,
     // then last cached or null. Never throws.
-    return (xmrExchangePrice || fetchCryptoFallbackPrice(sym, cur, capturedFetch)).then(function (fallbackPrice) {
+    return (preferredExchangePrice || fetchCryptoFallbackPrice(sym, cur, capturedFetch)).then(function (fallbackPrice) {
       fallbackPrice = Number(fallbackPrice);
       if (!isFinite(fallbackPrice) || fallbackPrice <= 0) {
         if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
@@ -4759,13 +4767,15 @@ function refreshAllPrices(symbols, vs, kinds) {
   }
   if (crypto.length) {
     var cryptoFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
-    var xmrExchangePrice = crypto.indexOf('XMR') !== -1
-      ? fetchCryptoFallbackPrice('XMR', cur, cryptoFetch) : null;
+    var preferredExchangePrices = {};
+    crypto.forEach(function (sym) {
+      if (prefersExchangePrice(sym)) preferredExchangePrices[sym] = fetchCryptoFallbackPrice(sym, cur, cryptoFetch);
+    });
     function useCryptoFallbacks(failureMessage) {
       return Promise.all(crypto.map(function (sym) {
-        var verifyXmr = sym === 'XMR' && xmrExchangePrice;
-        if (!verifyXmr && isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
-        return (verifyXmr || fetchCryptoFallbackPrice(sym, cur, cryptoFetch)).then(function (price) {
+        var preferred = preferredExchangePrices[sym];
+        if (!preferred && isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
+        return (preferred || fetchCryptoFallbackPrice(sym, cur, cryptoFetch)).then(function (price) {
           if (isFinite(Number(price)) && Number(price) > 0) {
             out[sym] = Number(price);
             delete errors[sym];

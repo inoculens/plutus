@@ -11396,9 +11396,14 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel, scopeIds
   if (!newLabel) return 'Ledger needs a label (e.g. Projects).';
   if (!isValidLedgerLabel(newLabel)) return 'Ledger label is too long — up to 80 characters.';
   var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  // A transfer also belongs to every secondary source account, so a ledger
+  // rename/delete reaches records shared into this scope, not just owned ones.
   function inScope(t) {
     if (!t) return false;
-    for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) return true;
+    for (var i = 0; i < scope.length; i++) {
+      if (t.accountId === scope[i]) return true;
+      if (t.type === 'transfer' && transferSourceIds(t).indexOf(scope[i]) !== -1) return true;
+    }
     return false;
   }
   function violationsUnion(s) {
@@ -11453,9 +11458,14 @@ function deleteAccountLedger(accountId, code, scopeIds) {
   code = String(code).trim();
   if (!code || code === '—') return;
   var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
+  // A transfer also belongs to every secondary source account, so a ledger
+  // rename/delete reaches records shared into this scope, not just owned ones.
   function inScope(t) {
     if (!t) return false;
-    for (var i = 0; i < scope.length; i++) if (t.accountId === scope[i]) return true;
+    for (var i = 0; i < scope.length; i++) {
+      if (t.accountId === scope[i]) return true;
+      if (t.type === 'transfer' && transferSourceIds(t).indexOf(scope[i]) !== -1) return true;
+    }
     return false;
   }
   var st = loadState();

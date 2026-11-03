@@ -24,7 +24,7 @@ MAX_MARKETS_PER_ASSET = 5
 MAX_DEVIATION = 0.08
 MIN_INDEPENDENT_EXCHANGES = 2
 MIN_TRUSTED_EXCHANGES = 2
-MAX_WEIGHT_MULTIPLE = 3.0
+MAX_WEIGHT_MULTIPLE = 1.0
 COLLECTOR_VERSION = 4
 BASE_ID_ALIASES = {"BTC": {"XBT"}}
 TRUSTED_EXCHANGES = {"binance", "kraken", "coinbase", "okx", "kucoin", "bitfinex", "bybit"}
@@ -87,7 +87,7 @@ def weighted_median(rows: list[tuple[float, float]]) -> float | None:
     if len(valid) >= 3:
         # Winsorize at the median venue volume. A single venue can never have
         # more weight than the combined weight of the other accepted venues.
-        volume_cap = median([weight for _, weight in valid]) or 1e-12
+        volume_cap = (median([weight for _, weight in valid]) or 1e-12) * MAX_WEIGHT_MULTIPLE
         valid = [(price, min(weight, volume_cap)) for price, weight in valid]
     total = sum(weight for _, weight in valid)
     running = 0.0

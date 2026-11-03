@@ -15,9 +15,11 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Before ANY work: `git fetch origin`, switch to `dev`, then compare `HEAD`
   vs `origin/dev` (`git rev-parse HEAD`, `git rev-parse origin/dev`,
   or `git status -sb`).
-- If the local checkout is behind: FIRST fast-forward it
-  (`git pull --ff-only`) on a clean tree, re-verify, and only then
-  start editing.
+- If the local files are not up to date with the remote `dev` branch
+  (behind `origin/dev`, or no local `dev` yet): FIRST sync with `dev` on a
+  clean tree (`git checkout dev`, then `git pull --ff-only origin dev`),
+  re-verify, and only then start editing. Never sync from or base work on
+  `main`.
 - If the tree is dirty or the pull would overwrite local work: STOP and
   ask the owner before touching anything.
 - Windows exception: a mode-only worktree difference on `stamp-version.sh`

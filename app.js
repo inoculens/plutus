@@ -14424,8 +14424,28 @@ function syncSourceRowMode(row) {
   }
 }
 
-// Fill a source row's qty with everything the account holds (at the record
-// date, approximate: current held qty). Used by the Max button.
+// Most an account can spend on one date: what it held at that point of the
+// ledger, as a plain decimal string ('' when nothing). Records dated after
+// isoDate are ignored (they run later), and so is the record being edited:
+// its own spend is about to be replaced, so it must not shrink the answer.
+// Same-date records stay in, because a new record executes after them.
+function transferSourceMaxQty(trades, accountId, symbol, isoDate, excludeId) {
+  var sym = String(symbol || '').trim().toUpperCase();
+  var list = (trades || []).filter(function (t) {
+    if (!t) return false;
+    if (excludeId && t.id === excludeId) return false;
+    if (isoDate && typeof t.date === 'string' && t.date > isoDate) return false;
+    return true;
+  });
+  var txt = exactQtyHeldString(list, accountId, sym);
+  if (txt === null) return '';
+  var ui = qtyUiText(txt, sym);
+  if (!ui || ui.charAt(0) === '-' || !/[1-9]/.test(ui)) return '';
+  return ui;
+}
+
+// Fill a source row's qty with everything the account held on the record's
+// date (not today's balance). Used by the Max button.
 function fillSourceMax(row) {
   try {
     var sel = row.querySelector('.src-account');
@@ -14434,9 +14454,17 @@ function fillSourceMax(row) {
     var acc = accountById(st, sel.value);
     if (!acc) return;
     var sym = String(acc.ticker || '').toUpperCase();
-    var held = heldForAccount(st.trades || [], sel.value, sym);
+    var dateRaw = uiVal('t-date', '').trim();
+    var iso = dateRaw ? parseDateInput(dateRaw) : todayStr();
+    if (!iso || !isValidDateStr(iso)) iso = null;
+    var maxTxt = transferSourceMaxQty(st.trades || [], sel.value, sym, iso, editingTradeId);
     var inp = row.querySelector('.src-qty');
-    if (inp && held > 0) inp.value = qtyUiText(held, sym);
+    if (!inp) return;
+    if (!maxTxt) {
+      tradeFormError(acc.name + ' holds no ' + sym + (iso ? ' on ' + fmtDateDmy(iso) : '') + '.');
+      return;
+    }
+    inp.value = maxTxt;
   } catch (e) { /* ignore */ }
 }
 

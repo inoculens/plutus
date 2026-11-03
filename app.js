@@ -8104,7 +8104,7 @@ function buildAccountAction() {
     var extra = full.length - picked.length;
     confirmAction('Delete accounts', 'Delete ' + full.length + (full.length === 1 ? ' account' : ' accounts') +
       (extra > 0 ? ' (including ' + extra + ' sub-account' + (extra === 1 ? '' : 's') + ')' : '') +
-      ' and all their trades? This cannot be undone.', 'Delete', true).then(function (ok) {
+      ' and all their trades?' + sharedTransfersNote(sharedTransfersOutside(s0, full)) + ' This cannot be undone.', 'Delete', true).then(function (ok) {
       if (!ok) return;
       var s2 = loadState();
       var inSet = {};
@@ -12291,6 +12291,32 @@ function renameAccount(id, name) {
   render();
 }
 
+// Transfers that touch a doomed account AND an account that survives.
+// Deleting the account removes these records from the surviving accounts
+// too (a shared transfer cannot exist half-way), so the confirm dialogs
+// say so. Pure: st + array of account ids.
+function sharedTransfersOutside(st, doomedIds) {
+  var doomed = {};
+  (doomedIds || []).forEach(function (id) { doomed[id] = true; });
+  var n = 0;
+  (st.trades || []).forEach(function (t) {
+    if (!t || t.type !== 'transfer') return;
+    var ids = [];
+    try {
+      ids = transferSourceIds(t).concat(transferDestIds(t));
+      if (typeof t.accountId === 'string' && t.accountId) ids.push(t.accountId);
+    } catch (e) { return; }
+    var hitsDoomed = false, hitsOther = false;
+    ids.forEach(function (id) { if (doomed[id]) hitsDoomed = true; else if (accountById(st, id)) hitsOther = true; });
+    if (hitsDoomed && hitsOther) n++;
+  });
+  return n;
+}
+
+function sharedTransfersNote(n) {
+  return n ? ' ' + n + ' transfer' + (n === 1 ? ' is' : 's are') + ' shared with other accounts and will be removed from them too.' : '';
+}
+
 function deleteAccount(id) {
   if (!id) return;
   var st = loadState();
@@ -12301,7 +12327,7 @@ function deleteAccount(id) {
   var msg = 'Delete account "' + acc.name + '" (' + acc.ticker + ')' +
     (n ? ' and its ' + n + ' trade' + (n === 1 ? '' : 's') : '') +
     (doomedSubs.length ? ' and delete ' + doomedSubs.length + ' sub-account' + (doomedSubs.length === 1 ? '' : 's') + ' with all their trades' : '') +
-    '? This cannot be undone.';
+    '?' + sharedTransfersNote(sharedTransfersOutside(st, expandDeleteIds(st, [id]))) + ' This cannot be undone.';
   confirmAction('Delete account', msg, 'Delete', true).then(function (ok) {
     if (!ok) return;
     var s2 = loadState();

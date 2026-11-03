@@ -1,0 +1,112 @@
+name: Refresh public market history
+
+on:
+  schedule:
+    - cron: "25 4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [dev, main]
+    paths:
+      - "app.js"
+      - "scripts/collect-market-history.py"
+      - "tests/test_market_history_collector.py"
+      - ".github/workflows/market-history.yml"
+
+permissions:
+  contents: write
+
+# One writer at a time, including scheduled/manual/dev-triggered runs.
+concurrency:
+  group: plutus-market-history-archive
+  # A newer source push supersedes an obsolete queued/backfill run. Scheduled
+  # and manually dispatched runs are allowed to finish unless a source push arrives.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out the canonical dev source
+        uses: actions/checkout@v5
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install CCXT
+        run: python -m pip install --disable-pip-version-check "ccxt>=4.4,<5"
+
+      - name: Verify collector and application syntax
+        run: |
+          python -m py_compile scripts/collect-market-history.py
+          python -m unittest discover -s tests -p 'test_market_history_collector.py'
+          node --check app.js
+
+      - name: Restore prior archive for incremental collection
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/plutus-market-history
+          if git ls-remote --exit-code --heads origin market-history >/dev/null 2>&1; then
+            git fetch origin market-history
+            git show FETCH_HEAD:market-history/daily.json > /tmp/plutus-market-history/previous.json
+            mkdir -p market-history
+            cp /tmp/plutus-market-history/previous.json market-history/daily.json
+          else
+            echo "No previous market-history archive exists; starting initial collection."
+          fi
+
+      - name: Collect daily market history
+        run: python scripts/collect-market-history.py
+
+      - name: Publish archive to dedicated data branch
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/plutus-market-history
+          cp market-history/daily.json /tmp/plutus-market-history/daily.json
+          rm -rf market-history
+
+          for attempt in 1 2 3; do
+            if git ls-remote --exit-code --heads origin market-history >/dev/null 2>&1; then
+              git fetch origin market-history
+              git checkout -B market-history FETCH_HEAD
+              remote_exists=1
+            else
+              remote_exists=0
+              if git show-ref --verify --quiet refs/heads/market-history; then
+                git checkout market-history
+              else
+                git checkout --orphan market-history
+                git rm -rf . >/dev/null 2>&1 || true
+              fi
+            fi
+
+            mkdir -p market-history
+            cp /tmp/plutus-market-history/daily.json market-history/daily.json
+            git add market-history/daily.json
+
+            if ! git diff --cached --quiet; then
+              git config user.name "sebaptcd"
+              git config user.email "dev@sebastian.ghiveci.com"
+              git commit -m "Refresh daily public market history" \
+                -m "Technical overview: publish the CCXT-aggregated daily USD archive to the dedicated market-history branch, keeping generated data out of dev/main application history and avoiding merge conflicts." \
+                -m "Commit made with GPT-6"
+            elif [ "$remote_exists" -eq 1 ]; then
+              echo "Dedicated archive branch is already current."
+              exit 0
+            fi
+
+            # Re-read the remote on every retry. If another writer moved it,
+            # the next iteration rebuilds this archive commit on the new head.
+            if git push origin HEAD:market-history; then
+              exit 0
+            fi
+            echo "Archive push attempt $attempt failed; refreshing remote state."
+          done
+
+          echo "Archive push failed after three attempts." >&2
+          exit 1

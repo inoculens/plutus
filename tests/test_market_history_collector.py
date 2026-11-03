@@ -76,17 +76,17 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     def test_archive_validator_rejects_single_source_confidence(self):
-        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 1]]}}}
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 1, ['kraken']]]}}}
         with self.assertRaises(ValueError):
             COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     def test_archive_validator_rejects_duplicate_or_unsorted_days(self):
-        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2], [1604361599999, 101.0, 2]]}}}
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2, ['kraken', 'coinbase']], [1604361599999, 101.0, 2, ['kraken', 'coinbase']]]}}}
         with self.assertRaises(ValueError):
             COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 
     def test_archive_validator_rejects_future_points(self):
-        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1798761599999, 100.0, 2]]}}}
+        archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1798761599999, 100.0, 2, ['kraken', 'coinbase']]]}}}
         with self.assertRaises(ValueError):
             COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 

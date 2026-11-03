@@ -125,10 +125,6 @@ def main() -> int:
     since_ms = int(datetime.combine(START, datetime.min.time(), timezone.utc).timestamp() * 1000)
 
     for symbol in symbols:
-        # Stablecoins are intentionally represented as USD parity only where
-        # there is no independent market needed for portfolio valuation.
-        if symbol in ("USDT", "USDC", "DAI"):
-            continue
         candidates = sorted(market_index.get(symbol, []), key=lambda item: item[0])
         chosen = []
         used = set()

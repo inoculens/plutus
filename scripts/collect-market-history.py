@@ -187,6 +187,40 @@ def main() -> int:
         except Exception:
             pass
 
+    # Preserve the last good observations when an exchange temporarily
+    # omits a market or a historical page. New aggregated values win for
+    # dates successfully collected today; old dates fill only missing days.
+    if OUTPUT.exists():
+        try:
+            previous = json.loads(OUTPUT.read_text(encoding="utf-8"))
+            previous_assets = previous.get("assets", {}) if isinstance(previous, dict) else {}
+            previous_coverage = previous.get("coverage", {}) if isinstance(previous, dict) else {}
+            for symbol, old_asset in previous_assets.items():
+                old_rows = old_asset.get("points", []) if isinstance(old_asset, dict) else []
+                current = archive["assets"].get(symbol, {"points": []})
+                current_by_day = {int(row[0]) // DAY_MS: row for row in current.get("points", [])
+                                  if isinstance(row, list) and len(row) >= 2}
+                for row in old_rows:
+                    if not isinstance(row, list) or len(row) < 2:
+                        continue
+                    day = int(row[0]) // DAY_MS
+                    current_by_day.setdefault(day, row)
+                merged = [current_by_day[day] for day in sorted(current_by_day)]
+                if merged:
+                    archive["assets"][symbol] = {"points": merged}
+                    old_meta = previous_coverage.get(symbol, {})
+                    current_meta = archive["coverage"].get(symbol, {})
+                    exchange_names = sorted(set(old_meta.get("exchanges", [])) |
+                                             set(current_meta.get("exchanges", [])))
+                    archive["coverage"][symbol] = {
+                        "days": len(merged),
+                        "first": datetime.fromtimestamp(merged[0][0] / 1000, timezone.utc).date().isoformat(),
+                        "last": datetime.fromtimestamp(merged[-1][0] / 1000, timezone.utc).date().isoformat(),
+                        "exchanges": exchange_names,
+                    }
+        except Exception as exc:
+            log.warning("Could not merge previous archive; using newly collected data: %s", exc)
+
     if not archive["assets"]:
         raise RuntimeError("Collector produced an empty archive; refusing to overwrite last good data")
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

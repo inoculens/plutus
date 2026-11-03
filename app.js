@@ -15989,12 +15989,19 @@ function setTradeSubmitBusy(btn, busy, label) {
   else if (btn.querySelector('.btn-spin')) btn.textContent = idle || 'Add record';
 }
 
+// Lets the "Saving…" state paint before heavy save work runs. Animation
+// frames never fire in hidden or occluded tabs, so a timer fallback guarantees
+// the work still runs (exactly once) instead of waiting for the tab to return.
 function deferTradeSubmitWork(callback) {
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(function () { setTimeout(callback, 0); });
-    return;
+  var started = false;
+  function run() {
+    if (started) return;
+    started = true;
+    setTimeout(callback, 0);
   }
-  setTimeout(callback, 0);
+  var hasFrames = typeof requestAnimationFrame === 'function';
+  if (hasFrames) requestAnimationFrame(run);
+  setTimeout(run, hasFrames ? 100 : 0);
 }
 
 function tradeFormError(msg) {

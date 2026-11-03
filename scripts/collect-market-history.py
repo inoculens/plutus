@@ -55,7 +55,7 @@ def weighted_median(rows: list[tuple[float, float]]) -> float | None:
 def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
     cursor = since_ms
     end_ms = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
-    rows_by_day: dict[int, list[float]] = {}
+    rows_by_day: dict[int, list[tuple[float, float]]] = {}
     pages = 0
     while cursor < end_ms and pages < 12:
         batch = exchange.fetch_ohlcv(market, timeframe="1d", since=cursor, limit=1000)
@@ -71,14 +71,16 @@ def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
                 continue
             day = stamp // DAY_MS
             # Quote-volume is approximated from base volume * daily close.
-            rows_by_day.setdefault(day, []).append(close)
+            rows_by_day.setdefault(day, []).append((close, max(close * volume, 1e-12)))
             advanced = max(advanced, stamp + DAY_MS)
         if advanced <= cursor:
             break
         cursor = advanced
         if len(batch) < 2:
             break
-    return [[day * DAY_MS + DAY_MS - 1, sum(values) / len(values), len(values)]
+    return [[day * DAY_MS + DAY_MS - 1,
+             sum(price * weight for price, weight in values) / sum(weight for _, weight in values),
+             sum(weight for _, weight in values)]
             for day, values in sorted(rows_by_day.items())]
 
 
@@ -147,9 +149,9 @@ def main() -> int:
             try:
                 rows = candle_rows(client, market, since_ms)
                 log.info("%s %s: %d daily candles", symbol, exchange_id, len(rows))
-                for stamp, close, _ in rows:
+                for stamp, close, quote_volume in rows:
                     day = int(stamp) // DAY_MS
-                    by_day[day].append((float(close), 1.0, exchange_id))
+                    by_day[day].append((float(close), max(float(quote_volume), 1e-12), exchange_id))
             except Exception as exc:
                 log.warning("%s %s %s: %s", symbol, exchange_id, market, exc)
 

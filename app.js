@@ -233,7 +233,7 @@ function loadState() {
     : [];
   var accountIds = accounts.map(function (a) { return a.id; });
   var trades = Array.isArray(parsed.trades)
-    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds); }).map(normalizeTradeForStore)
+    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
     : [];
   try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
   var priceOverrides = {};
@@ -1280,7 +1280,7 @@ function exportState(s) {
     : [];
   var accountIds = accounts.map(function (a) { return a.id; });
   var trades = Array.isArray(st.trades)
-    ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds); }).map(normalizeTradeForStore)
+    ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
     : [];
   var priceOverrides = {};
   if (st.priceOverrides && typeof st.priceOverrides === 'object' && !Array.isArray(st.priceOverrides) && isValidPriceOverrides(st.priceOverrides)) {
@@ -1422,7 +1422,7 @@ function importStateV1(data) {
   // so a grouping bug can never silently persist a dangling trade.
   var accountIds = accounts.map(function (a) { return a.id; });
   for (var vi = 0; vi < trades.length; vi++) {
-    if (!isValidImportTrade(trades[vi], accountIds)) {
+    if (!isValidImportTrade(trades[vi], accountIds, accounts)) {
       throw new Error('import failed: invalid trade at index ' + vi);
     }
   }

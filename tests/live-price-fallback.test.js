@@ -88,10 +88,11 @@ async function main() {
         json: () => Promise.resolve({ result: { XXMRZUSD: { c: ['600'] } } })
       });
     }
-    if (url.includes('api.frankfurter.dev')) {
+    if (url.includes('api.frankfurter.dev/v2/providers/ecb/rate/usd/eur?date=')) {
+      const requestedDate = decodeURIComponent(url.split('date=')[1].split('&')[0]);
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ date: new Date().toISOString().slice(0, 10), rates: { EUR: 0.9 } })
+        json: () => Promise.resolve({ date: requestedDate, base: 'USD', quote: 'EUR', rate: 0.9 })
       });
     }
     if (url.includes('api.exchange.coinbase.com')) return Promise.resolve({ ok: false, status: 404 });
@@ -116,6 +117,42 @@ async function main() {
     'only listed symbols let an exchange quote replace CoinGecko');
   mismatchedXmr.EXCHANGE_PREFERRED_SYMBOLS.forEach(symbol => assert(mismatchedXmr.SYMBOL_MAP[symbol],
     symbol + ' must have a verified SYMBOL_MAP entry'));
+
+  const fxContract = createApp(url => {
+    assert.match(url, /^https:\/\/api\.frankfurter\.dev\/v2\/providers\/ecb\/rate\/usd\/eur\?date=\d{4}-\d{2}-\d{2}$/,
+      'fiat conversion uses the documented Frankfurter v2 ECB rate route');
+    const requestedDate = decodeURIComponent(url.split('date=')[1].split('&')[0]);
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ date: requestedDate, base: 'USD', quote: 'EUR', rate: 0.9 })
+    });
+  });
+  const fxRate = await fxContract.fetchEcbRate(fxContract.todayStr(), 'USD', 'EUR');
+  assert.equal(fxRate.rate, 0.9, 'Frankfurter v2 rate objects are parsed correctly');
+
+  const euroGoldAndStock = createApp(url => {
+    if (url.includes('xaus.com/api/v1/spot')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
+      spot_usd_oz: 4012.5, data_state: { status: 'fresh', age_seconds: 12 }
+    }) });
+    if (url.includes('api.backed.fi/api/v2/public/assets/SPCXx/price-data')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: '146.25', currency: 'USD' }) });
+    }
+    if (url.includes('api.frankfurter.dev/v2/providers/ecb/rate/usd/eur?date=')) {
+      const requestedDate = decodeURIComponent(url.split('date=')[1].split('&')[0]);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ date: requestedDate, base: 'USD', quote: 'EUR', rate: 0.9 })
+      });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const euroSpotPrices = await euroGoldAndStock.refreshAllPrices(
+    ['XAU', 'SPCX'], 'EUR', { XAU: 'commodity', SPCX: 'stock' }
+  );
+  assert.equal(euroSpotPrices.XAU, 3611.25,
+    'XAU USD spot converts into the default EUR display currency');
+  assert.equal(euroSpotPrices.SPCX, 131.625,
+    'SPCX USD xStock quote converts into the default EUR display currency');
 
   function aaveFallbackFeed(krakenAvailable, coinbaseAvailable) {
     return url => {

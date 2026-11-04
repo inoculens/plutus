@@ -207,6 +207,37 @@ async function main() {
 
   // Independent stock and gold pricing: Backed reference -> Kraken xStocks,
   // and Kraken's gold-backed spot markets, with no Yahoo/CNBC proxy required.
+  const xausFresh = createApp(url => {
+    if (url.includes('xaus.com/api/v1/spot')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
+      spot_usd_oz: 4012.5, data_state: { status: 'fresh', age_seconds: 12 }
+    }) });
+    throw new Error('Unexpected request: ' + url);
+  });
+  assert.equal(await xausFresh.fetchLivePrice('XAU', 'USD', 'commodity'), 4012.5,
+    'XAU prefers the documented XAUS spot feed');
+
+  const xausRecentStale = createApp(url => {
+    if (url.includes('xaus.com/api/v1/spot')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
+      spot_usd_oz: 4011.25, data_state: { status: 'stale', age_seconds: 120 }
+    }) });
+    throw new Error('Unexpected request: ' + url);
+  });
+  assert.equal(await xausRecentStale.fetchLivePrice('XAU', 'USD', 'commodity'), 4011.25,
+    'recent explicitly-aged XAUS stale quotes remain usable');
+
+  const xausOldStale = createApp(url => {
+    if (url.includes('xaus.com/api/v1/spot')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
+      spot_usd_oz: 4011.25, data_state: { status: 'stale', age_seconds: 900 }
+    }) });
+    if (url.includes('api.kraken.com') || url.includes('api.gold-api.com') ||
+        url.includes('api.allorigins.win') || url.includes('api.codetabs.com') || url.includes('corsproxy.io')) {
+      return Promise.resolve({ ok: false, status: 451 });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  assert.equal(await xausOldStale.fetchLivePrice('XAU', 'USD', 'commodity'), null,
+    'old XAUS stale snapshots are never represented as live prices');
+
   const backedStock = createApp(url => {
     if (url.includes('api.backed.fi/api/v2/public/assets/SPCXx/price-data')) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: '146.25', currency: 'USD' }) });

@@ -47,7 +47,7 @@ jobs:
           python -m py_compile scripts/collect-market-history.py
           python -m unittest discover -s tests -p 'test_market_history_collector.py'
           node --check app.js
-          node tests/live-price-fallback.test.js
+          for test in tests/*.test.js; do node "$test"; done
 
       - name: Restore prior archive for incremental collection
         run: |

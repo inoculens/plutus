@@ -4090,10 +4090,27 @@ function fetchCoinbaseLiveUsd(sym, fetchImpl) {
   } catch (e) { return Promise.resolve(null); }
 }
 
+// Binance's ticker list is keyed by bare ticker, so a symbol is only trusted
+// when its Binance market is the same asset as the CoinGecko id in SYMBOL_MAP.
+// Tickers that were renamed, migrated, wrapped or delisted (MATIC, FTM, EOS,
+// XMR, MKR, WBTC, WSTETH, DAI, LRC, ...) are left out on purpose: a stale or
+// reused pair must read as unknown, never as another asset's price. A symbol
+// missing here simply falls through to the manual-override path.
+var BINANCE_LIVE_SYMBOLS = [
+  'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT',
+  'LTC', 'BCH', 'XLM', 'ATOM', 'UNI', 'TRX', 'NEAR', 'ARB', 'OP', 'USDC',
+  'USDT', 'POL', 'APT', 'INJ', 'SUI', 'SEI', 'TIA', 'PEPE', 'SHIB', 'TON',
+  'ICP', 'FIL', 'ETC', 'HBAR', 'VET', 'RENDER', 'FET', 'AAVE', 'CRV', 'LDO',
+  'SAND', 'MANA', 'AXS', 'CHZ', 'ENJ', 'BAT', 'ZEC', 'DASH', 'XTZ', 'KSM',
+  'ALGO', 'THETA', 'GRT', 'QNT', 'EGLD', 'FLOW', 'GALA', 'APE', 'ENS', 'IMX',
+  'COMP', 'SNX', 'YFI', 'SUSHI', 'RUNE', 'WIF', 'BONK', 'FLOKI', 'PENDLE',
+  'ENA', 'STRK', 'JUP', 'PYTH', 'ONDO', 'TAO', 'W', 'ZK'
+];
 var binanceLiveTickerPromise = null;
 var binanceLiveTickerFetchedAt = 0;
 function fetchBinanceLiveUsd(sym, fetchImpl) {
   var s = String(sym || '').trim().toUpperCase();
+  if (BINANCE_LIVE_SYMBOLS.indexOf(s) === -1) return Promise.resolve(null);
   var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
   if (!f) return Promise.resolve(null);
   var now = Date.now();
@@ -4135,16 +4152,19 @@ function fetchBinanceLiveUsd(sym, fetchImpl) {
 }
 
 function fetchCryptoFallbackUsd(sym, fetchImpl) {
+  // Kraken and Coinbase are small per-symbol requests, so they race in
+  // parallel (Kraken wins ties). Binance returns its whole public ticker list
+  // and is the most region-blocked venue, so it is only asked when neither of
+  // the others produced a price.
   return Promise.all([
     fetchKrakenLiveUsd(sym, fetchImpl),
-    fetchCoinbaseLiveUsd(sym, fetchImpl),
-    fetchBinanceLiveUsd(sym, fetchImpl)
+    fetchCoinbaseLiveUsd(sym, fetchImpl)
   ]).then(function (prices) {
     for (var i = 0; i < prices.length; i++) {
       var price = Number(prices[i]);
       if (isFinite(price) && price > 0) return price;
     }
-    return null;
+    return fetchBinanceLiveUsd(sym, fetchImpl);
   });
 }
 
@@ -4159,6 +4179,14 @@ function fetchCryptoFallbackPrice(sym, currency, fetchImpl) {
       return isFinite(converted) && converted > 0 ? converted : null;
     }, function () { return null; });
   });
+}
+
+// Symbols whose CoinGecko quote has been seen to disagree with the market.
+// For these, a live exchange quote (when one answers) replaces the CoinGecko
+// quote; CoinGecko is still used when every exchange is unreachable.
+var EXCHANGE_PREFERRED_SYMBOLS = ['XMR'];
+function prefersExchangePrice(sym) {
+  return EXCHANGE_PREFERRED_SYMBOLS.indexOf(String(sym || '').trim().toUpperCase()) !== -1;
 }
 
 // First URL that answers ok + parses as JSON; rejects when all fail.
@@ -4579,7 +4607,7 @@ function fetchLivePrice(symbol, vs, kind) {
     if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
-  var xmrExchangePrice = sym === 'XMR' ? fetchCryptoFallbackPrice(sym, cur, capturedFetch) : null;
+  var preferredExchangePrice = prefersExchangePrice(sym) ? fetchCryptoFallbackPrice(sym, cur, capturedFetch) : null;
   return fetchWithTimeout(capturedFetch, url).then(function (res) {
     if (!res.ok) throw new Error('price-http-' + res.status);
     return res.json();
@@ -4587,8 +4615,8 @@ function fetchLivePrice(symbol, vs, kind) {
     var p = data && data[id] && data[id][curLow];
     p = Number(p);
     if (isFinite(p) && p > 0) {
-      if (xmrExchangePrice) {
-        return xmrExchangePrice.then(function (exchangePrice) {
+      if (preferredExchangePrice) {
+        return preferredExchangePrice.then(function (exchangePrice) {
           exchangePrice = Number(exchangePrice);
           if (isFinite(exchangePrice) && exchangePrice > 0) {
             priceCache[key] = { price: exchangePrice, at: Date.now() };
@@ -4634,7 +4662,7 @@ function fetchLivePrice(symbol, vs, kind) {
   }).then(null, function () {
     // CoinGecko error / 429 / bad payload: independent exchange fallbacks,
     // then last cached or null. Never throws.
-    return (xmrExchangePrice || fetchCryptoFallbackPrice(sym, cur, capturedFetch)).then(function (fallbackPrice) {
+    return (preferredExchangePrice || fetchCryptoFallbackPrice(sym, cur, capturedFetch)).then(function (fallbackPrice) {
       fallbackPrice = Number(fallbackPrice);
       if (!isFinite(fallbackPrice) || fallbackPrice <= 0) {
         if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
@@ -4739,13 +4767,15 @@ function refreshAllPrices(symbols, vs, kinds) {
   }
   if (crypto.length) {
     var cryptoFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
-    var xmrExchangePrice = crypto.indexOf('XMR') !== -1
-      ? fetchCryptoFallbackPrice('XMR', cur, cryptoFetch) : null;
+    var preferredExchangePrices = {};
+    crypto.forEach(function (sym) {
+      if (prefersExchangePrice(sym)) preferredExchangePrices[sym] = fetchCryptoFallbackPrice(sym, cur, cryptoFetch);
+    });
     function useCryptoFallbacks(failureMessage) {
       return Promise.all(crypto.map(function (sym) {
-        var verifyXmr = sym === 'XMR' && xmrExchangePrice;
-        if (!verifyXmr && isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
-        return (verifyXmr || fetchCryptoFallbackPrice(sym, cur, cryptoFetch)).then(function (price) {
+        var preferred = preferredExchangePrices[sym];
+        if (!preferred && isFinite(Number(out[sym])) && Number(out[sym]) > 0) return Promise.resolve();
+        return (preferred || fetchCryptoFallbackPrice(sym, cur, cryptoFetch)).then(function (price) {
           if (isFinite(Number(price)) && Number(price) > 0) {
             out[sym] = Number(price);
             delete errors[sym];
@@ -7131,6 +7161,8 @@ function netWorthHistorySeriesPrice(series, at, main) {
 var NET_WORTH_HELD_GAP_MS = 14 * 86400000;
 var NET_WORTH_HELD_MAX_DATES = 600;
 var NET_WORTH_HELD_MAX_WORK = 50000;
+// Longest stretch of chart valuation work before yielding to the browser.
+var NET_WORTH_HISTORY_SLICE_MS = 12;
 var netWorthHistoryHeldPeriodsCacheKey = '';
 var netWorthHistoryHeldPeriodsCache = null;
 var netWorthHistoryHeldPeriodsPending = {};
@@ -7383,6 +7415,7 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
     });
     var points = [];
     var batchSize = 1;
+    var sliceStartedAt = Date.now();
     function valueNextBatch(offset) {
       if (typeof isCurrent === 'function' && !isCurrent()) return Promise.resolve(points);
       if (offset >= times.length) return Promise.resolve(points);
@@ -7407,8 +7440,13 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
           });
         });
       })).then(function (batchPoints) {
-        points = points.concat(batchPoints);
-        if (typeof onProgress === 'function') {
+        Array.prototype.push.apply(points, batchPoints);
+        var nextOffset = offset + batch.length;
+        // Hand the main thread back after a short slice of work rather than
+        // after every point: a timer wait per point costs several ms each in
+        // a foreground tab and a full second each in a hidden one.
+        var yieldNow = Date.now() - sliceStartedAt >= NET_WORTH_HISTORY_SLICE_MS;
+        if (typeof onProgress === 'function' && (yieldNow || nextOffset >= times.length)) {
           onProgress({
             phase: 'valuation',
             completed: points.length,
@@ -7417,8 +7455,12 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
             end: end
           });
         }
+        if (!yieldNow) return valueNextBatch(nextOffset);
         return new Promise(function (resolve) {
-          setTimeout(function () { resolve(valueNextBatch(offset + batch.length)); }, 0);
+          setTimeout(function () {
+            sliceStartedAt = Date.now();
+            resolve(valueNextBatch(nextOffset));
+          }, 0);
         });
       });
     }
@@ -15959,12 +16001,19 @@ function setTradeSubmitBusy(btn, busy, label) {
   else if (btn.querySelector('.btn-spin')) btn.textContent = idle || 'Add record';
 }
 
+// Lets the "Saving…" state paint before heavy save work runs. Animation
+// frames never fire in hidden or occluded tabs, so a timer fallback guarantees
+// the work still runs (exactly once) instead of waiting for the tab to return.
 function deferTradeSubmitWork(callback) {
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(function () { setTimeout(callback, 0); });
-    return;
+  var started = false;
+  function run() {
+    if (started) return;
+    started = true;
+    setTimeout(callback, 0);
   }
-  setTimeout(callback, 0);
+  var hasFrames = typeof requestAnimationFrame === 'function';
+  if (hasFrames) requestAnimationFrame(run);
+  setTimeout(run, hasFrames ? 100 : 0);
 }
 
 function tradeFormError(msg) {

@@ -101,6 +101,96 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
 
+    @staticmethod
+    def _midnight_ms(days_ago):
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(today.timestamp() * 1000) - days_ago * COLLECTOR.DAY_MS
+
+    def _fake_exchange(self, exchange_id, listed_days_ago, mode, limit_cap):
+        """Mimics ccxt OHLCV paging. mode: windowed | limit | latest."""
+        day = COLLECTOR.DAY_MS
+        listed = self._midnight_ms(listed_days_ago)
+        today = self._midnight_ms(0)
+        calls = []
+
+        class Fake:
+            id = exchange_id
+            options = {}
+
+            def fetch_ohlcv(self, market, timeframe="1d", since=None, limit=None):
+                calls.append(since)
+                stamps = [s for s in range(listed, today + day, day) if s >= since]
+                if mode == "windowed":
+                    stamps = [s for s in stamps if s < since + limit * day]
+                elif mode == "latest":
+                    stamps = stamps[-limit:]
+                else:
+                    stamps = stamps[:limit]
+                return [[s, 1, 1, 1, 100.0, 5.0] for s in stamps[:limit_cap]]
+
+        return Fake(), calls
+
+    def test_windowed_exchange_pages_past_empty_window_before_listing(self):
+        # Asset listed 300 days ago, history requested for ~6 years: the first
+        # windows are empty/short, yet the recent history must still be fetched.
+        for exchange_id, limit in (("kucoin", 1000), ("okx", 100), ("coinbase", 300)):
+            exchange, calls = self._fake_exchange(exchange_id, 300, "windowed", limit)
+            with patch.dict(COLLECTOR.PAGE_LIMITS, {exchange_id: limit}):
+                rows = COLLECTOR.candle_rows(exchange, "X/USD", self._midnight_ms(2200))
+            days = {int(row[0]) // COLLECTOR.DAY_MS for row in rows}
+            expected = {s // COLLECTOR.DAY_MS for s in range(self._midnight_ms(300), self._midnight_ms(0), COLLECTOR.DAY_MS)}
+            self.assertEqual(days, expected, exchange_id)
+
+    def test_windowed_exchange_short_first_window_does_not_stop_paging(self):
+        # Listed 1500 days ago: the first 1000-day window holds only ~500
+        # candles (< page_limit) but 1000+ more days exist after it.
+        exchange, _ = self._fake_exchange("kucoin", 1500, "windowed", 1000)
+        rows = COLLECTOR.candle_rows(exchange, "X/USD", self._midnight_ms(2200))
+        self.assertEqual(len(rows), 1500)
+
+    def test_windowed_exchange_has_no_duplicate_or_missing_days(self):
+        exchange, _ = self._fake_exchange("okx", 700, "windowed", 100)
+        with patch.dict(COLLECTOR.PAGE_LIMITS, {"okx": 100}):
+            rows = COLLECTOR.candle_rows(exchange, "X/USD", self._midnight_ms(700))
+        stamps = [row[0] for row in rows]
+        self.assertEqual(len(stamps), len(set(stamps)))
+        self.assertEqual(len(rows), 700)
+
+    def test_limit_based_exchange_paging_is_unchanged(self):
+        exchange, calls = self._fake_exchange("bitfinex", 1500, "limit", 1000)
+        rows = COLLECTOR.candle_rows(exchange, "X/USD", self._midnight_ms(2200))
+        self.assertEqual(len(rows), 1500)
+        self.assertLessEqual(len(calls), 3)
+
+    def test_latest_only_exchange_stops_after_its_cap(self):
+        exchange, calls = self._fake_exchange("kraken", 3000, "latest", 720)
+        rows = COLLECTOR.candle_rows(exchange, "X/USD", self._midnight_ms(2200))
+        # The venue's newest 720 candles include today's still-open candle,
+        # which the collector excludes by design.
+        self.assertEqual(len(rows), 719)
+        self.assertEqual(len(calls), 1)
+
+    def test_incremental_run_uses_a_single_page_per_venue(self):
+        for exchange_id in ("kucoin", "okx", "coinbase"):
+            exchange, calls = self._fake_exchange(exchange_id, 3000, "windowed", 100)
+            with patch.dict(COLLECTOR.PAGE_LIMITS, {exchange_id: 100}):
+                rows = COLLECTOR.candle_rows(exchange, "X/USD", self._midnight_ms(4))
+            self.assertEqual(len(calls), 1, exchange_id)
+            self.assertEqual(len(rows), 4)
+
+    def test_runner_blocked_exchanges_are_not_collected_or_trusted(self):
+        for blocked in ("binance", "bybit"):
+            self.assertNotIn(blocked, COLLECTOR.EXCHANGES)
+            archive = {'schema': 1, 'currency': 'USD', 'assets': {'BTC': {'points': [[1604361599999, 100.0, 2, ['kraken', blocked]]]}}}
+            with self.assertRaises(ValueError):
+                COLLECTOR.validate_archive(archive, datetime(2026, 1, 1, tzinfo=timezone.utc))
+        # Every venue with a paging rule must still be a collected venue.
+        self.assertTrue(COLLECTOR.WINDOWED_EXCHANGES.issubset(COLLECTOR.EXCHANGES))
+
+    def test_collector_version_forces_rebuild_of_gapped_archives(self):
+        # v6 archives contain permanent 1000-day holes for late-listed assets.
+        self.assertGreaterEqual(COLLECTOR.COLLECTOR_VERSION, 7)
+
     def test_symbol_list_is_read_from_the_application_map(self):
         symbols = COLLECTOR.symbols_from_app()
         self.assertIn("BTC", symbols)

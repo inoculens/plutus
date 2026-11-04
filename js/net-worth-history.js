@@ -330,6 +330,21 @@
     return true;
   }
 
+  // Lets the loading state paint before heavy work starts. Animation frames
+  // never fire in hidden or occluded tabs, so a timer fallback guarantees the
+  // work still runs (exactly once) instead of stalling until the tab returns.
+  function runAfterPaint(work) {
+    var scheduled = false;
+    function schedule() {
+      if (scheduled) return;
+      scheduled = true;
+      root.setTimeout(work, 0);
+    }
+    var hasFrames = typeof root.requestAnimationFrame === 'function';
+    if (hasFrames) root.requestAnimationFrame(schedule);
+    root.setTimeout(schedule, hasFrames ? 100 : 0);
+  }
+
   function byId(id) {
     return root.document ? root.document.getElementById(id) : null;
   }
@@ -764,11 +779,7 @@
             reject(error);
           }
         }
-        if (typeof root.requestAnimationFrame === 'function') {
-          root.requestAnimationFrame(function () { root.setTimeout(startLoad, 0); });
-        } else {
-          root.setTimeout(startLoad, 0);
-        }
+        runAfterPaint(startLoad);
       });
     }).then(function (result) {
       if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;

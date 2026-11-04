@@ -141,7 +141,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Pull request titles carry no agent attribution.
 - Every pull request description ends with one plain-text signature line in
   the same shape as the commit signature:
-  `PR description made with <agent> <version (if relevant)>`
+  `PR made with <agent> <version (if relevant)>`
   No emojis, no links, no session URLs, no other attribution.
 
 ## Commit signing — agent commits are unsigned

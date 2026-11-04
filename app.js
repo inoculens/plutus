@@ -1655,9 +1655,11 @@ function fetchSpotFxRate(date, from, to, fetchImpl) {
     }).then(function (data) {
       var rate = source.parse(data);
       if (isFinite(rate) && rate > 0) return { rate: rate, source: source.name };
-      return attempt(index + 1);
-    }).then(null, function () {
-      return attempt(index + 1);
+      return null;
+    }, function () {
+      return null;
+    }).then(function (result) {
+      return result || attempt(index + 1);
     });
   }
   return attempt(0);

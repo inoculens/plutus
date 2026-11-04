@@ -139,3 +139,22 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   other). Besides the signature line above, add no agent attribution to
   commits: no session-ID lines, no "Generated with <tool>" footers.
 - Pull request titles and descriptions carry no agent attribution.
+
+## Commit signing — agent commits are unsigned
+- Agent commits are NOT signed. Every agent commit already on `dev` is
+  unsigned; verification comes from GitHub, which signs the merge commit
+  when the owner merges (shown as Verified).
+- Agent sandboxes can ship a global git config with `commit.gpgsign=true`
+  and a sandbox-only SSH key. GitHub does not know that key, so every such
+  commit shows "Unverified" (`unknown_key`) — worse than unsigned. Before
+  the first commit of a session run `git config --local commit.gpgsign false`
+  and confirm `git config --get commit.gpgsign` prints `false`.
+- After committing, confirm there is no signature:
+  `git cat-file -p HEAD | grep -c '^gpgsig'` must print `0`. Do not trust
+  `git log --format=%G?` for this: without an allowed-signers file it
+  prints `N` for signed SSH commits too.
+- Never register an agent or sandbox key as a signing key on the owner's
+  GitHub account, and never create, copy or import the owner's private key.
+- A commit that was signed by mistake is not fixed by rewriting `dev` or
+  `main`. Tell the owner; they can re-sign locally with their own key if
+  they want that.

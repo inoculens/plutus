@@ -3910,8 +3910,18 @@ function fetchXausSpotUsd(fetchImpl) {
     if (!res || !res.ok) throw new Error('xaus-http-' + (res && res.status));
     return res.json();
   }).then(function (data) {
-    var state = data && data.data_state && String(data.data_state.status || '').toLowerCase();
-    if (state && state !== 'fresh') return null;
+    var stateData = data && data.data_state;
+    var state = stateData && String(stateData.status || '').toLowerCase();
+    // XAUS may serve its last observed real quote during an upstream outage.
+    // Accept it only when its explicit age is at most five minutes; never
+    // turn an unbounded stale snapshot into a live price.
+    if (state === 'unavailable') return null;
+    if (state === 'stale') {
+      var age = Number(stateData.age_seconds);
+      if (!isFinite(age) && stateData.as_of) age = (Date.now() - Date.parse(stateData.as_of)) / 1000;
+      if (!isFinite(age) || age < 0 || age > 300) return null;
+    }
+    if (state && state !== 'fresh' && state !== 'stale') return null;
     var p = Number(data && data.spot_usd_oz);
     if (!(isFinite(p) && p > 0)) p = Number(data && data.xau && data.xau.price);
     return (isFinite(p) && p > 0) ? p : null;
@@ -4434,11 +4444,18 @@ var KRAKEN_XSTOCK_PAIRS = {
   TSLA: 'TSLAxUSD'
 };
 
+// Backed's asset identifier is the full token symbol, including its trailing
+// x. Kraken's market pair adds the USD quote after that identifier.
+var BACKED_XSTOCK_SYMBOLS = {
+  SPCX: 'SPCXx', AAPL: 'AAPLx', CRCL: 'CRCLx', GLD: 'GLDx',
+  GOOGL: 'GOOGLx', HOOD: 'HOODx', MSTR: 'MSTRx', NVDA: 'NVDAx',
+  QQQ: 'QQQx', SPY: 'SPYx', TSLA: 'TSLAx'
+};
+
 function fetchBackedXstockUsd(sym, fetchImpl) {
   var s = String(sym || '').trim().toUpperCase();
-  var xstock = KRAKEN_XSTOCK_PAIRS[s];
+  var xstock = BACKED_XSTOCK_SYMBOLS[s];
   if (!xstock) return Promise.resolve(null);
-  xstock = xstock.slice(0, -3);
   var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
   if (!f) return Promise.resolve(null);
   var url = 'https://api.backed.fi/api/v2/public/assets/' + encodeURIComponent(xstock) + '/price-data';
@@ -4580,35 +4597,31 @@ function fetchCommodityPrice(symbol, vs) {
     }).then(null, function () { return cachedOrNull(); });
   }
   if (sym === 'XAU') {
-    // Query both independent Kraken gold-backed markets together. PAXG and
-    // XAUT each represent one fine troy ounce; their USD market quotes provide
-    // a keyless exchange fallback when spot aggregators are blocked.
-    return Promise.all([
-      fetchKrakenPairUsd('PAXGUSD', capturedFetch),
-      fetchKrakenPairUsd('XAUTUSD', capturedFetch)
-    ]).then(function (exchangePrices) {
-      for (var i = 0; i < exchangePrices.length; i++) {
-        var exchangeUsd = Number(exchangePrices[i]);
-        if (isFinite(exchangeUsd) && exchangeUsd > 0) return bridged(exchangeUsd, 'USD');
-      }
+    // XAUS is a documented, open-CORS spot feed with an explicit freshness
+    // contract. Prefer actual spot over token-market proxies; only fall back
+    // to PAXG/XAUT exchange prices and Gold-API when the spot feed misses.
+    return fetchXausSpotUsd(capturedFetch).then(function (spotUsd) {
+      if (isFinite(Number(spotUsd)) && Number(spotUsd) > 0) return bridged(spotUsd, 'USD');
       return Promise.all([
-        fetchXausSpotUsd(capturedFetch),
+        fetchKrakenPairUsd('PAXGUSD', capturedFetch),
+        fetchKrakenPairUsd('XAUTUSD', capturedFetch),
         fetchGoldApiUsd('XAU', capturedFetch)
-      ]).then(function (spotPrices) {
-        for (var j = 0; j < spotPrices.length; j++) {
-          var spotUsd = Number(spotPrices[j]);
-          if (isFinite(spotUsd) && spotUsd > 0) return bridged(spotUsd, 'USD');
+      ]).then(function (prices) {
+        for (var i = 0; i < prices.length; i++) {
+          var usd = Number(prices[i]);
+          if (isFinite(usd) && usd > 0) return bridged(usd, 'USD');
         }
         return viaYahooMetal();
       });
     }).then(null, function () {
       return Promise.all([
-        fetchXausSpotUsd(capturedFetch),
+        fetchKrakenPairUsd('PAXGUSD', capturedFetch),
+        fetchKrakenPairUsd('XAUTUSD', capturedFetch),
         fetchGoldApiUsd('XAU', capturedFetch)
-      ]).then(function (spotPrices) {
-        for (var j = 0; j < spotPrices.length; j++) {
-          var spotUsd = Number(spotPrices[j]);
-          if (isFinite(spotUsd) && spotUsd > 0) return bridged(spotUsd, 'USD');
+      ]).then(function (prices) {
+        for (var i = 0; i < prices.length; i++) {
+          var usd = Number(prices[i]);
+          if (isFinite(usd) && usd > 0) return bridged(usd, 'USD');
         }
         return viaYahooMetal();
       });

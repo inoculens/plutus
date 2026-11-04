@@ -1598,6 +1598,71 @@ function fetchEcbRate(date, from, to) {
   return attempt(date.slice(0, 10), 0);
 }
 
+// Current live-price conversions must not depend on the historical ECB archive.
+// Try independent public FX services on separate domains; historical accounting
+// continues to use fetchEcbRate() and its date-pinned ECB fixings.
+function fetchSpotFxRate(date, from, to, fetchImpl) {
+  var f = String(from || '').trim().toUpperCase();
+  var t = String(to || '').trim().toUpperCase();
+  if (!/^[A-Z]{2,10}$/.test(f) || !/^[A-Z]{2,10}$/.test(t)) {
+    return Promise.reject(new Error('fx-unavailable'));
+  }
+  var effFrom = stableToUsd(f) ? 'USD' : f;
+  var effTo = stableToUsd(t) ? 'USD' : t;
+  if (effFrom === effTo) return Promise.resolve({ rate: 1, source: '1:1' });
+  var fetcher = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!fetcher) return Promise.reject(new Error('fx-unavailable'));
+  var day = isValidDateStr(date) && !isFutureDateStr(date) ? date.slice(0, 10) : todayStr();
+  var fromLow = effFrom.toLowerCase();
+  var toLow = effTo.toLowerCase();
+  var sources = [
+    {
+      url: 'https://api.frankfurter.dev/v2/providers/ecb/rate/' + encodeURIComponent(fromLow) +
+        '/' + encodeURIComponent(toLow) + '?date=' + encodeURIComponent(day),
+      parse: function (data) {
+        var base = String(data && data.base || '').toUpperCase();
+        var quote = String(data && data.quote || '').toUpperCase();
+        if ((base && base !== effFrom) || (quote && quote !== effTo)) return NaN;
+        return Number(data && data.rate);
+      },
+      name: 'ECB'
+    },
+    {
+      url: 'https://open.er-api.com/v6/latest/' + encodeURIComponent(effFrom),
+      parse: function (data) {
+        if (data && data.result && data.result !== 'success') return NaN;
+        var base = String(data && data.base_code || '').toUpperCase();
+        if (base && base !== effFrom) return NaN;
+        return Number(data && data.rates && data.rates[effTo]);
+      },
+      name: 'ExchangeRate-API'
+    },
+    {
+      url: 'https://latest.currency-api.pages.dev/v1/currencies/' + encodeURIComponent(fromLow) + '.json',
+      parse: function (data) {
+        var rates = data && data[fromLow];
+        return Number(rates && rates[toLow]);
+      },
+      name: 'Currency-API'
+    }
+  ];
+  function attempt(index) {
+    if (index >= sources.length) return Promise.reject(new Error('fx-unavailable'));
+    var source = sources[index];
+    return fetchWithTimeout(fetcher, source.url, 5000).then(function (res) {
+      if (!res || !res.ok) throw new Error('fx-http');
+      return res.json();
+    }).then(function (data) {
+      var rate = source.parse(data);
+      if (isFinite(rate) && rate > 0) return { rate: rate, source: source.name };
+      return attempt(index + 1);
+    }).then(null, function () {
+      return attempt(index + 1);
+    });
+  }
+  return attempt(0);
+}
+
 // --- Display conversion (main-currency switching) ---
 // Trades are stored native (total + currency never change). The fxLock is
 // the entry-time record. For DISPLAY, every trade is converted into the
@@ -4235,7 +4300,7 @@ function fetchCryptoFallbackPrice(sym, currency, fetchImpl) {
     usd = Number(usd);
     if (!isFinite(usd) || usd <= 0) return null;
     if (cur === 'USD') return usd;
-    return fetchEcbRate(todayStr(), 'USD', cur).then(function (rate) {
+    return fetchSpotFxRate(todayStr(), 'USD', cur).then(function (rate) {
       var converted = usd * Number(rate.rate);
       return isFinite(converted) && converted > 0 ? converted : null;
     }, function () { return null; });
@@ -4393,7 +4458,7 @@ function convertStockQuote(sym, price, native, cur) {
     priceCache[key] = { price: p, at: Date.now() };
     return Promise.resolve(p);
   }
-  return fetchEcbRate(todayStr(), nat, c).then(function (r) {
+  return fetchSpotFxRate(todayStr(), nat, c).then(function (r) {
     var v = p * Number(r.rate);
     if (!isFinite(v) || v <= 0) return cachedOrNull();
     priceCache[key] = { price: v, at: Date.now() };
@@ -4561,7 +4626,7 @@ function fetchCommodityPrice(symbol, vs) {
       priceCache[key] = { price: p, at: Date.now() };
       return Promise.resolve(p);
     }
-    return fetchEcbRate(todayStr(), nat, cur).then(function (r) {
+    return fetchSpotFxRate(todayStr(), nat, cur).then(function (r) {
       var v = p * Number(r.rate);
       if (!isFinite(v) || v <= 0) return cachedOrNull();
       priceCache[key] = { price: v, at: Date.now() };
@@ -4707,7 +4772,7 @@ function fetchBatchPrices(syms, vs) {
       errors[s] = 'no quote returned — try a manual override in Settings';
     });
     if (!usdToCurJobs.length) return done(prices, errors);
-    return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
+    return fetchSpotFxRate(todayStr(), 'USD', cur).then(function (r) {
       usdToCur = Number(r.rate);
       usdToCurJobs.forEach(function (j) {
         var v = j.usd * usdToCur;
@@ -4749,7 +4814,7 @@ function fetchLivePrice(symbol, vs, kind) {
   if (ovEntry !== null) {
     if (!ovEntry.vs || ovEntry.vs === cur) return Promise.resolve(ovEntry.price);
     var ovCached = priceCache[key];
-    return fetchEcbRate(todayStr(), ovEntry.vs, cur).then(function (r) {
+    return fetchSpotFxRate(todayStr(), ovEntry.vs, cur).then(function (r) {
       var v = ovEntry.price * Number(r.rate);
       if (!isFinite(v) || v <= 0) {
         if (ovCached && isFinite(Number(ovCached.price)) && Number(ovCached.price) > 0) return Number(ovCached.price);
@@ -4819,7 +4884,7 @@ function fetchLivePrice(symbol, vs, kind) {
           if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
           return null;
         }
-        return fetchEcbRate(todayStr(), 'USD', cur).then(function (r) {
+        return fetchSpotFxRate(todayStr(), 'USD', cur).then(function (r) {
           var bridged = pu * Number(r.rate);
           if (!isFinite(bridged) || bridged <= 0) {
             if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
@@ -4921,7 +4986,7 @@ function refreshAllPrices(symbols, vs, kinds) {
   var jobs = [];
   if (ovConvJobs.length) {
     jobs.push(Promise.all(ovConvJobs.map(function (j) {
-      return fetchEcbRate(todayStr(), j.vs, cur).then(function (r) {
+      return fetchSpotFxRate(todayStr(), j.vs, cur).then(function (r) {
         var v = j.price * Number(r.rate);
         if (isFinite(v) && v > 0) {
           out[j.sym] = v;

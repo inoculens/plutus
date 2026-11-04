@@ -130,6 +130,55 @@ async function main() {
   const fxRate = await fxContract.fetchEcbRate(fxContract.todayStr(), 'USD', 'EUR');
   assert.equal(fxRate.rate, 0.9, 'Frankfurter v2 rate objects are parsed correctly');
 
+  const vpnResilientCrypto = createApp(url => {
+    if (url.includes('api.coingecko.com')) return Promise.resolve({ ok: false, status: 429 });
+    if (url.includes('api.kraken.com') || url.includes('api.exchange.coinbase.com')) {
+      return Promise.resolve({ ok: false, status: 451 });
+    }
+    if (url === 'https://api.binance.com/api/v3/ticker/price') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([{ symbol: 'BTCUSD', price: '65000' }])
+      });
+    }
+    if (url.includes('api.frankfurter.dev')) return Promise.resolve({ ok: false, status: 451 });
+    if (url === 'https://open.er-api.com/v6/latest/USD') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ result: 'success', base_code: 'USD', rates: { EUR: 0.9 } })
+      });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const vpnResilientBatch = await vpnResilientCrypto.refreshAllPrices(
+    ['BTC'], 'EUR', { BTC: 'crypto' }
+  );
+  assert.equal(vpnResilientBatch.BTC, 58500,
+    'crypto portfolio prices survive CoinGecko, Kraken, Coinbase and Frankfurter being blocked');
+  assert.equal(await vpnResilientCrypto.fetchSpotFxRate(
+    vpnResilientCrypto.todayStr(), 'USD', 'EUR'
+  ).then(rate => rate.source), 'ExchangeRate-API',
+  'the live FX bridge identifies the independent provider that answered');
+
+  const currencyApiFallback = createApp(url => {
+    if (url.includes('api.frankfurter.dev') || url.includes('open.er-api.com')) {
+      return Promise.resolve({ ok: false, status: 451 });
+    }
+    if (url === 'https://latest.currency-api.pages.dev/v1/currencies/usd.json') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ usd: { eur: 0.91 } })
+      });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const finalFxFallback = await currencyApiFallback.fetchSpotFxRate(
+    currencyApiFallback.todayStr(), 'USD', 'EUR'
+  );
+  assert.equal(finalFxFallback.rate, 0.91,
+    'the third independent FX provider is tried when the first two are blocked');
+  assert.equal(finalFxFallback.source, 'Currency-API');
+
   const euroGoldAndStock = createApp(url => {
     if (url.includes('xaus.com/api/v1/spot')) return Promise.resolve({ ok: true, json: () => Promise.resolve({
       spot_usd_oz: 4012.5, data_state: { status: 'fresh', age_seconds: 12 }

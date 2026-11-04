@@ -3816,7 +3816,9 @@ var SYMBOL_MAP = {
   ZK: 'zksync',
   W: 'wormhole',
   BLUR: 'blur',
-  ORCA: 'orca'
+  ORCA: 'orca',
+  PAXG: 'pax-gold',
+  XAUT: 'tether-gold'
 };
 
 // Commodities / precious metals / energy, quoted in USD on Stooq (spot for
@@ -4085,6 +4087,32 @@ function fetchKrakenLiveUsd(sym, fetchImpl) {
         var c = result[keys[i]] && result[keys[i]].c;
         var p = (c && c.length) ? Number(c[0]) : NaN;
         if (isFinite(p) && p > 0) return p;
+      }
+      return null;
+    }).then(null, function () { return null; });
+  } catch (e) { return Promise.resolve(null); }
+}
+
+function fetchKrakenPairUsd(pair, fetchImpl) {
+  var market = String(pair || '').trim();
+  if (!/^[A-Za-z0-9]{4,24}$/.test(market)) return Promise.resolve(null);
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  var url = 'https://api.kraken.com/0/public/Ticker?pair=' + encodeURIComponent(market);
+  try {
+    return fetchWithTimeout(f, url, 7000).then(function (res) {
+      if (!res || !res.ok) throw new Error('kraken-http-' + (res && res.status));
+      return res.json();
+    }).then(function (data) {
+      if (data && Array.isArray(data.error) && data.error.length) return null;
+      var result = data && data.result;
+      if (!result || typeof result !== 'object') return null;
+      var keys = Object.keys(result);
+      for (var i = 0; i < keys.length; i++) {
+        if (keys[i] === 'last') continue;
+        var trade = result[keys[i]] && result[keys[i]].c;
+        var price = trade && trade.length ? Number(trade[0]) : NaN;
+        if (isFinite(price) && price > 0) return price;
       }
       return null;
     }).then(null, function () { return null; });
@@ -4392,6 +4420,66 @@ function fetchStockYahoo(sym, cur, fetchImpl) {
   }).then(null, function () { return stooq(); });
 }
 
+var KRAKEN_XSTOCK_PAIRS = {
+  SPCX: 'SPCXxUSD',
+  AAPL: 'AAPLxUSD',
+  CRCL: 'CRCLxUSD',
+  GLD: 'GLDxUSD',
+  GOOGL: 'GOOGLxUSD',
+  HOOD: 'HOODxUSD',
+  MSTR: 'MSTRxUSD',
+  NVDA: 'NVDAxUSD',
+  QQQ: 'QQQxUSD',
+  SPY: 'SPYxUSD',
+  TSLA: 'TSLAxUSD'
+};
+
+function fetchBackedXstockUsd(sym, fetchImpl) {
+  var s = String(sym || '').trim().toUpperCase();
+  var xstock = KRAKEN_XSTOCK_PAIRS[s];
+  if (!xstock) return Promise.resolve(null);
+  xstock = xstock.slice(0, -3);
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  var url = 'https://api.backed.fi/api/v2/public/assets/' + encodeURIComponent(xstock) + '/price-data';
+  return fetchWithTimeout(f, url, 7000).then(function (res) {
+    if (!res || !res.ok) throw new Error('backed-http-' + (res && res.status));
+    return res.json();
+  }).then(function (data) {
+    var candidates = [
+      data && data.price,
+      data && data.priceUsd,
+      data && data.price_usd,
+      data && data.data && data.data.price,
+      data && data.data && data.data.priceUsd,
+      data && data.priceData && data.priceData.price,
+      data && data.result && data.result.price
+    ];
+    var currency = String((data && (data.currency || data.quoteCurrency || data.quote_currency)) ||
+      (data && data.data && (data.data.currency || data.data.quoteCurrency)) || 'USD').toUpperCase();
+    if (currency !== 'USD') return null;
+    for (var i = 0; i < candidates.length; i++) {
+      var raw = candidates[i];
+      if (raw && typeof raw === 'object') raw = raw.value || raw.amount;
+      var price = Number(raw);
+      if (isFinite(price) && price > 0) return price;
+    }
+    return null;
+  }).then(null, function () { return null; });
+}
+
+function fetchStockExchangeUsd(sym, fetchImpl) {
+  var s = String(sym || '').trim().toUpperCase();
+  var pair = KRAKEN_XSTOCK_PAIRS[s];
+  if (!pair) return Promise.resolve(null);
+  // Backed publishes the official xStocks reference price. Kraken's public
+  // ticker is the independent exchange-market fallback when that feed misses.
+  return fetchBackedXstockUsd(s, fetchImpl).then(function (price) {
+    if (isFinite(Number(price)) && Number(price) > 0) return Number(price);
+    return fetchKrakenPairUsd(pair, fetchImpl);
+  });
+}
+
 function fetchStockPrice(symbol, vs) {
   var sym = String(symbol || '').trim().toUpperCase();
   var cur = priceDefaultVs(vs);
@@ -4400,19 +4488,27 @@ function fetchStockPrice(symbol, vs) {
   var key = priceCacheKey('STOCK:' + sym, cur);
   var now = Date.now();
   var cached = priceCache[key];
+  function cachedOrNull() {
+    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
+    return null;
+  }
   if (cached && (now - cached.at) < PRICE_CACHE_TTL_MS && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
     return Promise.resolve(Number(cached.price));
   }
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
-  if (!capturedFetch) {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
-    return Promise.resolve(null);
-  }
-  // CNBC direct first (no proxy lottery), then Yahoo proxies, then Stooq.
-  return fetchStockCnbc(sym, cur, capturedFetch).then(function (p) {
-    if (isFinite(Number(p)) && Number(p) > 0) return Number(p);
+  if (!capturedFetch) return Promise.resolve(cachedOrNull());
+  // Independent xStocks market data first; legacy direct/proxied sources are
+  // retained only as fallbacks for equities not covered by the xStocks list.
+  return fetchStockExchangeUsd(sym, capturedFetch).then(function (usd) {
+    if (isFinite(Number(usd)) && Number(usd) > 0) return convertStockQuote(sym, usd, 'USD', cur);
+    return fetchStockCnbc(sym, cur, capturedFetch);
+  }).then(function (price) {
+    if (isFinite(Number(price)) && Number(price) > 0) return Number(price);
     return fetchStockYahoo(sym, cur, capturedFetch);
-  }, function () { return fetchStockYahoo(sym, cur, capturedFetch); });
+  }).then(function (price) {
+    if (isFinite(Number(price)) && Number(price) > 0) return Number(price);
+    return cachedOrNull();
+  }, function () { return cachedOrNull(); });
 }
 
 function fetchCommodityPrice(symbol, vs) {
@@ -4483,18 +4579,46 @@ function fetchCommodityPrice(symbol, vs) {
       return bridged(q.price, q.currency || 'USD');
     }).then(null, function () { return cachedOrNull(); });
   }
+  if (sym === 'XAU') {
+    // Query both independent Kraken gold-backed markets together. PAXG and
+    // XAUT each represent one fine troy ounce; their USD market quotes provide
+    // a keyless exchange fallback when spot aggregators are blocked.
+    return Promise.all([
+      fetchKrakenPairUsd('PAXGUSD', capturedFetch),
+      fetchKrakenPairUsd('XAUTUSD', capturedFetch)
+    ]).then(function (exchangePrices) {
+      for (var i = 0; i < exchangePrices.length; i++) {
+        var exchangeUsd = Number(exchangePrices[i]);
+        if (isFinite(exchangeUsd) && exchangeUsd > 0) return bridged(exchangeUsd, 'USD');
+      }
+      return Promise.all([
+        fetchXausSpotUsd(capturedFetch),
+        fetchGoldApiUsd('XAU', capturedFetch)
+      ]).then(function (spotPrices) {
+        for (var j = 0; j < spotPrices.length; j++) {
+          var spotUsd = Number(spotPrices[j]);
+          if (isFinite(spotUsd) && spotUsd > 0) return bridged(spotUsd, 'USD');
+        }
+        return viaYahooMetal();
+      });
+    }).then(null, function () {
+      return Promise.all([
+        fetchXausSpotUsd(capturedFetch),
+        fetchGoldApiUsd('XAU', capturedFetch)
+      ]).then(function (spotPrices) {
+        for (var j = 0; j < spotPrices.length; j++) {
+          var spotUsd = Number(spotPrices[j]);
+          if (isFinite(spotUsd) && spotUsd > 0) return bridged(spotUsd, 'USD');
+        }
+        return viaYahooMetal();
+      });
+    });
+  }
+  // Other precious metals and copper must never use a gold-backed token quote.
   if (goldApiSymbol(sym)) {
     return fetchGoldApiUsd(sym, capturedFetch).then(function (usd) {
       if (isFinite(Number(usd)) && Number(usd) > 0) return bridged(usd, 'USD');
-      return fetchXausSpotUsd(capturedFetch).then(function (xausUsd) {
-        if (isFinite(Number(xausUsd)) && Number(xausUsd) > 0) return bridged(xausUsd, 'USD');
-        return viaYahooMetal();
-      });
-    }, function () {
-      return fetchXausSpotUsd(capturedFetch).then(function (xausUsd) {
-        if (isFinite(Number(xausUsd)) && Number(xausUsd) > 0) return bridged(xausUsd, 'USD');
-        return viaYahooMetal();
-      });
+      return viaStooq();
     });
   }
   if (Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) return viaEnergy(YAHOO_COMMODITY_MAP[sym]);
@@ -4838,24 +4962,46 @@ function refreshAllPrices(symbols, vs, kinds) {
     }));
   }
   if (stocks.length) {
-    // One batched CNBC call for every stock (direct, no proxy), then the
-    // Yahoo-proxy chain per symbol that missed. Same out/errors contract.
+    // First resolve verified tokenized-equity markets directly, independent
+    // of Yahoo/proxy infrastructure. Only misses proceed to the batched CNBC
+    // quote and the legacy Yahoo fallback.
     var stockFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
-    jobs.push(fetchBatchCnbc(stocks, stockFetch).then(function (map) {
-      var per = stocks.map(function (sym) {
-        var q = map && map[sym];
-        if (q) {
-          return convertStockQuote(sym, q.price, q.currency, cur).then(function (p) {
-            if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
-            else { out[sym] = null; errors[sym] = 'stock feed unreachable — try a manual override in Settings'; }
-          });
-        }
-        return fetchStockYahoo(sym, cur, stockFetch).then(function (p) {
-          if (isFinite(Number(p)) && Number(p) > 0) out[sym] = Number(p);
-          else { out[sym] = null; errors[sym] = 'stock feed unreachable — try a manual override in Settings'; }
+    var exchangeJobs = stocks.map(function (sym) {
+      return fetchStockExchangeUsd(sym, stockFetch).then(function (usd) {
+        if (!isFinite(Number(usd)) || Number(usd) <= 0) return;
+        return convertStockQuote(sym, usd, 'USD', cur).then(function (price) {
+          if (isFinite(Number(price)) && Number(price) > 0) out[sym] = Number(price);
         });
       });
-      return Promise.all(per).then(function () { /* mapped into out/errors above */ });
+    });
+    jobs.push(Promise.all(exchangeJobs).then(function () {
+      var missing = stocks.filter(function (sym) {
+        return !(isFinite(Number(out[sym])) && Number(out[sym]) > 0);
+      });
+      return fetchBatchCnbc(missing, stockFetch).then(function (map) {
+        var per = missing.map(function (sym) {
+          var q = map && map[sym];
+          var quote = q
+            ? convertStockQuote(sym, q.price, q.currency, cur)
+            : fetchStockYahoo(sym, cur, stockFetch);
+          return quote.then(function (price) {
+            if (isFinite(Number(price)) && Number(price) > 0) {
+              out[sym] = Number(price);
+              delete errors[sym];
+              return;
+            }
+            var cachedStock = priceCache[priceCacheKey('STOCK:' + sym, cur)];
+            if (cachedStock && isFinite(Number(cachedStock.price)) && Number(cachedStock.price) > 0) {
+              out[sym] = Number(cachedStock.price);
+              delete errors[sym];
+            } else {
+              out[sym] = null;
+              errors[sym] = 'stock feed unreachable — try a manual override in Settings';
+            }
+          });
+        });
+        return Promise.all(per).then(function () { /* mapped into out/errors above */ });
+      });
     }));
   }
   commodities.forEach(function (sym) {

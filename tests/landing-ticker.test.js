@@ -147,6 +147,25 @@ async function main() {
     assert.match(pills['tick-spcx'].textContent, /64\.75/);
   }
 
+  // 4. XAU and SPCX resolve directly from independent exchange market feeds.
+  {
+    const { app, pills } = createApp(url => {
+      if (url.includes('api.coingecko.com')) return json({ bitcoin: { usd: 90000 } });
+      if (url.includes('api.kraken.com/0/public/Ticker?pair=PAXGUSD')) {
+        return json({ error: [], result: { PAXGUSD: { c: ['4015.25'] } } });
+      }
+      if (url.includes('api.backed.fi/api/v2/public/assets/SPCXx/price-data')) {
+        return json({ price: 144.5, currency: 'USD' });
+      }
+      return down();
+    });
+    app.refreshLandingTicker();
+    await until(() => isPrice(pills['tick-xau'].textContent) && isPrice(pills['tick-spcx'].textContent),
+      'XAU and SPCX load from independent market feeds');
+    assert.match(pills['tick-xau'].textContent, /4,015\.25/);
+    assert.match(pills['tick-spcx'].textContent, /144\.5/);
+  }
+
   // 2. A transient failure heals on the in-run retry (no sticky '—').
   {
     let cnbcCalls = 0;

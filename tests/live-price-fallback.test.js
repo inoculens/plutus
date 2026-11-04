@@ -205,6 +205,54 @@ async function main() {
   reusedTicker.BINANCE_LIVE_SYMBOLS.forEach(symbol => assert(mappedTickers.includes(symbol),
     symbol + ' must have a verified SYMBOL_MAP entry before it can use a live exchange fallback'));
 
+  // Independent stock and gold pricing: Backed reference -> Kraken xStocks,
+  // and Kraken's gold-backed spot markets, with no Yahoo/CNBC proxy required.
+  const backedStock = createApp(url => {
+    if (url.includes('api.backed.fi/api/v2/public/assets/SPCXx/price-data')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: '146.25', currency: 'USD' }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const backedStockBatch = await backedStock.refreshAllPrices(['SPCX'], 'USD', { SPCX: 'stock' });
+  assert.equal(backedStockBatch.SPCX, 146.25, 'SPCX batch pricing uses the independent Backed xStocks quote');
+  const backedStockSingle = createApp(url => {
+    if (url.includes('api.backed.fi/api/v2/public/assets/SPCXx/price-data')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: '146.25', currency: 'USD' }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  assert.equal(await backedStockSingle.fetchLivePrice('SPCX', 'USD', 'stock'), 146.25,
+    'SPCX single-symbol pricing uses the same independent source');
+
+  const krakenStock = createApp(url => {
+    if (url.includes('api.backed.fi/')) return Promise.resolve({ ok: false, status: 503 });
+    if (url.includes('api.kraken.com/0/public/Ticker?pair=SPCXxUSD')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ error: [], result: { SPCXxUSD: { c: ['145.75'] } } }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const krakenStockBatch = await krakenStock.refreshAllPrices(['SPCX'], 'USD', { SPCX: 'stock' });
+  assert.equal(krakenStockBatch.SPCX, 145.75, 'SPCX falls back to the direct Kraken xStocks ticker');
+
+  const silverOnly = createApp(url => {
+    if (url.includes('api.gold-api.com/price/XAG')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: 51.25 }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const silverBatch = await silverOnly.refreshAllPrices(['XAG'], 'USD', { XAG: 'commodity' });
+  assert.equal(silverBatch.XAG, 51.25, 'silver continues to use its own spot quote, never PAXG/XAUT');
+
+  const krakenGold = createApp(url => {
+    if (url.includes('pair=PAXGUSD')) return Promise.resolve({ ok: false, status: 451 });
+    if (url.includes('pair=XAUTUSD')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ error: [], result: { XAUTUSD: { c: ['4021.75'] } } }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const goldBatch = await krakenGold.refreshAllPrices(['XAU'], 'USD', { XAU: 'commodity' });
+  assert.equal(goldBatch.XAU, 4021.75, 'XAU uses XAUT/USD when PAXG/USD is unavailable');
+
   const historyApp = createApp(() => Promise.reject(new Error('unexpected network request')));
   const historyEnd = Date.now();
   const currentHistory = await historyApp.buildNetWorthHistory({

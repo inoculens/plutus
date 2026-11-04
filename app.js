@@ -3887,7 +3887,7 @@ function fetchGoldApiUsd(sym, fetchImpl) {
   if (!f) return Promise.resolve(null);
   var url = 'https://api.gold-api.com/price/' + encodeURIComponent(s);
   try {
-    return fetchWithTimeout(f, url).then(function (res) {
+    return fetchWithTimeout(f, url, 7000).then(function (res) {
       if (!res || !res.ok) throw new Error('goldapi-http-' + (res && res.status));
       return res.json();
     }).then(function (data) {
@@ -3896,6 +3896,24 @@ function fetchGoldApiUsd(sym, fetchImpl) {
       return null;
     }).then(null, function () { return null; });
   } catch (e) { return Promise.resolve(null); }
+}
+
+// Independent, keyless XAU spot fallback. xaus.com documents an open-CORS
+// JSON endpoint and exposes the spot price as spot_usd_oz (also xau.price).
+// Only a positive, explicit USD quote is accepted; no synthetic estimate.
+function fetchXausSpotUsd(fetchImpl) {
+  var f = fetchImpl || ((typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null);
+  if (!f) return Promise.resolve(null);
+  return fetchWithTimeout(f, 'https://xaus.com/api/v1/spot', 7000).then(function (res) {
+    if (!res || !res.ok) throw new Error('xaus-http-' + (res && res.status));
+    return res.json();
+  }).then(function (data) {
+    var state = data && data.data_state && String(data.data_state.status || '').toLowerCase();
+    if (state && state !== 'fresh') return null;
+    var p = Number(data && data.spot_usd_oz);
+    if (!(isFinite(p) && p > 0)) p = Number(data && data.xau && data.xau.price);
+    return (isFinite(p) && p > 0) ? p : null;
+  }).then(null, function () { return null; });
 }
 
 // Energy futures via Yahoo (same proxy chain as stocks): WTI/Brent/gas
@@ -4041,7 +4059,8 @@ function yahooProxyUrls(sym, query) {
   var base = 'https://query1.finance.yahoo.com/v8/finance/chart/' +
     encodeURIComponent(sym) + '?' + query;
   return ['https://api.allorigins.win/raw?url=' + encodeURIComponent(base),
-    'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(base)];
+    'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(base),
+    'https://corsproxy.io/?url=' + encodeURIComponent(base)];
 }
 
 // Crypto live fallbacks when CoinGecko is rate-limited: Kraken, Coinbase,
@@ -4219,10 +4238,10 @@ function fetchWithTimeout(fetchImpl, url, ms) {
   });
 }
 
-function fetchFirstJson(urls, fetchImpl) {
+function fetchFirstJson(urls, fetchImpl, timeoutMs) {
   function next(i) {
     if (i >= urls.length) return Promise.reject(new Error('no-source'));
-    return fetchWithTimeout(fetchImpl, urls[i]).then(function (res) {
+    return fetchWithTimeout(fetchImpl, urls[i], timeoutMs).then(function (res) {
       if (!res || !res.ok) throw new Error('proxy-http-' + (res && res.status));
       return res.json();
     }).then(null, function () { return next(i + 1); });
@@ -4356,7 +4375,7 @@ function fetchStockYahoo(sym, cur, fetchImpl) {
     var sq = stooqSymbol(sym);
     if (!sq || !f) return Promise.resolve(null);
     var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
-    return f(url).then(function (res) {
+    return fetchWithTimeout(f, url, 7000).then(function (res) {
       if (!res || !res.ok) throw new Error('price-http-' + (res && res.status));
       return res.text();
     }).then(function (csv) {
@@ -4366,7 +4385,7 @@ function fetchStockYahoo(sym, cur, fetchImpl) {
   if (!f) return Promise.resolve(null);
   var yq = yahooSymbol(sym);
   if (!yq) return stooq();
-  return fetchFirstJson(yahooProxyUrls(yq, 'interval=1d&range=5d'), f).then(function (data) {
+  return fetchFirstJson(yahooProxyUrls(yq, 'interval=1d&range=5d'), f, 7000).then(function (data) {
     var q = parseYahooQuote(data);
     if (!q) throw new Error('no-quote');
     return convertStockQuote(sym, q.price, q.currency, cur);
@@ -4439,7 +4458,7 @@ function fetchCommodityPrice(symbol, vs) {
     var sq = stooqCommoditySymbol(sym);
     if (!sq) return Promise.resolve(cachedOrNull());
     var url = 'https://stooq.com/q/l/?s=' + encodeURIComponent(sq) + '&f=sd2t2ohlcv&h&e=csv';
-    return capturedFetch(url).then(function (res) {
+    return fetchWithTimeout(capturedFetch, url, 7000).then(function (res) {
       if (!res.ok) throw new Error('price-http-' + res.status);
       return res.text();
     }).then(function (csv) {
@@ -4448,18 +4467,35 @@ function fetchCommodityPrice(symbol, vs) {
   }
   // Energy futures via Yahoo (same proxy chain as stocks).
   function viaEnergy(ySym) {
-    return fetchFirstJson(yahooProxyUrls(ySym, 'interval=1d&range=5d'), capturedFetch).then(function (data) {
+    return fetchFirstJson(yahooProxyUrls(ySym, 'interval=1d&range=5d'), capturedFetch, 7000).then(function (data) {
       var q = parseYahooQuote(data);
       if (!q) throw new Error('no-quote');
       return bridged(q.price, q.currency);
     }).then(null, function () { return viaStooq(); });
   }
-  // Metals first: gold-api.com is free, key-free and CORS-open.
+  // Metals: try two independent keyless spot providers, then Yahoo's
+  // XAUUSD chart endpoint. Stooq's legacy quote endpoint is known to return
+  // 404, so it is deliberately not treated as a meaningful metals fallback.
+  function viaYahooMetal() {
+    return fetchFirstJson(yahooProxyUrls('XAUUSD=X', 'interval=1d&range=5d'), capturedFetch, 7000).then(function (data) {
+      var q = parseYahooQuote(data);
+      if (!q) throw new Error('no-metal-quote');
+      return bridged(q.price, q.currency || 'USD');
+    }).then(null, function () { return cachedOrNull(); });
+  }
   if (goldApiSymbol(sym)) {
     return fetchGoldApiUsd(sym, capturedFetch).then(function (usd) {
       if (isFinite(Number(usd)) && Number(usd) > 0) return bridged(usd, 'USD');
-      return viaStooq();
-    }, function () { return viaStooq(); });
+      return fetchXausSpotUsd(capturedFetch).then(function (xausUsd) {
+        if (isFinite(Number(xausUsd)) && Number(xausUsd) > 0) return bridged(xausUsd, 'USD');
+        return viaYahooMetal();
+      });
+    }, function () {
+      return fetchXausSpotUsd(capturedFetch).then(function (xausUsd) {
+        if (isFinite(Number(xausUsd)) && Number(xausUsd) > 0) return bridged(xausUsd, 'USD');
+        return viaYahooMetal();
+      });
+    });
   }
   if (Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) return viaEnergy(YAHOO_COMMODITY_MAP[sym]);
   return viaStooq();

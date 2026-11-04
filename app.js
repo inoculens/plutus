@@ -1462,7 +1462,8 @@ function accountById(st, id) {
 
 var FX_STABLES = ['USDC', 'USDT', 'DAI'];
 var FX_MAX_LOOKBACK_DAYS = 5;
-var FX_BASE_URL = 'https://api.frankfurter.dev/v1';
+// Frankfurter v2's provider-specific endpoint preserves the ECB fixing source.
+var FX_BASE_URL = 'https://api.frankfurter.dev/v2/providers/ecb/rate';
 
 function stableToUsd(ccy) {
   if (typeof ccy !== 'string') return false;
@@ -1564,8 +1565,8 @@ function fetchEcbRate(date, from, to) {
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   function attempt(d, back) {
     if (!d || !isValidDateStr(d)) return Promise.reject(new Error('fx-unavailable'));
-    var url = FX_BASE_URL + '/' + d +
-      '?from=' + encodeURIComponent(effFrom) + '&to=' + encodeURIComponent(effTo);
+    var url = FX_BASE_URL + '/' + encodeURIComponent(effFrom.toLowerCase()) +
+      '/' + encodeURIComponent(effTo.toLowerCase()) + '?date=' + encodeURIComponent(d);
     function walkBack() {
       if (back >= FX_MAX_LOOKBACK_DAYS) throw new Error('fx-unavailable');
       var prev = fxShiftDate(d, -1);
@@ -1574,8 +1575,11 @@ function fetchEcbRate(date, from, to) {
     }
     return fxFetchWithRetry(url, capturedFetch).then(
       function (data) {
-        var rate = data && data.rates && data.rates[effTo];
-        if (typeof rate === 'number' && isFinite(rate) && rate > 0) {
+        var rate = data && Number(data.rate);
+        var responseBase = data && String(data.base || '').toUpperCase();
+        var responseQuote = data && String(data.quote || '').toUpperCase();
+        if ((responseBase && responseBase !== effFrom) || (responseQuote && responseQuote !== effTo)) return walkBack();
+        if (isFinite(rate) && rate > 0) {
           // Frankfurter answers with the latest available fixing, which may
           // predate the requested date: pin provenance to its actual date.
           // Guard lookahead: never accept a fixing after the requested date.

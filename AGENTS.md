@@ -138,7 +138,11 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - This applies to every agent (Claude, Copilot, Codex, Cursor, or any
   other). Besides the signature line above, add no agent attribution to
   commits: no session-ID lines, no "Generated with <tool>" footers.
-- Pull request titles and descriptions carry no agent attribution.
+- Pull request titles carry no agent attribution.
+- Every pull request description ends with one plain-text signature line in
+  the same shape as the commit signature:
+  `PR made with <agent> <version (if relevant)>`
+  No emojis, no links, no session URLs, no other attribution.
 
 ## Commit signing — agent commits are unsigned
 - Agent commits are NOT signed. Every agent commit already on `dev` is

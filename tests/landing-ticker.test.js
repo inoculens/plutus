@@ -112,6 +112,41 @@ async function main() {
     Object.values(pills).forEach(p => assert.equal(p.isLoading(), false, 'loading state cleared'));
   }
 
+  // 2. Gold-API outage falls through to the independent XAU provider.
+  {
+    const { app, pills } = createApp(url => {
+      if (url.includes('api.gold-api.com')) return down();
+      if (url.includes('xaus.com/api/v1/spot')) {
+        return json({ spot_usd_oz: 4100.5, data_state: { status: 'fresh' } });
+      }
+      if (url.includes('quote.cnbc.com')) return json({
+        FormattedQuoteResult: { FormattedQuote: [{ code: 0, symbol: 'SPCX', last: '55.25', currencyCode: 'USD' }] }
+      });
+      return healthyFeed(url);
+    });
+    app.refreshLandingTicker();
+    await until(() => isPrice(pills['tick-xau'].textContent), 'XAU loads from xaus after Gold-API fails');
+    assert.match(pills['tick-xau'].textContent, /4,100\.5/);
+  }
+
+  // 3. If CNBC misses SPCX, the third Yahoo CORS proxy can still supply it.
+  {
+    const { app, pills } = createApp(url => {
+      if (url.includes('quote.cnbc.com')) return down();
+      if (url.includes('api.allorigins.win') || url.includes('api.codetabs.com')) return down();
+      if (url.includes('corsproxy.io')) {
+        return json({ chart: { result: [{
+          meta: { currency: 'USD', regularMarketPrice: 64.75 },
+          indicators: { quote: [{ close: [64.75] }] }
+        }] } });
+      }
+      return healthyFeed(url);
+    });
+    app.refreshLandingTicker();
+    await until(() => isPrice(pills['tick-spcx'].textContent), 'SPCX loads through the additional Yahoo proxy');
+    assert.match(pills['tick-spcx'].textContent, /64\.75/);
+  }
+
   // 2. A transient failure heals on the in-run retry (no sticky '—').
   {
     let cnbcCalls = 0;

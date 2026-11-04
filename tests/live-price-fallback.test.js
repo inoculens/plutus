@@ -215,7 +215,13 @@ async function main() {
   });
   const backedStockBatch = await backedStock.refreshAllPrices(['SPCX'], 'USD', { SPCX: 'stock' });
   assert.equal(backedStockBatch.SPCX, 146.25, 'SPCX batch pricing uses the independent Backed xStocks quote');
-  assert.equal(await backedStock.fetchLivePrice('SPCX', 'USD', 'stock'), 146.25,
+  const backedStockSingle = createApp(url => {
+    if (url.includes('api.backed.fi/api/v2/public/assets/SPCXx/price-data')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: '146.25', currency: 'USD' }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  assert.equal(await backedStockSingle.fetchLivePrice('SPCX', 'USD', 'stock'), 146.25,
     'SPCX single-symbol pricing uses the same independent source');
 
   const krakenStock = createApp(url => {
@@ -227,6 +233,15 @@ async function main() {
   });
   const krakenStockBatch = await krakenStock.refreshAllPrices(['SPCX'], 'USD', { SPCX: 'stock' });
   assert.equal(krakenStockBatch.SPCX, 145.75, 'SPCX falls back to the direct Kraken xStocks ticker');
+
+  const silverOnly = createApp(url => {
+    if (url.includes('api.gold-api.com/price/XAG')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ price: 51.25 }) });
+    }
+    throw new Error('Unexpected request: ' + url);
+  });
+  const silverBatch = await silverOnly.refreshAllPrices(['XAG'], 'USD', { XAG: 'commodity' });
+  assert.equal(silverBatch.XAG, 51.25, 'silver continues to use its own spot quote, never PAXG/XAUT');
 
   const krakenGold = createApp(url => {
     if (url.includes('pair=PAXGUSD')) return Promise.resolve({ ok: false, status: 451 });

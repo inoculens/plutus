@@ -4579,10 +4579,10 @@ function fetchCommodityPrice(symbol, vs) {
       return bridged(q.price, q.currency || 'USD');
     }).then(null, function () { return cachedOrNull(); });
   }
-  if (goldApiSymbol(sym)) {
+  if (sym === 'XAU') {
     // Query both independent Kraken gold-backed markets together. PAXG and
-    // XAUT are each redeemable for one fine troy ounce; their USD market quotes
-    // provide a keyless exchange fallback when spot aggregators are blocked.
+    // XAUT each represent one fine troy ounce; their USD market quotes provide
+    // a keyless exchange fallback when spot aggregators are blocked.
     return Promise.all([
       fetchKrakenPairUsd('PAXGUSD', capturedFetch),
       fetchKrakenPairUsd('XAUTUSD', capturedFetch)
@@ -4593,7 +4593,7 @@ function fetchCommodityPrice(symbol, vs) {
       }
       return Promise.all([
         fetchXausSpotUsd(capturedFetch),
-        fetchGoldApiUsd(sym, capturedFetch)
+        fetchGoldApiUsd('XAU', capturedFetch)
       ]).then(function (spotPrices) {
         for (var j = 0; j < spotPrices.length; j++) {
           var spotUsd = Number(spotPrices[j]);
@@ -4604,7 +4604,7 @@ function fetchCommodityPrice(symbol, vs) {
     }).then(null, function () {
       return Promise.all([
         fetchXausSpotUsd(capturedFetch),
-        fetchGoldApiUsd(sym, capturedFetch)
+        fetchGoldApiUsd('XAU', capturedFetch)
       ]).then(function (spotPrices) {
         for (var j = 0; j < spotPrices.length; j++) {
           var spotUsd = Number(spotPrices[j]);
@@ -4612,6 +4612,13 @@ function fetchCommodityPrice(symbol, vs) {
         }
         return viaYahooMetal();
       });
+    });
+  }
+  // Other precious metals and copper must never use a gold-backed token quote.
+  if (goldApiSymbol(sym)) {
+    return fetchGoldApiUsd(sym, capturedFetch).then(function (usd) {
+      if (isFinite(Number(usd)) && Number(usd) > 0) return bridged(usd, 'USD');
+      return viaStooq();
     });
   }
   if (Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) return viaEnergy(YAHOO_COMMODITY_MAP[sym]);

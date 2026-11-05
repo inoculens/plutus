@@ -291,8 +291,8 @@ function contrastText(hex) {
   var r = parseInt(h.slice(0, 2), 16);
   var g = parseInt(h.slice(2, 4), 16);
   var b = parseInt(h.slice(4, 6), 16);
-  if (!isFinite(r) || !isFinite(g) || !isFinite(b)) return '#1a1408';
-  return ((r * 299 + g * 587 + b * 114) / 1000) >= 128 ? '#1a1408' : '#ffffff';
+  if (!isFinite(r) || !isFinite(g) || !isFinite(b)) return '#09090a';
+  return ((r * 299 + g * 587 + b * 114) / 1000) >= 128 ? '#09090a' : '#ffffff';
 }
 
 function numGte0(v, allowEmpty) {
@@ -17794,7 +17794,7 @@ function buildTopbar() {
         applyColorTarget(raw);
         return;
       }
-      applyColorTarget(uiVal('c-custom', '#e3c57c'));
+      applyColorTarget(uiVal('c-custom', '#c9c9cc'));
     });
   }
   var cReset = document.getElementById('c-reset');
@@ -18591,7 +18591,7 @@ function renderHeroAlloc(st) {
   host.hidden = false;
   host.innerHTML = '';
   // Text first, ring last: legend sits left, circle pins to the very right.
-  var palette = ['#e3c57c', '#7dd3fc', '#34d399', '#f472b6', '#a78bfa', '#fbbf24'];
+  var palette = ['#fafafa', '#d0d0d4', '#a8a8ae', '#85858b', '#626268', '#47474c'];
   var leg = document.createElement('ul');
   leg.className = 'hero-alloc-legend';
   al.items.forEach(function (it, i) {

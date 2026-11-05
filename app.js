@@ -18074,9 +18074,11 @@ function buildSettings() {
     '<input id="sy-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="sy-user">Username</label>' +
     '<input id="sy-user" autocomplete="username" spellcheck="false">' +
+    '<div class="sync-field-group">' +
     '<label for="sy-passwd">App-specific password</label>' +
     '<input id="sy-passwd" type="password" autocomplete="current-password">' +
     '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password</label>' +
+    '</div>' +
     '<label for="sy-filename">File name ' + infoPill('The .enc.json ending is added automatically. Missing folders are created automatically.') + '</label>' +
     '<input id="sy-filename" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
         '</div>' +
@@ -18107,21 +18109,27 @@ function buildSettings() {
     '<input id="sy-bucket" autocomplete="off" spellcheck="false">' +
     '<label for="sy-key">Access key</label>' +
     '<input id="sy-key" autocomplete="off" spellcheck="false">' +
+    '<div class="sync-field-group">' +
     '<label for="sy-skey">Secret key</label>' +
     '<input id="sy-skey" type="password" autocomplete="off">' +
     '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key</label>' +
+    '</div>' +
     '<label for="sy-object">File name ' + infoPill('The .enc.json ending is added automatically.') + '</label>' +
     '<input id="sy-object" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
     '<label for="sy-folder3">Folder prefix ' + infoPill('Optional. Keeps backups separate; existing files are never overwritten. Leave blank for the bucket top level.') + '</label>' +
     '<input id="sy-folder3" autocomplete="off" spellcheck="false" placeholder="e.g. backups/work">' +
         '</div>' +
+    '<div class="sync-field-group">' +
     '<label for="sy-pass">Passphrase ' + infoPill('Required to encrypt and restore your data. The same passphrase gives the same key fingerprint on every device.') + '</label>' +
     '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required">' +
     '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember passphrase</label>' +
     '<p class="muted set-blurb" id="sy-fp">Key fingerprint —</p>' +
+    '</div>' +
     '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically ' + infoPill('Syncs after every change. Connected devices check for newer changes every few seconds and update on their own.') + '</label>' +
-    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Price history with records ' + infoPill('Historical quotes and chart data. This encrypted cache can be rebuilt and stays separate from your account records.') + '</label>' +
-    '<div id="pd-independent" hidden>' +
+    '<div class="sync-feature-group" id="price-history-group">' +
+    '<h4 class="sync-subheading">Price history</h4>' +
+    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Store with records ' + infoPill('Historical quotes and chart data are included in the encrypted records backup. Turn this off only if you need a separate destination.') + '</label>' +
+    '<div id="pd-independent" class="sync-feature-settings" hidden>' +
     '<label for="pd-provider">Price history destination ' + infoPill('Google Drive and Dropbox reuse the sign-in above. The file is encrypted with your passphrase.') + '</label>' +
     '<select id="pd-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
@@ -18138,9 +18146,11 @@ function buildSettings() {
     '<input id="pd-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="pd-user">Username</label>' +
     '<input id="pd-user" autocomplete="username" spellcheck="false">' +
+    '<div class="sync-field-group">' +
     '<label for="pd-passwd">App-specific password</label>' +
     '<input id="pd-passwd" type="password" autocomplete="current-password">' +
     '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember password</label>' +
+    '</div>' +
     '</div>' +
     '<div id="pd-g-oauth" hidden></div>' +
     '<div id="pd-g-megas3" hidden>' +
@@ -18152,9 +18162,11 @@ function buildSettings() {
     '<input id="pd-bucket" autocomplete="off" spellcheck="false">' +
     '<label for="pd-key">Access key</label>' +
     '<input id="pd-key" autocomplete="off" spellcheck="false">' +
+    '<div class="sync-field-group">' +
     '<label for="pd-skey">Secret key</label>' +
     '<input id="pd-skey" type="password" autocomplete="off">' +
     '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember secret key</label>' +
+    '</div>' +
     '</div>' +
         '<div class="sync-btns">' +
     '<button id="pd-connect" type="button">Connect</button>' +
@@ -18162,6 +18174,7 @@ function buildSettings() {
     '</div>' +
     '</div>' +
     '<p class="muted set-blurb" id="pd-status">Stored with your records.</p>' +
+    '</div>' +
     '<p class="muted set-blurb" id="sy-status">Not connected.</p>' +
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
@@ -20955,11 +20968,11 @@ var priceDataFailureShown = {};
 function priceDataReportFailure(err, automatic) {
   var message = String((err && err.message) || err);
   var status = (typeof document !== 'undefined') ? document.getElementById('pd-status') : null;
-  if (status) status.textContent = 'Price Data sync failed — ' + message;
+  if (status) status.textContent = 'Price history sync failed — ' + message;
   if (!priceDataFailureShown[message]) {
     priceDataFailureShown[message] = true;
-    showBanner('Shared Price Data could not sync.', 'error', {
-      title: 'Price Data sync',
+    showBanner('Price history could not sync.', 'error', {
+      title: 'Price history sync',
       lines: [message, automatic ? 'It will retry after another history update or sync.' : 'Your account and trade data were not changed.']
     });
   }
@@ -20974,10 +20987,10 @@ function priceDataSyncFlow(opts) {
   var passphrase = rd.passphrase;
   var cfg = priceDataDestination(rd.cfg);
   if (!passphrase) {
-    var missingPass = new Error('Enter the Sync passphrase to access encrypted Price Data.');
+    var missingPass = new Error('Enter the Sync passphrase to access encrypted price history.');
     if (opts.automatic) {
       var missingStatus = (typeof document !== 'undefined') ? document.getElementById('pd-status') : null;
-      if (missingStatus) missingStatus.textContent = 'Price Data needs the Sync passphrase before it can load.';
+      if (missingStatus) missingStatus.textContent = 'Price history needs the Sync passphrase before it can load.';
       return Promise.resolve('skipped');
     }
     priceDataReportFailure(missingPass, false);
@@ -20991,7 +21004,7 @@ function priceDataSyncFlow(opts) {
   }
   priceDataSyncBusy = true;
   var status = (typeof document !== 'undefined') ? document.getElementById('pd-status') : null;
-  if (status) status.textContent = 'Loading shared Price Data…';
+  if (status) status.textContent = 'Loading price history…';
   function localPayload() {
     return {
       records: priceDataNormalizeRecords(loadHistCache(), false),
@@ -21043,7 +21056,7 @@ function priceDataSyncFlow(opts) {
         series: merged.series
       });
       return syncEncryptEnvelope(plaintext, passphrase).then(function (encrypted) {
-        if (status) status.textContent = 'Saving shared Price Data…';
+        if (status) status.textContent = 'Saving price history…';
         return syncRemoteEnsureFolder(cfg).then(function () {
           return syncRemoteUpload(cfg, encrypted);
         });
@@ -21054,7 +21067,7 @@ function priceDataSyncFlow(opts) {
     priceDataSyncBusy = false;
     var priceCount = Object.keys(merged.records).length;
     var seriesCount = Object.keys(merged.series).length;
-    if (status) status.textContent = 'Price Data synced (' + priceCount + ' historical prices, ' + seriesCount + ' chart series).';
+    if (status) status.textContent = 'Price history synced (' + priceCount + ' historical prices, ' + seriesCount + ' chart series).';
     if (priceDataCacheRevision !== uploadRevision) priceDataScheduleUpload();
     try { render(); } catch (e) { /* repaint must not affect a completed cache sync */ }
     if (historySeriesChanged && typeof window !== 'undefined' && window.NetWorthHistory &&
@@ -22818,7 +22831,7 @@ function priceDataRefreshPanel() {
   if (status && !priceDataSyncBusy) {
     status.textContent = cfg.sameAsRecords
       ? 'Stored with your records.'
-      : 'Price Data destination: ' + syncProviderLabel(cfg.provider) + ' / ' + cfg.filename;
+      : 'Price history destination: ' + syncProviderLabel(cfg.provider) + ' / ' + cfg.filename;
   }
 }
 

@@ -4548,3 +4548,228 @@ label.sync-check .info-pill { align-self: center; margin-left: 0.1rem; }
   #info-pop:not([hidden]) { animation: info-in 0.14s ease-out; }
   @keyframes info-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 }
+
+
+/* ————— Refined form rhythm and focus-safe insets —————
+   Scrollable panels reserve room for the full focus outline; labels keep
+   their help controls on a clean baseline instead of touching the field. */
+.set-panels {
+  padding: 0.6rem 0.75rem 1rem;
+  scroll-padding: 0.75rem;
+}
+.set-tabs {
+  padding: 0.45rem 0.5rem 0.65rem;
+}
+.set-panels section {
+  gap: 0.9rem;
+}
+.set-panels section > label:not(.sync-check) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 0.45rem;
+  row-gap: 0.2rem;
+  min-height: 1.45rem;
+  margin: 0.1rem 0 0;
+  padding: 0.1rem 0.15rem;
+  line-height: 1.45;
+}
+.set-panels section > input,
+.set-panels section > select,
+.set-panels section > textarea {
+  margin: 0 0 0.15rem;
+}
+.set-panels .set-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  line-height: 1.35;
+  margin: 0 0 0.2rem;
+}
+.info-pill,
+.set-panels section .info-pill,
+.set-panels .set-heading .info-pill {
+  display: inline-flex;
+  flex: 0 0 1.25rem;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin: 0 0 0 0.15rem;
+  padding: 0;
+  vertical-align: middle;
+  line-height: 1;
+}
+.info-pill:focus-visible {
+  outline-offset: 2px;
+}
+label.sync-check {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  min-height: 2rem;
+  margin: 0.1rem 0;
+  padding: 0.3rem 0.2rem;
+  line-height: 1.5;
+}
+label.sync-check .info-pill {
+  flex: 0 0 1.25rem;
+  margin: 0 0 0 0.1rem;
+}
+.set-panels input:focus-visible,
+.set-panels select:focus-visible,
+.set-panels textarea:focus-visible,
+.set-tabs button:focus-visible {
+  outline-offset: 2px;
+}
+#settings-dialog .set-panels {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+@media (max-width: 720px) {
+  #settings-dialog .set-panels {
+    padding-left: 0.75rem;
+    padding-right: 0.9rem;
+  }
+  #settings-dialog .set-tabs {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+}
+
+/* Related credentials belong together: the field, its remember toggle and
+   any supporting status read as one deliberate control group. */
+.sync-field-group {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  margin: 0.25rem 0;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.018);
+}
+.sync-field-group > label:not(.sync-check) {
+  margin: 0;
+  padding: 0.05rem 0.1rem;
+}
+.sync-field-group > input,
+.sync-field-group > select {
+  margin: 0;
+  min-width: 0;
+}
+.sync-field-group > label.sync-check {
+  margin: 0;
+  padding: 0.2rem 0.1rem 0;
+}
+
+
+/* Sync credentials and price history are nested parts of one cloud setup,
+   not competing cards. */
+.sync-field-group .set-blurb {
+  margin: 0.05rem 0 0;
+  padding: 0 0.1rem;
+  font-size: 0.76rem;
+}
+.sync-feature-group {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+  margin: 0.45rem 0 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: calc(var(--radius) + 2px);
+  background: linear-gradient(145deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+}
+.sync-subheading {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sync-feature-group > .sync-field-group {
+  margin: 0.15rem 0;
+}
+.sync-feature-settings {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 0.85rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(0,0,0,0.12);
+}
+.sync-feature-settings[hidden] {
+  display: none;
+}
+.sync-feature-settings > label:not(.sync-check) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.1rem;
+  line-height: 1.45;
+}
+.sync-feature-settings > input,
+.sync-feature-settings > select {
+  min-width: 0;
+  margin: 0;
+}
+.sync-feature-settings .sync-field-group {
+  margin: 0;
+}
+#pd-status {
+  margin: 0.1rem 0 0;
+  padding: 0.1rem 0.2rem;
+  font-size: 0.76rem;
+}
+@media (max-width: 720px) {
+  .sync-feature-group {
+    padding: 0.75rem;
+  }
+  .sync-feature-settings {
+    padding: 0.75rem 0.65rem;
+  }
+}
+
+
+/* Dialog forms use the same inset discipline as Settings. The scrollable
+   record form keeps a little extra room around focused controls and labels. */
+#trade-form,
+#account-dialog-body,
+#ledger-dialog-body,
+#group-dialog-body {
+  box-sizing: border-box;
+  padding: 0.35rem 0.45rem 0.85rem;
+  gap: 0.4rem;
+  scroll-padding: 1rem 0.65rem;
+}
+#trade-form > label:not(.sync-check),
+#account-dialog-body > label:not(.sync-check),
+#ledger-dialog-body > label:not(.sync-check),
+#group-dialog-body > label:not(.sync-check) {
+  margin: 0.7rem 0 0.15rem;
+  padding: 0.05rem 0.1rem;
+  line-height: 1.45;
+}
+#trade-form > input,
+#trade-form > select,
+#trade-form > textarea,
+#account-dialog-body > input,
+#account-dialog-body > select,
+#account-dialog-body > textarea,
+#ledger-dialog-body > input,
+#ledger-dialog-body > select,
+#group-dialog-body > input,
+#group-dialog-body > select {
+  min-width: 0;
+  max-width: 100%;
+}

@@ -4739,3 +4739,37 @@ label.sync-check .info-pill {
     padding: 0.75rem 0.65rem;
   }
 }
+
+
+/* Dialog forms use the same inset discipline as Settings. The scrollable
+   record form keeps a little extra room around focused controls and labels. */
+#trade-form,
+#account-dialog-body,
+#ledger-dialog-body,
+#group-dialog-body {
+  box-sizing: border-box;
+  padding: 0.35rem 0.45rem 0.85rem;
+  gap: 0.4rem;
+  scroll-padding: 1rem 0.65rem;
+}
+#trade-form > label:not(.sync-check),
+#account-dialog-body > label:not(.sync-check),
+#ledger-dialog-body > label:not(.sync-check),
+#group-dialog-body > label:not(.sync-check) {
+  margin: 0.7rem 0 0.15rem;
+  padding: 0.05rem 0.1rem;
+  line-height: 1.45;
+}
+#trade-form > input,
+#trade-form > select,
+#trade-form > textarea,
+#account-dialog-body > input,
+#account-dialog-body > select,
+#account-dialog-body > textarea,
+#ledger-dialog-body > input,
+#ledger-dialog-body > select,
+#group-dialog-body > input,
+#group-dialog-body > select {
+  min-width: 0;
+  max-width: 100%;
+}

@@ -4887,3 +4887,55 @@ label > .info-pill {
 label.sync-check {
   row-gap: 0.45rem;
 }
+
+/* Settings labels must reserve a real line of space for their help marker.
+   Some provider-specific fields live inside nested divs rather than directly
+   inside the section, so the old direct-child selector left those labels on
+   the generic form rhythm and let the marker crowd the input beneath it. */
+#settings-dialog .set-panels section label:not(.sync-check) {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 1.5rem;
+  margin: 0.35rem 0 0.35rem;
+  padding: 0.05rem 0.1rem;
+  line-height: 1.5;
+}
+#settings-dialog .set-panels section label:not(.sync-check) .info-pill {
+  display: inline-flex;
+  flex: 0 0 1.25rem;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin: 0;
+  vertical-align: middle;
+}
+#settings-dialog .set-panels section label:not(.sync-check) + input,
+#settings-dialog .set-panels section label:not(.sync-check) + select,
+#settings-dialog .set-panels section label:not(.sync-check) + textarea {
+  margin-top: 0;
+}
+#settings-dialog .set-panels label.sync-check {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  line-height: 1.45;
+}
+#settings-dialog .set-panels label.sync-check > input[type="checkbox"] {
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+  align-self: center;
+}

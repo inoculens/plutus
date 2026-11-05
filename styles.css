@@ -4088,24 +4088,24 @@ label.sync-check input {
 }
 .src-actions .src-max {
   background:var(--accent-soft);
-  border-color:var(--accent-line);
+  border-color:transparent;
   color:var(--text);
   font-weight:500;
 }
 .src-actions .src-max:hover {
   background:var(--accent-soft);
-  border-color:var(--accent-line);
+  border-color:transparent;
   color:var(--text);
 }
 .src-actions .src-remove {
   background:var(--red-bg);
-  border-color:var(--red-line);
+  border-color:transparent;
   color:var(--red);
 }
 .src-actions button[hidden] { display:none; }
 .src-actions .src-remove:hover {
   background:var(--red-bg);
-  border-color:var(--red);
+  border-color:transparent;
   color:var(--red);
 }
 .src-auto-wrap {

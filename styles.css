@@ -4009,7 +4009,8 @@ label.sync-check input {
 .src-grid { display:grid; grid-template-columns:minmax(110px,1.4fr) minmax(90px,1fr) minmax(90px,1fr) auto; gap:8px; align-items:end; min-width:0; }
 .src-grid label { display:grid; gap:5px; min-width:0; font-size:.82rem; }
 .src-grid input,.src-grid select { width:100%; min-width:0; }
-.src-actions { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.src-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-self:end; align-items:stretch; gap:6px; height:2.6rem; min-width:0; }
+.src-actions button { min-width:0; min-height:2.6rem; height:2.6rem; padding:0.3rem 0.65rem; white-space:nowrap; }
 .src-auto-wrap { display:flex!important; grid-column:1/-1; align-items:center; gap:7px!important; }
 .src-auto-wrap input { width:auto; }
 #t-source-add,#t-source-split { margin:6px 8px 0 0; }
@@ -4234,6 +4235,11 @@ label.sync-check input {
     padding: 0.55rem 0.8rem;
     white-space: nowrap;
     scroll-snap-align: start;
+  }
+  /* Mobile tabs are horizontal: balance the selected-state edge highlight
+     on both sides instead of carrying the desktop left-only rail. */
+  .set-tabs button[aria-selected="true"] {
+    box-shadow: inset 2px 0 0 rgba(255,255,255,0.78), inset -2px 0 0 rgba(255,255,255,0.78);
   }
   .set-panels { flex: 1 1 auto; }
   .set-panels label.sync-check { padding: 0.8rem; }

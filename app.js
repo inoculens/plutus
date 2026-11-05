@@ -18183,7 +18183,7 @@ function buildSettings() {
     '<button id="sy-pull" type="button">Restore from drive</button>' +
     '<button id="sy-cleanup" type="button">Clean up</button>' +
     '</div>' +
-    '<span id="s-enc-label">Encrypted backup ' + infoPill('Needs your passphrase to open.') + '</span>' +
+    '<span id="s-enc-label">Encrypted backup' + infoPill('Needs your passphrase to open.') + '</span>' +
     '<button id="sy-enc-download" type="button">Download encrypted backup</button>' +
     '<input id="sy-enc-upload" type="file" accept="application/json,.json">' +
     '</section>' +

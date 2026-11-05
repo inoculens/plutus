@@ -4845,3 +4845,45 @@ label.sync-check,
 label.sync-check .info-pill {
   margin-left: 0.15rem;
 }
+
+
+/* Global form-control alignment pass.
+   Keep checkbox controls on the label's text centreline in every form,
+   and give help markers a genuine gap after the label text. */
+label:has(> input[type="checkbox"]),
+label.sync-check,
+.set-panels label.sync-check {
+  display: flex;
+  align-items: center;
+  column-gap: 0.65rem;
+}
+label:has(> input[type="checkbox"]) > input[type="checkbox"],
+label.sync-check > input[type="checkbox"],
+.set-panels label.sync-check > input[type="checkbox"] {
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  align-self: center;
+}
+label.sync-check .info-pill,
+.set-panels label.sync-check .info-pill,
+.set-panels section > label .info-pill,
+.set-panels .set-heading .info-pill,
+label > .info-pill {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin-left: 0.7rem !important;
+  margin-right: 0.1rem;
+  align-self: center;
+}
+label.sync-check {
+  row-gap: 0.45rem;
+}

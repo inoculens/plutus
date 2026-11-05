@@ -17951,13 +17951,15 @@ function buildSettings() {
     '<div class="set-tabs" role="tablist" aria-label="Settings sections">' +
     '<button type="button" role="tab" data-settab="overrides" aria-selected="true">Price overrides</button>' +
     '<button type="button" role="tab" data-settab="date-format" aria-selected="false">Date format</button>' +
-    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledgers (default)</button>' +
-    '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backup &amp; restore</button>' +
-    '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud Sync</button>' +
-    '<button type="button" role="tab" data-settab="danger" aria-selected="false">Danger zone</button>' +
+    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledger defaults</button>' +
+    '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backups</button>' +
+    '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud sync</button>' +
+    '<button type="button" role="tab" data-settab="danger" aria-selected="false">Delete data</button>' +
     '</div>' +
     '<div class="set-panels">' +
     '<section data-setpanel="overrides" role="tabpanel" aria-label="Price overrides">' +
+    '<h3 class="set-heading">Market pricing</h3>' +
+    '<p class="muted set-blurb">Use a manual quote when a market price is unavailable or you prefer a specific source. Overrides apply to this browser only.</p>' +
     '<label for="o-symbol">Symbol</label>' +
     '<input id="o-symbol" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
     '<label for="o-price">Price (in current fiat)</label>' +
@@ -17966,6 +17968,7 @@ function buildSettings() {
     '<ul id="o-list"></ul>' +
     '</section>' +
     '<section data-setpanel="date-format" role="tabpanel" aria-label="Date format" hidden>' +
+    '<h3 class="set-heading">Date display</h3>' +
     '<p class="muted set-blurb">Choose how dates appear throughout the app. Your records stay stored in a consistent format and are not changed.</p>' +
     '<label for="set-date-format">Date format</label>' +
     '<select id="set-date-format">' +
@@ -17984,7 +17987,8 @@ function buildSettings() {
     '<button id="set-date-format-apply" type="button">Apply date format</button>' +
     '</section>' +
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
-    '<p class="muted set-blurb">Default bookkeeping codes every cash account starts from (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Editing codes inside an account diverges it from this default; renaming here changes future suggestions — records keep their own stored labels.</p>' +
+    '<h3 class="set-heading">Bookkeeping defaults</h3>' +
+    '<p class="muted set-blurb">These codes are the starting template for new cash accounts. Subledgers nest by code prefix. Changes here affect future suggestions only; existing records keep their saved labels. To customize one account, edit its ledger directly.</p>' +
     '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Ledgers on asset accounts (optional per income/expense record)</label>' +
     '<label for="l-code">Code</label>' +
     '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
@@ -17994,15 +17998,17 @@ function buildSettings() {
     '<ul id="l-list"></ul>' +
     '</section>' +
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
-    '<p class="muted set-blurb">Your data never leaves this browser. Download a backup file to move it to another device.</p>' +
+    '<h3 class="set-heading">Your records, in your hands</h3>' +
+    '<p class="muted set-blurb">Your records stay in this browser. Download a JSON backup to keep a safe copy or move your data to another device. CSV exports are designed for spreadsheets and tax-lot review.</p>' +
     '<button id="s-download" type="button">Download backup</button>' +
-    '<button id="s-csv-trades" type="button">Export trades CSV</button>' +
-    '<button id="s-csv-lots" type="button">Export tax lots CSV (FIFO)</button>' +
-    '<span id="s-upload-label">Restore from file</span>' +
+    '<button id="s-csv-trades" type="button">Export trades (CSV)</button>' +
+    '<button id="s-csv-lots" type="button">Export FIFO tax lots (CSV)</button>' +
+    '<span id="s-upload-label">Restore from a backup file</span>' +
     '<input id="s-upload" type="file" accept="application/json,.json">' +
     '</section>' +
     '<section data-setpanel="sync" role="tabpanel" aria-label="Encrypted sync" hidden>' +
-    '<p class="muted set-blurb">Sync an <strong>encrypted</strong> copy of your data to a drive you choose. The drive only ever sees ciphertext — bring the passphrase to any device to restore.</p>' +
+    '<h3 class="set-heading">Your encrypted cloud copy</h3>' +
+    '<p class="muted set-blurb">Keep an encrypted copy on a cloud drive you control. Your passphrase encrypts the data before upload, so the provider stores ciphertext rather than readable records. Use the same passphrase on each device.</p>' +
     '<label for="sy-provider">Provider</label>' +
     '<select id="sy-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
@@ -18126,7 +18132,9 @@ function buildSettings() {
     '<button id="sy-enc-download" type="button">Download encrypted file</button>' +
     '<input id="sy-enc-upload" type="file" accept="application/json,.json">' +
     '</section>' +
-    '<section data-setpanel="danger" role="tabpanel" aria-label="Danger zone" hidden>' +
+    '<section data-setpanel="danger" role="tabpanel" aria-label="Delete data" hidden>' +
+    '<h3 class="set-heading">Clear this browser</h3>' +
+    '<p class="muted set-blurb">Permanently removes the accounts, records and settings stored in this browser. Copies already saved to a cloud drive are separate and must be deleted there.</p>' +
     '<button id="s-clear" type="button">Clear all data</button>' +
     '</section>' +
     '</div>';

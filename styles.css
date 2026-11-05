@@ -4980,10 +4980,15 @@ label.sync-check {
   border: 0;
   border-radius: 0;
   background: none;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
-/* Help markers sit right after the label text: the label's flex gap already
-   separates them, so drop the extra 0.7rem push. */
-#settings-dialog .set-panels label .info-pill {
+/* Help markers keep one uniform 0.5rem gap, matching the Cloud provider row,
+   whether the text is a field label, a checkbox row or a panel title. */
+#settings-dialog .set-panels label .info-pill,
+#settings-dialog .set-panels .set-heading .info-pill {
   margin-left: 0 !important;
+}
+#settings-dialog .set-panels label.sync-check,
+#settings-dialog .set-panels .set-heading {
+  gap: 0.5rem;
 }

@@ -4044,12 +4044,16 @@ label.sync-check input {
   white-space:nowrap;
 }
 .src-actions .src-max {
-  background:var(--accent);
-  border-color:transparent;
-  color:var(--accent-ink);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
+  color:var(--text);
   font-weight:650;
 }
-.src-actions .src-max:hover { background:#ececee; border-color:transparent; }
+.src-actions .src-max:hover {
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
+  color:var(--text);
+}
 .src-actions .src-remove {
   background:var(--red-bg);
   border-color:var(--red-line);

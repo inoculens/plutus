@@ -4005,16 +4005,20 @@ label.sync-check input {
 
 
 /* Multi-source transfer editor */
-.src-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; padding:10px; margin:8px 0; border:1px solid var(--line,#333); border-radius:10px; background:var(--panel,transparent); }
-.src-grid { display:grid; grid-template-columns:minmax(110px,1.4fr) minmax(90px,1fr) minmax(90px,1fr) auto; gap:8px; align-items:end; min-width:0; }
+.src-row { display:block; min-width:0; padding:10px; margin:8px 0; border:1px solid var(--line,#333); border-radius:10px; background:var(--panel,transparent); }
+.src-grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) auto; gap:8px; align-items:end; min-width:0; }
 .src-grid label { display:grid; gap:5px; min-width:0; font-size:.82rem; }
 .src-grid input,.src-grid select { width:100%; min-width:0; }
 .src-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-self:end; align-items:stretch; gap:6px; height:2.6rem; min-width:0; }
-.src-actions button { min-width:0; min-height:2.6rem; height:2.6rem; padding:0.3rem 0.65rem; white-space:nowrap; }
+.src-actions button { display:flex; align-items:center; justify-content:center; min-width:0; min-height:2.6rem; height:2.6rem; margin:0; padding:0.3rem 0.65rem; white-space:nowrap; }
 .src-auto-wrap { display:flex!important; grid-column:1/-1; align-items:center; gap:7px!important; }
 .src-auto-wrap input { width:auto; }
 #t-source-add,#t-source-split { margin:6px 8px 0 0; }
-@media (max-width:560px) { .src-row { grid-template-columns:minmax(0,1fr); } .src-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:560px) {
+  .src-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .src-grid > label:first-child { grid-column:1/-1; }
+  .src-actions { grid-column:1/-1; width:100%; }
+}
 
 
 /* ————— Settings refinement: quiet hierarchy, generous rhythm, precise controls ————— */

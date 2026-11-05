@@ -3807,7 +3807,8 @@ label.sync-check input {
   padding: 1rem 1.25rem;
 }
 @media (min-width: 1024px) {
-  #cookie-banner { bottom: 1.25rem; left: calc(var(--rail) + 1rem); }
+  /* Center against the viewport, not the app content shifted by the nav rail. */
+  #cookie-banner { bottom: 1.25rem; left: 1rem; right: 1rem; }
 }
 #cookie-banner[hidden] { display: none; }
 #cookie-banner p { margin: 0; flex: 1 1 16rem; font-size: 0.88rem; color: var(--muted); }

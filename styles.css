@@ -4274,3 +4274,9 @@ html::after {
       radial-gradient(ellipse 32rem 34rem at 0% 100%, rgba(196, 204, 218, 0.05), transparent 76%);
   }
 }
+
+
+/* First-run landing: keep navigation chrome out of the way until an account exists. */
+body.is-empty #dock {
+  display: none !important;
+}

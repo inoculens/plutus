@@ -4872,7 +4872,10 @@ label.sync-check > input[type="checkbox"],
 }
 
 #settings-dialog .set-panels section > div label:not(.sync-check) {
-  margin-bottom: 1rem;
+  margin: 0.9rem 0 0.3rem;
+}
+#settings-dialog .set-panels section > div > label:not(.sync-check):first-child {
+  margin-top: 0;
 }
 #settings-dialog .set-panels section > div {
   box-sizing: border-box;
@@ -4947,4 +4950,35 @@ label.sync-check {
   min-height: 1.05rem;
   margin: 0;
   align-self: center;
+}
+
+/* ————— Settings credential rhythm —————
+   A label belongs to the control beneath it, so each pair stays tight and
+   the readable gap goes between one field and the next. Remember toggles
+   are part of their password field: drop the nested card and line the box
+   up with the field's text inset instead of hanging to its left. */
+#settings-dialog .set-panels section > label:not(.sync-check) {
+  margin-bottom: -0.45rem;
+}
+#settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) {
+  row-gap: 0.3rem;
+}
+#settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) > label:not(.sync-check) {
+  margin: 0.85rem 0 0;
+}
+#settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) > label:not(.sync-check):first-child {
+  margin-top: 0;
+}
+#settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) > input,
+#settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) > select {
+  margin: 0;
+}
+#settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) > label.sync-check {
+  min-height: 0;
+  margin: 0.35rem 0 0;
+  padding: 0.15rem 0 0.15rem 0.75rem;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  gap: 0.6rem;
 }

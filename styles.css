@@ -4956,7 +4956,7 @@ label.sync-check {
    A label belongs to the control beneath it, so each pair stays tight and
    the readable gap goes between one field and the next. Remember toggles
    are part of their password field: drop the nested card and line the box
-   up with the field's text inset instead of hanging to its left. */
+   up with the input above and the status text below. */
 #settings-dialog .set-panels section > label:not(.sync-check) {
   margin-bottom: -0.45rem;
 }
@@ -4976,9 +4976,14 @@ label.sync-check {
 #settings-dialog .set-panels :is(.sync-field-group, .sync-feature-settings) > label.sync-check {
   min-height: 0;
   margin: 0.35rem 0 0;
-  padding: 0.15rem 0 0.15rem 0.75rem;
+  padding: 0.15rem 0 0.15rem 0.1rem;
   border: 0;
   border-radius: 0;
   background: none;
   gap: 0.6rem;
+}
+/* Help markers sit right after the label text: the label's flex gap already
+   separates them, so drop the extra 0.7rem push. */
+#settings-dialog .set-panels label .info-pill {
+  margin-left: 0 !important;
 }

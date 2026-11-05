@@ -927,8 +927,13 @@ body.modal-open #dock { display: none; }
     font-size: 0.88rem;
   }
   #dock .dock-label { display: inline; }
-  #dock #fab-trade { order: -1; margin-bottom: 0.6rem; }
   body.modal-open #dock { display: flex; }
+}
+
+/* One entry point per width: the Trades header carries "+ Record" above 720px,
+   so the dock's Add record only exists where that button is hidden. */
+@media (min-width: 721px) {
+  #fab-trade { display: none !important; }
 }
 
 /* ————— Buttons ————— */
@@ -1308,12 +1313,15 @@ main {
   min-width: 0;
 }
 
-/* Views ease in when navigation swaps them (display change restarts it). */
+/* Views fade in when navigation swaps them (display change restarts it).
+   Opacity only, and no fill-mode: a transform here would make the view the
+   containing block for the fixed mobile bottom-sheet menus (.filter-panel),
+   pinning them to the page instead of the screen. */
 @media (prefers-reduced-motion: no-preference) {
-  #view-home:not([hidden]), #view-account:not([hidden]) { animation: view-in 0.5s var(--ease) both; }
+  #view-home:not([hidden]), #view-account:not([hidden]) { animation: view-in 0.35s ease-out; }
   @keyframes view-in {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: none; }
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 }
 

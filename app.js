@@ -17815,6 +17815,14 @@ function buildTopbar() {
       navHome();
     });
   }
+  var navHomeLink = document.getElementById('nav-home');
+  if (navHomeLink && !navHomeLink.getAttribute('data-wired')) {
+    navHomeLink.setAttribute('data-wired', '1');
+    navHomeLink.addEventListener('click', function (e) {
+      if (e && e.preventDefault) e.preventDefault();
+      navHome();
+    });
+  }
   var cok = document.getElementById('confirm-ok');
   if (cok && !cok.getAttribute('data-wired')) {
     cok.setAttribute('data-wired', '1');

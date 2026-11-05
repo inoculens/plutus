@@ -17989,7 +17989,7 @@ function buildSettings() {
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
     '<h3 class="set-heading">Bookkeeping defaults</h3>' +
     '<p class="muted set-blurb">These codes are the starting template for new cash accounts. Subledgers nest by code prefix. Changes here affect future suggestions only; existing records keep their saved labels. To customize one account, edit its ledger directly.</p>' +
-    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Ledgers on asset accounts (optional per income/expense record)</label>' +
+    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Show ledgers on asset accounts (optional for each income or expense record)</label>' +
     '<label for="l-code">Code</label>' +
     '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="l-label">Label</label>' +
@@ -18009,7 +18009,7 @@ function buildSettings() {
     '<section data-setpanel="sync" role="tabpanel" aria-label="Encrypted sync" hidden>' +
     '<h3 class="set-heading">Your encrypted cloud copy</h3>' +
     '<p class="muted set-blurb">Keep an encrypted copy on a cloud drive you control. Your passphrase encrypts the data before upload, so the provider stores ciphertext rather than readable records. Use the same passphrase on each device.</p>' +
-    '<label for="sy-provider">Provider</label>' +
+    '<label for="sy-provider">Cloud provider</label>' +
     '<select id="sy-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
     '<option value="gdrive">Google Drive</option>' +
@@ -18022,30 +18022,30 @@ function buildSettings() {
     '<input id="sy-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="sy-user">Username</label>' +
     '<input id="sy-user" autocomplete="username" spellcheck="false">' +
-    '<label for="sy-passwd">App password</label>' +
+    '<label for="sy-passwd">App-specific password</label>' +
     '<input id="sy-passwd" type="password" autocomplete="current-password">' +
-    '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password in this browser</label>' +
-    '<label for="sy-filename">File name</label>' +
+    '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password on this device</label>' +
+    '<label for="sy-filename">Backup file name</label>' +
     '<input id="sy-filename" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name. Missing folders are created automatically.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name. Missing folders are created automatically.</p>' +
     '</div>' +
     '<div id="sy-g-oauth" hidden>' +
     '<p class="muted set-blurb" id="sy-oneclick-note"></p>' +
-    '<label for="sy-filename2">File name</label>' +
+    '<label for="sy-filename2">Backup file name</label>' +
     '<input id="sy-filename2" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name.</p>' +
     '<label for="sy-folder2">Folder (optional)</label>' +
     '<input id="sy-folder2" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Work">' +
-    '<p class="muted set-blurb">Keep profiles apart with folders — a name already taken in the folder is refused, never overwritten. Leave empty for the top level; subfolders are created if missing.</p>' +
+    '<p class="muted set-blurb">Use a folder to keep backups separate. Existing files are never overwritten. Leave blank to save at the top level; missing folders are created automatically.</p>' +
     '<details class="adv" id="sy-adv">' +
-    '<summary>Bring your own OAuth app (advanced)</summary>' +
-    '<label for="sy-client">OAuth client ID (your own app)</label>' +
+    '<summary>Use your own OAuth app (advanced)</summary>' +
+    '<label for="sy-client">OAuth client ID</label>' +
     '<input id="sy-client" autocomplete="off" spellcheck="false">' +
     '<div id="sy-g-secret">' +
     '<label for="sy-secret">OAuth client secret (Google only)</label>' +
     '<input id="sy-secret" type="password" autocomplete="off">' +
     '</div>' +
-    '<p class="muted set-blurb">Redirect URI to register in your OAuth app:</p>' +
+    '<p class="muted set-blurb">Add this redirect URI to your OAuth app:</p>' +
     '<p class="mono-break" id="sy-redirect"></p>' +
     '</details>' +
     '</div>' +
@@ -18060,13 +18060,13 @@ function buildSettings() {
     '<input id="sy-key" autocomplete="off" spellcheck="false">' +
     '<label for="sy-skey">Secret key</label>' +
     '<input id="sy-skey" type="password" autocomplete="off">' +
-    '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key in this browser</label>' +
-    '<label for="sy-object">File name</label>' +
+    '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key on this device</label>' +
+    '<label for="sy-object">Backup file name</label>' +
     '<input id="sy-object" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name.</p>' +
     '<label for="sy-folder3">Folder prefix (optional)</label>' +
     '<input id="sy-folder3" autocomplete="off" spellcheck="false" placeholder="e.g. backups/work">' +
-    '<p class="muted set-blurb">Keep profiles apart with prefixes — a name already taken is refused, never overwritten. Leave empty for the bucket top level.</p>' +
+    '<p class="muted set-blurb">Use a prefix to keep backups separate. Existing files are never overwritten. Leave blank to save at the bucket top level.</p>' +
     '</div>' +
     '<label for="sy-pass">Encryption passphrase</label>' +
     '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required to encrypt and restore your data">' +
@@ -18093,12 +18093,12 @@ function buildSettings() {
     '<input id="pd-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="pd-user">Username</label>' +
     '<input id="pd-user" autocomplete="username" spellcheck="false">' +
-    '<label for="pd-passwd">App password</label>' +
+    '<label for="pd-passwd">App-specific password</label>' +
     '<input id="pd-passwd" type="password" autocomplete="current-password">' +
-    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-data password in this browser</label>' +
+    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-history password on this device</label>' +
     '</div>' +
     '<div id="pd-g-oauth" hidden>' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name. Google Drive and Dropbox use the existing OAuth sign-in infrastructure. The price-data file is encrypted with the Sync passphrase above.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name. Google Drive and Dropbox use the existing OAuth sign-in infrastructure. This file uses the encryption passphrase above.</p>' +
     '</div>' +
     '<div id="pd-g-megas3" hidden>' +
     '<label for="pd-endpoint">MEGA S4 endpoint</label>' +
@@ -18111,7 +18111,7 @@ function buildSettings() {
     '<input id="pd-key" autocomplete="off" spellcheck="false">' +
     '<label for="pd-skey">Secret key</label>' +
     '<input id="pd-skey" type="password" autocomplete="off">' +
-    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-data secret key in this browser</label>' +
+    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-history secret key on this device</label>' +
     '</div>' +
     '<p class="muted set-blurb">With a separate destination, sign-in details are stored apart from your main records connection. The file uses the name you enter.</p>' +
     '<div class="sync-btns">' +
@@ -18119,14 +18119,14 @@ function buildSettings() {
     '<button id="pd-sync" type="button">Sync price history now</button>' +
     '</div>' +
     '</div>' +
-    '<p class="muted set-blurb" id="pd-status">Price Data is stored next to the Records Data file.</p>' +
+    '<p class="muted set-blurb" id="pd-status">Price history is stored alongside your records backup.</p>' +
     '<p class="muted set-blurb" id="sy-status">Not connected.</p>' +
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
     '<button id="sy-disconnect" type="button">Disconnect</button>' +
     '<button id="sy-push" type="button">Upload latest changes</button>' +
     '<button id="sy-pull" type="button">Restore from drive</button>' +
-    '<button id="sy-cleanup" type="button">Clean up cloud files</button>' +
+    '<button id="sy-cleanup" type="button">Remove old cloud copies</button>' +
     '</div>' +
     '<span id="s-enc-label">Encrypted backup · requires the passphrase above</span>' +
     '<button id="sy-enc-download" type="button">Download encrypted backup</button>' +
@@ -21153,7 +21153,7 @@ function syncPullAttachment(cfg, pass, meta) {
   });
 }
 
-// --- Orphaned-blob cleanup ("Clean up cloud files") ---
+// --- Orphaned-blob cleanup ("Remove old cloud copies") ---
 // Lists our <base>-att-<hash>.enc.json objects at the destination, keeps
 // the ones no record on this device references, and deletes the rest only
 // after an explicit confirm. Never automatic: a hash missing here may be
@@ -22776,7 +22776,7 @@ function priceDataRefreshPanel() {
   var status = document.getElementById('pd-status');
   if (status && !priceDataSyncBusy) {
     status.textContent = cfg.sameAsRecords
-      ? 'Price Data is stored next to the Records Data file.'
+      ? 'Price history is stored alongside your records backup.'
       : 'Price Data destination: ' + syncProviderLabel(cfg.provider) + ' / ' + cfg.filename;
   }
 }

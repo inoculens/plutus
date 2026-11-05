@@ -4992,3 +4992,50 @@ label.sync-check {
 #settings-dialog .set-panels .set-heading {
   gap: 0.5rem;
 }
+
+/* "Encrypted backup" is a span rather than a label, so it needs the same
+   explicit 0.5rem gap instead of the pill's inline margin. */
+#settings-dialog .set-panels #s-enc-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+#settings-dialog .set-panels #s-enc-label .info-pill {
+  margin-left: 0 !important;
+}
+
+/* Price history belongs to the same cloud setup, so it follows the credential
+   card model: one bordered card, a plain remember row and flush fields
+   instead of a second nested card with its own chrome. */
+#settings-dialog .set-panels .sync-feature-group {
+  gap: 0.3rem;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.018);
+}
+#settings-dialog .set-panels .sync-feature-group > .sync-subheading {
+  margin: 0 0 0.15rem;
+}
+#settings-dialog .set-panels .sync-feature-group > label.sync-check {
+  min-height: 0;
+  margin: 0.35rem 0 0;
+  padding: 0.15rem 0 0.15rem 0.1rem;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  gap: 0.5rem;
+}
+#settings-dialog .set-panels .sync-feature-settings {
+  gap: 0.3rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+#settings-dialog .set-panels #pd-status {
+  margin: 0.35rem 0 0;
+  padding: 0 0.1rem;
+  font-size: 0.76rem;
+}

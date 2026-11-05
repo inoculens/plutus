@@ -8048,7 +8048,9 @@ function updateNetWorthHistory(st, value, main) {
         return;
       }
       if (status.state !== 'loading' && status.state !== 'error' && status.state !== 'incomplete') return;
-      netWorthHistoryLoadingBannerShown = (status.state === 'loading');
+      // The chart shows its own loading status, so loading never raises a toast.
+      if (status.state === 'loading') return;
+      netWorthHistoryLoadingBannerShown = false;
       var message = String(status.message || 'Some historical prices are unavailable.');
       showBanner(
         status.state === 'loading'
@@ -17942,9 +17944,66 @@ function refreshLedgerList() {
   });
 }
 
+// Info pill: a tiny (i) button whose text opens in a small popover, so
+// screens carry labels instead of helper paragraphs. The popover lives in the
+// top layer so it also shows above modal dialogs.
+function infoPill(text, id) {
+  var t = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return '<button type="button" class="info-pill"' + (id ? ' id="' + id + '"' : '') +
+    ' data-info="' + t + '" aria-label="' + t + '" aria-expanded="false">i</button>';
+}
+var infoPillReady = false;
+function initInfoPills() {
+  if (infoPillReady || typeof document === 'undefined') return;
+  infoPillReady = true;
+  var pop = document.createElement('div');
+  pop.id = 'info-pop';
+  pop.setAttribute('role', 'status');
+  var canPop = typeof pop.showPopover === 'function';
+  if (canPop) pop.setAttribute('popover', 'manual');
+  pop.hidden = true;
+  document.body.appendChild(pop);
+  var current = null;
+  function hide() {
+    if (current) current.setAttribute('aria-expanded', 'false');
+    current = null;
+    pop.hidden = true;
+    if (canPop) { try { pop.hidePopover(); } catch (e) { /* not open */ } }
+  }
+  function show(btn) {
+    pop.textContent = btn.getAttribute('data-info') || '';
+    if (!pop.textContent) return;
+    pop.hidden = false;
+    if (canPop) { try { pop.showPopover(); } catch (e) { /* already open */ } }
+    current = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    var r = btn.getBoundingClientRect();
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    var left = Math.max(8, Math.min(vw - w - 8, r.left + r.width / 2 - w / 2));
+    var top = r.bottom + 8;
+    if (top + h > vh - 8) top = Math.max(8, r.top - h - 8);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('.info-pill') : null;
+    if (btn) {
+      e.preventDefault();
+      if (current === btn) hide(); else { hide(); show(btn); }
+      return;
+    }
+    hide();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hide(); }, true);
+  window.addEventListener('resize', hide);
+  document.addEventListener('scroll', hide, true);
+}
+
 function buildSettings() {
   var host = document.getElementById('settings-dialog-body');
   if (!host || document.getElementById('o-add')) return;
+  initInfoPills();
   var wrap = document.createElement('div');
   wrap.className = 'set-layout';
   wrap.innerHTML =
@@ -17958,8 +18017,7 @@ function buildSettings() {
     '</div>' +
     '<div class="set-panels">' +
     '<section data-setpanel="overrides" role="tabpanel" aria-label="Price overrides">' +
-    '<h3 class="set-heading">Market pricing</h3>' +
-    '<p class="muted set-blurb">Use a manual quote when a market price is unavailable or you prefer a specific source. Overrides take priority over fetched quotes for the matching symbol.</p>' +
+    '<h3 class="set-heading">Market pricing ' + infoPill('Use a manual quote when a market price is unavailable or you prefer a specific source. It takes priority over fetched quotes for that symbol.') + '</h3>' +
     '<label for="o-symbol">Symbol</label>' +
     '<input id="o-symbol" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
     '<label for="o-price">Price (in current fiat)</label>' +
@@ -17968,8 +18026,7 @@ function buildSettings() {
     '<ul id="o-list"></ul>' +
     '</section>' +
     '<section data-setpanel="date-format" role="tabpanel" aria-label="Date format" hidden>' +
-    '<h3 class="set-heading">Date display</h3>' +
-    '<p class="muted set-blurb">Choose how dates appear throughout the app. Your records stay stored in a consistent format and are not changed.</p>' +
+    '<h3 class="set-heading">Date display ' + infoPill('Changes how dates appear. Your records are stored the same way regardless.') + '</h3>' +
     '<label for="set-date-format">Date format</label>' +
     '<select id="set-date-format">' +
     '<option value="DD/MM/YYYY">Day first · DD/MM/YYYY</option>' +
@@ -17979,17 +18036,15 @@ function buildSettings() {
     '<option value="custom">Custom</option>' +
     '</select>' +
     '<div id="set-date-format-custom" hidden>' +
-    '<label for="set-date-format-pattern">Custom pattern</label>' +
+    '<label for="set-date-format-pattern">Custom pattern ' + infoPill('D or DD for day, M or MM for month, YYYY for year, in any order, separated by / . - or a space.') + '</label>' +
     '<input id="set-date-format-pattern" autocomplete="off" spellcheck="false" maxlength="10" placeholder="e.g. DD.MM.YYYY">' +
-    '<p class="muted set-blurb">Use D or DD for day, M or MM for month, and YYYY for year, in any order, separated by /, ., - or spaces.</p>' +
-    '</div>' +
+        '</div>' +
     '<p class="muted set-blurb" id="set-date-format-preview"></p>' +
     '<button id="set-date-format-apply" type="button">Apply date format</button>' +
     '</section>' +
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
-    '<h3 class="set-heading">Bookkeeping defaults</h3>' +
-    '<p class="muted set-blurb">These codes are the starting template for new cash accounts. Subledgers nest by code prefix. Changes here affect future suggestions only; existing records keep their saved labels. To customize one account, edit its ledger directly.</p>' +
-    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Show ledgers on asset accounts (optional for each income or expense record)</label>' +
+    '<h3 class="set-heading">Bookkeeping defaults ' + infoPill('The starting template for new cash accounts. Subledgers nest by code prefix. Changes only affect future suggestions; existing records keep their saved labels. To customize one account, edit its ledger directly.') + '</h3>' +
+    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Ledgers on asset accounts ' + infoPill('Optional for each income or expense record.') + '</label>' +
     '<label for="l-code">Code</label>' +
     '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="l-label">Label</label>' +
@@ -17998,54 +18053,48 @@ function buildSettings() {
     '<ul id="l-list"></ul>' +
     '</section>' +
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
-    '<h3 class="set-heading">Your records, in your hands</h3>' +
-    '<p class="muted set-blurb">Records are stored on this device by default. Download a JSON backup to keep a safe copy or move your data to another device. CSV exports are designed for spreadsheets and tax-lot review.</p>' +
+    '<h3 class="set-heading">Backups ' + infoPill('Records live on this device. Download a JSON backup to keep a safe copy or move to another device. CSV exports are for spreadsheets and tax-lot review.') + '</h3>' +
     '<button id="s-download" type="button">Download backup</button>' +
-    '<button id="s-csv-trades" type="button">Export trades (CSV)</button>' +
-    '<button id="s-csv-lots" type="button">Export FIFO tax lots (CSV)</button>' +
-    '<span id="s-upload-label">Restore from a backup file</span>' +
+    '<button id="s-csv-trades" type="button">Trades CSV</button>' +
+    '<button id="s-csv-lots" type="button">FIFO tax lots CSV</button>' +
+    '<span id="s-upload-label">Restore from file</span>' +
     '<input id="s-upload" type="file" accept="application/json,.json">' +
     '</section>' +
     '<section data-setpanel="sync" role="tabpanel" aria-label="Encrypted sync" hidden>' +
-    '<h3 class="set-heading">Your encrypted cloud copy</h3>' +
-    '<p class="muted set-blurb">Keep an encrypted copy on a cloud drive you control. Your passphrase encrypts the data before upload, so the provider stores ciphertext rather than readable records. Use the same passphrase on each device.</p>' +
-    '<label for="sy-provider">Cloud provider</label>' +
+    '<h3 class="set-heading">Encrypted cloud copy ' + infoPill('Your passphrase encrypts the data before upload, so the provider only stores ciphertext. Use the same passphrase on each device.') + '</h3>' +
+    '<label for="sy-provider">Cloud provider ' + infoPill('', 'sy-hint') + '</label>' +
     '<select id="sy-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
     '<option value="gdrive">Google Drive</option>' +
     '<option value="dropbox">Dropbox</option>' +
     '<option value="megas3">MEGA (S4 object storage)</option>' +
     '</select>' +
-    '<p class="muted set-blurb" id="sy-hint"></p>' +
-    '<div id="sy-g-webdav">' +
+        '<div id="sy-g-webdav">' +
     '<label for="sy-url">Server URL</label>' +
     '<input id="sy-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="sy-user">Username</label>' +
     '<input id="sy-user" autocomplete="username" spellcheck="false">' +
     '<label for="sy-passwd">App-specific password</label>' +
     '<input id="sy-passwd" type="password" autocomplete="current-password">' +
-    '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password on this device</label>' +
-    '<label for="sy-filename">Backup file name</label>' +
+    '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password</label>' +
+    '<label for="sy-filename">File name ' + infoPill('The .enc.json ending is added automatically. Missing folders are created automatically.') + '</label>' +
     '<input id="sy-filename" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name. Missing folders are created automatically.</p>' +
-    '</div>' +
+        '</div>' +
     '<div id="sy-g-oauth" hidden>' +
     '<p class="muted set-blurb" id="sy-oneclick-note"></p>' +
-    '<label for="sy-filename2">Backup file name</label>' +
+    '<label for="sy-filename2">File name ' + infoPill('The .enc.json ending is added automatically.') + '</label>' +
     '<input id="sy-filename2" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name.</p>' +
-    '<label for="sy-folder2">Folder (optional)</label>' +
+    '<label for="sy-folder2">Folder ' + infoPill('Optional. Keeps backups separate; existing files are never overwritten. Leave blank for the top level. Missing folders are created automatically.') + '</label>' +
     '<input id="sy-folder2" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Work">' +
-    '<p class="muted set-blurb">Use a folder to keep backups separate. Existing files are never overwritten. Leave blank to save at the top level; missing folders are created automatically.</p>' +
-    '<details class="adv" id="sy-adv">' +
-    '<summary>Use your own OAuth app (advanced)</summary>' +
-    '<label for="sy-client">OAuth client ID</label>' +
+        '<details class="adv" id="sy-adv">' +
+    '<summary>Your own OAuth app</summary>' +
+    '<label for="sy-client">Client ID</label>' +
     '<input id="sy-client" autocomplete="off" spellcheck="false">' +
     '<div id="sy-g-secret">' +
-    '<label for="sy-secret">OAuth client secret (Google only)</label>' +
+    '<label for="sy-secret">Client secret</label>' +
     '<input id="sy-secret" type="password" autocomplete="off">' +
     '</div>' +
-    '<p class="muted set-blurb">Add this redirect URI to your OAuth app:</p>' +
+    '<label>Redirect URI ' + infoPill('Add this address to your OAuth app.') + '</label>' +
     '<p class="mono-break" id="sy-redirect"></p>' +
     '</details>' +
     '</div>' +
@@ -18060,33 +18109,29 @@ function buildSettings() {
     '<input id="sy-key" autocomplete="off" spellcheck="false">' +
     '<label for="sy-skey">Secret key</label>' +
     '<input id="sy-skey" type="password" autocomplete="off">' +
-    '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key on this device</label>' +
-    '<label for="sy-object">Backup file name</label>' +
+    '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key</label>' +
+    '<label for="sy-object">File name ' + infoPill('The .enc.json ending is added automatically.') + '</label>' +
     '<input id="sy-object" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name.</p>' +
-    '<label for="sy-folder3">Folder prefix (optional)</label>' +
+    '<label for="sy-folder3">Folder prefix ' + infoPill('Optional. Keeps backups separate; existing files are never overwritten. Leave blank for the bucket top level.') + '</label>' +
     '<input id="sy-folder3" autocomplete="off" spellcheck="false" placeholder="e.g. backups/work">' +
-    '<p class="muted set-blurb">Use a prefix to keep backups separate. Existing files are never overwritten. Leave blank to save at the bucket top level.</p>' +
-    '</div>' +
-    '<label for="sy-pass">Encryption passphrase</label>' +
-    '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required to encrypt and restore your data">' +
-    '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember this passphrase on this device</label>' +
-    '<p class="muted set-blurb" id="sy-fp">Key fingerprint: —</p>' +
-    '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically after changes</label>' +
-    '<p class="muted set-blurb">Connected devices check for newer changes every few seconds and update automatically.</p>' +
-    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Store price history with your records backup</label>' +
-    '<p class="muted set-blurb">Includes historical quotes and chart data. This encrypted cache can be rebuilt and is kept separate from your account records.</p>' +
+        '</div>' +
+    '<label for="sy-pass">Passphrase ' + infoPill('Required to encrypt and restore your data. The same passphrase gives the same key fingerprint on every device.') + '</label>' +
+    '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required">' +
+    '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember passphrase</label>' +
+    '<p class="muted set-blurb" id="sy-fp">Key fingerprint —</p>' +
+    '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically ' + infoPill('Syncs after every change. Connected devices check for newer changes every few seconds and update on their own.') + '</label>' +
+    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Price history with records ' + infoPill('Historical quotes and chart data. This encrypted cache can be rebuilt and stays separate from your account records.') + '</label>' +
     '<div id="pd-independent" hidden>' +
-    '<label for="pd-provider">Price history destination</label>' +
+    '<label for="pd-provider">Price history destination ' + infoPill('Google Drive and Dropbox reuse the sign-in above. The file is encrypted with your passphrase.') + '</label>' +
     '<select id="pd-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
     '<option value="gdrive">Google Drive</option>' +
     '<option value="dropbox">Dropbox</option>' +
     '<option value="megas3">MEGA (S4 object storage)</option>' +
     '</select>' +
-    '<label for="pd-filename">Price history file name</label>' +
+    '<label for="pd-filename">File name ' + infoPill('The file uses the name you enter. Sign-in details are stored apart from your main records connection.') + '</label>' +
     '<input id="pd-filename" autocomplete="off" spellcheck="false" placeholder="price-data.plutus.inoculens.com">' +
-    '<label for="pd-folder">Folder (optional)</label>' +
+    '<label for="pd-folder">Folder</label>' +
     '<input id="pd-folder" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Prices">' +
     '<div id="pd-g-webdav" hidden>' +
     '<label for="pd-url">WebDAV server URL</label>' +
@@ -18095,11 +18140,9 @@ function buildSettings() {
     '<input id="pd-user" autocomplete="username" spellcheck="false">' +
     '<label for="pd-passwd">App-specific password</label>' +
     '<input id="pd-passwd" type="password" autocomplete="current-password">' +
-    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-history password on this device</label>' +
+    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember password</label>' +
     '</div>' +
-    '<div id="pd-g-oauth" hidden>' +
-    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name. Google Drive and Dropbox use the existing OAuth sign-in infrastructure. This file uses the encryption passphrase above.</p>' +
-    '</div>' +
+    '<div id="pd-g-oauth" hidden></div>' +
     '<div id="pd-g-megas3" hidden>' +
     '<label for="pd-endpoint">MEGA S4 endpoint</label>' +
     '<input id="pd-endpoint" autocomplete="off" spellcheck="false" placeholder="https://s3.eu-amsterdam.megas4.com">' +
@@ -18111,30 +18154,28 @@ function buildSettings() {
     '<input id="pd-key" autocomplete="off" spellcheck="false">' +
     '<label for="pd-skey">Secret key</label>' +
     '<input id="pd-skey" type="password" autocomplete="off">' +
-    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-history secret key on this device</label>' +
+    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember secret key</label>' +
     '</div>' +
-    '<p class="muted set-blurb">With a separate destination, sign-in details are stored apart from your main records connection. The file uses the name you enter.</p>' +
-    '<div class="sync-btns">' +
-    '<button id="pd-connect" type="button">Connect price history destination</button>' +
-    '<button id="pd-sync" type="button">Sync price history now</button>' +
+        '<div class="sync-btns">' +
+    '<button id="pd-connect" type="button">Connect</button>' +
+    '<button id="pd-sync" type="button">Sync prices</button>' +
     '</div>' +
     '</div>' +
-    '<p class="muted set-blurb" id="pd-status">Price history is stored alongside your records backup.</p>' +
+    '<p class="muted set-blurb" id="pd-status">Stored with your records.</p>' +
     '<p class="muted set-blurb" id="sy-status">Not connected.</p>' +
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
     '<button id="sy-disconnect" type="button">Disconnect</button>' +
-    '<button id="sy-push" type="button">Upload latest changes</button>' +
+    '<button id="sy-push" type="button">Sync now</button>' +
     '<button id="sy-pull" type="button">Restore from drive</button>' +
-    '<button id="sy-cleanup" type="button">Remove old cloud copies</button>' +
+    '<button id="sy-cleanup" type="button">Clean up</button>' +
     '</div>' +
-    '<span id="s-enc-label">Encrypted backup · requires the passphrase above</span>' +
+    '<span id="s-enc-label">Encrypted backup ' + infoPill('Needs your passphrase to open.') + '</span>' +
     '<button id="sy-enc-download" type="button">Download encrypted backup</button>' +
     '<input id="sy-enc-upload" type="file" accept="application/json,.json">' +
     '</section>' +
     '<section data-setpanel="danger" role="tabpanel" aria-label="Delete data" hidden>' +
-    '<h3 class="set-heading">Clear this browser</h3>' +
-    '<p class="muted set-blurb">Permanently removes the accounts, records and settings stored in this browser. Copies already saved to a cloud drive are separate and must be deleted there.</p>' +
+    '<h3 class="set-heading">Clear this browser ' + infoPill('Permanently removes the accounts, records and settings stored in this browser. Copies on a cloud drive are separate and must be deleted there.') + '</h3>' +
     '<button id="s-clear" type="button">Clear all data</button>' +
     '</section>' +
     '</div>';
@@ -19126,10 +19167,10 @@ var SYNC_PROVIDERS = [
   { id: 'megas3', label: 'MEGA (S4 object storage)', kind: 's3' }
 ];
 var SYNC_HINTS = {
-  webdav: 'Nextcloud or any WebDAV host. Create a folder (e.g. INOCULENS-PLUTUS), paste its URL, and sign in with an app password. Only ciphertext is uploaded.',
-  gdrive: 'One-click Google sign-in when enabled below — otherwise expand the advanced box and use your own OAuth app (Web application, Drive API enabled). The app only sees files it created.',
-  dropbox: 'One-click Dropbox sign-in when enabled below — otherwise your own Dropbox app (Scoped access, App folder) plus its app key in the advanced box. Files stay in the private app folder.',
-  megas3: 'MEGA S4 object storage (needs a MEGA account with S4). Create a bucket and access keys under Object Storage, then fill endpoint, region, bucket and keys. Only ciphertext is stored.'
+  webdav: 'Nextcloud or any WebDAV host. Create a folder (e.g. INOCULENS-PLUTUS), paste its URL and sign in with an app password.',
+  gdrive: 'One-click Google sign-in, or use your own OAuth app (Web application, Drive API enabled). The app only sees files it created. Sessions last about an hour; reconnect when asked.',
+  dropbox: 'One-click Dropbox sign-in, or your own Dropbox app (Scoped access, App folder) with its app key. Files stay in the private app folder.',
+  megas3: 'MEGA S4 object storage (needs a MEGA account with S4). Create a bucket and access keys under Object Storage, then fill in the fields.'
 };
 
 // Built-in OAuth app IDs for one-click sign-in (public by design, exactly
@@ -22607,7 +22648,7 @@ function syncRefreshSyncPanel(opts) {
     if (g) g.hidden = (groups[cfg.provider] !== ids[i]);
   }
   var hint = document.getElementById('sy-hint');
-  if (hint) hint.textContent = SYNC_HINTS[cfg.provider] || '';
+  if (hint) { hint.setAttribute('data-info', SYNC_HINTS[cfg.provider] || ''); hint.setAttribute('aria-label', SYNC_HINTS[cfg.provider] || 'More info'); hint.hidden = !SYNC_HINTS[cfg.provider]; }
   var sec = document.getElementById('sy-g-secret');
   if (sec) sec.hidden = (cfg.provider !== 'gdrive');
   var redir = document.getElementById('sy-redirect');
@@ -22621,8 +22662,8 @@ function syncRefreshSyncPanel(opts) {
   var note = document.getElementById('sy-oneclick-note');
   if (note) {
     note.textContent = sharedNow
-      ? ('One-click sign-in is ready — just press Connect.' + (cfg.provider === 'gdrive' ? ' Google sessions last about an hour; reconnect when asked.' : ''))
-      : 'One-click is not set up for this provider yet — expand the advanced box below to use your own OAuth app.';
+      ? 'One-click sign-in ready'
+      : 'Add your own OAuth app below';
   }
   var adv = document.getElementById('sy-adv');
   if (adv) {
@@ -22686,11 +22727,11 @@ function syncRefreshSyncPanel(opts) {
       var cur = document.getElementById('sy-pass');
       if (cur && cur.value === v0) {
         var fel = document.getElementById('sy-fp');
-        if (fel) fel.textContent = 'Key fingerprint: ' + (f || '—') + ' (same on all devices = same passphrase)';
+        if (fel) fel.textContent = 'Key fingerprint ' + (f || '—');
       }
     });
   } else if (fp) {
-    fp.textContent = 'Key fingerprint: —';
+    fp.textContent = 'Key fingerprint —';
   }
   try { syncToggleEncButtons(); } catch (e) { /* ignore */ }
   try { priceDataRefreshPanel(); } catch (e2) { /* separate cache settings must not break Records Data sync */ }
@@ -22776,7 +22817,7 @@ function priceDataRefreshPanel() {
   var status = document.getElementById('pd-status');
   if (status && !priceDataSyncBusy) {
     status.textContent = cfg.sameAsRecords
-      ? 'Price history is stored alongside your records backup.'
+      ? 'Stored with your records.'
       : 'Price Data destination: ' + syncProviderLabel(cfg.provider) + ' / ' + cfg.filename;
   }
 }
@@ -23287,13 +23328,13 @@ function buildSyncSettings() {
       var v = passEl.value || '';
       var fp = document.getElementById('sy-fp');
       if (!v) {
-        if (fp) fp.textContent = 'Key fingerprint: —';
+        if (fp) fp.textContent = 'Key fingerprint —';
       } else {
         syncFingerprint(v).then(function (f) {
           var cur = document.getElementById('sy-pass');
           if (cur && cur.value === v) {
             var fel = document.getElementById('sy-fp');
-            if (fel) fel.textContent = 'Key fingerprint: ' + (f || '—') + ' (same on all devices = same passphrase)';
+            if (fel) fel.textContent = 'Key fingerprint ' + (f || '—');
           }
         });
       }

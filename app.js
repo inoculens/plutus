@@ -14379,21 +14379,21 @@ function buildTradeForm() {
     '<div id="t-toaccount-row" hidden><label for="t-toaccount" id="t-toaccount-label">To account (optional)' + infoPill('Transfer moves cost basis — only the network + fiat fees count as losses.', 't-toaccount-hint') + '</label>' +
     '<select id="t-toaccount"></select></div>' +
     '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity' + infoPill('Amount you received (net of any fee taken in asset).', 't-qty-hint') + '</label>' +
-    '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
+    '<input id="t-qty" autocomplete="off" inputmode="decimal" placeholder="e.g. 1">' +
     '</div>' +
     '<div id="t-toqty-row" hidden><label for="t-toqty" id="t-toqty-label">Received quantity' + infoPill('', 't-toqty-hint') + '</label>' +
-    '<input id="t-toqty" inputmode="decimal" placeholder="e.g. 15.2">' +
+    '<input id="t-toqty" autocomplete="off" inputmode="decimal" placeholder="e.g. 15.2">' +
     '</div>' +
     '<div id="t-recipients" hidden><span class="fld-label">Recipients' + infoPill('One transaction, many recipients — internal moves keep their cost basis, external rows spend by default. Amount that stayed here goes in Received back below.', 't-rec-hint') + '</span>' +
     '<div id="t-rec-list"></div>' +
     '<button type="button" id="t-rec-add">+ Add recipient</button>' +
     '</div>' +
     '<div id="t-selfrecv-row" hidden><label for="t-selfrecv" id="t-selfrecv-label">Received back (same account)' + infoPill('Part of the send that stayed in this account — fee = sent − recipients − this.', 't-selfrecv-hint') + '</label>' +
-    '<input id="t-selfrecv" inputmode="decimal" placeholder="e.g. 0.99">' +
+    '<input id="t-selfrecv" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.99">' +
     '</div>' +
     '<div class="fld-locked" hidden><span class="fld-label">Symbol (locked to account)</span> <span id="t-symbol-locked" role="status"></span></div>' +
     '<div id="t-total-row"><label for="t-total" id="t-total-label">Total (native currency)' + infoPill('Full amount paid, including the fee below.', 't-total-hint') + '</label>' +
-    '<input id="t-total" inputmode="decimal" placeholder="e.g. 50000">' +
+    '<input id="t-total" autocomplete="off" inputmode="decimal" placeholder="e.g. 50000">' +
     '</div>' +
     '<div id="t-currency-row"><label for="t-currency">Currency</label>' +
     '<select id="t-currency">' + ccyOptions('EUR') + '</select></div>' +
@@ -14409,10 +14409,10 @@ function buildTradeForm() {
     '<input id="t-ledger-label" autocomplete="off" spellcheck="false" placeholder="e.g. Income from X" maxlength="80">' +
     '</div>' +
     '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)' + infoPill('Fee calculated automatically from the send and received inputs above.', 't-networkfee-hint') + '</label>' +
-    '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
+    '<input id="t-networkfee" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
     '</div>' +
     '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat, optional)' + infoPill('Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.') + '</label>' +
-    '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
+    '<input id="t-fee" autocomplete="off" inputmode="decimal" placeholder="e.g. 0">' +
     '</div>' +
     '<label for="t-note">Note (optional)</label>' +
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
@@ -14423,9 +14423,9 @@ function buildTradeForm() {
     '<p class="fld-hint" id="t-attach-cur" hidden></p>' +
     '<button type="button" id="t-attach-remove" hidden>Remove file</button></div>' +
     '<label for="t-manual-rate">Manual FX rate (optional fallback when ECB is unavailable)</label>' +
-    '<input id="t-manual-rate" inputmode="decimal" placeholder="e.g. 0.92">' +
+    '<input id="t-manual-rate" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.92">' +
     '<label for="t-manual-price">Manual exec price (optional, this trade only, in trade fiat)</label>' +
-    '<input id="t-manual-price" inputmode="decimal" placeholder="e.g. 67000">' +
+    '<input id="t-manual-price" autocomplete="off" inputmode="decimal" placeholder="e.g. 67000">' +
     '</details>' +
     '<div class="t-dock">' +
     '<div id="t-error-panel" class="t-err" role="alert" aria-live="assertive" hidden>' +
@@ -14760,9 +14760,9 @@ function addRecipientRow(data) {
     '<label>Kind<select class="rec-kind"><option value="internal">Internal — own account</option><option value="external">External — someone else</option></select></label>' +
     '<label class="rec-acc-wrap">Account<select class="rec-account"></select></label>' +
     '<label class="rec-label-wrap" hidden>Label<input class="rec-label" autocomplete="off" spellcheck="false" maxlength="80" placeholder="e.g. friend / merchant"></label>' +
-    '<label>Amount<input class="rec-qty" inputmode="decimal" placeholder="e.g. 0.1"></label>' +
-    '<label class="rec-toqty-wrap" hidden>Received (dest fiat)<input class="rec-toqty" inputmode="decimal" placeholder="e.g. 15.2"></label>' +
-    '<label>Fee share (optional)<input class="rec-fee" inputmode="decimal" placeholder="e.g. 0.0001"></label>' +
+    '<label>Amount<input class="rec-qty" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.1"></label>' +
+    '<label class="rec-toqty-wrap" hidden>Received (dest fiat)<input class="rec-toqty" autocomplete="off" inputmode="decimal" placeholder="e.g. 15.2"></label>' +
+    '<label>Fee share (optional)<input class="rec-fee" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.0001"></label>' +
     '</div>' +
     '<label class="rec-spend-wrap" hidden><input type="checkbox" class="rec-spend" checked> Spend (counts as expense — untick for a neutral hand-over)</label>' +
     '<button type="button" class="rec-remove quiet">Remove</button>';
@@ -14909,8 +14909,8 @@ function addSourceRow(data) {
   row.innerHTML =
     '<div class="src-grid">' +
     '<label>Account<select class="src-account"></select></label>' +
-    '<label>Qty<input class="src-qty" inputmode="decimal" placeholder="e.g. 0.1"></label>' +
-    '<label>Fee<input class="src-fee" inputmode="decimal" placeholder="e.g. 0.0001"></label>' +
+    '<label>Qty<input class="src-qty" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.1"></label>' +
+    '<label>Fee<input class="src-fee" autocomplete="off" inputmode="decimal" placeholder="e.g. 0.0001"></label>' +
     '<div class="src-actions"><button type="button" class="src-max quiet">Max</button>' +
     '<button type="button" class="src-remove quiet"' + (!list.querySelector('.src-row') ? ' hidden disabled' : '') + '>Remove</button></div>' +
     '<label class="src-auto-wrap"><input type="checkbox" class="src-auto" checked> Auto fee</label>' +

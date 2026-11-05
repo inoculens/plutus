@@ -5058,10 +5058,10 @@ label.sync-check {
   padding: 0.05rem 0.1rem;
   line-height: 1.45;
 }
-/* Direct grid children already receive the form gap: trim it so every
-   label sits the same 0.3rem above its control. */
+/* Direct grid children already receive the form gap, which supplies the
+   label-to-control space without a second margin. */
 #trade-form > label:not(.sync-check) {
-  margin-bottom: -0.1rem;
+  margin-bottom: 0;
 }
 #trade-form > label:not(.sync-check):first-child {
   margin-top: 0;

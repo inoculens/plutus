@@ -15294,7 +15294,7 @@ function syncTradeTypeUI() {
     var fromId = uiVal('t-account', '');
     var fromAcc = accountById(st, fromId);
     var toSel = document.getElementById('t-toaccount');
-    var hint = document.getElementById('t-toaccount-hint');
+    var hint = hintTextTarget(document.getElementById('t-toaccount-hint'));
     if (toSel && isSwap) {
       var cur = toSel.value;
       toSel.innerHTML = '';
@@ -15689,7 +15689,7 @@ function qtyDisplayTrim(txt, symbol) {
 function syncTransferFeePreview() {
   var sideEl = document.getElementById('t-side');
   if (!sideEl || sideEl.value !== 'transfer') return;
-  var hint = document.getElementById('t-rec-hint');
+  var hint = hintTextTarget(document.getElementById('t-rec-hint'));
   var feeInput = document.getElementById('t-networkfee');
   var qtyEl = document.getElementById('t-qty');
   var selfRow = document.getElementById('t-selfrecv-row');
@@ -17966,6 +17966,20 @@ function infoPill(text, id) {
   var t = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return '<button type="button" class="info-pill"' + (id ? ' id="' + id + '"' : '') + (t ? '' : ' hidden') +
     ' data-info="' + t + '" aria-label="' + t + '" aria-expanded="false">i</button>';
+}
+// Hints that became info pills are updated through data-info, so rewritten
+// copy never replaces the visible marker.
+function hintTextTarget(el) {
+  if (!el || !el.classList || !el.classList.contains('info-pill')) return el;
+  return {
+    set textContent(v) {
+      var t = String(v);
+      el.setAttribute('data-info', t);
+      el.setAttribute('aria-label', t);
+      el.hidden = !t;
+    },
+    get textContent() { return el.getAttribute('data-info') || ''; }
+  };
 }
 var infoPillReady = false;
 function initInfoPills() {

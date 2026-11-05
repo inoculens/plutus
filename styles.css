@@ -5041,6 +5041,13 @@ label.sync-check {
   font-size: 0.76rem;
 }
 
+/* Idle portfolio history has no download status, so the load panel had
+   nothing to show but still reserved its heading height and margins. Collapse
+   it only while the live status is empty; loading and error copy still show. */
+.history-load-panel:has(> .history-load-heading > .history-load-status:empty) {
+  display: none;
+}
+
 /* ————— Record form fields —————
    Same rhythm as Settings: each label hugs its own control, field groups keep
    a clear gap, and explanation copy lives in an info pill beside the label. */

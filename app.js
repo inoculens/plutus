@@ -8048,7 +8048,9 @@ function updateNetWorthHistory(st, value, main) {
         return;
       }
       if (status.state !== 'loading' && status.state !== 'error' && status.state !== 'incomplete') return;
-      netWorthHistoryLoadingBannerShown = (status.state === 'loading');
+      // The chart shows its own loading status, so loading never raises a toast.
+      if (status.state === 'loading') return;
+      netWorthHistoryLoadingBannerShown = false;
       var message = String(status.message || 'Some historical prices are unavailable.');
       showBanner(
         status.state === 'loading'

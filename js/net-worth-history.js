@@ -23,6 +23,10 @@
   var hoverPoint = null;
   var pinned = false;
   var lastDrawn = [];
+  // Plot geometry in SVG units. The viewBox follows the rendered pixel width
+  // (1 unit = 1px), so axis labels keep their real size on phones.
+  var plotGeom = { width: 960, left: 82, right: 948 };
+  var lastPlotWidth = 0;
   var storeLoaded = false;
   var pendingUpdateOptions = null;
   var storageReady = false;
@@ -493,6 +497,17 @@
         }
       });
     }
+
+    var resizeFrame = 0;
+    root.addEventListener('resize', function () {
+      if (resizeFrame || !active) return;
+      resizeFrame = root.requestAnimationFrame(function () {
+        resizeFrame = 0;
+        var svg = byId('history-plot');
+        var w = svg ? Math.round(svg.getBoundingClientRect().width) : 0;
+        if (w && Math.abs(w - lastPlotWidth) > 1) draw();
+      });
+    });
 
     var fromInput = byId('history-date-from');
     var toInput = byId('history-date-to');
@@ -971,29 +986,26 @@
       ? displayRangeDate(progress.start) + ' to ' + displayRangeDate(progress.end)
       : 'Selected interval';
     if (data.loading && current && current.phase === 'retry') {
-      status.textContent = 'Retrying ' + current.symbol + ' — ' + current.provider +
-        ', chunk ' + (Number(current.completed) + 1) + ' of ' + current.total + ' (attempt ' + current.attempt + ').';
+      status.textContent = 'Retrying ' + current.symbol + '…';
     } else if (data.loading && current && current.phase === 'cache') {
-      status.textContent = 'Reusing saved historical prices for ' + current.symbol + '.';
+      status.textContent = 'Using saved ' + current.symbol + ' prices';
     } else if (data.loading && current && current.phase === 'download-error') {
-      status.textContent = 'Could not load ' + current.symbol + ' chunk ' +
-        (Number(current.completed) + 1) + ' of ' + current.total + '; trying another source.';
+      status.textContent = current.symbol + ' unavailable, trying another source';
     } else if (data.loading && current && current.phase === 'download') {
-      status.textContent = 'Downloading ' + current.symbol + ' — ' + current.provider +
-        ', chunk ' + (Number(current.completed) + (Number(current.completed) < Number(current.total) ? 1 : 0)) +
-        ' of ' + current.total + '.';
+      status.textContent = 'Loading ' + current.symbol + ' prices…';
     } else if (data.loading && current && current.phase === 'valuation') {
-      status.textContent = 'Calculating portfolio values: ' + current.completed + ' of ' + current.total + ' dates.';
+      var pct = Number(current.total) > 0 ? Math.round(Number(current.completed) / Number(current.total) * 100) : 0;
+      status.textContent = 'Calculating values, ' + Math.min(100, pct) + '%';
     } else if (data.loading && current && current.phase === 'asset-complete') {
-      status.textContent = 'Loaded historical prices for ' + current.completedAssets + ' of ' + current.totalAssets + ' assets.';
+      status.textContent = current.completedAssets + ' of ' + current.totalAssets + ' assets ready';
     } else if (data.loading) {
-      status.textContent = 'Preparing historical prices for the selected interval…';
+      status.textContent = 'Preparing history…';
     } else if (data.loadError) {
-      status.textContent = 'Historical market data could not be loaded.';
+      status.textContent = 'History could not be loaded';
     } else if (data.incomplete) {
-      status.textContent = 'Some historical values are still unavailable.';
+      status.textContent = 'Some values are unavailable';
     } else {
-      status.textContent = 'Historical market data loaded.';
+      status.textContent = '';
     }
 
     var completedAssets = progress ? Number(progress.completedAssets) || 0 : 0;
@@ -1244,12 +1256,12 @@
       ? 'Updating portfolio history…'
       : '');
 
-    var width = 960;
-    var height = 260;
-    var left = 82;
-    var right = 948;
+    var measured = svg.getBoundingClientRect().width;
+    var width = measured > 0 ? Math.max(260, Math.round(measured)) : 960;
+    var height = width < 600 ? 220 : 260;
     var top = 14;
-    var bottom = 220;
+    var bottom = height - 40;
+    var right = width - 12;
     var min = Infinity;
     var max = -Infinity;
     validPoints.forEach(function (point) {
@@ -1261,6 +1273,14 @@
     min = min >= 0 ? Math.max(0, min - padding) : min - padding;
     max += padding;
     if (max === min) max = min + 1;
+    var axisLongest = 0;
+    for (var al = 0; al < 4; al++) {
+      axisLongest = Math.max(axisLongest, money(max - (max - min) * al / 3, active.currency).length);
+    }
+    var left = Math.min(Math.round(width * 0.4), Math.max(56, Math.ceil(axisLongest * 6.6) + 16));
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    plotGeom = { width: width, left: left, right: right };
+    lastPlotWidth = width;
     var start = validPoints[0].at;
     var end = Math.max(start + 1, range.end);
     function xAt(time) { return left + ((time - start) / (end - start)) * (right - left); }
@@ -1297,7 +1317,7 @@
       var point = validPoints[index];
       var anchor = labelIndex === 0 ? 'start' : (labelIndex === labelIndices.length - 1 ? 'end' : 'middle');
       var dateLabel = svgElement('text', {
-        x: xAt(point.at), y: 248, 'text-anchor': anchor,
+        x: xAt(point.at), y: height - 12, 'text-anchor': anchor,
         'class': 'history-axis-label'
       });
       dateLabel.textContent = labelText;
@@ -1416,10 +1436,10 @@
     if (!svg || !lastDrawn.length) return null;
     var rect = svg.getBoundingClientRect();
     if (!rect.width) return null;
-    var x = (event.clientX - rect.left) / rect.width * 960;
+    var x = (event.clientX - rect.left) / rect.width * plotGeom.width;
     var start = currentRange().start;
     var end = Math.max(start + 1, currentRange().end);
-    var target = start + (x - 82) / (948 - 82) * (end - start);
+    var target = start + (x - plotGeom.left) / (plotGeom.right - plotGeom.left) * (end - start);
     var low = 0;
     var high = lastDrawn.length - 1;
     while (low < high) {

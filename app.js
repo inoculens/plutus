@@ -18068,23 +18068,23 @@ function buildSettings() {
     '<input id="sy-folder3" autocomplete="off" spellcheck="false" placeholder="e.g. backups/work">' +
     '<p class="muted set-blurb">Keep profiles apart with prefixes — a name already taken is refused, never overwritten. Leave empty for the bucket top level.</p>' +
     '</div>' +
-    '<label for="sy-pass">Sync passphrase</label>' +
-    '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required — only you know it">' +
-    '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember passphrase in this browser</label>' +
+    '<label for="sy-pass">Encryption passphrase</label>' +
+    '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required to encrypt and restore your data">' +
+    '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember this passphrase on this device</label>' +
     '<p class="muted set-blurb" id="sy-fp">Key fingerprint: —</p>' +
-    '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically on every change</label>' +
-    '<p class="muted set-blurb">Open devices check the drive every few seconds and pull newer changes on their own — no reload needed.</p>' +
-    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Save Price Data next to the Records Data file</label>' +
-    '<p class="muted set-blurb">Price Data includes trade-date quotes and chart series. It is a rebuildable encrypted cache and never participates in account or trade reconciliation.</p>' +
+    '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically after changes</label>' +
+    '<p class="muted set-blurb">Connected devices check for newer changes every few seconds and update automatically.</p>' +
+    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Store price history with your records backup</label>' +
+    '<p class="muted set-blurb">Includes historical quotes and chart data. This encrypted cache can be rebuilt and is kept separate from your account records.</p>' +
     '<div id="pd-independent" hidden>' +
-    '<label for="pd-provider">Price Data provider</label>' +
+    '<label for="pd-provider">Price history destination</label>' +
     '<select id="pd-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
     '<option value="gdrive">Google Drive</option>' +
     '<option value="dropbox">Dropbox</option>' +
     '<option value="megas3">MEGA (S4 object storage)</option>' +
     '</select>' +
-    '<label for="pd-filename">Price Data file name</label>' +
+    '<label for="pd-filename">Price history file name</label>' +
     '<input id="pd-filename" autocomplete="off" spellcheck="false" placeholder="price-data.plutus.inoculens.com">' +
     '<label for="pd-folder">Folder (optional)</label>' +
     '<input id="pd-folder" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Prices">' +
@@ -18113,10 +18113,10 @@ function buildSettings() {
     '<input id="pd-skey" type="password" autocomplete="off">' +
     '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-data secret key in this browser</label>' +
     '</div>' +
-    '<p class="muted set-blurb">When using a separate destination, credentials are stored separately from the Records Data sync profile. The file is named exactly as entered.</p>' +
+    '<p class="muted set-blurb">With a separate destination, sign-in details are stored apart from your main records connection. The file uses the name you enter.</p>' +
     '<div class="sync-btns">' +
-    '<button id="pd-connect" type="button">Connect Price Data destination</button>' +
-    '<button id="pd-sync" type="button">Sync Price Data now</button>' +
+    '<button id="pd-connect" type="button">Connect price history destination</button>' +
+    '<button id="pd-sync" type="button">Sync price history now</button>' +
     '</div>' +
     '</div>' +
     '<p class="muted set-blurb" id="pd-status">Price Data is stored next to the Records Data file.</p>' +
@@ -18124,12 +18124,12 @@ function buildSettings() {
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
     '<button id="sy-disconnect" type="button">Disconnect</button>' +
-    '<button id="sy-push" type="button">Sync now (upload)</button>' +
+    '<button id="sy-push" type="button">Upload latest changes</button>' +
     '<button id="sy-pull" type="button">Restore from drive</button>' +
     '<button id="sy-cleanup" type="button">Clean up cloud files</button>' +
     '</div>' +
-    '<span id="s-enc-label">Encrypted file — needs your passphrase above</span>' +
-    '<button id="sy-enc-download" type="button">Download encrypted file</button>' +
+    '<span id="s-enc-label">Encrypted backup · requires the passphrase above</span>' +
+    '<button id="sy-enc-download" type="button">Download encrypted backup</button>' +
     '<input id="sy-enc-upload" type="file" accept="application/json,.json">' +
     '</section>' +
     '<section data-setpanel="danger" role="tabpanel" aria-label="Delete data" hidden>' +

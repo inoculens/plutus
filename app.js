@@ -291,8 +291,8 @@ function contrastText(hex) {
   var r = parseInt(h.slice(0, 2), 16);
   var g = parseInt(h.slice(2, 4), 16);
   var b = parseInt(h.slice(4, 6), 16);
-  if (!isFinite(r) || !isFinite(g) || !isFinite(b)) return '#1a1408';
-  return ((r * 299 + g * 587 + b * 114) / 1000) >= 128 ? '#1a1408' : '#ffffff';
+  if (!isFinite(r) || !isFinite(g) || !isFinite(b)) return '#09090a';
+  return ((r * 299 + g * 587 + b * 114) / 1000) >= 128 ? '#09090a' : '#ffffff';
 }
 
 function numGte0(v, allowEmpty) {
@@ -17794,7 +17794,7 @@ function buildTopbar() {
         applyColorTarget(raw);
         return;
       }
-      applyColorTarget(uiVal('c-custom', '#e3c57c'));
+      applyColorTarget(uiVal('c-custom', '#c9c9cc'));
     });
   }
   var cReset = document.getElementById('c-reset');
@@ -17811,6 +17811,14 @@ function buildTopbar() {
   if (brandHome && !brandHome.getAttribute('data-wired')) {
     brandHome.setAttribute('data-wired', '1');
     brandHome.addEventListener('click', function (e) {
+      if (e && e.preventDefault) e.preventDefault();
+      navHome();
+    });
+  }
+  var navHomeLink = document.getElementById('nav-home');
+  if (navHomeLink && !navHomeLink.getAttribute('data-wired')) {
+    navHomeLink.setAttribute('data-wired', '1');
+    navHomeLink.addEventListener('click', function (e) {
       if (e && e.preventDefault) e.preventDefault();
       navHome();
     });
@@ -18591,7 +18599,8 @@ function renderHeroAlloc(st) {
   host.hidden = false;
   host.innerHTML = '';
   // Text first, ring last: legend sits left, circle pins to the very right.
-  var palette = ['#e3c57c', '#7dd3fc', '#34d399', '#f472b6', '#a78bfa', '#fbbf24'];
+  // Muted hues that skip red and green, which stay reserved for loss / gain.
+  var palette = ['#e6e6e8', '#78aee0', '#4fb3a9', '#a995e8', '#dba94e', '#8a8a90'];
   var leg = document.createElement('ul');
   leg.className = 'hero-alloc-legend';
   al.items.forEach(function (it, i) {

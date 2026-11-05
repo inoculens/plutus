@@ -21,7 +21,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="format-detection" content="telephone=no">
-  <meta name="theme-color" content="#07080b">
+  <meta name="theme-color" content="#09090a">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
@@ -67,14 +67,14 @@
   <meta name="twitter:image" content="https://plutus.inoculens.com/icons/plutus-logo.png">
   <meta name="twitter:image:alt" content="INOCULENS PLUTUS logo">
 
-  <link rel="manifest" href="/manifest.json?v=302">
+  <link rel="manifest" href="/manifest.json?v=303">
 
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/Inter-400-latin.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-600-latin.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
-  <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=1" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=501">
+  <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=2" fetchpriority="high">
+  <link rel="stylesheet" href="/styles.css?v=509">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -149,13 +149,11 @@
 </head>
 <body class="is-app-loading">
   <div id="app-loader" role="status" aria-live="polite" aria-label="Loading INOCULENS PLUTUS" aria-busy="true">
-    <div class="app-loader-glow app-loader-glow-gold" aria-hidden="true"></div>
-    <div class="app-loader-glow app-loader-glow-blue" aria-hidden="true"></div>
     <div class="app-loader-content" aria-hidden="true">
       <div class="app-loader-stage">
-        <img class="app-loader-coin app-loader-usd" src="/icons/usd.webp?v=1" width="72" height="72" alt="" draggable="false">
-        <img class="app-loader-coin app-loader-eur" src="/icons/eur.webp?v=1" width="72" height="72" alt="" draggable="false">
-        <img class="app-loader-coin app-loader-btc" src="/icons/btc.webp?v=1" width="72" height="72" alt="" draggable="false">
+        <img class="app-loader-coin app-loader-usd" src="/icons/usd.webp?v=2" width="72" height="72" alt="" draggable="false">
+        <img class="app-loader-coin app-loader-eur" src="/icons/eur.webp?v=2" width="72" height="72" alt="" draggable="false">
+        <img class="app-loader-coin app-loader-btc" src="/icons/btc.webp?v=2" width="72" height="72" alt="" draggable="false">
         <img class="app-loader-logo" src="/icons/plutus-logo.png" width="88" height="88" alt="">
       </div>
       <div class="app-loader-progress"><span></span></div>
@@ -185,7 +183,6 @@
           <button type="button" id="tb-fifo" aria-pressed="false">FIFO</button>
         </div>
         <button type="button" id="tb-sync" class="icon-btn sync-img-btn" hidden aria-label="Sync status"><img id="tb-sync-img" src="/icons/sync-ok.png" alt="" width="20" height="20"></button>
-        <button type="button" id="tb-settings" class="icon-btn" aria-haspopup="dialog" aria-label="Settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
       </div>
     </div>
   </header>
@@ -231,9 +228,9 @@
         </div>
         <div class="landing-coins" aria-hidden="true">
           <div class="coin-row">
-          <div class="coin-float coin-float-usd"><picture><source type="image/webp" srcset="/icons/usd.webp?v=1"><img class="coin coin-usd" src="/icons/usd.png?v=1" width="891" height="1141" decoding="async" alt="" draggable="false"></picture></div>
-          <div class="coin-float coin-float-btc"><picture><source type="image/webp" srcset="/icons/btc.webp?v=1"><img class="coin coin-btc" src="/icons/btc.png?v=1" width="839" height="1075" decoding="async" fetchpriority="high" alt="" draggable="false"></picture></div>
-          <div class="coin-float coin-float-eur"><picture><source type="image/webp" srcset="/icons/eur.webp?v=1"><img class="coin coin-eur" src="/icons/eur.png?v=1" width="818" height="936" decoding="async" alt="" draggable="false"></picture></div>
+          <div class="coin-float coin-float-usd"><picture><source type="image/webp" srcset="/icons/usd.webp?v=2"><img class="coin coin-usd" src="/icons/usd.png?v=2" width="891" height="1141" decoding="async" alt="" draggable="false"></picture></div>
+          <div class="coin-float coin-float-btc"><picture><source type="image/webp" srcset="/icons/btc.webp?v=2"><img class="coin coin-btc" src="/icons/btc.png?v=2" width="839" height="1075" decoding="async" fetchpriority="high" alt="" draggable="false"></picture></div>
+          <div class="coin-float coin-float-eur"><picture><source type="image/webp" srcset="/icons/eur.webp?v=2"><img class="coin coin-eur" src="/icons/eur.png?v=2" width="818" height="936" decoding="async" alt="" draggable="false"></picture></div>
           </div>
         </div>
         <ul class="landing-feats">
@@ -328,7 +325,11 @@
     </div>
   </main>
 
-  <button type="button" id="fab-trade" aria-label="Add record">+</button>
+  <nav id="dock" aria-label="Primary">
+    <button type="button" id="fab-trade" aria-label="Add record"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><span class="dock-label">Add record</span></button>
+    <a class="dock-item" id="nav-home" href="#/" aria-label="Overview"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"></path></svg><span class="dock-label">Overview</span></a>
+    <button type="button" id="tb-settings" class="dock-item" aria-haspopup="dialog" aria-label="Settings"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span class="dock-label">Settings</span></button>
+  </nav>
 
   <dialog id="trade-dialog" aria-labelledby="trade-dialog-title">
     <div class="dialog-head">
@@ -403,7 +404,17 @@
       <h2 id="color-dialog-title">Change color</h2>
       <button type="button" data-close aria-label="Close dialog">✕</button>
     </div>
-    <div class="swatches" role="group" aria-label="Default colors">
+    <p class="swatch-title">Neutrals</p>
+    <div class="swatches" role="group" aria-label="Neutral colors">
+      <button type="button" data-color-pick="#FAFAFA"><span class="sw" style="background:#FAFAFA"></span>White</button>
+      <button type="button" data-color-pick="#C9C9CC"><span class="sw" style="background:#C9C9CC"></span>Silver</button>
+      <button type="button" data-color-pick="#8E8E93"><span class="sw" style="background:#8E8E93"></span>Slate</button>
+      <button type="button" data-color-pick="#5A5A5F"><span class="sw" style="background:#5A5A5F"></span>Graphite</button>
+      <button type="button" data-color-pick="#34343A"><span class="sw" style="background:#34343A"></span>Charcoal</button>
+      <button type="button" data-color-pick="#1F1F22"><span class="sw" style="background:#1F1F22"></span>Onyx</button>
+    </div>
+    <p class="swatch-title">Asset colors</p>
+    <div class="swatches" role="group" aria-label="Asset colors">
       <button type="button" data-color-pick="#F7931A"><span class="sw" style="background:#F7931A"></span>Bitcoin</button>
       <button type="button" data-color-pick="#627EEA"><span class="sw" style="background:#627EEA"></span>Ethereum</button>
       <button type="button" data-color-pick="#0033AD"><span class="sw" style="background:#0033AD"></span>Cardano</button>
@@ -413,8 +424,8 @@
     </div>
     <div class="color-custom">
       <label for="c-custom">Custom</label>
-      <input type="color" id="c-custom" value="#e3c57c" aria-label="Pick a custom color">
-      <input id="c-hex" autocomplete="off" spellcheck="false" placeholder="#E3C57C" aria-label="Hex color code" maxlength="7">
+      <input type="color" id="c-custom" value="#c9c9cc" aria-label="Pick a custom color">
+      <input id="c-hex" autocomplete="off" spellcheck="false" placeholder="#C9C9CC" aria-label="Hex color code" maxlength="7">
       <button id="c-apply" type="button">Apply</button>
     </div>
     <div class="dialog-actions">
@@ -444,7 +455,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=72" defer></script>
-  <script src="/app.js?v=497" defer></script>
+  <script src="/js/net-worth-history.js?v=79" defer></script>
+  <script src="/app.js?v=504" defer></script>
 </body>
 </html>

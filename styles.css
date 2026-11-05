@@ -5036,6 +5036,7 @@ label.sync-check {
 }
 #settings-dialog .set-panels #pd-status {
   margin: 0.35rem 0 0;
-  padding: 0 0.1rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius);
   font-size: 0.76rem;
 }

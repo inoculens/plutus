@@ -4773,3 +4773,75 @@ label.sync-check .info-pill {
   min-width: 0;
   max-width: 100%;
 }
+
+
+/* ————— Consistent checkbox geometry + label rhythm —————
+   The generic form-control rule above is intended for text fields. Without
+   an explicit reset, checkboxes inherit its full-width, padded input box,
+   which makes them sit off-centre or stretch in different forms. */
+input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+input[type="checkbox"]:focus {
+  box-shadow: none;
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+/* Preserve the intentionally larger selection controls. */
+input[type="checkbox"].card-check {
+  flex: 0 0 1.3rem;
+  width: 1.3rem;
+  min-width: 1.3rem;
+  max-width: 1.3rem;
+  height: 1.3rem;
+  min-height: 0;
+}
+
+/* Checkboxes sit on the text's visual centreline, including multi-line
+   labels. The previous flex-start + top margin made them look too high. */
+label.sync-check,
+.set-panels label.sync-check {
+  align-items: center;
+}
+.set-panels label.sync-check input[type="checkbox"] {
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+}
+
+/* Help markers need a real visual gap from the words they explain. Keep
+   their hit-area fixed so the spacing survives wrapping at narrow widths. */
+.info-pill,
+.set-panels section .info-pill,
+.set-panels .set-heading .info-pill {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin-left: 0.5rem;
+}
+label.sync-check .info-pill {
+  margin-left: 0.15rem;
+}

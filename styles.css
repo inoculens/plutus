@@ -4236,6 +4236,11 @@ label.sync-check input {
     white-space: nowrap;
     scroll-snap-align: start;
   }
+  /* Mobile tabs are horizontal: balance the selected-state edge highlight
+     on both sides instead of carrying the desktop left-only rail. */
+  .set-tabs button[aria-selected="true"] {
+    box-shadow: inset 2px 0 0 rgba(255,255,255,0.78), inset -2px 0 0 rgba(255,255,255,0.78);
+  }
   .set-panels { flex: 1 1 auto; }
   .set-panels label.sync-check { padding: 0.8rem; }
 }

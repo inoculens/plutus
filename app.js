@@ -17959,7 +17959,7 @@ function buildSettings() {
     '<div class="set-panels">' +
     '<section data-setpanel="overrides" role="tabpanel" aria-label="Price overrides">' +
     '<h3 class="set-heading">Market pricing</h3>' +
-    '<p class="muted set-blurb">Use a manual quote when a market price is unavailable or you prefer a specific source. Overrides apply to this browser only.</p>' +
+    '<p class="muted set-blurb">Use a manual quote when a market price is unavailable or you prefer a specific source. Overrides take priority over fetched quotes for the matching symbol.</p>' +
     '<label for="o-symbol">Symbol</label>' +
     '<input id="o-symbol" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
     '<label for="o-price">Price (in current fiat)</label>' +
@@ -17972,9 +17972,9 @@ function buildSettings() {
     '<p class="muted set-blurb">Choose how dates appear throughout the app. Your records stay stored in a consistent format and are not changed.</p>' +
     '<label for="set-date-format">Date format</label>' +
     '<select id="set-date-format">' +
-    '<option value="DD/MM/YYYY">European · DD/MM/YYYY</option>' +
-    '<option value="MM/DD/YYYY">American · MM/DD/YYYY</option>' +
-    '<option value="YYYY/MM/DD">Asian · YYYY/MM/DD</option>' +
+    '<option value="DD/MM/YYYY">Day first · DD/MM/YYYY</option>' +
+    '<option value="MM/DD/YYYY">Month first · MM/DD/YYYY</option>' +
+    '<option value="YYYY/MM/DD">Year first · YYYY/MM/DD</option>' +
     '<option value="YYYY-MM-DD">ISO · YYYY-MM-DD</option>' +
     '<option value="custom">Custom</option>' +
     '</select>' +
@@ -17999,7 +17999,7 @@ function buildSettings() {
     '</section>' +
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
     '<h3 class="set-heading">Your records, in your hands</h3>' +
-    '<p class="muted set-blurb">Your records stay in this browser. Download a JSON backup to keep a safe copy or move your data to another device. CSV exports are designed for spreadsheets and tax-lot review.</p>' +
+    '<p class="muted set-blurb">Records are stored on this device by default. Download a JSON backup to keep a safe copy or move your data to another device. CSV exports are designed for spreadsheets and tax-lot review.</p>' +
     '<button id="s-download" type="button">Download backup</button>' +
     '<button id="s-csv-trades" type="button">Export trades (CSV)</button>' +
     '<button id="s-csv-lots" type="button">Export FIFO tax lots (CSV)</button>' +

@@ -74,7 +74,7 @@
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/SpaceGrotesk-700-latin.woff2">
 
   <link rel="preload" as="image" type="image/webp" href="/icons/btc.webp?v=2" fetchpriority="high">
-  <link rel="stylesheet" href="/styles.css?v=521">
+  <link rel="stylesheet" href="/styles.css?v=524">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -289,11 +289,18 @@
             <button type="button" data-history-period="5Y" aria-pressed="false">5Y</button>
             <button type="button" data-history-period="ALL" aria-pressed="false">All-time</button>
           </div>
-          <fieldset id="history-custom" class="history-custom">
-            <legend>Custom date range</legend>
-            <label>From <input id="history-date-from" type="date"></label>
-            <label>To <input id="history-date-to" type="date"></label>
-          </fieldset>
+          <details id="history-custom-picker" class="history-custom-picker">
+            <summary>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="2"></rect><path d="M5 1.5v3M11 1.5v3M2 6.5h12"></path></svg>
+              <span id="history-custom-label">Custom dates</span>
+              <svg class="history-custom-chevron" viewBox="0 0 12 8" aria-hidden="true"><path d="m1 1 5 5 5-5"></path></svg>
+            </summary>
+            <fieldset id="history-custom" class="history-custom">
+              <legend>Custom date range</legend>
+              <label>From <input id="history-date-from" type="date"></label>
+              <label>To <input id="history-date-to" type="date"></label>
+            </fieldset>
+          </details>
         </div>
         <button id="history-retry" class="history-retry quiet" type="button" hidden>Retry historical prices</button>
         <div class="history-load-panel">
@@ -455,7 +462,7 @@
     </div>
   </div>
 
-  <script src="/js/net-worth-history.js?v=79" defer></script>
-  <script src="/app.js?v=508" defer></script>
+  <script src="/js/net-worth-history.js?v=82" defer></script>
+  <script src="/app.js?v=512" defer></script>
 </body>
 </html>

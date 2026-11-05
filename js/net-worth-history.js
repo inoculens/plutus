@@ -450,6 +450,20 @@
     if (!panel || panel.getAttribute('data-wired') === 'true') return;
     panel.setAttribute('data-wired', 'true');
 
+    var datePicker = byId('history-custom-picker');
+    function positionDatePicker() {
+      if (!datePicker || !datePicker.open) return;
+      var summary = datePicker.querySelector('summary');
+      var fieldset = byId('history-custom');
+      if (!summary || !fieldset) return;
+      var rect = summary.getBoundingClientRect();
+      var above = rect.top - 12;
+      var below = root.innerHeight - rect.bottom - 12;
+      var opensUp = below < fieldset.scrollHeight && above > below;
+      datePicker.classList.toggle('opens-up', opensUp);
+      fieldset.style.maxHeight = Math.max(120, opensUp ? above : below) + 'px';
+    }
+
     panel.querySelectorAll('[data-history-period]').forEach(function (button) {
       button.addEventListener('click', function () {
         if (!active) return;
@@ -464,6 +478,21 @@
         requestHistory();
       });
     });
+
+    if (datePicker) {
+      datePicker.addEventListener('toggle', positionDatePicker);
+      root.addEventListener('resize', positionDatePicker);
+      root.document.addEventListener('click', function (event) {
+        if (datePicker.open && !datePicker.contains(event.target)) datePicker.open = false;
+      });
+      datePicker.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && datePicker.open) {
+          datePicker.open = false;
+          var summary = datePicker.querySelector('summary');
+          if (summary) summary.focus();
+        }
+      });
+    }
 
     var fromInput = byId('history-date-from');
     var toInput = byId('history-date-to');
@@ -1313,8 +1342,8 @@
         button.setAttribute('aria-pressed', selected ? 'true' : 'false');
       });
     }
-    var custom = byId('history-custom');
-    if (custom) custom.hidden = false;
+    var customLabel = byId('history-custom-label');
+    if (customLabel) customLabel.textContent = active.period === 'CUSTOM' ? 'Custom range' : 'Custom dates';
     var from = byId('history-date-from');
     var to = byId('history-date-to');
     if (from && active.points.length) {

@@ -14363,6 +14363,7 @@ function ccyOptions(selected) {
 function buildTradeForm() {
   var host = document.getElementById('trade-dialog-body');
   if (!host || document.getElementById('trade-form')) return;
+  initInfoPills();
   var wrap = document.createElement('div');
   wrap.innerHTML =
     '<form id="trade-form">' +
@@ -14370,58 +14371,55 @@ function buildTradeForm() {
     '<select id="t-side"><option value="buy">Buy</option><option value="sell">Sell</option><option value="transfer">Transfer (self move + gas)</option><option value="income">Income (reward / airdrop)</option><option value="expense">Expense / fee</option><option value="swap">Swap (coin → coin)</option></select>' +
     '<div id="t-account-row"><label for="t-account">Account</label>' +
     '<select id="t-account"></select></div>' +
-    '<div id="t-sources-row" hidden><span class="fld-label">Spend from</span>' +
+    '<div id="t-sources-row" hidden><span class="fld-label">Spend from' + infoPill('Each source spends what it held at the record date. Fee is split evenly or attributed to any source. The total qty below stays read-only — it is the sum of the source amounts.', 't-source-hint') + '</span>' +
     '<div id="t-source-list"></div>' +
     '<button type="button" id="t-source-add">+ Add source account</button>' +
     '<button type="button" id="t-source-split">Split evenly</button>' +
-    '<p class="fld-hint" id="t-source-hint">Each source spends what it held at the record date. Fee is split evenly or attributed to any source. The total qty below stays read-only — it is the sum of the source amounts.</p></div>' +
-    '<div id="t-toaccount-row" hidden><label for="t-toaccount" id="t-toaccount-label">To account (optional)</label>' +
-    '<select id="t-toaccount"></select><p class="fld-hint" id="t-toaccount-hint">Transfer moves cost basis — only the network + fiat fees count as losses.</p></div>' +
-    '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity</label>' +
+    '</div>' +
+    '<div id="t-toaccount-row" hidden><label for="t-toaccount" id="t-toaccount-label">To account (optional)' + infoPill('Transfer moves cost basis — only the network + fiat fees count as losses.', 't-toaccount-hint') + '</label>' +
+    '<select id="t-toaccount"></select></div>' +
+    '<div id="t-qty-row"><label for="t-qty" id="t-qty-label">Quantity' + infoPill('Amount you received (net of any fee taken in asset).', 't-qty-hint') + '</label>' +
     '<input id="t-qty" inputmode="decimal" placeholder="e.g. 1">' +
-    '<p class="fld-hint" id="t-qty-hint">Amount you received (net of any fee taken in asset).</p></div>' +
-    '<div id="t-toqty-row" hidden><label for="t-toqty" id="t-toqty-label">Received quantity</label>' +
+    '</div>' +
+    '<div id="t-toqty-row" hidden><label for="t-toqty" id="t-toqty-label">Received quantity' + infoPill('', 't-toqty-hint') + '</label>' +
     '<input id="t-toqty" inputmode="decimal" placeholder="e.g. 15.2">' +
-    '<p class="fld-hint" id="t-toqty-hint"></p></div>' +
-    '<div id="t-recipients" hidden><span class="fld-label">Recipients</span>' +
+    '</div>' +
+    '<div id="t-recipients" hidden><span class="fld-label">Recipients' + infoPill('One transaction, many recipients — internal moves keep their cost basis, external rows spend by default. Amount that stayed here goes in Received back below.', 't-rec-hint') + '</span>' +
     '<div id="t-rec-list"></div>' +
     '<button type="button" id="t-rec-add">+ Add recipient</button>' +
-    '<p class="fld-hint" id="t-rec-hint">One transaction, many recipients — internal moves keep their cost basis, external rows spend by default. Amount that stayed here goes in Received back below.</p></div>' +
-    '<div id="t-selfrecv-row" hidden><label for="t-selfrecv" id="t-selfrecv-label">Received back (same account)</label>' +
+    '</div>' +
+    '<div id="t-selfrecv-row" hidden><label for="t-selfrecv" id="t-selfrecv-label">Received back (same account)' + infoPill('Part of the send that stayed in this account — fee = sent − recipients − this.', 't-selfrecv-hint') + '</label>' +
     '<input id="t-selfrecv" inputmode="decimal" placeholder="e.g. 0.99">' +
-    '<p class="fld-hint" id="t-selfrecv-hint">Part of the send that stayed in this account — fee = sent − recipients − this.</p></div>' +
+    '</div>' +
     '<div class="fld-locked" hidden><span class="fld-label">Symbol (locked to account)</span> <span id="t-symbol-locked" role="status"></span></div>' +
-    '<div id="t-total-row"><label for="t-total" id="t-total-label">Total (native currency)</label>' +
+    '<div id="t-total-row"><label for="t-total" id="t-total-label">Total (native currency)' + infoPill('Full amount paid, including the fee below.', 't-total-hint') + '</label>' +
     '<input id="t-total" inputmode="decimal" placeholder="e.g. 50000">' +
-    '<p class="fld-hint" id="t-total-hint">Full amount paid, including the fee below.</p></div>' +
+    '</div>' +
     '<div id="t-currency-row"><label for="t-currency">Currency</label>' +
     '<select id="t-currency">' + ccyOptions('EUR') + '</select></div>' +
     '<label for="t-custom-ccy" id="t-custom-ccy-label" hidden>Custom currency code</label>' +
     '<input id="t-custom-ccy" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY" hidden>' +
-    '<label for="t-date">Date</label>' +
+    '<label for="t-date">Date' + infoPill('Format DD/MM/YYYY.', 't-date-hint') + '</label>' +
     '<input id="t-date" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="DD/MM/YYYY" maxlength="10">' +
-    '<p class="fld-hint" id="t-date-hint">Format DD/MM/YYYY.</p>' +
     '<details class="adv"><summary>Details</summary>' +
-    '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger (optional)</label>' +
+    '<div id="t-ledger-row" hidden><label for="t-ledger">Ledger (optional)' + infoPill('Bookkeeping code for this record — subledgers nest by prefix (1110 under 1100 under 1000).', 't-ledger-hint') + '</label>' +
     '<input id="t-ledger" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24" list="t-ledger-codes">' +
     '<datalist id="t-ledger-codes"></datalist>' +
     '<label for="t-ledger-label">Ledger label (optional)</label>' +
     '<input id="t-ledger-label" autocomplete="off" spellcheck="false" placeholder="e.g. Income from X" maxlength="80">' +
-    '<p class="fld-hint" id="t-ledger-hint">Bookkeeping code for this record — subledgers nest by prefix (1110 under 1100 under 1000).</p></div>' +
-    '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)</label>' +
+    '</div>' +
+    '<div id="t-networkfee-row" hidden><label for="t-networkfee">Transfer fees (in same asset)' + infoPill('Fee calculated automatically from the send and received inputs above.', 't-networkfee-hint') + '</label>' +
     '<input id="t-networkfee" inputmode="decimal" placeholder="e.g. 0.0005" readonly>' +
-    '<p class="fld-hint" id="t-networkfee-hint">Fee calculated automatically from the send and received inputs above.</p></div>' +
-    '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat, optional)</label>' +
+    '</div>' +
+    '<div id="t-feefiat-row"><label for="t-fee">Fee (fiat, optional)' + infoPill('Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.') + '</label>' +
     '<input id="t-fee" inputmode="decimal" placeholder="e.g. 0">' +
-    '<p class="fld-hint">Denominated in the Currency above, like everything else on this trade. The total already includes it — the Real price is simply total ÷ qty (e.g. 50 EUR ÷ 0.00058193 BTC). Info only, zero P&L drag.</p></div>' +
+    '</div>' +
     '<label for="t-note">Note (optional)</label>' +
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
-    '<label for="t-txid">Transaction ID (optional)</label>' +
+    '<label for="t-txid">Transaction ID (optional)' + infoPill('Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.') + '</label>' +
     '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash">' +
-    '<p class="fld-hint">Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.</p>' +
-    '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt (optional)</label>' +
+    '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt (optional)' + infoPill('Optional — PDF, PNG or JPG up to 10 MB. Stored on this device, synced encrypted when sync is on.', 't-attach-hint') + '</label>' +
     '<input id="t-attach" type="file" accept="application/pdf,image/png,image/jpeg">' +
-    '<p class="fld-hint" id="t-attach-hint">Optional — PDF, PNG or JPG up to 10 MB. Stored on this device, synced encrypted when sync is on.</p>' +
     '<p class="fld-hint" id="t-attach-cur" hidden></p>' +
     '<button type="button" id="t-attach-remove" hidden>Remove file</button></div>' +
     '<label for="t-manual-rate">Manual FX rate (optional fallback when ECB is unavailable)</label>' +
@@ -14614,7 +14612,14 @@ function syncDateFormatInputs() {
   var input = document.getElementById('t-date');
   if (input) input.placeholder = format;
   var hint = document.getElementById('t-date-hint');
-  if (hint) hint.textContent = 'Format ' + format + '.';
+  if (hint) {
+    if (hint.classList && hint.classList.contains('info-pill')) {
+      hint.setAttribute('data-info', 'Format ' + format + '.');
+      hint.setAttribute('aria-label', 'Format ' + format + '.');
+    } else {
+      hint.textContent = 'Format ' + format + '.';
+    }
+  }
   var from = document.querySelector('[data-date-filter-from]');
   var to = document.querySelector('[data-date-filter-to]');
   if (from) from.placeholder = format;
@@ -15099,7 +15104,17 @@ function syncTradeTypeUI() {
   var sideEl = document.getElementById('t-side');
   var type = sideEl ? sideEl.value : 'buy';
   function setHidden(id, hide) { var el = document.getElementById(id); if (el) el.hidden = !!hide; }
-  function setLabel(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+  function setLabel(id, txt) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.classList && el.classList.contains('info-pill')) {
+      el.setAttribute('data-info', txt);
+      el.setAttribute('aria-label', txt);
+      el.hidden = !String(txt);
+      return;
+    }
+    el.textContent = txt;
+  }
   // Cash accounts are bookkeeping ledgers: only money-movement types.
   // (Legacy buy/sell/swap records on cash stay editable, never creatable.)
   var cashAcc = null;
@@ -17949,7 +17964,7 @@ function refreshLedgerList() {
 // top layer so it also shows above modal dialogs.
 function infoPill(text, id) {
   var t = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-  return '<button type="button" class="info-pill"' + (id ? ' id="' + id + '"' : '') +
+  return '<button type="button" class="info-pill"' + (id ? ' id="' + id + '"' : '') + (t ? '' : ' hidden') +
     ' data-info="' + t + '" aria-label="' + t + '" aria-expanded="false">i</button>';
 }
 var infoPillReady = false;

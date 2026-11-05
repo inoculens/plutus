@@ -4646,7 +4646,7 @@ label.sync-check .info-pill {
    any supporting status read as one deliberate control group. */
 .sync-field-group {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.7rem;
   min-width: 0;
   margin: 0.25rem 0;
   padding: 0.75rem 0.8rem;
@@ -4728,7 +4728,7 @@ label.sync-check .info-pill {
 }
 #pd-status {
   margin: 0.1rem 0 0;
-  padding: 0.1rem 0.2rem;
+  padding: 0.45rem 0.7rem;
   font-size: 0.76rem;
 }
 @media (max-width: 720px) {
@@ -4756,7 +4756,7 @@ label.sync-check .info-pill {
 #account-dialog-body > label:not(.sync-check),
 #ledger-dialog-body > label:not(.sync-check),
 #group-dialog-body > label:not(.sync-check) {
-  margin: 0.7rem 0 0.15rem;
+  margin: 0.7rem 0 0.35rem;
   padding: 0.05rem 0.1rem;
   line-height: 1.45;
 }
@@ -4870,6 +4870,10 @@ label.sync-check > input[type="checkbox"],
   padding: 0;
   align-self: center;
 }
+
+#settings-dialog .set-panels section > div label:not(.sync-check) {
+  margin-bottom: 0.5rem;
+}
 label.sync-check .info-pill,
 .set-panels label.sync-check .info-pill,
 .set-panels section > label .info-pill,
@@ -4900,7 +4904,7 @@ label.sync-check {
   width: fit-content;
   max-width: 100%;
   min-height: 1.5rem;
-  margin: 0.35rem 0 0.35rem;
+  margin: 0.35rem 0 0.45rem;
   padding: 0.05rem 0.1rem;
   line-height: 1.5;
 }

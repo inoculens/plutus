@@ -5077,6 +5077,13 @@ label.sync-check {
   border-radius: 999px;
 }
 
+/* The record form's expanded Details card needs the same safe inset below its
+   last field as it has around the fields, so the control no longer sits on
+   the card's bottom border. */
+#trade-form details.adv {
+  padding-bottom: 0.9rem;
+}
+
 /* ————— Record form fields —————
    Same rhythm as Settings: each label hugs its own control, field groups keep
    a clear gap, and explanation copy lives in an info pill beside the label. */

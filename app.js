@@ -18214,7 +18214,8 @@ function buildSettings() {
     '</div>' +
     '<span id="s-enc-label">Encrypted backup' + infoPill('Needs your passphrase to open.') + '</span>' +
     '<button id="sy-enc-download" type="button">Download encrypted backup</button>' +
-    '<input id="sy-enc-upload" type="file" accept="application/json,.json">' +
+    '<span id="sy-enc-upload-label">Restore from encrypted file</span>' +
+    '<input id="sy-enc-upload" type="file" accept="application/json,.json" aria-label="Restore from encrypted file">' +
     '</section>' +
     '<section data-setpanel="danger" role="tabpanel" aria-label="Delete data" hidden>' +
     '<h3 class="set-heading">Clear this browser ' + infoPill('Permanently removes the accounts, records and settings stored in this browser. Copies on a cloud drive are separate and must be deleted there.') + '</h3>' +

@@ -5048,6 +5048,35 @@ label.sync-check {
   display: none;
 }
 
+/* Encrypted backup restore uses the same Browse file design as Backups:
+   a dashed rounded drop box with a pill button, not a plain text input. */
+#sy-enc-upload-label {
+  display: block;
+  margin: 0.7rem 0 0;
+  color: #b7b7bc;
+  font-size: 0.76rem;
+  font-weight: 550;
+  letter-spacing: 0;
+}
+#sy-enc-upload {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.45rem;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  pointer-events: none;
+  cursor: default;
+}
+#sy-enc-upload::file-selector-button,
+#sy-enc-upload::-webkit-file-upload-button {
+  min-height: 2.15rem;
+  margin-right: 0.7rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+}
+
 /* ————— Record form fields —————
    Same rhythm as Settings: each label hugs its own control, field groups keep
    a clear gap, and explanation copy lives in an info pill beside the label. */

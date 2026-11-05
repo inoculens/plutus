@@ -18599,7 +18599,8 @@ function renderHeroAlloc(st) {
   host.hidden = false;
   host.innerHTML = '';
   // Text first, ring last: legend sits left, circle pins to the very right.
-  var palette = ['#fafafa', '#d0d0d4', '#a8a8ae', '#85858b', '#626268', '#47474c'];
+  // Muted hues that skip red and green, which stay reserved for loss / gain.
+  var palette = ['#e6e6e8', '#78aee0', '#4fb3a9', '#a995e8', '#dba94e', '#8a8a90'];
   var leg = document.createElement('ul');
   leg.className = 'hero-alloc-legend';
   al.items.forEach(function (it, i) {

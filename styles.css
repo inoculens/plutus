@@ -4008,15 +4008,15 @@ label.sync-check input {
 .src-row { display:block; min-width:0; padding:10px; margin:8px 0; border:1px solid var(--line,#333); border-radius:10px; background:var(--panel,transparent); }
 .src-grid {
   display:grid;
-  grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);
-  grid-template-rows:auto auto auto;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  grid-template-rows:auto auto auto auto;
   gap:10px;
   align-items:end;
   min-width:0;
 }
-.src-grid > label:first-child { grid-column:1; grid-row:1 / span 2; }
-.src-grid > label:nth-child(2) { grid-column:2; grid-row:1; }
-.src-grid > label:nth-child(3) { grid-column:2; grid-row:2; }
+.src-grid > label:first-child { grid-column:1 / -1; grid-row:1; }
+.src-grid > label:nth-child(2) { grid-column:1; grid-row:2; }
+.src-grid > label:nth-child(3) { grid-column:1 / -1; grid-row:3; }
 .src-grid label {
   display:grid;
   gap:6px;
@@ -4027,8 +4027,8 @@ label.sync-check input {
 }
 .src-grid input,.src-grid select { width:100%; min-width:0; margin:0; }
 .src-actions {
-  grid-column:3;
-  grid-row:1;
+  grid-column:2;
+  grid-row:2;
   display:flex;
   align-self:end;
   align-items:stretch;
@@ -4043,8 +4043,8 @@ label.sync-check input {
   flex:1 1 0;
   width:auto;
   min-width:0;
-  min-height:2.6rem;
-  height:2.6rem;
+  min-height:2.5rem;
+  height:2.5rem;
   margin:0;
   padding:.55rem .7rem;
   font-size:.9rem;
@@ -4068,6 +4068,7 @@ label.sync-check input {
   border-color:var(--red-line);
   color:var(--red);
 }
+.src-actions button[hidden] { display:none; }
 .src-actions .src-remove:hover {
   background:var(--red-bg);
   border-color:var(--red);
@@ -4076,7 +4077,7 @@ label.sync-check input {
 .src-auto-wrap {
   display:flex!important;
   grid-column:1/-1;
-  grid-row:3;
+  grid-row:4;
   align-items:center;
   gap:7px!important;
   margin:.25rem 0 0!important;
@@ -4084,34 +4085,10 @@ label.sync-check input {
 .src-auto-wrap input { width:auto; min-height:0; height:auto; }
 #t-source-add,#t-source-split { margin:6px 8px 0 0; }
 @media (max-width:700px) {
-  .src-grid {
-    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-    grid-template-rows:auto auto auto auto;
-    align-items:stretch;
-    gap:10px;
-  }
-  .src-grid > label:first-child { grid-column:1/-1; grid-row:1; }
-  .src-grid > label:nth-child(2) { grid-column:1; grid-row:2; }
-  .src-grid > label:nth-child(3) { grid-column:1; grid-row:3; }
-  .src-actions {
-    grid-column:2;
-    grid-row:2;
-    display:flex;
-    width:100%;
-    align-self:end;
-    align-items:stretch;
-    gap:8px;
-  }
-  .src-actions button {
-    flex:1 1 0;
-    width:auto;
-    min-width:0;
-    min-height:2.6rem;
-    height:2.6rem;
-    padding:.55rem .55rem;
-    font-size:.9rem;
-  }
-  .src-auto-wrap { grid-column:1/-1; grid-row:4; }
+  .src-actions button { padding:.55rem .55rem; }
+}
+@media (max-width:720px) {
+  .src-actions button { min-height:3rem; height:3rem; }
 }
 
 /* ————— Settings refinement: quiet hierarchy, generous rhythm, precise controls ————— */

@@ -17951,13 +17951,15 @@ function buildSettings() {
     '<div class="set-tabs" role="tablist" aria-label="Settings sections">' +
     '<button type="button" role="tab" data-settab="overrides" aria-selected="true">Price overrides</button>' +
     '<button type="button" role="tab" data-settab="date-format" aria-selected="false">Date format</button>' +
-    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledgers (default)</button>' +
-    '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backup &amp; restore</button>' +
-    '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud Sync</button>' +
-    '<button type="button" role="tab" data-settab="danger" aria-selected="false">Danger zone</button>' +
+    '<button type="button" role="tab" data-settab="ledgers" aria-selected="false">Ledger defaults</button>' +
+    '<button type="button" role="tab" data-settab="backup" aria-selected="false">Backups</button>' +
+    '<button type="button" role="tab" data-settab="sync" aria-selected="false">Cloud sync</button>' +
+    '<button type="button" role="tab" data-settab="danger" aria-selected="false">Delete data</button>' +
     '</div>' +
     '<div class="set-panels">' +
     '<section data-setpanel="overrides" role="tabpanel" aria-label="Price overrides">' +
+    '<h3 class="set-heading">Market pricing</h3>' +
+    '<p class="muted set-blurb">Use a manual quote when a market price is unavailable or you prefer a specific source. Overrides take priority over fetched quotes for the matching symbol.</p>' +
     '<label for="o-symbol">Symbol</label>' +
     '<input id="o-symbol" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
     '<label for="o-price">Price (in current fiat)</label>' +
@@ -17966,12 +17968,13 @@ function buildSettings() {
     '<ul id="o-list"></ul>' +
     '</section>' +
     '<section data-setpanel="date-format" role="tabpanel" aria-label="Date format" hidden>' +
+    '<h3 class="set-heading">Date display</h3>' +
     '<p class="muted set-blurb">Choose how dates appear throughout the app. Your records stay stored in a consistent format and are not changed.</p>' +
     '<label for="set-date-format">Date format</label>' +
     '<select id="set-date-format">' +
-    '<option value="DD/MM/YYYY">European · DD/MM/YYYY</option>' +
-    '<option value="MM/DD/YYYY">American · MM/DD/YYYY</option>' +
-    '<option value="YYYY/MM/DD">Asian · YYYY/MM/DD</option>' +
+    '<option value="DD/MM/YYYY">Day first · DD/MM/YYYY</option>' +
+    '<option value="MM/DD/YYYY">Month first · MM/DD/YYYY</option>' +
+    '<option value="YYYY/MM/DD">Year first · YYYY/MM/DD</option>' +
     '<option value="YYYY-MM-DD">ISO · YYYY-MM-DD</option>' +
     '<option value="custom">Custom</option>' +
     '</select>' +
@@ -17984,8 +17987,9 @@ function buildSettings() {
     '<button id="set-date-format-apply" type="button">Apply date format</button>' +
     '</section>' +
     '<section data-setpanel="ledgers" role="tabpanel" aria-label="Ledger codes" hidden>' +
-    '<p class="muted set-blurb">Default bookkeeping codes every cash account starts from (e.g. 1000 income, 1100 income from X, 1110 detail). Subledgers nest by prefix. Editing codes inside an account diverges it from this default; renaming here changes future suggestions — records keep their own stored labels.</p>' +
-    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Ledgers on asset accounts (optional per income/expense record)</label>' +
+    '<h3 class="set-heading">Bookkeeping defaults</h3>' +
+    '<p class="muted set-blurb">These codes are the starting template for new cash accounts. Subledgers nest by code prefix. Changes here affect future suggestions only; existing records keep their saved labels. To customize one account, edit its ledger directly.</p>' +
+    '<label class="sync-check" for="set-assetledgers"><input id="set-assetledgers" type="checkbox"> Show ledgers on asset accounts (optional for each income or expense record)</label>' +
     '<label for="l-code">Code</label>' +
     '<input id="l-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="l-label">Label</label>' +
@@ -17994,16 +17998,18 @@ function buildSettings() {
     '<ul id="l-list"></ul>' +
     '</section>' +
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
-    '<p class="muted set-blurb">Your data never leaves this browser. Download a backup file to move it to another device.</p>' +
+    '<h3 class="set-heading">Your records, in your hands</h3>' +
+    '<p class="muted set-blurb">Records are stored on this device by default. Download a JSON backup to keep a safe copy or move your data to another device. CSV exports are designed for spreadsheets and tax-lot review.</p>' +
     '<button id="s-download" type="button">Download backup</button>' +
-    '<button id="s-csv-trades" type="button">Export trades CSV</button>' +
-    '<button id="s-csv-lots" type="button">Export tax lots CSV (FIFO)</button>' +
-    '<span id="s-upload-label">Restore from file</span>' +
+    '<button id="s-csv-trades" type="button">Export trades (CSV)</button>' +
+    '<button id="s-csv-lots" type="button">Export FIFO tax lots (CSV)</button>' +
+    '<span id="s-upload-label">Restore from a backup file</span>' +
     '<input id="s-upload" type="file" accept="application/json,.json">' +
     '</section>' +
     '<section data-setpanel="sync" role="tabpanel" aria-label="Encrypted sync" hidden>' +
-    '<p class="muted set-blurb">Sync an <strong>encrypted</strong> copy of your data to a drive you choose. The drive only ever sees ciphertext — bring the passphrase to any device to restore.</p>' +
-    '<label for="sy-provider">Provider</label>' +
+    '<h3 class="set-heading">Your encrypted cloud copy</h3>' +
+    '<p class="muted set-blurb">Keep an encrypted copy on a cloud drive you control. Your passphrase encrypts the data before upload, so the provider stores ciphertext rather than readable records. Use the same passphrase on each device.</p>' +
+    '<label for="sy-provider">Cloud provider</label>' +
     '<select id="sy-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
     '<option value="gdrive">Google Drive</option>' +
@@ -18016,30 +18022,30 @@ function buildSettings() {
     '<input id="sy-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="sy-user">Username</label>' +
     '<input id="sy-user" autocomplete="username" spellcheck="false">' +
-    '<label for="sy-passwd">App password</label>' +
+    '<label for="sy-passwd">App-specific password</label>' +
     '<input id="sy-passwd" type="password" autocomplete="current-password">' +
-    '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password in this browser</label>' +
-    '<label for="sy-filename">File name</label>' +
+    '<label class="sync-check" for="sy-remember"><input id="sy-remember" type="checkbox"> Remember password on this device</label>' +
+    '<label for="sy-filename">Backup file name</label>' +
     '<input id="sy-filename" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name. Missing folders are created automatically.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name. Missing folders are created automatically.</p>' +
     '</div>' +
     '<div id="sy-g-oauth" hidden>' +
     '<p class="muted set-blurb" id="sy-oneclick-note"></p>' +
-    '<label for="sy-filename2">File name</label>' +
+    '<label for="sy-filename2">Backup file name</label>' +
     '<input id="sy-filename2" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name.</p>' +
     '<label for="sy-folder2">Folder (optional)</label>' +
     '<input id="sy-folder2" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Work">' +
-    '<p class="muted set-blurb">Keep profiles apart with folders — a name already taken in the folder is refused, never overwritten. Leave empty for the top level; subfolders are created if missing.</p>' +
+    '<p class="muted set-blurb">Use a folder to keep backups separate. Existing files are never overwritten. Leave blank to save at the top level; missing folders are created automatically.</p>' +
     '<details class="adv" id="sy-adv">' +
-    '<summary>Bring your own OAuth app (advanced)</summary>' +
-    '<label for="sy-client">OAuth client ID (your own app)</label>' +
+    '<summary>Use your own OAuth app (advanced)</summary>' +
+    '<label for="sy-client">OAuth client ID</label>' +
     '<input id="sy-client" autocomplete="off" spellcheck="false">' +
     '<div id="sy-g-secret">' +
     '<label for="sy-secret">OAuth client secret (Google only)</label>' +
     '<input id="sy-secret" type="password" autocomplete="off">' +
     '</div>' +
-    '<p class="muted set-blurb">Redirect URI to register in your OAuth app:</p>' +
+    '<p class="muted set-blurb">Add this redirect URI to your OAuth app:</p>' +
     '<p class="mono-break" id="sy-redirect"></p>' +
     '</details>' +
     '</div>' +
@@ -18054,31 +18060,31 @@ function buildSettings() {
     '<input id="sy-key" autocomplete="off" spellcheck="false">' +
     '<label for="sy-skey">Secret key</label>' +
     '<input id="sy-skey" type="password" autocomplete="off">' +
-    '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key in this browser</label>' +
-    '<label for="sy-object">File name</label>' +
+    '<label class="sync-check" for="sy-remember2"><input id="sy-remember2" type="checkbox"> Remember secret key on this device</label>' +
+    '<label for="sy-object">Backup file name</label>' +
     '<input id="sy-object" autocomplete="off" spellcheck="false" placeholder="plutus.inoculens.com">' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name.</p>' +
     '<label for="sy-folder3">Folder prefix (optional)</label>' +
     '<input id="sy-folder3" autocomplete="off" spellcheck="false" placeholder="e.g. backups/work">' +
-    '<p class="muted set-blurb">Keep profiles apart with prefixes — a name already taken is refused, never overwritten. Leave empty for the bucket top level.</p>' +
+    '<p class="muted set-blurb">Use a prefix to keep backups separate. Existing files are never overwritten. Leave blank to save at the bucket top level.</p>' +
     '</div>' +
-    '<label for="sy-pass">Sync passphrase</label>' +
-    '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required — only you know it">' +
-    '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember passphrase in this browser</label>' +
+    '<label for="sy-pass">Encryption passphrase</label>' +
+    '<input id="sy-pass" type="password" autocomplete="new-password" placeholder="Required to encrypt and restore your data">' +
+    '<label class="sync-check" for="sy-remember-pass"><input id="sy-remember-pass" type="checkbox"> Remember this passphrase on this device</label>' +
     '<p class="muted set-blurb" id="sy-fp">Key fingerprint: —</p>' +
-    '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically on every change</label>' +
-    '<p class="muted set-blurb">Open devices check the drive every few seconds and pull newer changes on their own — no reload needed.</p>' +
-    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Save Price Data next to the Records Data file</label>' +
-    '<p class="muted set-blurb">Price Data includes trade-date quotes and chart series. It is a rebuildable encrypted cache and never participates in account or trade reconciliation.</p>' +
+    '<label class="sync-check" for="sy-auto"><input id="sy-auto" type="checkbox"> Sync automatically after changes</label>' +
+    '<p class="muted set-blurb">Connected devices check for newer changes every few seconds and update automatically.</p>' +
+    '<label class="sync-check" for="pd-same"><input id="pd-same" type="checkbox"> Store price history with your records backup</label>' +
+    '<p class="muted set-blurb">Includes historical quotes and chart data. This encrypted cache can be rebuilt and is kept separate from your account records.</p>' +
     '<div id="pd-independent" hidden>' +
-    '<label for="pd-provider">Price Data provider</label>' +
+    '<label for="pd-provider">Price history destination</label>' +
     '<select id="pd-provider">' +
     '<option value="webdav">WebDAV / Nextcloud</option>' +
     '<option value="gdrive">Google Drive</option>' +
     '<option value="dropbox">Dropbox</option>' +
     '<option value="megas3">MEGA (S4 object storage)</option>' +
     '</select>' +
-    '<label for="pd-filename">Price Data file name</label>' +
+    '<label for="pd-filename">Price history file name</label>' +
     '<input id="pd-filename" autocomplete="off" spellcheck="false" placeholder="price-data.plutus.inoculens.com">' +
     '<label for="pd-folder">Folder (optional)</label>' +
     '<input id="pd-folder" autocomplete="off" spellcheck="false" placeholder="e.g. INOCULENS-PLUTUS/Prices">' +
@@ -18087,12 +18093,12 @@ function buildSettings() {
     '<input id="pd-url" autocomplete="off" spellcheck="false" placeholder="https://cloud.example.com/remote.php/dav/files/USER/INOCULENS-PLUTUS">' +
     '<label for="pd-user">Username</label>' +
     '<input id="pd-user" autocomplete="username" spellcheck="false">' +
-    '<label for="pd-passwd">App password</label>' +
+    '<label for="pd-passwd">App-specific password</label>' +
     '<input id="pd-passwd" type="password" autocomplete="current-password">' +
-    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-data password in this browser</label>' +
+    '<label class="sync-check" for="pd-remember"><input id="pd-remember" type="checkbox"> Remember price-history password on this device</label>' +
     '</div>' +
     '<div id="pd-g-oauth" hidden>' +
-    '<p class="muted set-blurb">The ending .enc.json is fixed — type just the name. Google Drive and Dropbox use the existing OAuth sign-in infrastructure. The price-data file is encrypted with the Sync passphrase above.</p>' +
+    '<p class="muted set-blurb">The .enc.json ending is added automatically. Enter only the file name. Google Drive and Dropbox use the existing OAuth sign-in infrastructure. This file uses the encryption passphrase above.</p>' +
     '</div>' +
     '<div id="pd-g-megas3" hidden>' +
     '<label for="pd-endpoint">MEGA S4 endpoint</label>' +
@@ -18105,28 +18111,30 @@ function buildSettings() {
     '<input id="pd-key" autocomplete="off" spellcheck="false">' +
     '<label for="pd-skey">Secret key</label>' +
     '<input id="pd-skey" type="password" autocomplete="off">' +
-    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-data secret key in this browser</label>' +
+    '<label class="sync-check" for="pd-remember2"><input id="pd-remember2" type="checkbox"> Remember price-history secret key on this device</label>' +
     '</div>' +
-    '<p class="muted set-blurb">When using a separate destination, credentials are stored separately from the Records Data sync profile. The file is named exactly as entered.</p>' +
+    '<p class="muted set-blurb">With a separate destination, sign-in details are stored apart from your main records connection. The file uses the name you enter.</p>' +
     '<div class="sync-btns">' +
-    '<button id="pd-connect" type="button">Connect Price Data destination</button>' +
-    '<button id="pd-sync" type="button">Sync Price Data now</button>' +
+    '<button id="pd-connect" type="button">Connect price history destination</button>' +
+    '<button id="pd-sync" type="button">Sync price history now</button>' +
     '</div>' +
     '</div>' +
-    '<p class="muted set-blurb" id="pd-status">Price Data is stored next to the Records Data file.</p>' +
+    '<p class="muted set-blurb" id="pd-status">Price history is stored alongside your records backup.</p>' +
     '<p class="muted set-blurb" id="sy-status">Not connected.</p>' +
     '<div class="sync-btns">' +
     '<button id="sy-connect" type="button">Connect</button>' +
     '<button id="sy-disconnect" type="button">Disconnect</button>' +
-    '<button id="sy-push" type="button">Sync now (upload)</button>' +
+    '<button id="sy-push" type="button">Upload latest changes</button>' +
     '<button id="sy-pull" type="button">Restore from drive</button>' +
-    '<button id="sy-cleanup" type="button">Clean up cloud files</button>' +
+    '<button id="sy-cleanup" type="button">Remove old cloud copies</button>' +
     '</div>' +
-    '<span id="s-enc-label">Encrypted file — needs your passphrase above</span>' +
-    '<button id="sy-enc-download" type="button">Download encrypted file</button>' +
+    '<span id="s-enc-label">Encrypted backup · requires the passphrase above</span>' +
+    '<button id="sy-enc-download" type="button">Download encrypted backup</button>' +
     '<input id="sy-enc-upload" type="file" accept="application/json,.json">' +
     '</section>' +
-    '<section data-setpanel="danger" role="tabpanel" aria-label="Danger zone" hidden>' +
+    '<section data-setpanel="danger" role="tabpanel" aria-label="Delete data" hidden>' +
+    '<h3 class="set-heading">Clear this browser</h3>' +
+    '<p class="muted set-blurb">Permanently removes the accounts, records and settings stored in this browser. Copies already saved to a cloud drive are separate and must be deleted there.</p>' +
     '<button id="s-clear" type="button">Clear all data</button>' +
     '</section>' +
     '</div>';
@@ -21145,7 +21153,7 @@ function syncPullAttachment(cfg, pass, meta) {
   });
 }
 
-// --- Orphaned-blob cleanup ("Clean up cloud files") ---
+// --- Orphaned-blob cleanup ("Remove old cloud copies") ---
 // Lists our <base>-att-<hash>.enc.json objects at the destination, keeps
 // the ones no record on this device references, and deletes the rest only
 // after an explicit confirm. Never automatic: a hash missing here may be
@@ -22768,7 +22776,7 @@ function priceDataRefreshPanel() {
   var status = document.getElementById('pd-status');
   if (status && !priceDataSyncBusy) {
     status.textContent = cfg.sameAsRecords
-      ? 'Price Data is stored next to the Records Data file.'
+      ? 'Price history is stored alongside your records backup.'
       : 'Price Data destination: ' + syncProviderLabel(cfg.provider) + ' / ' + cfg.filename;
   }
 }

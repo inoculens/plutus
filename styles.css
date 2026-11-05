@@ -580,7 +580,6 @@ body::before {
   width: 5.5rem;
   height: 5.5rem;
   opacity: 0;
-  filter: grayscale(1) contrast(1.08);
   border-radius: 22%;
 }
 
@@ -696,11 +695,10 @@ header.brand {
   overflow: hidden;
 }
 
-/* The mark is the owner's gold logo; in-app it is rendered as silver so the
-   chrome stays strictly black / white / gray. */
+/* The logo keeps its original gold: it is the one brand-colored element in
+   an otherwise monochrome shell. */
 .brand-mark.brand-logo {
   background: url('/icons/android-chrome-192x192.png') center / cover no-repeat #0b0b0c;
-  filter: grayscale(1) contrast(1.08);
   box-shadow: 0 0 0 1px var(--border-strong);
 }
 

@@ -12451,21 +12451,22 @@ function renderAccountDetail(st, id) {
     host.appendChild(feesLine);
   }
   var tHead = document.createElement('div');
-  tHead.className = 'section-head';
+  tHead.className = 'section-head trades-head';
   var tTitle = document.createElement('h2');
   tTitle.className = 'section-title';
   tTitle.textContent = 'Trades';
   tHead.appendChild(tTitle);
   if (atrades.length || dateFilter) {
+    // Keep the account-level controls together, using the same compact
+    // action group as the home Accounts header.
+    var tActions = document.createElement('div');
+    tActions.className = 'section-actions';
     var tAdd = document.createElement('button');
     tAdd.type = 'button';
     tAdd.className = 'ghost t-add';
     tAdd.textContent = '+ Record';
     tAdd.setAttribute('aria-label', 'Add record to ' + acc.name);
     tAdd.addEventListener('click', function () { openPrefillTrade(acc.id, true); });
-    // Select button for trades (mirrors account selection on the home
-    // screen: Select sits before the Filter, Filter stays directly left of
-    // + Record).
     var tradeSelectBtn = document.createElement('button');
     tradeSelectBtn.type = 'button';
     tradeSelectBtn.className = 'ghost' + (tradeSelectionMode ? ' select-on' : '');
@@ -12477,11 +12478,10 @@ function renderAccountDetail(st, id) {
       if (tradeSelectionMode) cancelTradeSelection();
       else { tradeSelectionMode = true; render(); }
     });
-    if (atrades.length) tHead.appendChild(tradeSelectBtn);
-    tHead.appendChild(buildTradeTypeFilter(acc, atrades));
+    if (atrades.length) tActions.appendChild(tradeSelectBtn);
+    tActions.appendChild(buildTradeTypeFilter(acc, atrades));
     // Bootstrap: standalone asset accounts with nothing labeled yet get
-    // their + Ledger here (filter … + Ledger … + Record); once the Ledgers
-    // section exists it owns the button instead.
+    // their + Ledger here; once the Ledgers section exists it owns the button.
     if (!isCashAccD && !mainOf && !members.length && !assetLedgersShown) {
       var showBoot = false;
       try { showBoot = assetLedgersOn(st); } catch (e) { showBoot = false; }
@@ -12493,10 +12493,10 @@ function renderAccountDetail(st, id) {
         lBoot.setAttribute('data-ledger-add', acc.id);
         lBoot.setAttribute('aria-label', 'Add ledger to ' + acc.name);
         lBoot.addEventListener('click', function () { openLedgerDialog(acc.id); });
-        tHead.appendChild(lBoot);
+        tActions.appendChild(lBoot);
       }
     }
-    tHead.appendChild(tAdd);
+    tActions.appendChild(tAdd);
     if (tradeSelectionMode) {
       var nSel = selectedTradeCount();
       var countEl = document.createElement('span');
@@ -12504,9 +12504,10 @@ function renderAccountDetail(st, id) {
       countEl.setAttribute('data-trade-select-count', '1');
       countEl.textContent = nSel + ' selected';
       countEl.hidden = nSel === 0;
-      tHead.appendChild(countEl);
-      tHead.appendChild(buildTradeAction(acc.id));
+      tActions.appendChild(countEl);
+      tActions.appendChild(buildTradeAction(acc.id));
     }
+    tHead.appendChild(tActions);
     host.appendChild(tHead);
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
     var accKind = (acc && typeof acc.kind === 'string') ? acc.kind : undefined;

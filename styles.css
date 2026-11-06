@@ -4456,7 +4456,19 @@ body.is-empty .landing-feats li { display: flex; flex-direction: column; align-i
 body.is-empty .foot-inner { justify-content: center; }
 body.is-empty .foot-ver { margin-left: 0; }
 @media (max-width: 1023.98px) {
-  body.is-empty .landing-coins { opacity: 0.25; }
+  /* The desktop empty-state box above (top:0 / bottom:7rem / width:34% /
+     centered) outranks the base mobile backdrop rule, which dragged the
+     coins down-left. Re-assert the backdrop geometry here: pinned to the
+     top-right, bleeding off the right edge so the Euro stays ~75% visible. */
+  body.is-empty .landing-coins {
+    top: 2.75rem;
+    right: -30px;
+    bottom: auto;
+    width: auto;
+    align-items: flex-end;
+    justify-content: flex-start;
+    opacity: 0.25;
+  }
 }
 
 /* ————— History status line: calm, one short phrase; details live behind (i) ————— */

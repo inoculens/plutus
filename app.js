@@ -17935,6 +17935,31 @@ function showSettingsTab(name) {
       if (abox) abox.checked = assetLedgersOn(loadState());
     } catch (e) { /* ignore */ }
   }
+  // Callers select the tab before the dialog is opened, and a closed dialog
+  // has no layout, so reveal once now and again after it has been laid out.
+  revealSelectedSettingsTab(host);
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(function () { revealSelectedSettingsTab(host); });
+  }
+}
+
+// On phones the tab strip scrolls sideways; a tab past the right edge (Cloud
+// sync, Delete data) must already be in view when the dialog opens. Scrolls
+// only the strip itself, never the page, and only on an axis that overflows.
+function revealSelectedSettingsTab(host) {
+  try {
+    var bar = host && host.querySelector('.set-tabs');
+    var sel = bar && bar.querySelector('[aria-selected="true"]');
+    if (!bar || !sel) return;
+    var b = bar.getBoundingClientRect();
+    var t = sel.getBoundingClientRect();
+    if (bar.scrollWidth > bar.clientWidth) {
+      bar.scrollLeft += (t.left - b.left) - (bar.clientWidth - t.width) / 2;
+    }
+    if (bar.scrollHeight > bar.clientHeight) {
+      bar.scrollTop += (t.top - b.top) - (bar.clientHeight - t.height) / 2;
+    }
+  } catch (e) { /* tab reveal never blocks the dialog */ }
 }
 
 function refreshLedgerList() {
@@ -23518,6 +23543,54 @@ if (typeof window !== 'undefined') {
     document.addEventListener('DOMContentLoaded', consentInitBanner);
     try {
       if (document.readyState === 'interactive' || document.readyState === 'complete') consentInitBanner();
+    } catch (e) { /* listener covers it */ }
+  }
+}
+
+// Floating dock (phones/tablets): when the page is scrolled to the end the
+// footer rises into view, and the fixed pill used to sit on top of it. Lift
+// the pill by exactly the footer's visible height so it rests right above the
+// footer instead. The desktop rail (>= 1024px) is top-anchored and never lifts.
+function dockFooterInit() {
+  try {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    var dock = document.getElementById('dock');
+    var foot = document.querySelector('footer');
+    if (!dock || !foot || dock.getAttribute('data-lift-wired')) return;
+    dock.setAttribute('data-lift-wired', '1');
+    var root = document.documentElement;
+    var queued = false;
+    var update = function () {
+      queued = false;
+      var lift = 0;
+      if (window.innerWidth < 1024) {
+        var visible = window.innerHeight - foot.getBoundingClientRect().top;
+        if (visible > 0) lift = Math.round(visible);
+      }
+      root.style.setProperty('--dock-lift', lift + 'px');
+    };
+    var schedule = function () {
+      if (queued) return;
+      queued = true;
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(update);
+      else update();
+    };
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    if (typeof ResizeObserver === 'function') {
+      var ro = new ResizeObserver(schedule);
+      ro.observe(document.body);
+      ro.observe(foot);
+    }
+    update();
+  } catch (e) { /* dock placement never breaks boot */ }
+}
+
+if (typeof window !== 'undefined') {
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('DOMContentLoaded', dockFooterInit);
+    try {
+      if (document.readyState === 'interactive' || document.readyState === 'complete') dockFooterInit();
     } catch (e) { /* listener covers it */ }
   }
 }

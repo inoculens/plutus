@@ -862,7 +862,9 @@ header.brand {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(0.8rem + env(safe-area-inset-bottom));
+  /* --dock-lift (set from app.js) keeps the pill above the footer once the
+     footer scrolls into view. */
+  bottom: calc(0.8rem + env(safe-area-inset-bottom) + var(--dock-lift, 0px));
   z-index: 25;
   width: max-content;
   max-width: calc(100vw - 1.5rem);
@@ -3151,7 +3153,7 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
   position: relative;
   max-width: var(--max);
   margin: 0 auto;
-  padding: 1.4rem 1.25rem 2.5rem;
+  padding: 1.4rem 1rem 2.5rem;
   display: flex;
   align-items: center;
   gap: 0.6rem 1.25rem;
@@ -3189,6 +3191,15 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
   .foot-inner { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; }
   .foot-brand, .foot-tag { flex: 1 1 100%; }
   .foot-ver { flex: 1 1 100%; margin-left: 0; }
+  /* Footer edges line up with the page content (main uses 0.9rem here). */
+  .foot-inner { padding-left: 0.9rem; padding-right: 0.9rem; }
+  /* First-run page: everything centred, in the order brand, Privacy +
+     Credits, tagline, then the GitHub version link. */
+  body.is-empty .foot-inner { justify-content: center; text-align: center; }
+  body.is-empty .foot-brand { order: 1; justify-content: center; }
+  body.is-empty .foot-link { order: 2; }
+  body.is-empty .foot-tag { order: 3; }
+  body.is-empty .foot-ver { order: 4; justify-content: center; }
 }
 
 /* Tables (legacy safety) */
@@ -5033,6 +5044,13 @@ label.sync-check {
   border: 0;
   border-radius: 0;
   background: none;
+}
+/* Credential cards nested inside a provider block (WebDAV password, MEGA
+   secret key) sat flush against the field above them because those blocks
+   have no gap of their own. Give the card the same readable gap that
+   separates any other field from the one before it. */
+#settings-dialog .set-panels :is(#sy-g-webdav, #sy-g-megas3, #pd-g-webdav, #pd-g-megas3) > .sync-field-group {
+  margin: 0.9rem 0 0;
 }
 #settings-dialog .set-panels #pd-status {
   margin: 0.35rem 0 0;

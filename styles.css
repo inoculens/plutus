@@ -1585,10 +1585,9 @@ section h2, aside h2 {
 /* Keep Select at its original position; the filter and following
    add controls remain packed against the right edge. */
 #account-detail .section-head .filter-wrap { margin-left: auto; }
-/* Tighten only the Filter / + Ledger / + Record gaps while selection mode
-   is off. Selection mode keeps the original spacing and alignment. */
-#account-detail .section-head.trades-head:not(.is-selecting) .filter-wrap + button,
-#account-detail .section-head.trades-head:not(.is-selecting) .filter-wrap + button + .t-add {
+/* Keep Filter / + Ledger / + Record spacing compact in both selection modes. */
+#account-detail .section-head.trades-head .filter-wrap + button,
+#account-detail .section-head.trades-head .filter-wrap + button + .t-add {
   margin-left: -0.35rem;
 }
 /* Group Ledgers header (title + currency select + Ledger button): the

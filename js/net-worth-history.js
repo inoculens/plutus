@@ -599,7 +599,12 @@
             ? startRange : endRange;
         }
         if (target.disabled) return;
-        rangeDrag = { pointerId: event.pointerId, startChanged: target === startRange };
+        var targetRect = target.getBoundingClientRect();
+        rangeDrag = {
+          pointerId: event.pointerId,
+          startChanged: target === startRange,
+          pointerOffset: event.clientX - (targetRect.left + targetRect.width / 2)
+        };
         rangeTrack.setPointerCapture(event.pointerId);
         moveRangeFromPointer(event, rangeTrack);
         event.preventDefault();
@@ -721,7 +726,8 @@
   function moveRangeFromPointer(event, track) {
     var rect = track.getBoundingClientRect();
     if (!rect.width || !rangeDrag) return;
-    var position = Math.max(0, Math.min(1000, (event.clientX - rect.left) / rect.width * 1000));
+    var position = Math.max(0, Math.min(1000,
+      (event.clientX - rect.left - rangeDrag.pointerOffset) / rect.width * 1000));
     setRangeValue(byId(rangeDrag.startChanged ? 'history-range-start' : 'history-range-end'), position);
     onRangeInput(rangeDrag.startChanged);
   }

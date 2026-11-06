@@ -1412,13 +1412,11 @@
     }
 
     var note = byId('history-note');
-    var badge = byId('history-local-badge');
     var retryButton = byId('history-retry');
     var panel = byId('networth-history');
     if (panel) panel.setAttribute('aria-busy', active.loading ? 'true' : 'false');
     renderLoadDetails(active);
     if (retryButton) retryButton.hidden = !(active.loadError || active.incomplete);
-    if (badge) badge.textContent = storageMessage ? 'Storage issue' : 'Saved locally';
     if (note) {
       note.hidden = !storageMessage && (active.loading || active.loadError || active.incomplete);
       if (storageMessage) note.textContent = storageMessage;

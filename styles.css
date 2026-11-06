@@ -3978,6 +3978,7 @@ label.sync-check input {
   cursor: ew-resize;
   transition: transform 0.15s var(--ease);
 }
+.history-range-thumb:active { transform: translate(-50%, -50%); }
 .history-range-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .history-range-thumb:disabled { cursor: default; opacity: 0.55; }
 .history-range-start { z-index: 2; }

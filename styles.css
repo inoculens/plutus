@@ -2315,6 +2315,11 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   height: auto;
   align-self: auto;
   background: none;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  appearance: none;
+  padding: 0;
 }
 .trade-block .drag-handle::before {
   content: '';
@@ -2650,7 +2655,25 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 }
 /* One true facts line on desktop: the strip never wraps, so every fact —
    however long — shares the single row and trims instead of spilling below. */
+/* Separate the record heading from its detail columns with one continuous
+   rule. Extending the rule across the reserved grip rail keeps the table
+   edge visually uninterrupted. */
+.trade-facts {
+  position: relative;
+  padding-top: 0.42rem;
+  margin-top: 0.22rem;
+}
+.trade-facts::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -2.6rem;
+  right: -1rem;
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+}
 .trade-facts { display: flex; flex-wrap: nowrap; justify-content: flex-start; align-items: stretch; gap: 0 1.25rem; min-width: 0; flex: 1 1 100%; max-width: 100%; overflow: hidden; }
+
 .trade-foot { display: flex; justify-content: flex-end; padding: 0.5rem 0 0.35rem; }
 .trade-del { margin-left: 0.25rem; padding: 0.45rem 0.7rem; min-height: 2.5rem; font-size: 1.05rem; line-height: 1; }
 /* Phone action cluster (▾ ✎ 🗑): the wrapper only exists so the three wrap to

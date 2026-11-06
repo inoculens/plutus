@@ -17510,10 +17510,17 @@ function updateModalLock() {
     }
     var body = document.body;
     if (!body || !body.classList) return;
+    // The class goes on <html> as well as <body>: on phones html carries
+    // overflow-x: clip, so it is the real scroller and body's overflow no
+    // longer propagates to the viewport. Locking body alone left the page
+    // scrollable from the dimmed area around a bottom sheet.
+    var root = document.documentElement;
     if (open > 0) {
       try { body.classList.add('modal-open'); } catch (e) { /* ignore */ }
+      try { if (root && root.classList) root.classList.add('modal-open'); } catch (e) { /* ignore */ }
     } else {
       try { body.classList.remove('modal-open'); } catch (e) { /* ignore */ }
+      try { if (root && root.classList) root.classList.remove('modal-open'); } catch (e) { /* ignore */ }
     }
   } catch (e) { /* ignore */ }
 }

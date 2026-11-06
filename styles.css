@@ -2829,7 +2829,10 @@ details.opt + details.opt { margin-top: 0.65rem; }
 #tb-sync.sync-img-btn:hover { background: #fafafa; }
 #tb-sync-img { display: block; width: 20px; height: 20px; }
 /* ————— Modal freeze: no background scroll or interaction ————— */
-body.modal-open { overflow: hidden; }
+/* Both roots: on phones html is itself an overflow box (overflow-x: clip),
+   so locking body alone does not stop the viewport from scrolling. */
+html.modal-open,
+body.modal-open { overflow: hidden; overscroll-behavior: none; }
 /* ————— Progressive disclosure: no irrelevant buttons ————— */
 /* Step 1 (no accounts): the landing CTA is the only path. Topbar chrome hides. */
 body.is-empty .topbar-controls { display: none; }

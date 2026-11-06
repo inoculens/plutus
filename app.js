@@ -1779,12 +1779,20 @@ function displayPairs(trades, main, kinds) {
     seen[k] = true;
     out.push({ date: dk, from: f });
   }
+  function needLock(lock, date) {
+    if (!lock || typeof lock.pair !== 'string') return;
+    var pair = /^([A-Z]{2,10})\/[A-Z]{2,10}$/i.exec(lock.pair.trim());
+    if (pair) need(date, pair[1]);
+  }
   (trades || []).forEach(function (t) {
     if (!t) return;
     var c = (typeof t.currency === 'string') ? t.currency.toUpperCase() : '';
     var d = (typeof t.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.date)) ? t.date.slice(0, 10) : '';
-    if (!c || !d) return;
-    need(d, c);
+    if (!d) return;
+    if (c) need(d, c);
+    needLock(t.fromFxLock, d);
+    needLock(t.toFxLock, d);
+    if (!c) return;
     if (kinds && t.type === 'income' && c !== m) {
       var kd = '';
       try { kd = kinds[t.accountId] || ''; } catch (e) { kd = ''; }
@@ -1875,6 +1883,25 @@ function convertTrade(t, main) {
     var fixDay = (/^ECB-(\d{4}-\d{2}-\d{2})$/.exec(hit.source) || [])[1] || d;
     return { pair: f + '/' + m, rate: hit.rate, source: 'ECB-' + fixDay, interpolated: fixDay !== d };
   }
+  function convertLegLock(lock) {
+    if (!lock || typeof lock.pair !== 'string') return lock;
+    var pair = /^([A-Z]{2,10})\/([A-Z]{2,10})$/i.exec(lock.pair.trim());
+    if (!pair) return lock;
+    var from = pair[1].toUpperCase();
+    var oldTo = pair[2].toUpperCase();
+    var direct = lockFor(from);
+    if (direct) return direct;
+    if (oldTo === m) return lock;
+    var bridge = lockFor(oldTo);
+    var rate = Number(lock.rate);
+    if (!bridge || !isFinite(rate) || rate <= 0) return lock;
+    return {
+      pair: from + '/' + m,
+      rate: rate * bridge.rate,
+      source: bridge.source,
+      interpolated: !!(lock.interpolated || bridge.interpolated)
+    };
+  }
   // Total leg.
   if (c === m) {
     clone().fxLock = { pair: c + '/' + m, rate: 1, source: '1:1', interpolated: false };
@@ -1882,6 +1909,15 @@ function convertTrade(t, main) {
     var tl = lockFor(c);
     if (tl) clone().fxLock = tl;
     // No cached rate yet: keep the stored lock (corrected on re-render).
+  }
+  if (t.fromFxLock || t.toFxLock) {
+    var convertedFromLock = convertLegLock(t.fromFxLock);
+    var convertedToLock = convertLegLock(t.toFxLock);
+    if (convertedFromLock !== t.fromFxLock || convertedToLock !== t.toFxLock) {
+      clone();
+      if (convertedFromLock) out.fromFxLock = convertedFromLock;
+      if (convertedToLock) out.toFxLock = convertedToLock;
+    }
   }
   // One fiat per trade: a stale separate fee lock would convert the fee at
   // the wrong rate, so it is always dropped from display copies.
@@ -2808,9 +2844,11 @@ function computePortfolio(allTrades, live, method) {
               if (!dstP) { dstP = stFor(String(item.o.toAccountId).trim(), dSymP); dstP.touched = true; }
               if (isFifo) {
                 var keepD = fifoScaleForP(w, partQty);
+                var arrivalScale = arrPart / partQty;
+                if (!isFinite(arrivalScale) || arrivalScale <= 0) return;
                 w.removed.forEach(function (rl) {
-                  var kd = rl.qty * keepD;
-                  if (kd > qtyEps) dstP.queue.push({ qty: kd, unitCost: rl.unitCost, date: rl.openDate, buyId: rl.buyId || null });
+                  var kd = rl.qty * keepD * arrivalScale;
+                  if (kd > qtyEps) dstP.queue.push({ qty: kd, unitCost: rl.unitCost / arrivalScale, date: rl.openDate, buyId: rl.buyId || null });
                 });
               } else {
                 dstP.qty += arrPart;
@@ -7917,10 +7955,12 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
   var missing = {};
   var cashTotal = 0;
   var seenAccount = {};
+  var cashIds = cashAccountIds(st);
 
   function addAccountPositions(accountId) {
     if (seenAccount[accountId]) return;
     seenAccount[accountId] = true;
+    if (cashIds[accountId]) return;
     var rows = portfolio.byAccount[accountId];
     if (!rows) return;
     rows.forEach(function (row, symbol) {
@@ -7938,7 +7978,6 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     groupMembers(st, account.id).forEach(function (member) { addAccountPositions(member.id); });
   });
 
-  var cashIds = cashAccountIds(st);
   var cashJobs = [];
   Object.keys(cashIds).forEach(function (accountId) {
     var account = accountById(st, accountId);
@@ -7990,6 +8029,7 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
       total = 0;
       accounts.forEach(function (account) {
         function addRows(accountId) {
+          if (cashIds[accountId]) return;
           var rows = repriced.byAccount[accountId];
           if (!rows) return;
           rows.forEach(function (row) {
@@ -8077,7 +8117,40 @@ function updateNetWorthHistory(st, value, main) {
   });
 }
 
-function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
+function summaryLifetimeCost(st, rows, dtrades, visibleAccounts) {
+  var cashIds = cashAccountIds(st);
+  var included = {};
+  (visibleAccounts || []).forEach(function (account) {
+    if (!account || !account.id) return;
+    included[account.id] = true;
+    groupMembers(st, account.id).forEach(function (member) { included[member.id] = true; });
+  });
+  var buyBySym = {};
+  (dtrades || []).forEach(function (t) {
+    if (!t || !included[t.accountId] || cashIds[t.accountId] || (t.type !== 'buy' && t.type !== 'income')) return;
+    var symbol = String(t.symbol || '').toUpperCase();
+    var qty = Number(t.qty);
+    if (!symbol || !isFinite(qty) || qty <= 0) return;
+    var normalized = normalizeTrade(t);
+    buyBySym[symbol] = (buyBySym[symbol] || 0) + normalized.netMain + normalized.feeLossMain;
+  });
+  var knownSyms = {};
+  (rows || []).forEach(function (position) {
+    if (position.unrealized !== null || Math.abs(position.realized || 0) > 1e-9) knownSyms[position.symbol] = true;
+  });
+  var lifetime = 0;
+  Object.keys(buyBySym).forEach(function (symbol) {
+    if (knownSyms[symbol]) lifetime += buyBySym[symbol];
+  });
+  if (!(lifetime > 0)) {
+    (rows || []).forEach(function (position) {
+      if (position.marketValue !== null && position.unrealized !== null) lifetime += position.marketValue - position.unrealized;
+    });
+  }
+  return lifetime > 0 ? lifetime : 0;
+}
+
+function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
   var main = st.settings.mainCurrency;
   var mv = 0;
   var un = 0;
@@ -8132,37 +8205,8 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt) {
     if (p.marketValue !== null) { mv += p.marketValue; mvKnown = true; }
     if (p.unrealized !== null) { un += p.unrealized; unKnown = true; }
   });
-  // Lifetime cost denominator (consistent with computePositions returnPct):
-  // sum of buy+income cost for symbols with known P&L. Falls back to
-  // remaining-cost when trade history is unavailable (tests/native).
   var lifetime = 0;
-  try {
-    var dtr = dtradesOpt || convertTrades(st.trades, main);
-    var buyBySym = {};
-    dtr.forEach(function (t) {
-      if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
-      if (t.accountId && cashIdsS[t.accountId]) return; // cash is balance-only
-      var s = String(t.symbol || '').toUpperCase();
-      if (!s) return;
-      var q = Number(t.qty);
-      if (!isFinite(q) || q <= 0) return;
-      var nn = normalizeTrade(t);
-      buyBySym[s] = (buyBySym[s] || 0) + nn.netMain + nn.feeLossMain;
-    });
-    var knownSyms = {};
-    rows.forEach(function (p) {
-      if (p.unrealized !== null || Math.abs(p.realized || 0) > 1e-9) knownSyms[p.symbol] = true;
-    });
-    Object.keys(buyBySym).forEach(function (s) { if (knownSyms[s]) lifetime += buyBySym[s]; });
-  } catch (e) { lifetime = 0; }
-  if (!(lifetime > 0)) {
-    // Fallback: remaining cost (old behaviour) so empty/new portfolios still paint.
-    rows.forEach(function (p) {
-      if (p.marketValue !== null && p.unrealized !== null) lifetime += p.marketValue - p.unrealized;
-    });
-    // If fallback yields 0 but we have realized (e.g. closed, price unknown), use it as denominator guard below.
-    if (!(lifetime > 0)) lifetime = 0;
-  }
+  try { lifetime = summaryLifetimeCost(st, rows, dtradesOpt || convertTrades(st.trades, main), visibleAccounts || []); } catch (e) { lifetime = 0; }
   var plKnown = unKnown || hasRealized;
   var tb = document.getElementById('tb-totals');
   if (tb) {
@@ -9211,7 +9255,7 @@ function renderAccounts(st) {
   perAcctRows.forEach(function (rows) {
     rows.forEach(function (r) { grandRows.push(r); });
   });
-  renderSummaryCards(st, grandRows, dtrades, visibleAccounts.length);
+  renderSummaryCards(st, grandRows, dtrades, visibleAccounts.length, visibleAccounts);
   // Paged cards, global totals: only the current page renders, while hero,
   // summary and counts always cover every visible account.
   var rowsById = {};
@@ -18637,9 +18681,22 @@ function downloadLotsCsv() {
   var main = st.settings.mainCurrency;
   var dtrades = convertTrades(st.trades, main);
   var fifo = computeFifo(dtrades);
-  var accName = {};
-  (st.accounts || []).forEach(function (a) { accName[a.id] = a.name; });
   var rows = [['symbol', 'openDate', 'closeDate', 'qty', 'proceeds_' + main, 'cost_' + main, 'gain_' + main, 'holdingDays', 'accountId']];
+  function appendLotRow(lot, accountId, symbol) {
+    var proceedsCents = Math.round(Number(lot.proceeds) * 100);
+    var costCents = Math.round(Number(lot.cost) * 100);
+    rows.push([
+      lot.symbol || symbol || '',
+      fmtDateDmy(lot.openDate || ''),
+      fmtDateDmy(lot.closeDate || ''),
+      lot.qty,
+      proceedsCents / 100,
+      costCents / 100,
+      (proceedsCents - costCents) / 100,
+      lot.holdingDays,
+      { text: accountId || '' }
+    ]);
+  }
   // Lots are per-symbol globally; attribute account where possible via close trade? FIFO lots don't carry account, but joint lots do.
   // Use joint portfolio lots (with accountId) for accuracy.
   try {
@@ -18648,15 +18705,15 @@ function downloadLotsCsv() {
       var syms = pf.states[accId];
       Object.keys(syms).forEach(function (sym) {
         (syms[sym].lots || []).forEach(function (l) {
-          rows.push([sym, fmtDateDmy(l.openDate || ''), fmtDateDmy(l.closeDate || ''), l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, { text: accName[accId] || accId }]);
+          appendLotRow(l, accId, sym);
         });
       });
     });
   } catch (e) {
     fifo.forEach(function (v, sym) {
-      (v.lots || []).forEach(function (l) {
-        rows.push([sym, fmtDateDmy(l.openDate || ''), fmtDateDmy(l.closeDate || ''), l.qty, Math.round(l.proceeds * 100) / 100, Math.round(l.cost * 100) / 100, Math.round(l.gain * 100) / 100, l.holdingDays, '']);
-      });
+    (v.lots || []).forEach(function (l) {
+      appendLotRow(l, '', sym);
+    });
     });
   }
   downloadTextFile('plutus.inoculens.com-tax-lots-' + backupStamp() + '.csv', rows.map(function (r) {

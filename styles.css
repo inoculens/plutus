@@ -594,6 +594,8 @@ html::after {
   transition: opacity 450ms ease;
 }
 
+#app-loader[hidden] { display: none; }
+
 #app-loader.is-exiting { opacity: 0; pointer-events: none; }
 
 .app-loader-glow { display: none; }

@@ -12506,7 +12506,6 @@ function renderAccountDetail(st, id) {
       tHead.appendChild(countEl);
       tHead.appendChild(buildTradeAction(acc.id));
     }
-  }
   host.appendChild(tHead);
     var nameById = function (aid) { var a = accountById(st, aid); return a ? a.name : ''; };
     var accKind = (acc && typeof acc.kind === 'string') ? acc.kind : undefined;

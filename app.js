@@ -12257,7 +12257,7 @@ function renderAccountDetail(st, id) {
   }
   var qtyExactTxt = null;
   if (pos) {
-    try { qtyExactTxt = exactQtyHeldString(scopeTrades, null, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
+    try { var qtyScopeIds = [acc.id]; members.forEach(function (m) { qtyScopeIds.push(m.id); }); qtyExactTxt = exactQtyHeldString(scopeTrades, qtyScopeIds, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
   }
   stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyDisplayTrim(qtyExactTxt, pos.symbol) : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
   // Full grid even with no records yet: unknowns show —, and the live price
@@ -15650,10 +15650,10 @@ function exactQtyHeldString(allTrades, accountId, symbol) {
     var w = exactQtyHeldMap(allTrades);
     var d = (w.decimals.get(sym) !== undefined) ? w.decimals.get(sym) : qtyDecimals(sym);
     var total = 0n;
-    var matchAcct = (accountId === null || accountId === undefined) ? null : String(accountId);
+    var matchAccts = (accountId === null || accountId === undefined) ? null : (Array.isArray(accountId) ? accountId.map(String) : [String(accountId)]);
     w.db.forEach(function (sc, key) {
       var parts = String(key).split('\u0001');
-      if (matchAcct !== null && parts[0] !== matchAcct) return;
+      if (matchAccts !== null && matchAccts.indexOf(parts[0]) === -1) return;
       if (parts[1] !== sym) return;
       total += sc;
     });
@@ -17510,10 +17510,17 @@ function updateModalLock() {
     }
     var body = document.body;
     if (!body || !body.classList) return;
+    // The class goes on <html> as well as <body>: on phones html carries
+    // overflow-x: clip, so it is the real scroller and body's overflow no
+    // longer propagates to the viewport. Locking body alone left the page
+    // scrollable from the dimmed area around a bottom sheet.
+    var root = document.documentElement;
     if (open > 0) {
       try { body.classList.add('modal-open'); } catch (e) { /* ignore */ }
+      try { if (root && root.classList) root.classList.add('modal-open'); } catch (e) { /* ignore */ }
     } else {
       try { body.classList.remove('modal-open'); } catch (e) { /* ignore */ }
+      try { if (root && root.classList) root.classList.remove('modal-open'); } catch (e) { /* ignore */ }
     }
   } catch (e) { /* ignore */ }
 }

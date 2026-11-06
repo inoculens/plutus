@@ -3338,6 +3338,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     right: 0;
     display: flex;
     align-items: center;
+    gap: 0.1rem;
     margin: 0;
     order: unset;
   }
@@ -3358,7 +3359,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     content: ''; position: absolute; inset: -0.35rem -0.25rem;
   }
   .trade-head .trade-edit { margin-left: 0; }
-  .trade-head .trade-more { margin-right: 0.25rem; }
+  .trade-head .trade-more { margin-right: 0; }
   .trade-head .trade-pair { order: 3; }
   .trade-block.is-swap .trade-head .trade-actions { order: 4; }
   .trade-block.is-swap .trade-head .trade-now { order: 5; }

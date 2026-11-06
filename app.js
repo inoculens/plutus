@@ -19940,7 +19940,9 @@ function syncRedirectUri() {
     if (typeof window === 'undefined' || !window.location) return '';
     var loc = window.location;
     if (!loc.protocol || loc.protocol.indexOf('http') !== 0 || !loc.host) return '';
-    return loc.protocol + '//' + loc.host + String(loc.pathname || '/');
+    // Always the site root: the registered redirect URI must be stable and must
+    // not follow the current route (e.g. /account/<id>).
+    return loc.protocol + '//' + loc.host + '/';
   } catch (e) {
     return '';
   }

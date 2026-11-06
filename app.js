@@ -11102,6 +11102,10 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   var facts = document.createElement('div');
   facts.className = 'trade-facts';
   Array.prototype.forEach.call(box.querySelectorAll(':scope > .stat-row'), function (r) { facts.appendChild(r); });
+  var divider = document.createElement('div');
+  divider.className = 'trade-divider';
+  divider.setAttribute('aria-hidden', 'true');
+  box.appendChild(divider);
   box.appendChild(facts);
   // A card opened before a re-render opens again in the fresh DOM (after the
   // strip exists, so the caret and the ⓘ gate pick up the open state).
@@ -12257,7 +12261,7 @@ function renderAccountDetail(st, id) {
   }
   var qtyExactTxt = null;
   if (pos) {
-    try { var qtyScopeIds = [acc.id]; members.forEach(function (m) { qtyScopeIds.push(m.id); }); qtyExactTxt = exactQtyHeldString(scopeTrades, qtyScopeIds, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
+    try { var qtyScopeIds = [acc.id]; members.forEach(function (m) { qtyScopeIds.push(m.id); }); qtyExactTxt = exactQtyHeldString(dtrades, qtyScopeIds, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
   }
   stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyDisplayTrim(qtyExactTxt, pos.symbol) : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
   // Full grid even with no records yet: unknowns show —, and the live price

@@ -61,6 +61,18 @@ const st = { accounts, trades: [ms('B')] };
 assert.equal(C.sharedTransfersOutside(st, ['A']), 1);
 assert.equal(C.sharedTransfersOutside(st, ['A', 'B']), 0);
 
+// Exact incoming holdings need the source account's earlier balance to
+// replay a transfer; account-filtered records alone cannot resolve the leg.
+const exactTransfer = mk({
+  id: 'exact-transfer', type: 'transfer', symbol: 'BTC', qty: 0.5, networkFee: 0,
+  date: '2026-02-01', accountId: 'A', outputs: [{ toAccountId: 'B', qty: 0.1, spend: false }],
+  selfQty: 0.4
+});
+const exactHistory = [buy('A', 0.5, '2026-01-10'), exactTransfer];
+assert.equal(C.exactQtyHeldString([exactTransfer], ['B'], 'BTC'), '0.00000000');
+assert.equal(C.exactQtyHeldString(exactHistory, ['B'], 'BTC'), '0.10000000');
+assert.match(src, /exactQtyHeldString\(dtrades, qtyScopeIds, pos\.symbol\)/);
+
 // Oversell message names the short source account.
 const d = ms('B');
 assert.match(C.heldConflictMessage({ trade: d, accountId: 'B', available: '0.1' }, d, st), /AccB can spend at most 0\.1/);

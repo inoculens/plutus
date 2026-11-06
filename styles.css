@@ -2655,12 +2655,12 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
 }
 /* One true facts line on desktop: the strip never wraps, so every fact —
    however long — shares the single row and trims instead of spilling below. */
-/* Keep the heading divider outside the clipped facts strip so it spans the
-   grip rail without being cut off or painting over the card border. */
+/* Keep the heading divider outside the clipped facts strip. It aligns with
+   the facts content, staying clear of the grip rail and card border. */
 .trade-divider {
   flex: 1 1 100%;
   height: 0;
-  margin: 0.22rem -1rem 0.42rem -2.6rem;
+  margin: 0.22rem 0 0.42rem;
   border-top: 1px solid var(--border);
 }
 .trade-facts { display: flex; flex-wrap: nowrap; justify-content: flex-start; align-items: stretch; gap: 0 1.25rem; min-width: 0; flex: 1 1 100%; max-width: 100%; overflow: hidden; }
@@ -3290,7 +3290,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   #account-detail .t-add { display: none; }
   .menu summary { min-height: 2.75rem; }
   .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; padding-left: 3.2rem; }
-  .trade-divider { margin-right: -0.9rem; margin-left: -3.2rem; }
   .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
   .trade-head {
     flex: 1 1 100%;

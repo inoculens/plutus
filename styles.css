@@ -862,7 +862,9 @@ header.brand {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(0.8rem + env(safe-area-inset-bottom));
+  /* --dock-lift (set from app.js) keeps the pill above the footer once the
+     footer scrolls into view. */
+  bottom: calc(0.8rem + env(safe-area-inset-bottom) + var(--dock-lift, 0px));
   z-index: 25;
   width: max-content;
   max-width: calc(100vw - 1.5rem);

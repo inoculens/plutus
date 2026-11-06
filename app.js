@@ -17935,6 +17935,31 @@ function showSettingsTab(name) {
       if (abox) abox.checked = assetLedgersOn(loadState());
     } catch (e) { /* ignore */ }
   }
+  // Callers select the tab before the dialog is opened, and a closed dialog
+  // has no layout, so reveal once now and again after it has been laid out.
+  revealSelectedSettingsTab(host);
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(function () { revealSelectedSettingsTab(host); });
+  }
+}
+
+// On phones the tab strip scrolls sideways; a tab past the right edge (Cloud
+// sync, Delete data) must already be in view when the dialog opens. Scrolls
+// only the strip itself, never the page, and only on an axis that overflows.
+function revealSelectedSettingsTab(host) {
+  try {
+    var bar = host && host.querySelector('.set-tabs');
+    var sel = bar && bar.querySelector('[aria-selected="true"]');
+    if (!bar || !sel) return;
+    var b = bar.getBoundingClientRect();
+    var t = sel.getBoundingClientRect();
+    if (bar.scrollWidth > bar.clientWidth) {
+      bar.scrollLeft += (t.left - b.left) - (bar.clientWidth - t.width) / 2;
+    }
+    if (bar.scrollHeight > bar.clientHeight) {
+      bar.scrollTop += (t.top - b.top) - (bar.clientHeight - t.height) / 2;
+    }
+  } catch (e) { /* tab reveal never blocks the dialog */ }
 }
 
 function refreshLedgerList() {

@@ -1580,11 +1580,9 @@ section h2, aside h2 {
 
 .section-head .section-title { margin: 0; }
 
-/* Trades header carries three children (title + type filter + Record), so
-   the filter would strand mid-row under space-between: pull it (and the
-   Record button after it) to the right edge instead. Scoped to the account
-   detail header — the home header has two children and stays as-is. */
-#account-detail .section-head .filter-wrap { margin-left: auto; }
+/* Account record controls share one compact action group, like the
+   Select / Filter / Add controls in the home Accounts header. */
+#account-detail .section-head.trades-head > .section-actions { margin-left: auto; }
 /* Group Ledgers header (title + currency select + Ledger button): the
    select hugs the button at the right edge, like the trades filter. */
 #account-detail .section-head select { margin-left: auto; }
@@ -3338,7 +3336,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     right: 0;
     display: flex;
     align-items: center;
-    gap: 0.1rem;
     margin: 0;
     order: unset;
   }
@@ -3359,7 +3356,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
     content: ''; position: absolute; inset: -0.35rem -0.25rem;
   }
   .trade-head .trade-edit { margin-left: 0; }
-  .trade-head .trade-more { margin-right: 0; }
+  .trade-head .trade-more { margin-right: 0.25rem; }
   .trade-head .trade-pair { order: 3; }
   .trade-block.is-swap .trade-head .trade-actions { order: 4; }
   .trade-block.is-swap .trade-head .trade-now { order: 5; }

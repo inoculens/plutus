@@ -10768,18 +10768,14 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   // times — no Select trip needed before reordering. It hangs on the CARD
   // itself as a rail along the left edge (dots ride in the rail's vertical
   // middle; positioning lives in styles.css), and the drop target decides
-  // which records may swap, not any selection.
-  var sourceLegsForGrip = (t.type === 'transfer') ? transferSourceLegs(t) : [];
-  var scopeForGrip = Array.isArray(viewScopeIds) ? viewScopeIds : [];
-  var visibleSource = sourceLegsForGrip.some(function (leg) { return scopeForGrip.indexOf(leg.accountId) !== -1; });
-  var primaryVisible = scopeForGrip.indexOf(t.accountId) !== -1;
-  if (!(sourceLegsForGrip.length > 1 && visibleSource && !primaryVisible)) {
-    var grip = document.createElement('span');
-    grip.className = 'drag-handle';
-    grip.title = 'Drag to reorder (same date only)';
-    grip.setAttribute('aria-hidden', 'true');
-    box.appendChild(grip);
-  }
+  // which records may swap, not any selection. Every account a record
+  // appears under shows the grip, including the accounts a multi-source
+  // transfer only propagates to.
+  var grip = document.createElement('span');
+  grip.className = 'drag-handle';
+  grip.title = 'Drag to reorder (same date only)';
+  grip.setAttribute('aria-hidden', 'true');
+  box.appendChild(grip);
   var when = document.createElement('span');
   when.className = 'trade-when muted';
   when.textContent = fmtDateDmy(t.date || '');
@@ -12792,6 +12788,9 @@ function renderAccountDetail(st, id) {
     host.appendChild(bottomBar);
     // Record reordering lives on the always-visible grip (like account
     // cards); wireTradeDnD wires the host listeners once, later calls no-op.
+    // The open account is stamped on the host so the one-time listeners know
+    // which account's list a drag belongs to.
+    host.setAttribute('data-view-account', acc.id);
     wireTradeDnD();
     restoreTradeTypeFilterFocus();
   } else {
@@ -14082,6 +14081,15 @@ function clearTradeCardMarks() {
   });
 }
 
+// The records one account's list shows for a single date: its own records
+// plus every transfer that touches it (as primary, source or recipient). This
+// is the same predicate the list is built from (accountTrades), so a reorder
+// always permutes exactly the cards on screen, whichever account of a
+// multi-account transfer the user is looking at.
+function tradeInReorderScope(t, accId, date) {
+  return !!t && t.date === date && transferInvolvesAccount(t, accId);
+}
+
 // Failsafe for the record reorder: a proposed order is only accepted when
 // the ledger timeline still books every outflow in full. This is what stops
 // "add funds → spend those funds" from being reordered into
@@ -14100,7 +14108,7 @@ function validateTradeReorder(st, accId, date, newOrderIds) {
   // The proposed order must cover exactly the date's records: a missing id
   // means the caller built a broken order, so refuse it.
   var dateTrades = trades.filter(function (t) {
-    return t && t.accountId === accId && t.date === date;
+    return tradeInReorderScope(t, accId, date);
   });
   var knownIds = dateTrades.map(function (t) { return t.id; });
   if (newOrderIds.length !== knownIds.length) return { ok: false, reason: 'incomplete' };
@@ -14114,7 +14122,7 @@ function validateTradeReorder(st, accId, date, newOrderIds) {
   dateTrades.forEach(function (t) { if (t && t.id) tradeMap[t.id] = t; });
   var slots = [];
   trades.forEach(function (t, ix) {
-    if (t && t.accountId === accId && t.date === date) slots.push(ix);
+    if (tradeInReorderScope(t, accId, date)) slots.push(ix);
   });
   var rebuilt = trades.slice();
   for (var s = 0; s < slots.length; s++) {
@@ -14162,13 +14170,13 @@ function applyTradeReorder(st, accId, date, newOrderIds) {
   if (!check || !check.ok) return { ok: false, reason: check && check.reason, shortfall: check && check.shortfall };
   var trades = st.trades || [];
   var dateTrades = trades.filter(function (t) {
-    return t && t.accountId === accId && t.date === date;
+    return tradeInReorderScope(t, accId, date);
   });
   var tradeMap = {};
   dateTrades.forEach(function (t) { if (t && t.id) tradeMap[t.id] = t; });
   var slots = [];
   trades.forEach(function (t, ix) {
-    if (t && t.accountId === accId && t.date === date) slots.push(ix);
+    if (tradeInReorderScope(t, accId, date)) slots.push(ix);
   });
   var rebuilt = trades.slice();
   for (var s = 0; s < slots.length; s++) {
@@ -14201,12 +14209,16 @@ function wireTradeDnDEvents(host) {
     if (e.pointerType === 'mouse' && e.button !== undefined && e.button !== 0) return;
     if (typeof e.clientX !== 'number') return;
     // The record's own date is the boundary: it may only swap with records
-    // that carry the very same date. The record also pins the account, so
-    // the grip decides everything — no mode flags needed.
+    // that carry the very same date. The account whose list is open pins the
+    // scope (not the record's primary account), so a transfer can be moved
+    // among that account's same-date records from any account it appears
+    // under; the grip decides everything — no mode flags needed.
     var st = loadState();
     var trade = findTradeById(st, tradeId);
     if (!trade) return;
-    tradeDrag = { id: tradeId, startX: e.clientX, startY: e.clientY, started: false, ghost: null, overId: null, after: false, date: trade.date, accId: trade.accountId };
+    var viewAcc = host.getAttribute('data-view-account') || '';
+    if (!viewAcc || !transferInvolvesAccount(trade, viewAcc)) viewAcc = trade.accountId;
+    tradeDrag = { id: tradeId, startX: e.clientX, startY: e.clientY, started: false, ghost: null, overId: null, after: false, date: trade.date, accId: viewAcc };
     try { grip.setPointerCapture(e.pointerId); } catch (err) {}
   });
   host.addEventListener('pointermove', function (e) {
@@ -14281,7 +14293,7 @@ function wireTradeDnDEvents(host) {
     var st = loadState();
     if (!accountById(st, accId)) return;
     var dateTrades = (st.trades || []).filter(function (t) {
-      return t && t.accountId === accId && t.date === date;
+      return tradeInReorderScope(t, accId, date);
     });
     var displayIds = dateTrades.map(function (t) { return t.id; }).reverse();
     var fromIdx = displayIds.indexOf(id);

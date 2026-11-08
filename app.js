@@ -773,26 +773,133 @@ function transferSourceShareOf(t, accountId) {
   return 0;
 }
 
-// Same-account remainder credited to one source. Multi-source records split
-// selfQty by net contribution; a destinationless move returns each source's
-// own net (the fee is the only thing that left).
+// Which source legs fund what leaves a multi-source transfer. Everything that
+// is sent out (the "received back" remainder and every recipient row) is paid
+// by the legs' net contributions (qty - fee). A source account that is also a
+// same-asset recipient first funds what lands back in itself, so its own
+// money returns to it; only what is left of every leg is then pooled pro
+// rata. Without such an overlap this is exactly the plain net-share split.
+// nets: moved net per leg; legIds: account id per leg; items: in funding order
+// [{qty, destId}] where destId names the account credited by a same-asset
+// internal row ('' for the received-back remainder, external and cross-asset
+// rows). Returns parts[item][leg] in the units of nets/qty.
+function transferFundingParts(nets, legIds, items) {
+  var n = nets.length, k, ii;
+  var rem = nets.map(function (v) { return (isFinite(v) && v > 0) ? v : 0; });
+  var parts = [], left = [];
+  for (ii = 0; ii < items.length; ii++) {
+    var it = items[ii];
+    var q = (it && isFinite(it.qty) && it.qty > 0) ? it.qty : 0;
+    var row = [];
+    for (k = 0; k < n; k++) row.push(0);
+    var p = (q > 0 && it.destId) ? legIds.indexOf(it.destId) : -1;
+    if (p !== -1) {
+      var own = Math.min(q, rem[p]);
+      row[p] = own;
+      rem[p] -= own;
+      q -= own;
+    }
+    parts.push(row);
+    left.push(q);
+  }
+  for (ii = 0; ii < items.length; ii++) {
+    var need = left[ii];
+    if (!(need > 0)) continue;
+    var tot = 0;
+    for (k = 0; k < n; k++) tot += rem[k];
+    if (!(tot > 0)) continue;
+    var use = Math.min(need, tot);
+    var snap = rem.slice();
+    for (k = 0; k < n; k++) {
+      var share = use * (snap[k] / tot);
+      parts[ii][k] += share;
+      rem[k] = Math.max(0, rem[k] - share);
+    }
+  }
+  return parts;
+}
+
+// Exact twin of transferFundingParts for the received-back remainder only, on
+// the symbol grid (BigInt). Recipient rows cover their own source account
+// first (rows: [{qty, destId}] in record order); the remainder is split over
+// what every leg has left by largest remainder, so the shares add up to
+// selfSc to the last unit and no dust is lost or invented.
+function transferSelfSplitExact(netsSc, legIds, selfSc, rows) {
+  var n = netsSc.length, k;
+  var shares = [];
+  for (k = 0; k < n; k++) shares.push(0n);
+  if (selfSc <= 0n || !n) return shares;
+  var rem = netsSc.map(function (v) { return v > 0n ? v : 0n; });
+  (rows || []).forEach(function (r) {
+    if (!r || !r.destId || r.qty <= 0n) return;
+    var p = legIds.indexOf(r.destId);
+    if (p === -1) return;
+    var own = r.qty < rem[p] ? r.qty : rem[p];
+    rem[p] -= own;
+  });
+  var tot = 0n;
+  for (k = 0; k < n; k++) tot += rem[k];
+  var weights = rem;
+  if (tot <= 0n) {
+    weights = netsSc.map(function (v) { return v > 0n ? v : 0n; });
+    tot = 0n;
+    for (k = 0; k < n; k++) tot += weights[k];
+    if (tot <= 0n) return shares;
+  }
+  var used = 0n, fracs = [];
+  for (k = 0; k < n; k++) {
+    var num = selfSc * weights[k];
+    shares[k] = num / tot;
+    used += shares[k];
+    fracs.push({ k: k, r: num % tot });
+  }
+  fracs.sort(function (a, b) { return a.r > b.r ? -1 : a.r < b.r ? 1 : a.k - b.k; });
+  var extra = selfSc - used;
+  for (var f = 0; f < fracs.length && extra > 0n; f++) {
+    if (weights[fracs[f].k] <= 0n) continue;
+    shares[fracs[f].k] += 1n;
+    extra -= 1n;
+  }
+  return shares;
+}
+
+// Same-asset internal recipient row -> credited account id, else ''.
+function transferFundingDest(o, symbol) {
+  if (!isTransferOutputInternal(o)) return '';
+  var symU = String(symbol || '').toUpperCase();
+  var toU = (o.toSymbol === undefined || o.toSymbol === null || String(o.toSymbol).trim() === '')
+    ? symU : String(o.toSymbol).trim().toUpperCase();
+  return toU === symU ? String(o.toAccountId).trim() : '';
+}
+
+// Same-account remainder credited to one source. Multi-source records fund it
+// from the legs that still have net left after paying what returns to their
+// own account (see transferFundingParts); a destinationless move returns each
+// source's own net (the fee is the only thing that left).
 function transferSelfArrivalFor(t, accountId) {
   if (!t || t.type !== 'transfer' || typeof accountId !== 'string' || accountId === '') return 0;
   var legs = transferSourceLegs(t);
-  var leg = null;
+  var legIdx = -1;
   var totalNet = 0;
   for (var i = 0; i < legs.length; i++) {
     totalNet += legs[i].net;
-    if (legs[i].accountId === accountId) leg = legs[i];
+    if (legs[i].accountId === accountId) legIdx = i;
   }
-  if (!leg) return 0;
+  if (legIdx === -1) return 0;
+  var leg = legs[legIdx];
   var outs = transferOutputsOf(t);
   var hasTo = t.toAccountId !== undefined && t.toAccountId !== null && String(t.toAccountId).trim() !== '';
   if (!outs.length && !hasTo) return leg.net; // same-account sweep: own net stays
   if (!outs.length) return 0;
   var selfQ = transferSelfQtyOf(t);
   if (!(selfQ > 0) || !(totalNet > 0)) return 0;
-  return selfQ * (leg.net / totalNet);
+  var items = [{ qty: selfQ, destId: '' }];
+  outs.forEach(function (o) {
+    var dest = transferFundingDest(o, t.symbol);
+    if (dest) items.push({ qty: Number(o.qty), destId: dest });
+  });
+  var parts = transferFundingParts(legs.map(function (l) { return l.net; }), legs.map(function (l) { return l.accountId; }), items);
+  return parts[0][legIdx];
 }
 
 // Exact even split across sources, water-filled to each source's fee cap
@@ -2810,7 +2917,23 @@ function computePortfolio(allTrades, live, method) {
         var fifoScaleForP = function (w, partQty) {
           return w.moved > qtyEps ? partQty / w.moved : 0;
         };
-        var distributeP = function (item) {
+        // Every outflow (received-back remainder, each recipient row) is funded
+        // leg by leg: a source that is also a same-asset recipient pays its own
+        // return first, the rest is pooled by net (transferFundingParts).
+        var fundingItemsP = [];
+        var selfP = transferSelfQtyOf(t);
+        if (selfP > 0) fundingItemsP.push({ kind: 'self', qty: selfP * distScaleP, destId: '' });
+        outsP.forEach(function (o) {
+          var oq = Number(o.qty);
+          if (!isFinite(oq) || oq <= 0) return;
+          fundingItemsP.push({ kind: 'output', o: o, qty: oq * distScaleP, destId: transferFundingDest(o, sym) });
+        });
+        var fundingPartsP = transferFundingParts(
+          workP.map(function (w) { return (w.net > qtyEps && w.moved > qtyEps) ? w.net : 0; }),
+          workP.map(function (w) { return w.leg.accountId; }),
+          fundingItemsP
+        );
+        var distributeP = function (item, itemParts) {
           if (!item || !isFinite(item.qty) || item.qty <= qtyEps) return;
           var isInternalP = item.kind === 'output' && isTransferOutputInternal(item.o);
           var dSymP = sym;
@@ -2818,9 +2941,9 @@ function computePortfolio(allTrades, live, method) {
             dSymP = String(item.o.toSymbol).trim().toUpperCase();
           }
           var dstP = null;
-          workP.forEach(function (w) {
+          workP.forEach(function (w, wi) {
             if (w.net <= qtyEps || w.moved <= qtyEps) return;
-            var partQty = item.qty * (w.net / totalNetMovedP);
+            var partQty = itemParts[wi];
             if (!isFinite(partQty) || partQty <= qtyEps) return;
             if (item.kind === 'self') {
               if (isFifo) {
@@ -2831,7 +2954,7 @@ function computePortfolio(allTrades, live, method) {
                 });
               } else {
                 w.src.qty += partQty;
-                w.src.cost += w.costNet * (item.qty / totalNetMovedP);
+                w.src.cost += w.costNet * (partQty / w.net);
               }
               return;
             }
@@ -2852,7 +2975,7 @@ function computePortfolio(allTrades, live, method) {
                 });
               } else {
                 dstP.qty += arrPart;
-                dstP.cost += w.costNet * (item.qty / totalNetMovedP);
+                dstP.cost += w.costNet * (partQty / w.net);
               }
               return;
             }
@@ -2870,7 +2993,7 @@ function computePortfolio(allTrades, live, method) {
                 totals.feesCryptoQty += xshP;
               });
             } else {
-              var xcoA = w.costNet * (item.qty / totalNetMovedP);
+              var xcoA = w.costNet * (partQty / w.net);
               w.src.realized -= xcoA;
               totals.realized -= xcoA;
               totals.feesCryptoMain += xcoA;
@@ -2878,13 +3001,7 @@ function computePortfolio(allTrades, live, method) {
             }
           });
         };
-        var selfP = transferSelfQtyOf(t);
-        if (selfP > 0) distributeP({ kind: 'self', qty: selfP * distScaleP });
-        outsP.forEach(function (o) {
-          var oq = Number(o.qty);
-          if (!isFinite(oq) || oq <= 0) return;
-          distributeP({ kind: 'output', o: o, qty: oq * distScaleP });
-        });
+        fundingItemsP.forEach(function (item, ii) { distributeP(item, fundingPartsP[ii]); });
       }
       if (isFifo) {
         var dirtyP = [];
@@ -3066,11 +3183,23 @@ function timelineOutflowShortfalls(trades) {
       return;
     }
     if (outs.length) {
-      // Multi-output remainder that stayed in the source accounts.
+      // Multi-output remainder that stayed in the source accounts. Legs that
+      // also receive a recipient row fund their own return first, so the
+      // remainder only draws on what they have left.
       var selfBack = transferSelfQtyOf(t);
       if (selfBack > 0 && totalNet > 0) {
-        legs.forEach(function (leg) {
-          var back = selfBack * (leg.__netMoved / totalNet);
+        var selfItems = [{ qty: selfBack * distScale, destId: '' }];
+        outs.forEach(function (o) {
+          var dest = transferFundingDest(o, sym);
+          if (dest) selfItems.push({ qty: Number(o.qty) * distScale, destId: dest });
+        });
+        var selfParts = transferFundingParts(
+          legs.map(function (leg) { return leg.__netMoved; }),
+          legs.map(function (leg) { return leg.accountId; }),
+          selfItems
+        );
+        legs.forEach(function (leg, li) {
+          var back = selfParts[0][li];
           if (back > 0) add(leg.__key, back);
         });
       }
@@ -15655,10 +15784,27 @@ function exactQtyHeldMap(allTrades) {
     // with each source's actually moved net slice, floored on the grid like
     // the engines.
     var selfSc = exactScaledOf(t.selfQty, d);
-    if (selfSc !== null && selfSc > 0n && totalNetSc > 0n) {
-      exactLegs.forEach(function (leg) {
-        var back = (selfSc * leg.__net) / totalNetSc;
-        if (back > 0n) add(leg.__key, sym, back);
+    if (selfSc !== null && selfSc > 0n && totalNetSc > 0n && movedNetSc > 0n) {
+      // The remainder scales with what actually moved, like every recipient
+      // row. Legs that also receive a recipient row fund their own return
+      // first; the rest is split by largest remainder so the shares add up
+      // to the remainder exactly (no floored dust).
+      var selfEff = (selfSc * movedNetSc) / totalNetSc;
+      var coverRows = [];
+      outs.forEach(function (o) {
+        if (!o) return;
+        var cvDest = transferFundingDest(o, sym);
+        var cvSc = exactScaledOf(o.qty, d);
+        if (cvDest && cvSc !== null && cvSc > 0n) coverRows.push({ destId: cvDest, qty: (cvSc * movedNetSc) / totalNetSc });
+      });
+      var selfShares = transferSelfSplitExact(
+        exactLegs.map(function (leg) { return leg.__net; }),
+        exactLegs.map(function (leg) { return leg.accountId; }),
+        selfEff,
+        coverRows
+      );
+      exactLegs.forEach(function (leg, li) {
+        if (selfShares[li] > 0n) add(leg.__key, sym, selfShares[li]);
       });
     }
     for (var oi = 0; oi < outs.length; oi++) {

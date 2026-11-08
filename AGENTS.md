@@ -6,18 +6,18 @@ Local-first portfolio tracker. Static site: `index.html`, `app.js`,
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
 ## Branches — mandatory for every agent
-- Make ALL changes on the `dev` branch. Commit and push to `dev` only.
-- The owner reviews and merges `dev` into `main`. Agents never do.
+- Make ALL changes on the `developing` branch. Commit and push to `developing` only.
+- The owner reviews and merges `developing` into `main`. Agents never do.
 - Never commit to, push to, or merge into `main` unless the owner
   explicitly tells you to.
 
 ## Session start — always work on latest
-- Before ANY work: `git fetch origin`, switch to `dev`, then compare `HEAD`
-  vs `origin/dev` (`git rev-parse HEAD`, `git rev-parse origin/dev`,
+- Before ANY work: `git fetch origin`, switch to `developing`, then compare `HEAD`
+  vs `origin/developing` (`git rev-parse HEAD`, `git rev-parse origin/developing`,
   or `git status -sb`).
-- If the local files are not up to date with the remote `dev` branch
-  (behind `origin/dev`, or no local `dev` yet): FIRST sync with `dev` on a
-  clean tree (`git checkout dev`, then `git pull --ff-only origin dev`),
+- If the local files are not up to date with the remote `developing` branch
+  (behind `origin/developing`, or no local `developing` yet): FIRST sync with `developing` on a
+  clean tree (`git checkout developing`, then `git pull --ff-only origin developing`),
   re-verify, and only then start editing. Never sync from or base work on
   `main`.
 - If the tree is dirty or the pull would overwrite local work: STOP and
@@ -68,7 +68,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Verify `stamp-version.sh` is committed as mode `100755` (see above).
 
 ## Push cadence — mandatory for every agent
-- Push each commit to `dev` as soon as it is finished and verified, with its
+- Push each commit to `developing` as soon as it is finished and verified, with its
   complete message and technical overview (see Commit messages), even while
   the overall implementation is still in progress.
 - Never keep finished commits local until the end of the task or reply and
@@ -111,12 +111,12 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - `main` must never create a stacking context (`position: relative` only,
   no `z-index`): the fixed mobile bottom-sheet menus (`.filter-panel`) must
   paint above the footer and the FAB.
-- Commit each change separately with a clear message and push to `dev`
+- Commit each change separately with a clear message and push to `developing`
   (never `main`; see Branches).
 
 ## Push replies — mandatory for every agent, no prompting needed
 - Every reply that reports a push must START with the confirmation line
-  `Pushed to <branch> #<short-hash>`, e.g. `Pushed to dev #f993f82`.
+  `Pushed to <branch> #<short-hash>`, e.g. `Pushed to developing #f993f82`.
   Nothing before it: no greeting, no preamble.
 - The owner must never have to ask for this format again; AGENTS.md carries
   it, and coding agents load this file automatically.
@@ -145,7 +145,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   No emojis, no links, no session URLs, no other attribution.
 
 ## Commit signing — agent commits are unsigned
-- Agent commits are NOT signed. Every agent commit already on `dev` is
+- Agent commits are NOT signed. Every agent commit already on `developing` is
   unsigned; verification comes from GitHub, which signs the merge commit
   when the owner merges (shown as Verified).
 - Agent sandboxes can ship a global git config with `commit.gpgsign=true`
@@ -159,6 +159,6 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   prints `N` for signed SSH commits too.
 - Never register an agent or sandbox key as a signing key on the owner's
   GitHub account, and never create, copy or import the owner's private key.
-- A commit that was signed by mistake is not fixed by rewriting `dev` or
+- A commit that was signed by mistake is not fixed by rewriting `developing` or
   `main`. Tell the owner; they can re-sign locally with their own key if
   they want that.

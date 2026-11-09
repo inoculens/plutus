@@ -5436,6 +5436,32 @@ function isCryptoQtyExpense(t) {
   return isFinite(q) && q > 0;
 }
 
+// Fiat worth, in the main fiat, of an expense paid in the account asset at
+// the quote of the spend date (frozen at save, else the history cache). It is
+// derived, never typed: the user enters only what left the account, so a
+// website's own fx rate can never book a different amount. Null when the
+// record is not a crypto-quantity expense or no rate in the main fiat is known.
+function expenseFiatValueMain(t, main, kind) {
+  if (!isCryptoQtyExpense(t)) return null;
+  var m = String(main || '').toUpperCase();
+  var ex = null;
+  try { ex = resolveExecPrice(t, main, kind); } catch (e) { ex = null; }
+  if (!ex || !m || String(ex.ccy || '').toUpperCase() !== m) return null;
+  var v = Number(t.qty) * Number(ex.price);
+  return (isFinite(v) && v > 0) ? v : null;
+}
+
+// Fiat cost of one expense for the SPENT AMOUNT pills. A crypto-quantity
+// expense counts once, at its spend-date value: a stored fiat total (legacy
+// records) already describes the same money, so adding both double-counted.
+// Without a known rate it falls back to the stored total (never 0 from a guess).
+function expenseSpentMain(t, main, kind) {
+  var eq = expenseFiatValueMain(t, main, kind);
+  if (eq !== null) return eq;
+  var n = normalizeTrade(t);
+  return (isFinite(n.netMain) && n.netMain > 0) ? n.netMain : 0;
+}
+
 // Frozen reference quote stamped on the trade at save time:
 // {price, vs, source}. Extra trade key, ignored by validation/ledger/export
 // shape checks (isValidImportTrade only asserts known fields).
@@ -8505,6 +8531,9 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
           var sn = normalizeTrade(t);
           if (t.type === 'sell') {
             if (isFinite(sn.totalMain) && sn.totalMain > 0) spent += sn.totalMain;
+          } else if (t.type === 'expense' && isCryptoQtyExpense(t)) {
+            var kdExp = kindsSpent[String(t.symbol || '').toUpperCase()];
+            spent += expenseSpentMain(t, main, (typeof kdExp === 'string') ? kdExp : undefined);
           } else if (t.type === 'expense' || t.type === 'transfer') {
             if (isFinite(sn.netMain) && sn.netMain > 0) spent += sn.netMain;
             var cq;
@@ -9953,15 +9982,25 @@ function tradeNowPct(thenMain, nowMain) {
 // a price below is a save (gain colour); `pct` carries that same mirror
 // sign (negated buy percent) so the number never contradicts the colour.
 // `then` stays the full proceeds (fee inside), like everywhere else.
-function tradeNowMeta(t, main, livePrice) {
-  if (!t || (t.type !== 'buy' && t.type !== 'sell')) return null;
-  var isSell = t.type === 'sell';
+function tradeNowMeta(t, main, livePrice, kind) {
+  var isExp = !!(t && t.type === 'expense' && isCryptoQtyExpense(t));
+  if (!t || (t.type !== 'buy' && t.type !== 'sell' && !isExp)) return null;
+  // An expense reads like a sell: the asset is gone, so today's worth above
+  // what it was worth when spent is a miss, below it a save.
+  var isSell = t.type !== 'buy';
   var q = Number(t.qty);
   if (!isFinite(q) || q <= 0) return null;
   var now = tradeNowValue(q, livePrice);
   if (now === null) return null;
   var then = null;
-  try { then = normalizeTrade(t).netMain; } catch (e) { then = null; }
+  if (isExp) {
+    // Spend-date fiat value (derived from the quote of that day); unknown
+    // quote means no pill rather than a made-up comparison.
+    then = expenseFiatValueMain(t, main, kind);
+    if (then === null) return null;
+  } else {
+    try { then = normalizeTrade(t).netMain; } catch (e) { then = null; }
+  }
   then = Number(then);
   if (!isFinite(then) || then < 0) return null;
   var rawPct = tradeNowPct(then, now);
@@ -10866,18 +10905,18 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   // tradeNowMeta). Buys and sells only; display-only (never stored, never
   // booked). Hidden while the live price is unknown instead of printing a
   // fictitious loss.
-  if (t.type === 'buy' || t.type === 'sell') {
+  if (t.type === 'buy' || t.type === 'sell' || (t.type === 'expense' && !isCashKind(kind) && isCryptoQtyExpense(t))) {
     var nowMeta = null;
     try {
       var nwSym = String(t.symbol || '').toUpperCase();
       var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePrices[nwSym] : null;
-      nowMeta = tradeNowMeta(t, main, lvRaw);
+      nowMeta = tradeNowMeta(t, main, lvRaw, kind);
     } catch (e) { nowMeta = null; }
     if (nowMeta) {
       var nowPill = document.createElement('span');
       nowPill.className = 'trade-now ' + nowMeta.cls;
       var nowTxt = '';
-      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then, t.type === 'sell'); } catch (e) { nowTxt = ''; }
+      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then, t.type !== 'buy'); } catch (e) { nowTxt = ''; }
       nowPill.textContent = nowTxt;
       nowPill.title = nowTxt;
       nowPill.setAttribute('aria-label', nowTxt);
@@ -11180,7 +11219,14 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     if (t.qty !== undefined && t.qty !== null && String(t.qty).trim() !== '') {
       box.appendChild(primary(statRow('Lost', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
     }
-    if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
+    if (!isCashKind(kind) && isCryptoQtyExpense(t)) {
+      // Paid in the account asset: the fiat side is never typed. It is what
+      // the quantity was worth on the spend date, derived from that day's
+      // quote ("—" while no quote is known — never 0, never a guess).
+      var spendFiat = null;
+      try { spendFiat = expenseFiatValueMain(t, main, kind); } catch (e) { spendFiat = null; }
+      box.appendChild(primary(statRow('Fiat value', spendFiat !== null ? fmtMoney(spendFiat, main) : '—', spendFiat, false)));
+    } else if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
       box.appendChild(primary(statRow('Fiat lost', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
       if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     }
@@ -11213,7 +11259,8 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate is gone for
   // transfers (Fee in fiat rate lives next to Transfer fees instead), and the
   // fiat Fee row is gone too — the network fee IS the fee.
-  if (!isXfer) {
+  // A crypto expense has no fiat input, so there is no fx rate to show.
+  if (!isXfer && !(t.type === 'expense' && !isCashKind(kind) && isCryptoQtyExpense(t))) {
     box.appendChild(rateRow('Rate', fxBadgeText(t)));
   }
   if (!isXfer) {
@@ -12601,13 +12648,7 @@ function renderAccountDetail(st, id) {
       } else if (t.accountId === acc.id && t.type === 'sell') {
         if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
       } else if (t.accountId === acc.id && t.type === 'expense') {
-        if (isFinite(sn.netMain) && sn.netMain > 0) spentSum += sn.netMain;
-        var cqExpense = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? 0 : Number(t.qty);
-        if (isFinite(cqExpense) && cqExpense > 0) {
-          var krExpense = null;
-          try { krExpense = resolveExecPrice(t, main, accKind); } catch (e) { krExpense = null; }
-          if (krExpense !== null && isFinite(Number(krExpense.price)) && Number(krExpense.price) > 0) spentSum += cqExpense * Number(krExpense.price);
-        }
+        spentSum += expenseSpentMain(t, main, accKind);
       }
     });
   } catch (e) { spentSum = 0; }
@@ -15450,9 +15491,10 @@ function syncTradeTypeUI() {
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else if (isExpense) {
-    setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : 'Quantity lost (optional if cash-only)');
-    setLabel('t-total-label', 'Fiat lost (optional if crypto-only)');
-    setLabel('t-qty-hint', isCash ? 'Money out, in the account currency.' : 'Amount you received (net of any fee taken in asset).');
+    var expTicker = (cashAcc && cashAcc.ticker) ? String(cashAcc.ticker).toUpperCase() : '';
+    setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : ('Amount spent' + (expTicker ? ' (in ' + expTicker + ')' : '')));
+    setLabel('t-total-label', 'Fiat lost');
+    setLabel('t-qty-hint', isCash ? 'Money out, in the account currency.' : 'Exactly what left this account. Its fiat value is calculated from the rate on the date.');
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else if (type === 'sell') {
@@ -15480,6 +15522,28 @@ function syncTradeTypeUI() {
     if (custC) custC.hidden = true;
     var clabC = document.getElementById('t-custom-ccy-label');
     if (clabC) clabC.hidden = true;
+  }
+  // An expense paid in the account asset has no fiat input: what left the
+  // account is the quantity, and its fiat value is derived from the spend-date
+  // rate (a website's own fx rate must never book a different amount). Only
+  // when editing an old fiat-only record do the fiat rows stay, so it can
+  // still be saved as it was.
+  if (isExpense && !isCash) {
+    var legacyFiatExp = false;
+    try {
+      var edExp = editingTradeId ? (loadState().trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0] : null;
+      legacyFiatExp = !!(edExp && edExp.type === 'expense' && !isCryptoQtyExpense(edExp) && Number(edExp.total) > 0);
+    } catch (e) { legacyFiatExp = false; }
+    if (!legacyFiatExp) {
+      setHidden('t-total-row', true);
+      setHidden('t-currency-row', true);
+      var custE = document.getElementById('t-custom-ccy');
+      if (custE) custE.hidden = true;
+      var clabE = document.getElementById('t-custom-ccy-label');
+      if (clabE) clabE.hidden = true;
+    } else {
+      setLabel('t-qty-label', 'Amount spent (optional for this older fiat-only record)');
+    }
   }
   // Ledger row: cash income/expense always; asset income/expense only when
   // the global switch is on (optional at submit, required never).
@@ -17370,8 +17434,16 @@ function onTradeSubmit(ev) {
     } else { total = 0; currency = String(main).toUpperCase(); }
   } else if (side === 'expense') {
     var hasQ = !(String(qtyRaw).trim() === '');
-    var hasT = !isCashAcc && !(String(totalRaw).trim() === '');
-    if (!hasQ && !hasT) { tradeFormError('Expense needs a quantity or a cash amount.'); return; }
+    // Asset expenses carry no typed fiat: the quantity is the truth and the
+    // fiat value derives from the spend-date rate. Only an older fiat-only
+    // record being edited may keep its fiat amount (and only without a qty).
+    var legacyFiatSave = false;
+    try {
+      var exSaved = editingTradeId ? (st0.trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0] : null;
+      legacyFiatSave = !!(exSaved && exSaved.type === 'expense' && !isCryptoQtyExpense(exSaved) && Number(exSaved.total) > 0);
+    } catch (e) { legacyFiatSave = false; }
+    var hasT = !isCashAcc && legacyFiatSave && !hasQ && !(String(totalRaw).trim() === '');
+    if (!hasQ && !hasT) { tradeFormError(isCashAcc ? 'Expense needs a quantity or a cash amount.' : 'Enter how much you spent (quantity > 0).'); return; }
     if (hasQ && (!isFinite(qtyChk) || qtyChk <= 0)) { tradeFormError('Quantity must be > 0.'); return; }
     if (hasT && (!isFinite(total) || total <= 0)) { tradeFormError('Fiat amount must be > 0.'); return; }
     if (!hasQ) qty = null;

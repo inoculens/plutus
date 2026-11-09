@@ -8504,8 +8504,8 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
       hi.textContent = 'INVESTED AMOUNT: ' + fmtMoney(inv, main);
     }
   }
-  // Spent amount: lifetime gross fiat out — sell proceeds, the cash legs of
-  // expense and transfer records, plus crypto fees and crypto expenses
+  // Spent amount: lifetime fiat out — the cash legs of expense and transfer
+  // records, plus crypto fees and crypto expenses
   // valued at the frozen tx-date rate (the same ≈ the cards show; 0 while
   // the rate is unknown, never a guess). Each leg uses its locked
   // historical rate. Never reduced by anything; appreciation can push it
@@ -8529,9 +8529,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
           if (!t) return;
           if (t.accountId && cashIdsS[t.accountId]) return; // cash is balance-only
           var sn = normalizeTrade(t);
-          if (t.type === 'sell') {
-            if (isFinite(sn.totalMain) && sn.totalMain > 0) spent += sn.totalMain;
-          } else if (t.type === 'expense' && isCryptoQtyExpense(t)) {
+          if (t.type === 'expense' && isCryptoQtyExpense(t)) {
             var kdExp = kindsSpent[String(t.symbol || '').toUpperCase()];
             spent += expenseSpentMain(t, main, (typeof kdExp === 'string') ? kdExp : undefined);
           } else if (t.type === 'expense' || t.type === 'transfer') {

@@ -80,6 +80,24 @@ async function run() {
   assert.equal(C.expenseFiatValueMain(noRate, 'EUR', undefined), null);
   assert.equal(C.expenseSpentMain(noRate, 'EUR', undefined), 7);
 
+  // "Now" pill: the spent 0.5 was worth 25 at spend time.
+  // Price rose to 60 -> now 30: it would be worth more, a miss (loss colour).
+  const up = C.tradeNowMeta(expense, 'EUR', 60, undefined);
+  assert.equal(up.then, 25);
+  assert.equal(up.now, 30);
+  assert.equal(up.cls, 'trade-now-loss');
+  assert.match(C.tradeNowText(up.now, 'EUR', up.pct, up.then, true), /^Missed .*5.* · Now .*30/);
+  // Price fell to 40 -> now 20: spending it saved value (gain colour).
+  const down = C.tradeNowMeta(expense, 'EUR', 40, undefined);
+  assert.equal(down.now, 20);
+  assert.equal(down.cls, 'trade-now-gain');
+  assert.match(C.tradeNowText(down.now, 'EUR', down.pct, down.then, true), /^Saved /);
+  // Unknown live price or unknown spend-date rate: no pill at all.
+  assert.equal(C.tradeNowMeta(expense, 'EUR', null, undefined), null);
+  assert.equal(C.tradeNowMeta(noRate, 'EUR', 10, undefined), null);
+  // A cash-only expense never gets a pill.
+  assert.equal(C.tradeNowMeta({ type: 'expense', total: 25, currency: 'EUR' }, 'EUR', 10, undefined), null);
+
   // Cash-only expenses stay out of the rate prefetch.
   requested.length = 0;
   await C.ensureHistoricalExec([{ id: 'e2', type: 'expense', symbol: 'EUR', total: 25, currency: 'EUR', date: '2024-01-03', accountId: 'a2' }], 'EUR', {});

@@ -9982,15 +9982,25 @@ function tradeNowPct(thenMain, nowMain) {
 // a price below is a save (gain colour); `pct` carries that same mirror
 // sign (negated buy percent) so the number never contradicts the colour.
 // `then` stays the full proceeds (fee inside), like everywhere else.
-function tradeNowMeta(t, main, livePrice) {
-  if (!t || (t.type !== 'buy' && t.type !== 'sell')) return null;
-  var isSell = t.type === 'sell';
+function tradeNowMeta(t, main, livePrice, kind) {
+  var isExp = !!(t && t.type === 'expense' && isCryptoQtyExpense(t));
+  if (!t || (t.type !== 'buy' && t.type !== 'sell' && !isExp)) return null;
+  // An expense reads like a sell: the asset is gone, so today's worth above
+  // what it was worth when spent is a miss, below it a save.
+  var isSell = t.type !== 'buy';
   var q = Number(t.qty);
   if (!isFinite(q) || q <= 0) return null;
   var now = tradeNowValue(q, livePrice);
   if (now === null) return null;
   var then = null;
-  try { then = normalizeTrade(t).netMain; } catch (e) { then = null; }
+  if (isExp) {
+    // Spend-date fiat value (derived from the quote of that day); unknown
+    // quote means no pill rather than a made-up comparison.
+    then = expenseFiatValueMain(t, main, kind);
+    if (then === null) return null;
+  } else {
+    try { then = normalizeTrade(t).netMain; } catch (e) { then = null; }
+  }
   then = Number(then);
   if (!isFinite(then) || then < 0) return null;
   var rawPct = tradeNowPct(then, now);
@@ -10895,18 +10905,18 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   // tradeNowMeta). Buys and sells only; display-only (never stored, never
   // booked). Hidden while the live price is unknown instead of printing a
   // fictitious loss.
-  if (t.type === 'buy' || t.type === 'sell') {
+  if (t.type === 'buy' || t.type === 'sell' || (t.type === 'expense' && !isCashKind(kind) && isCryptoQtyExpense(t))) {
     var nowMeta = null;
     try {
       var nwSym = String(t.symbol || '').toUpperCase();
       var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePrices[nwSym] : null;
-      nowMeta = tradeNowMeta(t, main, lvRaw);
+      nowMeta = tradeNowMeta(t, main, lvRaw, kind);
     } catch (e) { nowMeta = null; }
     if (nowMeta) {
       var nowPill = document.createElement('span');
       nowPill.className = 'trade-now ' + nowMeta.cls;
       var nowTxt = '';
-      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then, t.type === 'sell'); } catch (e) { nowTxt = ''; }
+      try { nowTxt = tradeNowText(nowMeta.now, main, nowMeta.pct, nowMeta.then, t.type !== 'buy'); } catch (e) { nowTxt = ''; }
       nowPill.textContent = nowTxt;
       nowPill.title = nowTxt;
       nowPill.setAttribute('aria-label', nowTxt);
@@ -11209,7 +11219,14 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     if (t.qty !== undefined && t.qty !== null && String(t.qty).trim() !== '') {
       box.appendChild(primary(statRow('Lost', fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase(), t.qty, false)));
     }
-    if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
+    if (!isCashKind(kind) && isCryptoQtyExpense(t)) {
+      // Paid in the account asset: the fiat side is never typed. It is what
+      // the quantity was worth on the spend date, derived from that day's
+      // quote ("—" while no quote is known — never 0, never a guess).
+      var spendFiat = null;
+      try { spendFiat = expenseFiatValueMain(t, main, kind); } catch (e) { spendFiat = null; }
+      box.appendChild(primary(statRow('Fiat value', spendFiat !== null ? fmtMoney(spendFiat, main) : '—', spendFiat, false)));
+    } else if (t.total !== undefined && t.total !== null && String(t.total).trim() !== '' && Number(t.total) > 0) {
       box.appendChild(primary(statRow('Fiat lost', fmtMoney(t.total, String(t.currency || '').toUpperCase()), t.total, false)));
       if (showConverted) box.appendChild(statRow('Converted', fmtMoney(n.netMain, main), n.netMain, false));
     }
@@ -11242,7 +11259,8 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   // Same-asset moves have no FX: the meaningless '1:1 @ 1' Rate is gone for
   // transfers (Fee in fiat rate lives next to Transfer fees instead), and the
   // fiat Fee row is gone too — the network fee IS the fee.
-  if (!isXfer) {
+  // A crypto expense has no fiat input, so there is no fx rate to show.
+  if (!isXfer && !(t.type === 'expense' && !isCashKind(kind) && isCryptoQtyExpense(t))) {
     box.appendChild(rateRow('Rate', fxBadgeText(t)));
   }
   if (!isXfer) {

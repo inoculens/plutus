@@ -69,6 +69,17 @@ async function run() {
   assert.ok(rate && rate.price === 50, 'expense resolves a cached rate');
   assert.equal(0.5 * rate.price, 25);
 
+  // Fiat value of the spend is derived from qty and the spend-date rate.
+  assert.equal(C.expenseFiatValueMain(expense, 'EUR', undefined), 25);
+  assert.equal(C.expenseSpentMain(expense, 'EUR', undefined), 25);
+  // A legacy record that also stored a fiat total is counted once, not twice.
+  const both = Object.assign({}, expense, { total: 25, currency: 'EUR' });
+  assert.equal(C.expenseSpentMain(both, 'EUR', undefined), 25);
+  // No rate known: fall back to the stored total instead of a guess or zero.
+  const noRate = { id: 'e9', type: 'expense', symbol: 'ZZZ', qty: 1, total: 7, currency: 'EUR', date: '2024-01-02', accountId: 'a1' };
+  assert.equal(C.expenseFiatValueMain(noRate, 'EUR', undefined), null);
+  assert.equal(C.expenseSpentMain(noRate, 'EUR', undefined), 7);
+
   // Cash-only expenses stay out of the rate prefetch.
   requested.length = 0;
   await C.ensureHistoricalExec([{ id: 'e2', type: 'expense', symbol: 'EUR', total: 25, currency: 'EUR', date: '2024-01-03', accountId: 'a2' }], 'EUR', {});

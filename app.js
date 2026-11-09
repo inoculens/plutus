@@ -5436,6 +5436,32 @@ function isCryptoQtyExpense(t) {
   return isFinite(q) && q > 0;
 }
 
+// Fiat worth, in the main fiat, of an expense paid in the account asset at
+// the quote of the spend date (frozen at save, else the history cache). It is
+// derived, never typed: the user enters only what left the account, so a
+// website's own fx rate can never book a different amount. Null when the
+// record is not a crypto-quantity expense or no rate in the main fiat is known.
+function expenseFiatValueMain(t, main, kind) {
+  if (!isCryptoQtyExpense(t)) return null;
+  var m = String(main || '').toUpperCase();
+  var ex = null;
+  try { ex = resolveExecPrice(t, main, kind); } catch (e) { ex = null; }
+  if (!ex || !m || String(ex.ccy || '').toUpperCase() !== m) return null;
+  var v = Number(t.qty) * Number(ex.price);
+  return (isFinite(v) && v > 0) ? v : null;
+}
+
+// Fiat cost of one expense for the SPENT AMOUNT pills. A crypto-quantity
+// expense counts once, at its spend-date value: a stored fiat total (legacy
+// records) already describes the same money, so adding both double-counted.
+// Without a known rate it falls back to the stored total (never 0 from a guess).
+function expenseSpentMain(t, main, kind) {
+  var eq = expenseFiatValueMain(t, main, kind);
+  if (eq !== null) return eq;
+  var n = normalizeTrade(t);
+  return (isFinite(n.netMain) && n.netMain > 0) ? n.netMain : 0;
+}
+
 // Frozen reference quote stamped on the trade at save time:
 // {price, vs, source}. Extra trade key, ignored by validation/ledger/export
 // shape checks (isValidImportTrade only asserts known fields).
@@ -8505,6 +8531,9 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
           var sn = normalizeTrade(t);
           if (t.type === 'sell') {
             if (isFinite(sn.totalMain) && sn.totalMain > 0) spent += sn.totalMain;
+          } else if (t.type === 'expense' && isCryptoQtyExpense(t)) {
+            var kdExp = kindsSpent[String(t.symbol || '').toUpperCase()];
+            spent += expenseSpentMain(t, main, (typeof kdExp === 'string') ? kdExp : undefined);
           } else if (t.type === 'expense' || t.type === 'transfer') {
             if (isFinite(sn.netMain) && sn.netMain > 0) spent += sn.netMain;
             var cq;
@@ -12601,13 +12630,7 @@ function renderAccountDetail(st, id) {
       } else if (t.accountId === acc.id && t.type === 'sell') {
         if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
       } else if (t.accountId === acc.id && t.type === 'expense') {
-        if (isFinite(sn.netMain) && sn.netMain > 0) spentSum += sn.netMain;
-        var cqExpense = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? 0 : Number(t.qty);
-        if (isFinite(cqExpense) && cqExpense > 0) {
-          var krExpense = null;
-          try { krExpense = resolveExecPrice(t, main, accKind); } catch (e) { krExpense = null; }
-          if (krExpense !== null && isFinite(Number(krExpense.price)) && Number(krExpense.price) > 0) spentSum += cqExpense * Number(krExpense.price);
-        }
+        spentSum += expenseSpentMain(t, main, accKind);
       }
     });
   } catch (e) { spentSum = 0; }

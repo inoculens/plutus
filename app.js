@@ -5426,6 +5426,16 @@ function dropBakedExecLocks(trades, overrides) {
   return changed;
 }
 
+// An expense that loses a quantity of an asset (not a cash-only expense).
+// Its fiat worth at the tx date feeds the SPENT AMOUNT pills, so it needs the
+// same reference quote (frozen at save + history prefetch) as buy/sell/transfer.
+function isCryptoQtyExpense(t) {
+  if (!t || t.type !== 'expense') return false;
+  if (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') return false;
+  var q = Number(t.qty);
+  return isFinite(q) && q > 0;
+}
+
 // Frozen reference quote stamped on the trade at save time:
 // {price, vs, source}. Extra trade key, ignored by validation/ledger/export
 // shape checks (isValidImportTrade only asserts known fields).
@@ -5692,9 +5702,51 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   }
   // Most reliable source first: Coinbase public candles (no key, generous
   // limits, deep history, CORS-open). The rest of the chain follows on a miss.
+  // Second: the public Plutus daily archive (98 assets, USD daily closes
+  // built by the market-history workflow). It covers assets the majors-only
+  // sources above do not, and goes further back than CoinGecko's free window.
   return fetchCoinbaseHistory(sym, dateStr, cur).then(function (cb) {
     if (isFinite(cb) && cb > 0) return cb;
-    return coingeckoAndBeyond();
+    return fetchArchiveHistory(sym, dateStr, cur).then(function (ap) {
+      if (isFinite(ap) && ap > 0) return ap;
+      return coingeckoAndBeyond();
+    });
+  });
+}
+
+// One UTC day's close from the public Plutus archive (the same file the net
+// worth history reads, fetched once per session). Exact day only: a missing
+// day is null — never interpolated or guessed. Non-USD fiats bridge through
+// the historical ECB USD rate, like the other crypto sources.
+function fetchArchiveHistory(sym, dateStr, vs) {
+  var s = String(sym || '').trim().toUpperCase();
+  var c = String(vs || '').trim().toUpperCase();
+  var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
+  if (!s || !c || !isValidDateStr(day) || isFutureDateStr(day)) return Promise.resolve(null);
+  var dayStart = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+  if (!isFinite(dayStart)) return Promise.resolve(null);
+  var wantDay = Math.floor(dayStart / 86400000);
+  return fetchPlutusDailyCryptoSeries(s, dayStart, dayStart).then(function (series) {
+    var pts = (series && Array.isArray(series.points)) ? series.points : [];
+    var usd = NaN;
+    for (var i = 0; i < pts.length; i++) {
+      if (Math.floor(Number(pts[i].at) / 86400000) === wantDay) { usd = Number(pts[i].price); break; }
+    }
+    if (!(isFinite(usd) && usd > 0)) {
+      histDiagNote(s, day, c, 'Plutus archive: no price for date');
+      return null;
+    }
+    if (c === 'USD') { histDiagClear(s, day, c); return usd; }
+    return fetchEcbRate(day, 'USD', c).then(function (r) {
+      var v = usd * Number(r.rate);
+      if (isFinite(v) && v > 0) { histDiagClear(s, day, c); return v; }
+      return null;
+    }, function () { return null; });
+  }).then(null, function (e) {
+    var msg = String((e && e.message) || e);
+    if (msg.indexOf('has no daily history') !== -1) histDiagNote(s, day, c, 'Plutus archive: asset or date not covered');
+    else histDiagNote(s, day, c, 'Plutus archive unreachable');
+    return null;
   });
 }
 
@@ -6002,7 +6054,7 @@ function ensureHistoricalExec(trades, main, kinds) {
   var jobs = [];
   var idsByKey = {}; // quote key -> trade ids waiting on it (for failure tooltips)
   (trades || []).forEach(function (t) {
-    if (!t || (t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer')) return;
+    if (!t || (t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer' && !isCryptoQtyExpense(t))) return;
     var sym = String((t && t.symbol) || '').toUpperCase();
     var day = (t && typeof t.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t.date)) ? t.date.slice(0, 10) : '';
     if (!sym || !isValidDateStr(day) || isFutureDateStr(day)) return;
@@ -17416,7 +17468,7 @@ function onTradeSubmit(ev) {
       // Transfers freeze it too: it values the network fee in fiat at the
       // tx-date rate (Fee in fiat rate). Other rows carry no execLock.
       var needRefreeze = false;
-      if (side === 'buy' || side === 'sell' || side === 'transfer') {
+      if (side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) {
         if (manualPrice !== null) {
           // Manual quote follows the trade's Currency field (like total and
           // fee), never the header display fiat — display converts it.
@@ -17556,7 +17608,7 @@ function onTradeSubmit(ev) {
       trade.fromFxLock = srcFiatLockForTrade;
       if (!isCrossFiat) trade.toFxLock = srcFiatLockForTrade;
     }
-    if (side === 'buy' || side === 'sell' || side === 'transfer') {
+    if (side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) {
       if (manualPrice !== null) {
         // Same rule as the edit path: the manual quote follows the trade's
         // Currency field, never the header display fiat.
@@ -17580,7 +17632,7 @@ function onTradeSubmit(ev) {
     st.trades.push(trade);
     learnLedgerLabel(st, trade);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
-    if ((side === 'buy' || side === 'sell' || side === 'transfer') && manualPrice === null) {
+    if ((side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) && manualPrice === null) {
       // No manual quote: freeze the reference exec price in the background.
       // Saving never waits on it; failure just leaves the legacy async path.
       try { freezeExecLock(trade.id, symbol, date, mainU, (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }

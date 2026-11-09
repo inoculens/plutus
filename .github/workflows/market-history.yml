@@ -5,7 +5,7 @@ on:
     - cron: "25 4 * * *"
   workflow_dispatch:
   push:
-    branches: [dev, main]
+    branches: [developing, main]
     paths:
       - "app.js"
       - "scripts/collect-market-history.py"
@@ -16,7 +16,7 @@ on:
 permissions:
   contents: write
 
-# One writer at a time, including scheduled/manual/dev-triggered runs.
+# One writer at a time, including scheduled/manual/developing-triggered runs.
 concurrency:
   group: plutus-market-history-archive
   # A newer source push supersedes an obsolete queued/backfill run. Scheduled
@@ -28,10 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - name: Check out the canonical dev source
+      - name: Check out the canonical developing source
         uses: actions/checkout@v5
         with:
-          ref: dev
+          ref: developing
           fetch-depth: 0
 
       - name: Set up Python
@@ -95,7 +95,7 @@ jobs:
               git config user.name "sebaptcd"
               git config user.email "dev@sebastian.ghiveci.com"
               git commit -m "Refresh daily public market history" \
-                -m "Technical overview: publish the CCXT-aggregated daily USD archive to the dedicated market-history branch, keeping generated data out of dev/main application history and avoiding merge conflicts." \
+                -m "Technical overview: publish the CCXT-aggregated daily USD archive to the dedicated market-history branch, keeping generated data out of developing/main application history and avoiding merge conflicts." \
                 -m "Commit made with GPT-6"
             elif [ "$remote_exists" -eq 1 ]; then
               echo "Dedicated archive branch is already current."

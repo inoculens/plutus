@@ -5,9 +5,9 @@ name: Checks
 # publishes data).
 on:
   push:
-    branches: [dev, main]
+    branches: [developing, main]
   pull_request:
-    branches: [dev, main]
+    branches: [developing, main]
 
 permissions:
   contents: read

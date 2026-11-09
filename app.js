@@ -5426,6 +5426,16 @@ function dropBakedExecLocks(trades, overrides) {
   return changed;
 }
 
+// An expense that loses a quantity of an asset (not a cash-only expense).
+// Its fiat worth at the tx date feeds the SPENT AMOUNT pills, so it needs the
+// same reference quote (frozen at save + history prefetch) as buy/sell/transfer.
+function isCryptoQtyExpense(t) {
+  if (!t || t.type !== 'expense') return false;
+  if (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') return false;
+  var q = Number(t.qty);
+  return isFinite(q) && q > 0;
+}
+
 // Frozen reference quote stamped on the trade at save time:
 // {price, vs, source}. Extra trade key, ignored by validation/ledger/export
 // shape checks (isValidImportTrade only asserts known fields).
@@ -6002,7 +6012,7 @@ function ensureHistoricalExec(trades, main, kinds) {
   var jobs = [];
   var idsByKey = {}; // quote key -> trade ids waiting on it (for failure tooltips)
   (trades || []).forEach(function (t) {
-    if (!t || (t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer')) return;
+    if (!t || (t.type !== 'buy' && t.type !== 'sell' && t.type !== 'transfer' && !isCryptoQtyExpense(t))) return;
     var sym = String((t && t.symbol) || '').toUpperCase();
     var day = (t && typeof t.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t.date)) ? t.date.slice(0, 10) : '';
     if (!sym || !isValidDateStr(day) || isFutureDateStr(day)) return;
@@ -17416,7 +17426,7 @@ function onTradeSubmit(ev) {
       // Transfers freeze it too: it values the network fee in fiat at the
       // tx-date rate (Fee in fiat rate). Other rows carry no execLock.
       var needRefreeze = false;
-      if (side === 'buy' || side === 'sell' || side === 'transfer') {
+      if (side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) {
         if (manualPrice !== null) {
           // Manual quote follows the trade's Currency field (like total and
           // fee), never the header display fiat — display converts it.
@@ -17556,7 +17566,7 @@ function onTradeSubmit(ev) {
       trade.fromFxLock = srcFiatLockForTrade;
       if (!isCrossFiat) trade.toFxLock = srcFiatLockForTrade;
     }
-    if (side === 'buy' || side === 'sell' || side === 'transfer') {
+    if (side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) {
       if (manualPrice !== null) {
         // Same rule as the edit path: the manual quote follows the trade's
         // Currency field, never the header display fiat.
@@ -17580,7 +17590,7 @@ function onTradeSubmit(ev) {
     st.trades.push(trade);
     learnLedgerLabel(st, trade);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
-    if ((side === 'buy' || side === 'sell' || side === 'transfer') && manualPrice === null) {
+    if ((side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) && manualPrice === null) {
       // No manual quote: freeze the reference exec price in the background.
       // Saving never waits on it; failure just leaves the legacy async path.
       try { freezeExecLock(trade.id, symbol, date, mainU, (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }

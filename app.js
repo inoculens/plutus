@@ -2194,8 +2194,9 @@ function cashIncomeRate(t, main) {
 // remainder_qty * today_rate + sum(consumed_qty_i * spend_rate_i), where
 // each spend_rate_i is the consuming expense's frozen display rate
 // (trade-date fixing into the current main). Consumption is FIFO, oldest
-// income first, same account + same fiat, expenses only. Transfers are
-// moves, never spends. Qty-less (fiat-only) expenses consume nothing and
+// income first among income already received on or before the expense's
+// date (same-date incomes book before same-date expenses), same account +
+// same fiat, expenses only. Transfers are moves, never spends. Qty-less (fiat-only) expenses consume nothing and
 // book straight through. Asset incomes stay frozen (never in the map).
 // Record lines, linkage, cost basis, invested/spent and native balances
 // are untouched — only the converted view numbers use this.
@@ -2241,11 +2242,27 @@ function buildCashRealization(allTrades, main, isCash) {
     }
     Object.keys(byKey).forEach(function (key) {
       var g = byKey[key];
-      var incomes = g.incomes.slice().sort(byDate);
-      var expenses = g.expenses.slice().sort(byDate);
-      var lots = incomes.map(function (t) { return { t: t, left: cashQtyOf(t), consumedMain: 0 }; });
-      var li = 0;
-      expenses.forEach(function (e) {
+      // One chronological stream: an expense may only consume income lots
+      // that already exist on or before its date. Dates carry no time of day,
+      // so on the SAME date incomes book first (money received that day can
+      // fund that day's spend); remaining ties keep store order.
+      var events = [];
+      g.incomes.forEach(function (t, i) { events.push({ t: t, income: true, idx: i }); });
+      g.expenses.forEach(function (t, i) { events.push({ t: t, income: false, idx: i }); });
+      events.sort(function (a, b) {
+        var c = byDate(a.t, b.t);
+        if (c !== 0) return c;
+        if (a.income !== b.income) return a.income ? -1 : 1;
+        return a.idx - b.idx;
+      });
+      var lots = [];
+      var li = 0; // oldest lot that may still have a balance
+      events.forEach(function (ev) {
+        if (ev.income) {
+          lots.push({ t: ev.t, left: cashQtyOf(ev.t), consumedMain: 0 });
+          return;
+        }
+        var e = ev.t;
         var need = cashQtyOf(e);
         if (!(need > 0)) return;
         var spendRate = ledgerFxRate(e.fxLock);
@@ -2258,8 +2275,9 @@ function buildCashRealization(allTrades, main, isCash) {
           need -= take;
           if (lot.left <= LEDGER_EPS) { lot.left = 0; li++; }
         }
-        // Overspend beyond held income consumes nothing further: the excess
-        // stays as a frozen expense (negative balances allowed).
+        // Overspend beyond income received so far consumes nothing further
+        // (never later income): the excess stays as a frozen expense
+        // (negative balances allowed).
       });
       lots.forEach(function (lot) {
         var rem = lot.left;

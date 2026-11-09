@@ -12621,9 +12621,11 @@ function renderAccountDetail(st, id) {
     }
     return;
   }
-  // Per-account spent (this account only): lifetime sell proceeds, cash legs
-  // and crypto fees at the frozen tx-date rate — same definition as the home
-  // SPENT AMOUNT, scoped to atrades. Orange pill above the red fees pill.
+  // Per-account spent (this account only): lifetime cash legs of expense and
+  // transfer records, plus crypto fees and crypto expenses at the frozen
+  // tx-date rate — same definition as the home SPENT AMOUNT, scoped to
+  // atrades. Sales and swap legs are conversions, never spending: they land
+  // in Realized. Orange pill above the red fees pill.
   var spentSum = 0;
   try {
     atrades.forEach(function (t) {
@@ -12643,8 +12645,6 @@ function renderAccountDetail(st, id) {
           try { kr = resolveExecPrice(t, main, accKind); } catch (e) { kr = null; }
           if (kr !== null && isFinite(Number(kr.price)) && Number(kr.price) > 0) spentSum += cq * Number(kr.price);
         }
-      } else if (t.accountId === acc.id && t.type === 'sell') {
-        if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
       } else if (t.accountId === acc.id && t.type === 'expense') {
         spentSum += expenseSpentMain(t, main, accKind);
       }

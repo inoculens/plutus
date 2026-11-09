@@ -211,6 +211,107 @@ var QTY_NATIVE_DECIMALS = {
 // up a same-named crypto's precision. Rebuilt whenever accounts load/save.
 var QTY_NON_CRYPTO = {};
 
+// --- Damaged-data protection ---
+// A stored state that cannot be read (bad JSON / wrong shape) or that loses
+// records in validation must never be silently replaced by the next save.
+// The raw text is first preserved as a recovery copy under a separate key,
+// the user is told, and the copy can be downloaded from Settings > Backups.
+// Only an explicit "Clear all data" discards recovery copies.
+var RECOVERY_KEY = STORAGE_KEY + '.recovery';
+var RECOVERY_KEEP = 3;
+var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, saved}
+var lastSeenRaw = null;      // stored text last read clean, or last written by saveState
+var lastPreservedRaw = null; // stored text already kept as a recovery copy
+
+function readRecoveryCopies() {
+  try {
+    var r = localStorage.getItem(RECOVERY_KEY);
+    if (!r) return [];
+    var list = JSON.parse(r);
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (c) { return c && typeof c.raw === 'string'; });
+  } catch (e) {
+    return [];
+  }
+}
+
+function preserveRawState(raw, reason) {
+  if (typeof raw !== 'string') return false;
+  if (raw === lastPreservedRaw) return true;
+  var list = readRecoveryCopies();
+  var have = list.some(function (c) { return c.raw === raw; });
+  if (!have) {
+    list.push({ at: new Date().toISOString(), reason: reason, raw: raw });
+    while (list.length > RECOVERY_KEEP) list.shift();
+    var ok = false;
+    while (list.length) {
+      try {
+        localStorage.setItem(RECOVERY_KEY, JSON.stringify(list));
+        ok = true;
+        break;
+      } catch (e) {
+        if (list.length <= 1) break; // keep the newest; drop older copies to make room
+        list.shift();
+      }
+    }
+    if (!ok) return false;
+  }
+  lastPreservedRaw = raw;
+  return true;
+}
+
+function noteStorageDamage(raw, damage) {
+  var saved = preserveRawState(raw, damage.kind);
+  storageRecovery = {
+    kind: damage.kind,
+    accounts: damage.accounts || 0,
+    trades: damage.trades || 0,
+    shape: !!damage.shape,
+    saved: saved
+  };
+  return saved;
+}
+
+function clearRecoveryCopies() {
+  try { localStorage.removeItem(RECOVERY_KEY); } catch (e) { /* ignore */ }
+  storageRecovery = null;
+  lastPreservedRaw = null;
+  lastSeenRaw = null;
+  try {
+    var rb = document.getElementById('s-recovery');
+    if (rb) rb.style.display = 'none';
+  } catch (e) { /* ignore */ }
+}
+
+// Parse + validate stored text without side effects. `parsed` is null when
+// the text is unreadable. `damage` is null when nothing was lost.
+function readStoredState(raw) {
+  var parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { parsed: null, damage: { kind: 'unreadable' } };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { parsed: null, damage: { kind: 'unreadable' } };
+  }
+  var accounts = Array.isArray(parsed.accounts)
+    ? sanitizeGroups(parsed.accounts.filter(isValidAccount).map(normalizeAccount))
+    : [];
+  var accountIds = accounts.map(function (a) { return a.id; });
+  var trades = Array.isArray(parsed.trades)
+    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
+    : [];
+  var droppedAccounts = Array.isArray(parsed.accounts) ? parsed.accounts.length - accounts.length : 0;
+  var droppedTrades = Array.isArray(parsed.trades) ? parsed.trades.length - trades.length : 0;
+  var shape = (parsed.accounts !== undefined && parsed.accounts !== null && !Array.isArray(parsed.accounts)) ||
+    (parsed.trades !== undefined && parsed.trades !== null && !Array.isArray(parsed.trades));
+  var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape)
+    ? { kind: 'rejected', accounts: droppedAccounts, trades: droppedTrades, shape: shape }
+    : null;
+  return { parsed: parsed, accounts: accounts, trades: trades, damage: damage };
+}
+
 function loadState() {
   var fallback = defaultState();
   activeDateFormat = fallback.settings.dateFormat;
@@ -221,20 +322,16 @@ function loadState() {
     return fallback;
   }
   if (raw === null || raw === undefined) return fallback;
-  var parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    return fallback;
+  var info = readStoredState(raw);
+  if (info.damage) {
+    noteStorageDamage(raw, info.damage);
+  } else {
+    lastSeenRaw = raw;
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
-  var accounts = Array.isArray(parsed.accounts)
-    ? sanitizeGroups(parsed.accounts.filter(isValidAccount).map(normalizeAccount))
-    : [];
-  var accountIds = accounts.map(function (a) { return a.id; });
-  var trades = Array.isArray(parsed.trades)
-    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
-    : [];
+  if (!info.parsed) return fallback;
+  var parsed = info.parsed;
+  var accounts = info.accounts;
+  var trades = info.trades;
   try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
   var priceOverrides = {};
   if (parsed.priceOverrides && typeof parsed.priceOverrides === 'object' && !Array.isArray(parsed.priceOverrides) && isValidPriceOverrides(parsed.priceOverrides)) {
@@ -251,13 +348,31 @@ function loadState() {
   };
 }
 
-function saveState(s) {
+// Before a save replaces the stored text, make sure that text is either
+// clean or already preserved. If a damaged original cannot be preserved
+// (quota), the save is refused rather than destroying it.
+function guardStoredStateBeforeSave() {
+  var raw;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { return; }
+  if (raw === null || raw === undefined || raw === lastSeenRaw) return;
+  var info = readStoredState(raw);
+  if (!info.damage) { lastSeenRaw = raw; return; }
+  if (!noteStorageDamage(raw, info.damage)) throw new Error('storage-unavailable');
+}
+
+// opts.replaceDamaged: explicit user action (Clear all data) that is allowed
+// to drop a damaged original without keeping a recovery copy.
+function saveState(s, opts) {
   try { noteSymbolKinds(s && s.accounts); } catch (e) { /* ignore */ }
+  if (!(opts && opts.replaceDamaged)) guardStoredStateBeforeSave();
+  var out;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    out = JSON.stringify(s);
+    localStorage.setItem(STORAGE_KEY, out);
   } catch (e) {
     throw new Error('storage-unavailable');
   }
+  lastSeenRaw = out;
   // Any persisted change may make the drive copy stale: let auto-sync
   // (opt-in, Sync tab) schedule an encrypted push. Never breaks saving.
   try { syncScheduleAuto(); } catch (e) { /* ignore */ }
@@ -6953,9 +7068,9 @@ function clearPriceBanner() {
 // Error('storage-unavailable') on private-mode/quota failure. Every UI
 // mutation must go through here so no storage failure bricks the UI
 // uncaught — the failure surfaces via the existing banner path.
-function saveStateGuarded(s) {
+function saveStateGuarded(s, opts) {
   try {
-    saveState(s);
+    saveState(s, opts);
     return true;
   } catch (e) {
     if (e && e.message === 'storage-unavailable') {
@@ -18443,6 +18558,7 @@ function buildSettings() {
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
     '<h3 class="set-heading">Backups ' + infoPill('Records live on this device. Download a JSON backup to keep a safe copy or move to another device. CSV exports are for spreadsheets and tax-lot review.') + '</h3>' +
     '<button id="s-download" type="button">Download backup</button>' +
+    '<button id="s-recovery" type="button" style="display:none">Download recovery copy</button>' +
     '<button id="s-csv-trades" type="button">Trades CSV</button>' +
     '<button id="s-csv-lots" type="button">FIFO tax lots CSV</button>' +
     '<span id="s-upload-label">Restore from file</span>' +
@@ -18723,6 +18839,8 @@ function buildSettings() {
     refreshPrices(); // re-resolve + repaint with the declared fiat
   });
   document.getElementById('s-download').addEventListener('click', downloadBackup);
+  var recBtn = document.getElementById('s-recovery');
+  if (recBtn) recBtn.addEventListener('click', downloadRecoveryCopy);
   var csvT = document.getElementById('s-csv-trades');
   if (csvT) csvT.addEventListener('click', downloadTradesCsv);
   var csvL = document.getElementById('s-csv-lots');
@@ -18859,6 +18977,45 @@ function downloadBackup() {
     try { urls.revokeObjectURL(url); } catch (e) { /* ignore */ }
     if (a.parentNode) a.parentNode.removeChild(a);
   }, 1000);
+}
+
+// The newest preserved copy of stored data that could not be read in full.
+// Written as plain text: an unreadable original is not valid JSON.
+function downloadRecoveryCopy() {
+  var list = readRecoveryCopies();
+  if (!list.length) return;
+  downloadTextFile('plutus.inoculens.com-recovery-' + backupStamp() + '.txt', list[list.length - 1].raw, 'text/plain');
+}
+
+// One calm banner when saved data was unreadable or partly rejected.
+function announceStorageRecovery() {
+  var r = storageRecovery;
+  if (!r) return;
+  try {
+    var rb = document.getElementById('s-recovery');
+    if (rb && r.saved) rb.style.display = '';
+  } catch (e) { /* ignore */ }
+  var lines;
+  var msg;
+  if (r.kind === 'unreadable') {
+    msg = 'Saved data in this browser could not be read.';
+    lines = [
+      'What happened: the stored data is damaged, so the app started empty.'
+    ];
+  } else {
+    msg = 'Some saved records could not be loaded.';
+    lines = [
+      'What happened: ' + (r.accounts ? r.accounts + ' account(s) ' : '') + (r.accounts && r.trades ? 'and ' : '') + (r.trades ? r.trades + ' record(s) ' : '') +
+        (r.shape ? 'and some malformed data ' : '') + 'failed validation and are not shown.'
+    ];
+  }
+  if (r.saved) {
+    lines.push('The original data is kept as a recovery copy in this browser. Download it from Settings > Backups > Download recovery copy.');
+  } else {
+    lines.push('The original data could NOT be copied (browser storage is full). Free space before making changes — saving is blocked to protect it.');
+  }
+  lines.push('Your next change will replace the active data; the recovery copy stays until you use Clear all data.');
+  showBanner(msg, 'error', { title: 'Saved data problem', lines: lines });
 }
 
 function csvEsc(v) {
@@ -19185,7 +19342,9 @@ function clearAllData() {
     if (!ok) return;
     livePrices = {};
     priceLoading = {};
-    if (!saveStateGuarded(defaultState())) return;
+    // Explicit wipe: discard any recovery copies too ("cannot be undone").
+    if (!saveStateGuarded(defaultState(), { replaceDamaged: true })) return;
+    clearRecoveryCopies();
     clearBanner();
     render();
     closeDialog('settings-dialog');
@@ -19445,6 +19604,7 @@ function init() {
   uiBooted = true;
   render();
   finishStartupLoader();
+  try { announceStorageRecovery(); } catch (e) { /* the notice never breaks boot */ }
   refreshPrices();
   try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
   try {

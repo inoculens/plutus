@@ -15491,9 +15491,10 @@ function syncTradeTypeUI() {
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else if (isExpense) {
-    setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : 'Quantity lost (optional if cash-only)');
-    setLabel('t-total-label', 'Fiat lost (optional if crypto-only)');
-    setLabel('t-qty-hint', isCash ? 'Money out, in the account currency.' : 'Amount you received (net of any fee taken in asset).');
+    var expTicker = (cashAcc && cashAcc.ticker) ? String(cashAcc.ticker).toUpperCase() : '';
+    setLabel('t-qty-label', isCash ? ('Amount (in ' + cashTicker + ')') : ('Amount spent' + (expTicker ? ' (in ' + expTicker + ')' : '')));
+    setLabel('t-total-label', 'Fiat lost');
+    setLabel('t-qty-hint', isCash ? 'Money out, in the account currency.' : 'Exactly what left this account. Its fiat value is calculated from the rate on the date.');
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   } else if (type === 'sell') {
@@ -15521,6 +15522,28 @@ function syncTradeTypeUI() {
     if (custC) custC.hidden = true;
     var clabC = document.getElementById('t-custom-ccy-label');
     if (clabC) clabC.hidden = true;
+  }
+  // An expense paid in the account asset has no fiat input: what left the
+  // account is the quantity, and its fiat value is derived from the spend-date
+  // rate (a website's own fx rate must never book a different amount). Only
+  // when editing an old fiat-only record do the fiat rows stay, so it can
+  // still be saved as it was.
+  if (isExpense && !isCash) {
+    var legacyFiatExp = false;
+    try {
+      var edExp = editingTradeId ? (loadState().trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0] : null;
+      legacyFiatExp = !!(edExp && edExp.type === 'expense' && !isCryptoQtyExpense(edExp) && Number(edExp.total) > 0);
+    } catch (e) { legacyFiatExp = false; }
+    if (!legacyFiatExp) {
+      setHidden('t-total-row', true);
+      setHidden('t-currency-row', true);
+      var custE = document.getElementById('t-custom-ccy');
+      if (custE) custE.hidden = true;
+      var clabE = document.getElementById('t-custom-ccy-label');
+      if (clabE) clabE.hidden = true;
+    } else {
+      setLabel('t-qty-label', 'Amount spent (optional for this older fiat-only record)');
+    }
   }
   // Ledger row: cash income/expense always; asset income/expense only when
   // the global switch is on (optional at submit, required never).
@@ -17411,8 +17434,16 @@ function onTradeSubmit(ev) {
     } else { total = 0; currency = String(main).toUpperCase(); }
   } else if (side === 'expense') {
     var hasQ = !(String(qtyRaw).trim() === '');
-    var hasT = !isCashAcc && !(String(totalRaw).trim() === '');
-    if (!hasQ && !hasT) { tradeFormError('Expense needs a quantity or a cash amount.'); return; }
+    // Asset expenses carry no typed fiat: the quantity is the truth and the
+    // fiat value derives from the spend-date rate. Only an older fiat-only
+    // record being edited may keep its fiat amount (and only without a qty).
+    var legacyFiatSave = false;
+    try {
+      var exSaved = editingTradeId ? (st0.trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0] : null;
+      legacyFiatSave = !!(exSaved && exSaved.type === 'expense' && !isCryptoQtyExpense(exSaved) && Number(exSaved.total) > 0);
+    } catch (e) { legacyFiatSave = false; }
+    var hasT = !isCashAcc && legacyFiatSave && !hasQ && !(String(totalRaw).trim() === '');
+    if (!hasQ && !hasT) { tradeFormError(isCashAcc ? 'Expense needs a quantity or a cash amount.' : 'Enter how much you spent (quantity > 0).'); return; }
     if (hasQ && (!isFinite(qtyChk) || qtyChk <= 0)) { tradeFormError('Quantity must be > 0.'); return; }
     if (hasT && (!isFinite(total) || total <= 0)) { tradeFormError('Fiat amount must be > 0.'); return; }
     if (!hasQ) qty = null;

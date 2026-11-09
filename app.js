@@ -20394,6 +20394,10 @@ function syncNetErr(label) {
 
 // All sync traffic goes through here: a hung connection aborts after
 // SYNC_TIMEOUT_MS so the UI can never wedge with its buttons disabled.
+// The timer covers the whole exchange: it keeps running after the response
+// headers arrive and stops only once the body has been read (a stalled body
+// aborts and rejects like a stalled request). A response whose body is never
+// read is cut off by the timer, which is harmless.
 // Degrades to plain fetch where AbortController/timers are unavailable.
 var SYNC_TIMEOUT_MS = 30000;
 
@@ -20404,14 +20408,35 @@ function syncFetch(url, opts, label) {
       var ctrl = new AbortController();
       o.signal = ctrl.signal;
       var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* ignore */ } }, SYNC_TIMEOUT_MS);
+      var stop = function () { try { clearTimeout(timer); } catch (e) { /* ignore */ } };
+      var timedOut = function () {
+        return new Error('sync failed: timed out reaching ' + label + '. Check your connection.');
+      };
       return fetch(url, o).then(function (res) {
-        try { clearTimeout(timer); } catch (e) { /* ignore */ }
+        if (!res) { stop(); return res; }
+        if (res.body === null) { stop(); return res; } // HEAD / 204: nothing left to wait for
+        ['json', 'text', 'arrayBuffer', 'blob', 'formData'].forEach(function (name) {
+          var orig = res[name];
+          if (typeof orig !== 'function') return;
+          try {
+            res[name] = function () {
+              var p;
+              try { p = orig.apply(res, arguments); } catch (e) { stop(); throw e; }
+              return Promise.resolve(p).then(function (v) {
+                stop();
+                return v;
+              }, function (err) {
+                stop();
+                if (err && err.name === 'AbortError') throw timedOut();
+                throw err;
+              });
+            };
+          } catch (e) { /* read-only response object: timer still bounds it */ }
+        });
         return res;
       }, function (err) {
-        try { clearTimeout(timer); } catch (e) { /* ignore */ }
-        if (err && err.name === 'AbortError') {
-          throw new Error('sync failed: timed out reaching ' + label + '. Check your connection.');
-        }
+        stop();
+        if (err && err.name === 'AbortError') throw timedOut();
         throw new Error('sync failed: cannot reach ' + label + '. Check your connection.');
       });
     }

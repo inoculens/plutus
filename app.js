@@ -5702,9 +5702,51 @@ function fetchHistoricalCryptoPrice(symbol, dateStr, vs) {
   }
   // Most reliable source first: Coinbase public candles (no key, generous
   // limits, deep history, CORS-open). The rest of the chain follows on a miss.
+  // Second: the public Plutus daily archive (98 assets, USD daily closes
+  // built by the market-history workflow). It covers assets the majors-only
+  // sources above do not, and goes further back than CoinGecko's free window.
   return fetchCoinbaseHistory(sym, dateStr, cur).then(function (cb) {
     if (isFinite(cb) && cb > 0) return cb;
-    return coingeckoAndBeyond();
+    return fetchArchiveHistory(sym, dateStr, cur).then(function (ap) {
+      if (isFinite(ap) && ap > 0) return ap;
+      return coingeckoAndBeyond();
+    });
+  });
+}
+
+// One UTC day's close from the public Plutus archive (the same file the net
+// worth history reads, fetched once per session). Exact day only: a missing
+// day is null — never interpolated or guessed. Non-USD fiats bridge through
+// the historical ECB USD rate, like the other crypto sources.
+function fetchArchiveHistory(sym, dateStr, vs) {
+  var s = String(sym || '').trim().toUpperCase();
+  var c = String(vs || '').trim().toUpperCase();
+  var day = (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) ? dateStr.slice(0, 10) : '';
+  if (!s || !c || !isValidDateStr(day) || isFutureDateStr(day)) return Promise.resolve(null);
+  var dayStart = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+  if (!isFinite(dayStart)) return Promise.resolve(null);
+  var wantDay = Math.floor(dayStart / 86400000);
+  return fetchPlutusDailyCryptoSeries(s, dayStart, dayStart).then(function (series) {
+    var pts = (series && Array.isArray(series.points)) ? series.points : [];
+    var usd = NaN;
+    for (var i = 0; i < pts.length; i++) {
+      if (Math.floor(Number(pts[i].at) / 86400000) === wantDay) { usd = Number(pts[i].price); break; }
+    }
+    if (!(isFinite(usd) && usd > 0)) {
+      histDiagNote(s, day, c, 'Plutus archive: no price for date');
+      return null;
+    }
+    if (c === 'USD') { histDiagClear(s, day, c); return usd; }
+    return fetchEcbRate(day, 'USD', c).then(function (r) {
+      var v = usd * Number(r.rate);
+      if (isFinite(v) && v > 0) { histDiagClear(s, day, c); return v; }
+      return null;
+    }, function () { return null; });
+  }).then(null, function (e) {
+    var msg = String((e && e.message) || e);
+    if (msg.indexOf('has no daily history') !== -1) histDiagNote(s, day, c, 'Plutus archive: asset or date not covered');
+    else histDiagNote(s, day, c, 'Plutus archive unreachable');
+    return null;
   });
 }
 

@@ -53,6 +53,17 @@ assert.equal(C.isValidDebtTimestamp('November 10, 2026'), false,
 assert.equal(C.isValidDebtTimestamp('2026-11-10T12:30:00+02:00'), true);
 
 assert.equal(C.isValidDebtPosition(position(), accounts[0], accounts), true);
+assert.equal(C.isValidDebtPosition(position({ assetKind: 'cash', assetTicker: 'EUR' }), accounts[0], accounts), true,
+  'a liability denomination is independent of the owning account');
+assert.equal(C.isValidDebtPosition(position({ assetKind: 'cash' }), accounts[0], accounts), false,
+  'a partial denomination cannot be silently migrated');
+assert.equal(C.isValidDebtPosition(position({ assetKind: 'unknown', assetTicker: 'EUR' }), accounts[0], accounts), false);
+const collisionOwner = acc('collision-owner', 'W', 'crypto');
+collisionOwner.debtPositions = [position({ assetKind: 'commodity', assetTicker: 'W' })];
+C.noteSymbolKinds([collisionOwner], []);
+assert.equal(C.priceKeyOf('W', 'crypto'), 'CRYPTO:W', 'debt kinds participate in ticker collision identity');
+assert.equal(C.priceKeyOf('W', 'commodity'), 'COMMODITY:W', 'same-ticker debt uses its own kind-qualified price');
+
 const unknownSnapshotProperty = Object.assign(snap('unknown-field', 1, '2026-11-10T10:00:00.000Z'), {
   toString: 'not an allowed snapshot field'
 });
@@ -105,6 +116,18 @@ const prototypeIdValuation = C.currentDebtValuation([prototypeIdDebt], 'USD', { 
 assert.equal(prototypeIdValuation.value, 75000,
   'prototype-like account IDs must not cause a real liability to be skipped');
 
+const crossAssetOwner = acc('btc-owner-eur-debt', 'BTC', 'crypto');
+crossAssetOwner.debtPositions = [position({ assetKind: 'cash', assetTicker: 'EUR', collateral: [], balanceSnapshots: [snap('eur-cross-s1', 100, '2026-11-10T10:00:00.000Z')] })];
+C.cacheRate(C.todayStr(), 'EUR', 'USD', 1.1, 'test-cross-asset');
+const crossAssetValuation = C.currentDebtValuation([crossAssetOwner], 'USD', {}, valuationAt);
+assert.ok(Math.abs(crossAssetValuation.value - 110) < 1e-9, 'EUR debt owned by a BTC account is valued as EUR, not BTC');
+const goldDebtOwner = acc('stock-owner-gold-debt', 'AAPL', 'stock');
+goldDebtOwner.debtPositions = [position({ assetKind: 'commodity', assetTicker: 'XAU', collateral: [], balanceSnapshots: [snap('gold-cross-s1', 2, '2026-11-10T10:00:00.000Z')] })];
+const goldValuation = C.currentDebtValuation([goldDebtOwner], 'USD', { XAU: 2000 }, valuationAt);
+assert.equal(goldValuation.value, 4000, 'gold debt owned by a stock account is valued as gold');
+assert.equal(C.accountDebtBalanceAt({ debtPositions: [position(), position({ assetKind: 'cash', assetTicker: 'EUR' })] }, valuationAt), null,
+  'an unqualified account debt total refuses to add different denominations');
+
 const unknownValuation = C.currentDebtValuation([btcDebt], 'USD', {}, valuationAt);
 assert.equal(unknownValuation.value, null,
   'an unavailable liability price remains unknown, not zero');
@@ -137,6 +160,8 @@ const normalized = C.normalizeAccount(accounts[0], accounts);
 assert.equal(normalized.ticker, 'USDC');
 assert.equal(normalized.debtPositions[0].balanceSnapshots.length, 2);
 assert.equal(normalized.debtPositions[0].collateral.length, 2);
+assert.equal(normalized.debtPositions[0].assetKind, 'cash', 'legacy debt inherits its old owner kind once');
+assert.equal(normalized.debtPositions[0].assetTicker, 'USDC', 'legacy debt inherits its old owner ticker once');
 const legacy = C.defaultState();
 legacy.accounts = [acc('old', 'BTC', 'crypto')];
 assert.equal(C.isValidDebtPositions(legacy.accounts[0], legacy.accounts), true,
@@ -206,6 +231,12 @@ assert.equal(JSON.parse(damaged.store.get(REC))[0].raw, damagedRaw, 'a later sav
   }, historyState, 'USD', false);
   assert.equal(firstReport.value, -50000,
     'historical net worth subtracts the first reported balance at and after its timestamp');
+
+  const foreignDebtOwner = acc('btc-owner-xau-debt', 'BTC', 'crypto');
+  foreignDebtOwner.debtPositions = [position({ assetKind: 'commodity', assetTicker: 'XAU', collateral: [], balanceSnapshots: [snap('xau-history-s1', 2, '2026-11-10T10:00:00.000Z')] })];
+  const foreignHistory = await C.netWorthHistoryPointValue({ at: Date.parse('2026-11-10T11:00:00.000Z'), prices: { XAU: 2000 } },
+    { settings: state.settings, accounts: [foreignDebtOwner], trades: [], priceOverrides: {} }, 'USD', false);
+  assert.equal(foreignHistory.value, -4000, 'historical net worth values gold debt independently of its BTC owner');
 
   btcDebt.debtPositions[0].balanceSnapshots.push(
     snap('btc-s2', 1.5, '2026-11-10T12:00:00.000Z')

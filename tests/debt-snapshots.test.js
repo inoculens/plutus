@@ -80,7 +80,7 @@ eurDebt.debtPositions = [position({
 })];
 C.cacheRate(C.todayStr(), 'EUR', 'USD', 1.1, 'test');
 const eurValuation = C.currentDebtValuation([eurDebt], 'USD', {}, valuationAt);
-assert.equal(eurValuation.value, 110,
+assert.ok(Math.abs(eurValuation.value - 110) < 1e-9,
   'fiat debt is converted using the main-currency FX rate');
 const collateralOnly = C.currentDebtValuation([accounts[1], accounts[2]], 'USD', { BTC: 25000, XAU: 2000 }, valuationAt);
 assert.equal(collateralOnly.hasDebt, false,

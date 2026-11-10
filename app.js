@@ -211,6 +211,52 @@ var QTY_NATIVE_DECIMALS = {
 // up a same-named crypto's precision. Rebuilt whenever accounts load/save.
 var QTY_NON_CRYPTO = {};
 
+// --- Price identity ---
+// A ticker alone is not a unique asset: the same symbol can be a coin in one
+// account and a stock in another (W, OP, AR, ...). Prices are keyed by the
+// bare ticker (SYM) -- unless the portfolio holds that ticker under more than
+// one asset kind, in which case every price for it is keyed KIND:SYM
+// (e.g. STOCK:W, CRYPTO:W) so the two can never share or overwrite a price.
+// Rebuilt whenever accounts load/save (noteSymbolKinds).
+var PRICE_KIND_BY_ACCOUNT = {}; // accountId -> normalized kind
+var PRICE_KINDS_BY_SYMBOL = {}; // SYM -> { kind: true } for every held kind
+var PRICE_COLLISIONS = {};      // SYM -> true when held under 2+ kinds
+var PRICE_KIND_NAMES = ['CRYPTO', 'STOCK', 'COMMODITY', 'CASH', 'CUSTOM'];
+
+function normPriceKind(kind) {
+  var k = String(kind === undefined || kind === null ? '' : kind).trim().toLowerCase();
+  return (k === 'stock' || k === 'commodity' || k === 'cash' || k === 'custom') ? k : 'crypto';
+}
+
+// Price key for a symbol held under `kind`: bare SYM unless the ticker is
+// shared by several kinds.
+function priceKeyOf(sym, kind) {
+  var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
+  if (!up) return up;
+  return PRICE_COLLISIONS[up] ? normPriceKind(kind).toUpperCase() + ':' + up : up;
+}
+
+function priceKeyForAccount(sym, accountId) {
+  return priceKeyOf(sym, PRICE_KIND_BY_ACCOUNT[accountId]);
+}
+
+// "STOCK:W" -> {sym:'W', kind:'stock'}; anything else (plain ticker) -> null.
+function splitPriceKey(key) {
+  var m = /^([A-Z]+):([A-Z0-9._-]+)$/.exec(String(key === undefined || key === null ? '' : key));
+  if (!m || PRICE_KIND_NAMES.indexOf(m[1]) === -1) return null;
+  return { sym: m[2], kind: m[1].toLowerCase() };
+}
+
+// Live price for `sym` as held in `accountId`. A shared ticker only ever
+// reads its own kind-qualified entry -- never the bare ticker, which could be
+// another asset's price -- so an unresolved price stays unknown (null).
+function livePriceFor(live, sym, accountId) {
+  if (!live) return undefined;
+  var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
+  if (up && PRICE_COLLISIONS[up]) return live[priceKeyForAccount(up, accountId)];
+  return live[sym] !== undefined ? live[sym] : live[up];
+}
+
 // --- Damaged-data protection ---
 // A stored state that cannot be read (bad JSON / wrong shape) or that loses
 // records in validation must never be silently replaced by the next save.
@@ -339,7 +385,7 @@ function loadState() {
   }
   var settings = normalizeSettings(parsed.settings, fallback.settings);
   activeDateFormat = settings.dateFormat;
-  try { noteSymbolKinds(accounts); } catch (e) { /* never breaks load */ }
+  try { noteSymbolKinds(accounts, trades); } catch (e) { /* never breaks load */ }
   return {
     settings: settings,
     accounts: accounts,
@@ -363,7 +409,7 @@ function guardStoredStateBeforeSave() {
 // opts.replaceDamaged: explicit user action (Clear all data) that is allowed
 // to drop a damaged original without keeping a recovery copy.
 function saveState(s, opts) {
-  try { noteSymbolKinds(s && s.accounts); } catch (e) { /* ignore */ }
+  try { noteSymbolKinds(s && s.accounts, s && s.trades); } catch (e) { /* ignore */ }
   if (!(opts && opts.replaceDamaged)) guardStoredStateBeforeSave();
   var out;
   try {
@@ -2722,6 +2768,12 @@ function computePositions(trades, live, method) {
   var engine = method === 'fifo' ? computeFifo(trades) : computeAverage(trades);
   var buyCost = {}; // sym -> lifetime all-in buy+income cost (denominator for returnPct)
   var hasBuy = {};
+  var accOfSym = {}; // sym -> account holding it (picks the price kind for shared tickers)
+  (trades || []).forEach(function (t) {
+    if (!t) return;
+    var symAny = ledgerSym(t);
+    if (symAny && accOfSym[symAny] === undefined && t.accountId !== undefined) accOfSym[symAny] = t.accountId;
+  });
   (trades || []).forEach(function (t) {
     if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
     var sym = ledgerSym(t);
@@ -2738,8 +2790,7 @@ function computePositions(trades, live, method) {
     if (!hasBuy[sym] && !(v.qty > qtyEps) && !(Math.abs(v.realized || 0) > LEDGER_EPS)) return; // skip phantom sell-only rows
     // Unknown live price stays unknown (null) — never coerced to 0, which
     // fabricated a full loss (value 0, unrealized -cost, return -100%).
-    var lookup = String(sym).toUpperCase();
-    var raw = live ? (live[sym] !== undefined ? live[sym] : live[lookup]) : undefined;
+    var raw = livePriceFor(live, sym, accOfSym[sym]);
     var num = Number(raw);
     var known = isFinite(num) && num > 0;
     var livePrice = known ? num : null;
@@ -3164,8 +3215,7 @@ function computePortfolio(allTrades, live, method) {
     Object.keys(syms).forEach(function (sym) {
       var s = syms[sym];
       if (!s.touched) return; // never active: drop phantom (e.g. sell-only with no inventory)
-      var lookup = String(sym).toUpperCase();
-      var raw = live ? (live[sym] !== undefined ? live[sym] : live[lookup]) : undefined;
+      var raw = livePriceFor(live, sym, accId);
       var num = Number(raw);
       var known = isFinite(num) && num > 0;
       var qtyHeld = Math.abs(s.qty) < ledgerQtyEpsilon(sym) ? 0 : s.qty;
@@ -5218,7 +5268,48 @@ function fetchLivePrice(symbol, vs, kind) {
   });
 }
 
+// Public entry. Plain tickers resolve exactly as before. Kind-qualified keys
+// (STOCK:W, CRYPTO:W -- see "Price identity") are resolved per kind so two
+// assets sharing a ticker are fetched, cached and returned separately; the
+// result stays one flat object, qualified entries keyed by their KIND:SYM.
 function refreshAllPrices(symbols, vs, kinds) {
+  var plain = [];
+  var groups = {}; // kind -> [sym]
+  var qualified = false;
+  (symbols || []).forEach(function (s) {
+    var up = String(s === undefined || s === null ? '' : s).toUpperCase();
+    var parts = splitPriceKey(up);
+    if (!parts) { plain.push(s); return; }
+    qualified = true;
+    if (!groups[parts.kind]) groups[parts.kind] = [];
+    if (groups[parts.kind].indexOf(parts.sym) === -1) groups[parts.kind].push(parts.sym);
+  });
+  if (!qualified) return refreshAllPricesCore(symbols, vs, kinds);
+  var merged = {};
+  var mergedErrors = {};
+  // Sequential: each core run reports its errors through lastPriceErrors.
+  var chain = plain.length
+    ? refreshAllPricesCore(plain, vs, kinds).then(function (out) {
+        Object.keys(out).forEach(function (k) { merged[k] = out[k]; });
+        Object.keys(lastPriceErrors).forEach(function (k) { mergedErrors[k] = lastPriceErrors[k]; });
+      })
+    : Promise.resolve();
+  Object.keys(groups).forEach(function (kind) {
+    chain = chain.then(function () {
+      return refreshAllPricesCore(groups[kind], vs, function () { return kind; }).then(function (out) {
+        var errs = lastPriceErrors;
+        groups[kind].forEach(function (sym) {
+          var key = kind.toUpperCase() + ':' + sym;
+          if (Object.prototype.hasOwnProperty.call(out, sym)) merged[key] = out[sym];
+          if (errs && errs[sym]) mergedErrors[key] = errs[sym];
+        });
+      });
+    });
+  });
+  return chain.then(function () { lastPriceErrors = mergedErrors; return merged; });
+}
+
+function refreshAllPricesCore(symbols, vs, kinds) {
   var cur = priceDefaultVs(vs);
   var seen = {};
   var uniq = [];
@@ -6299,10 +6390,14 @@ function hasCommoditySource(sym) {
 
 function isActionablePriceSymbol(s, kinds) {
   var up = String(s || '').toUpperCase();
+  var keyParts = splitPriceKey(up); // KIND:SYM carries its own kind
+  var keyKind = null;
+  if (keyParts) { up = keyParts.sym; keyKind = keyParts.kind; }
   try { if (priceOverrideEntry(up) !== null) return true; } catch (e) { /* fall through */ }
   var kd = null;
   try {
-    if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
+    if (keyKind !== null) kd = keyKind;
+    else if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
     else if (kinds) {
       var ks = Object.keys(kinds);
       for (var i = 0; i < ks.length; i++) {
@@ -6318,8 +6413,11 @@ function isActionablePriceSymbol(s, kinds) {
   return false;
 }
 
-function isPriceLoading(sym) {
-  try { return !!priceLoading[String(sym || '').toUpperCase()]; } catch (e) { return false; }
+function isPriceLoading(sym, accountId) {
+  try {
+    var up = String(sym || '').toUpperCase();
+    return !!priceLoading[accountId === undefined ? up : priceKeyForAccount(up, accountId)];
+  } catch (e) { return false; }
 }
 
 function anyPriceLoading() {
@@ -8306,7 +8404,14 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     rows.forEach(function (row, symbol) {
       if (!(Number(row.qtyHeld) > 0)) return;
       if (row.marketValue === null) {
-        missing[String(symbol).toUpperCase()] = kinds[String(symbol).toUpperCase()] || 'crypto';
+        // A ticker held under several asset kinds is priced per kind.
+        var upSym = String(symbol).toUpperCase();
+        if (PRICE_COLLISIONS[upSym]) {
+          var accKind = PRICE_KIND_BY_ACCOUNT[accountId] || 'crypto';
+          missing[priceKeyOf(upSym, accKind)] = accKind;
+        } else {
+          missing[upSym] = kinds[upSym] || 'crypto';
+        }
       } else {
         total += Number(row.marketValue);
       }
@@ -8352,7 +8457,8 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
       complete = false;
       return Promise.resolve(false);
     }
-    return fetchNetWorthHistoryPrice(symbol, day, main, kind).then(function (price) {
+    var keyParts = splitPriceKey(symbol);
+    return fetchNetWorthHistoryPrice(keyParts ? keyParts.sym : symbol, day, main, kind).then(function (price) {
       if (isFinite(Number(price)) && Number(price) > 0) {
         prices[symbol] = Number(price);
         return true;
@@ -9464,7 +9570,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   valv.className = 'acct-value';
   var plv = document.createElement('span');
   var accTick = String(acc.ticker || '').toUpperCase();
-  var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick);
+  var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick, acc.id);
   valv.textContent = valKnown ? fmtMoney(valNum, main) : (scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
   paintLoading(valv, accLoading, acc.name + ' value');
   if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
@@ -9488,7 +9594,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     }
   } else {
     plv.className = 'acct-pl';
-    var plLoading = !!scopeTrades && isPriceLoading(accTick);
+    var plLoading = !!scopeTrades && isPriceLoading(accTick, acc.id);
     plv.textContent = scopeTrades ? (plLoading ? PRICE_LOADING_TEXT : '—') : 'New';
     paintLoading(plv, plLoading, acc.name + ' profit');
   }
@@ -11040,7 +11146,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     var nowMeta = null;
     try {
       var nwSym = String(t.symbol || '').toUpperCase();
-      var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePrices[nwSym] : null;
+      var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePriceFor(livePrices, nwSym, t.accountId) : null;
       nowMeta = tradeNowMeta(t, main, lvRaw, kind);
     } catch (e) { nowMeta = null; }
     if (nowMeta) {
@@ -12494,6 +12600,17 @@ function renderAccountDetail(st, id) {
         ? Number(hit.price)
         : null;
     });
+    // A ticker held under several asset kinds is priced per kind
+    // (see "Price identity"): the bare entry above is never read for it.
+    historySymbols.forEach(function (symbol) {
+      if (!PRICE_COLLISIONS[symbol]) return;
+      Object.keys(PRICE_KINDS_BY_SYMBOL[symbol] || {}).forEach(function (kind) {
+        var kh = getHistoricalExec(symbol, dateFilter.to, main, kind);
+        detailPrices[priceKeyOf(symbol, kind)] = kh && isFinite(Number(kh.price)) && Number(kh.price) > 0
+          ? Number(kh.price)
+          : null;
+      });
+    });
     if (!rangeIssue && historySymbols.length) {
       var historyRequests = historySymbols.map(function (symbol) {
         return { type: 'buy', symbol: symbol, date: dateFilter.to, qty: 1, accountId: id };
@@ -12669,7 +12786,7 @@ function renderAccountDetail(st, id) {
   var lvRaw = tickSym ? (detailPrices ? detailPrices[tickSym] : null) : null;
   var lvNum = Number(lvRaw);
   var liveShow = pos ? pos.livePrice : ((isFinite(lvNum) && lvNum > 0) ? lvNum : null);
-  var detLoading = !historicalEnd && isPriceLoading(tickSym);
+  var detLoading = !historicalEnd && isPriceLoading(tickSym, acc.id);
   stats.appendChild(statCard('Value', mvKnown ? fmtMoney(mv, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), mvKnown ? mv : null, !mvKnown && detLoading));
   stats.appendChild(statCard(historicalEnd ? 'Price on ' + fmtDateDmy(dateFilter.to) : 'Live price', liveShow !== null ? fmtMoney(liveShow, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), liveShow, liveShow === null && detLoading));
   stats.appendChild(statCard('Average entry', (pos && !closed) ? fmtMoney(pos.avgEntry, main) : '—', (pos && !closed) ? pos.avgEntry : null));
@@ -15779,18 +15896,42 @@ function qtyDecimals(symbol) {
   return 8;
 }
 
-function noteSymbolKinds(accounts) {
+function noteSymbolKinds(accounts, trades) {
   var next = {};
   var crypto = {};
+  var kindByAccount = {};
+  var kindsBySym = {};
+  function noteKind(sym, kind) {
+    var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
+    if (!up) return;
+    if (!kindsBySym[up]) kindsBySym[up] = {};
+    kindsBySym[up][normPriceKind(kind)] = true;
+  }
   (Array.isArray(accounts) ? accounts : []).forEach(function (a) {
-    if (!a || a.ticker === undefined || a.ticker === null) return;
+    if (!a) return;
+    if (a.id !== undefined && a.id !== null) kindByAccount[a.id] = normPriceKind(a.kind);
+    if (a.ticker === undefined || a.ticker === null) return;
     var t = String(a.ticker).trim().toUpperCase();
     var k = String(a.kind || '').trim().toLowerCase();
     if (k === 'stock' || k === 'commodity') next[t] = true;
     else if (k === 'crypto') crypto[t] = true;
+    noteKind(t, a.kind);
   });
   Object.keys(crypto).forEach(function (t) { delete next[t]; });
   QTY_NON_CRYPTO = next;
+  // Trade symbols inherit their account's kind.
+  (Array.isArray(trades) ? trades : []).forEach(function (tr) {
+    if (!tr || !tr.symbol || tr.accountId === undefined || tr.accountId === null) return;
+    if (!Object.prototype.hasOwnProperty.call(kindByAccount, tr.accountId)) return;
+    noteKind(tr.symbol, kindByAccount[tr.accountId]);
+  });
+  var collisions = {};
+  Object.keys(kindsBySym).forEach(function (sym) {
+    if (Object.keys(kindsBySym[sym]).length > 1) collisions[sym] = true;
+  });
+  PRICE_KIND_BY_ACCOUNT = kindByAccount;
+  PRICE_KINDS_BY_SYMBOL = kindsBySym;
+  PRICE_COLLISIONS = collisions;
 }
 
 var EX_ACT_POW10 = [1n, 10n, 100n]; // grows on demand, one entry per exponent
@@ -19382,22 +19523,34 @@ var priceReqGen = 0;
 function refreshPrices() {
   var st = loadState();
   var mainNow = st.settings.mainCurrency;
-  var syms = uniqueSymbols(st.trades);
+  // One entry per price identity (see "Price identity"): the bare ticker, or
+  // KIND:SYM for a ticker held under several asset kinds.
+  var syms = [];
   var kinds = {};
-  (st.accounts || []).forEach(function (a) {
-    if (a && a.ticker) {
-      var t = String(a.ticker).toUpperCase();
-      if (syms.indexOf(t) === -1) syms.push(t); // unique: trades may already list it
-      if (a.kind) kinds[t] = a.kind;
+  function addPrice(sym, kind) {
+    var up = String(sym || '').toUpperCase();
+    if (!up) return;
+    if (PRICE_COLLISIONS[up]) {
+      var held = PRICE_KINDS_BY_SYMBOL[up] || {};
+      Object.keys(held).forEach(function (k) {
+        var key = priceKeyOf(up, k);
+        if (syms.indexOf(key) === -1) syms.push(key);
+        kinds[key] = k;
+      });
+      return;
     }
+    if (syms.indexOf(up) === -1) syms.push(up);
+    if (kind && !kinds[up]) kinds[up] = kind;
+  }
+  uniqueSymbols(st.trades).forEach(function (s) { addPrice(s); });
+  (st.accounts || []).forEach(function (a) {
+    if (a && a.ticker) addPrice(a.ticker, a.kind);
   });
   // Trade symbols inherit their account's kind (stock/commodity accounts fetch live).
   (st.trades || []).forEach(function (tr) {
     if (!tr || !tr.symbol || !tr.accountId) return;
-    var s = String(tr.symbol).toUpperCase();
-    if (kinds[s]) return;
     var a = accountById(st, tr.accountId);
-    if (a && a.kind) kinds[s] = a.kind;
+    if (a && a.kind) addPrice(tr.symbol, a.kind);
   });
   if (!syms.length) {
     priceLoading = {};
@@ -19462,7 +19615,9 @@ function refreshPrices() {
       var actionableStill = stillMissing.filter(isActionable);
       if (actionableStill.length) {
         var detailLines = actionableStill.map(function (s) {
-          return s + ' — ' + (lastPriceErrors[s] || 'price unavailable');
+          var kp = splitPriceKey(s);
+          var label = kp ? kp.sym + ' (' + kp.kind + ')' : s;
+          return label + ' — ' + (lastPriceErrors[s] || 'price unavailable');
         });
         showBanner('Live prices are unreachable right now — your data is safe and numbers will fill in automatically.', 'info', {
           title: 'Price errors',

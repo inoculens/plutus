@@ -7517,16 +7517,20 @@ function showBanner(msg, kind, details) {
   b.classList.remove('run');
   void b.offsetWidth; // restart the bar animation
   b.classList.add('run');
-  bannerTimer = setTimeout(dismissBanner, lead + BANNER_DWELL_MS);}
+  var bannerDelay = lead + BANNER_DWELL_MS;
+  bannerTimerEnd = Date.now() + bannerDelay;
+  bannerTimer = setTimeout(dismissBanner, bannerDelay);}
 
 function cancelBannerTimers() {
   if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
-  if (bannerOutTimer) { clearTimeout(bannerOutTimer); bannerOutTimer = null; }}
+  if (bannerOutTimer) { clearTimeout(bannerOutTimer); bannerOutTimer = null; }
+  bannerTimerEnd = 0;}
 
 // Animated exit (progress bar ran out, or the X was pressed): dip, then
 // slide back up off-screen; only then is the element really hidden.
 function dismissBanner() {
   if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  bannerTimerEnd = 0;
   var b = document.getElementById('banner');
   if (!b || b.hidden || b.classList.contains('hide')) return;
   b.classList.remove('show'); // 'run' stays so the bar does not snap back to full during the exit
@@ -7564,6 +7568,49 @@ var BANNER_OUT_MS = 550;     // slide-out duration (CSS --banner-out)
 var BANNER_DWELL_MS = 5000;  // on-screen time = progress bar run time
 var bannerTimer = null;      // starts the animated exit when the bar runs out
 var bannerOutTimer = null;   // finishes the exit (really hides) after the slide-out
+// Page-visibility pause/resume: CSS animations freeze for background tabs but
+// setTimeout does not, so the timer can fire while the bar still shows time.
+// bannerTimerEnd stores the absolute wall-clock time the timer should fire at;
+// on visibility restore we schedule a new timeout for the remaining duration.
+var bannerTimerEnd = 0;
+(function () {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      // Tab going background: cancel the timeout but remember when it was due.
+      if (bannerTimer && bannerTimerEnd) {
+        clearTimeout(bannerTimer);
+        bannerTimer = null;
+        // bannerTimerEnd already set to the correct future timestamp.
+      }
+    } else {
+      // Tab becoming visible again: re-arm for the remaining dwell time.
+      // Also resume the CSS progress bar animation from where it paused.
+      if (!bannerTimer && bannerTimerEnd) {
+        var remaining = bannerTimerEnd - Date.now();
+        if (remaining <= 0) {
+          // Time already elapsed while hidden: dismiss immediately.
+          dismissBanner();
+        } else {
+          var b = document.getElementById('banner');
+          if (b && b.classList.contains('run')) {
+            // Re-sync CSS animation: set the remaining time as the new dwell,
+            // with zero lead (bar is already mid-drain), so animation duration
+            // matches the rescheduled JS timer exactly.
+            try {
+              b.style.setProperty('--banner-dwell', remaining + 'ms');
+              b.style.setProperty('--banner-lead', '0ms');
+            } catch (e) { /* ignore */ }
+            b.classList.remove('run');
+            void b.offsetWidth;
+            b.classList.add('run');
+          }
+          bannerTimer = setTimeout(dismissBanner, remaining);
+        }
+      }
+    }
+  });
+}());
 
 // Settings-dialog mirror of the page banner: modal dialogs paint above the
 // page, so without this an error fired from the Sync tab hides behind the

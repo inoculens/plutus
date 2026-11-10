@@ -13502,13 +13502,34 @@ function describeDebtAsset(kind, ticker) {
   return 'Debt denomination: ' + t;
 }
 
-function debtAssetSuggestions(kind) {
+function debtAssetTickerExample(kind, owner) {
   var k = String(kind || '').trim().toLowerCase();
-  if (k === 'crypto') return ['USDC', 'USDT', 'DAI', 'BTC', 'ETH', 'SOL', 'XMR', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
-  if (k === 'cash') return ['USD', 'EUR', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
-  if (k === 'commodity') return ['XAU', 'XAG', 'PA', 'PL'];
-  if (k === 'stock') return ['SPCX', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'];
-  return [];
+  var ownerKind = owner ? String(owner.kind || '').trim().toLowerCase() : '';
+  var ownerTicker = owner ? String(owner.ticker || '').trim().toUpperCase() : '';
+  var sameKind = owner && ownerTicker && (ownerKind === k || (isCashKind(ownerKind) && isCashKind(k)));
+  if (sameKind) return ownerTicker;
+  if (k === 'stock') return 'SPCX';
+  if (k === 'commodity') return 'XAU';
+  if (k === 'cash') return 'USD';
+  if (k === 'custom') return 'LOAN';
+  return 'BTC';
+}
+
+function debtAssetSuggestions(kind, owner) {
+  var k = String(kind || '').trim().toLowerCase();
+  var base = [];
+  if (k === 'crypto') base = ['USDC', 'USDT', 'DAI', 'BTC', 'ETH', 'SOL', 'XMR', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
+  else if (k === 'cash') base = ['USD', 'EUR', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
+  else if (k === 'commodity') base = ['XAU', 'XAG', 'PA', 'PL'];
+  else if (k === 'stock') base = ['SPCX', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'];
+  else base = [];
+  var ownerKind = owner ? String(owner.kind || '').trim().toLowerCase() : '';
+  var ownerTicker = owner ? String(owner.ticker || '').trim().toUpperCase() : '';
+  var sameKind = owner && ownerTicker && (ownerKind === k || (isCashKind(ownerKind) && isCashKind(k)));
+  if (sameKind && ownerTicker && base.indexOf(ownerTicker) === -1) {
+    base = [ownerTicker].concat(base);
+  }
+  return base;
 }
 
 function buildDebtPositionDialog() {
@@ -13526,7 +13547,7 @@ function buildDebtPositionDialog() {
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
     '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
     '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
-    '<input id="debt-position-asset-ticker" list="debt-position-ticker-datalist" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Asset ticker" aria-label="Debt asset ticker">' +
+    '<input id="debt-position-asset-ticker" list="debt-position-ticker-datalist" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Ticker, e.g. BTC" aria-label="Ticker">' +
     '<datalist id="debt-position-ticker-datalist"></datalist></div>' +
     '<p id="debt-position-asset-status" class="muted debt-form-hint">Choose the unit in which the lender reports the debt.</p>' +
     '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
@@ -13669,20 +13690,17 @@ function openDebtPositionDialog(ownerId, positionId) {
   note.value = '';
   document.getElementById('debt-position-notes').value = (position && typeof position.notes === 'string') ? position.notes : '';
   assetKindInput.value = position ? position.assetKind : (owner.kind || 'crypto');
-  assetTickerInput.value = position ? position.assetTicker : String(owner.ticker || '').toUpperCase();
+  assetTickerInput.value = position ? position.assetTicker : '';
   assetKindInput.disabled = !!position;
   assetTickerInput.disabled = !!position;
   function syncDebtAssetUI() {
     var kind = String(assetKindInput.value || '').trim().toLowerCase();
     var ticker = String(assetTickerInput.value || '').trim().toUpperCase();
     unit.textContent = ticker ? '(' + ticker + ')' : '';
-    assetTickerInput.placeholder = kind === 'stock' ? 'e.g. SPCX'
-      : (kind === 'commodity' ? 'e.g. XAU'
-      : (kind === 'cash' ? 'e.g. USD'
-      : (kind === 'custom' ? 'e.g. LOAN' : 'e.g. USDC')));
+    assetTickerInput.placeholder = 'Ticker, e.g. ' + debtAssetTickerExample(kind, owner);
     var datalist = document.getElementById('debt-position-ticker-datalist');
     if (datalist) {
-      datalist.innerHTML = debtAssetSuggestions(kind).map(function (sym) {
+      datalist.innerHTML = debtAssetSuggestions(kind, owner).map(function (sym) {
         return '<option value="' + sym + '">';
       }).join('');
     }

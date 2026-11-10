@@ -5276,7 +5276,6 @@ label.sync-check {
 .debt-collateral-row input, .debt-collateral-row select { min-width: 0; }
 .debt-collateral-actions { display: flex; align-items: center; gap: 0.4rem; }
 .debt-collateral-actions button { min-height: 2.5rem; padding: 0.3rem 0.6rem; }
-.debt-collateral-actions .debt-max-collateral { background: var(--accent-soft); border-color: transparent; color: var(--text); }
 .debt-collateral-actions .debt-remove-collateral { min-width: 2.5rem; padding: 0.3rem; }
 .debt-position-delete:hover { color: var(--red); }
 @media (max-width: 520px) {

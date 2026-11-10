@@ -13607,7 +13607,7 @@ function debtCollateralRow(list, accounts, allocation) {
   actions.className = 'debt-collateral-actions';
   var max = document.createElement('button');
   max.type = 'button';
-  max.className = 'debt-max-collateral';
+  max.className = 'quiet debt-max-collateral';
   max.textContent = 'Max';
   max.addEventListener('click', function () {
     var st = loadState();

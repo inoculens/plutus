@@ -13549,6 +13549,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       labelEl.textContent = label;
       var valueEl = document.createElement('strong');
       valueEl.textContent = value;
+      valueEl.title = value; // full figure stays reachable when the box truncates it
       line.appendChild(labelEl);
       line.appendChild(valueEl);
       summary.appendChild(line);

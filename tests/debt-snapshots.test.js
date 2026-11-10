@@ -149,10 +149,13 @@ assert.equal(JSON.parse(damaged.store.get(REC))[0].raw, damagedRaw, 'a later sav
     ]
   });
   const windows = C.debtPositionPositiveBalanceWindows(windowPosition);
-  assert.deepEqual(JSON.parse(JSON.stringify(windows)), [
-    { from: Date.parse('2026-11-10T10:00:00.000Z'), to: Date.parse('2026-11-10T11:00:00.000Z') },
-    { from: Date.parse('2026-11-10T12:00:00.000Z'), to: Infinity }
-  ]);
+  assert.equal(windows.length, 2);
+  assert.deepEqual(windows[0], {
+    from: Date.parse('2026-11-10T10:00:00.000Z'),
+    to: Date.parse('2026-11-10T11:00:00.000Z')
+  });
+  assert.equal(windows[1].from, Date.parse('2026-11-10T12:00:00.000Z'));
+  assert.equal(windows[1].to, Infinity, 'the last positive snapshot remains effective until another report');
 
   const historyState = {
     settings: state.settings,

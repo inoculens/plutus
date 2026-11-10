@@ -2843,6 +2843,7 @@ details.opt + details.opt { margin-top: 0.65rem; }
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.dlg-note button.dlg-note-close { text-decoration: none; font-weight: 700; }
 #settings-alert-close { text-decoration: none; font-weight: 700; }
 /* ————— Header sync cloud (hidden until sync is configured) ————— */
 /* Black-glyph sync art sits on a lifted tile so the cloud reads on the dark bar. */

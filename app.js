@@ -144,7 +144,22 @@ function normalizeAccount(a, accountList) {
 // A snapshot is the lender's total reported outstanding balance. There is
 // deliberately no interest, APR, accrual, interpolation or event arithmetic.
 function isValidDebtTimestamp(value) {
-  return typeof value === 'string' && value.trim() !== '' && isFinite(Date.parse(value));
+  // Persisted debt timestamps are ISO date-times, not Date.parse's permissive
+  // free-form input. Reject impossible dates instead of normalizing Feb 30.
+  if (typeof value !== 'string') return false;
+  var match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) return false;
+  var year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  var hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
+  if (year < 1000 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  var days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > days) return false;
+  if (match[8] !== 'Z') {
+    var offsetHour = Number(match[8].slice(1, 3));
+    var offsetMinute = Number(match[8].slice(4, 6));
+    if (offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)) return false;
+  }
+  return isFinite(Date.parse(value));
 }
 
 function isValidDebtId(value) {
@@ -172,7 +187,7 @@ function isValidDebtPosition(position, owningAccount, accounts) {
       !isValidDebtTimestamp(position.createdAt)) return false;
   if (!Array.isArray(position.balanceSnapshots) || position.balanceSnapshots.length < 1 ||
       position.balanceSnapshots.length > 5000) return false;
-  var snapshotIds = {};
+  var snapshotIds = Object.create(null);
   for (var si = 0; si < position.balanceSnapshots.length; si++) {
     var snapshot = position.balanceSnapshots[si];
     if (!isValidDebtSnapshot(snapshot) || snapshotIds[snapshot.id]) return false;
@@ -183,11 +198,11 @@ function isValidDebtPosition(position, owningAccount, accounts) {
   if (position.collateral !== undefined && position.collateral !== null) {
     if (!Array.isArray(position.collateral) || position.collateral.length > 100) return false;
     var accountList = Array.isArray(accounts) ? accounts : (owningAccount ? [owningAccount] : []);
-    var known = {};
+    var known = Object.create(null);
     accountList.forEach(function (account) {
       if (account && typeof account.id === 'string') known[account.id] = true;
     });
-    var sourceIds = {};
+    var sourceIds = Object.create(null);
     for (var ci = 0; ci < position.collateral.length; ci++) {
       var allocation = position.collateral[ci];
       if (!allocation || typeof allocation !== 'object' || Array.isArray(allocation)) return false;
@@ -206,7 +221,7 @@ function isValidDebtPositions(account, accounts) {
   if (!account || typeof account !== 'object') return false;
   if (account.debtPositions === undefined || account.debtPositions === null) return true;
   if (!Array.isArray(account.debtPositions) || account.debtPositions.length > 500) return false;
-  var ids = {};
+  var ids = Object.create(null);
   for (var i = 0; i < account.debtPositions.length; i++) {
     var position = account.debtPositions[i];
     if (!isValidDebtPosition(position, account, accounts) || ids[position.id]) return false;
@@ -296,7 +311,7 @@ function accountDebtPositions(account) {
 // as collateral, is never deleted: a dangling collateral id would make the
 // owner's whole debtPositions list invalid on the next load.
 function debtAccountDeleteBlock(st, ids) {
-  var deleting = {};
+  var deleting = Object.create(null);
   (ids || []).forEach(function (accountId) {
     if (typeof accountId === 'string' && accountId !== '') deleting[accountId] = true;
   });

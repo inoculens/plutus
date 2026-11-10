@@ -44,7 +44,25 @@ accounts[0].debtPositions = [position()];
 
 const { C, store } = createApp();
 assert.equal(C.isValidDebtPositions(accounts[0], accounts), true);
+assert.equal(C.isValidDebtTimestamp('2024-02-29T12:30:00.000Z'), true);
+assert.equal(C.isValidDebtTimestamp('2026-02-30T12:30:00.000Z'), false,
+  'impossible calendar dates are rejected rather than normalized');
+assert.equal(C.isValidDebtTimestamp('2026-13-01T12:30:00.000Z'), false);
+assert.equal(C.isValidDebtTimestamp('November 10, 2026'), false,
+  'free-form Date.parse strings are not accepted as persisted snapshots');
+assert.equal(C.isValidDebtTimestamp('2026-11-10T12:30:00+02:00'), true);
+
 assert.equal(C.isValidDebtPosition(position(), accounts[0], accounts), true);
+const specialIdAccount = acc('__proto__', 'BTC', 'crypto');
+const specialOwner = acc('special-owner', 'USDC', 'crypto');
+specialOwner.debtPositions = [position({
+  id: 'toString', collateral: [{ accountId: '__proto__', quantity: 1 }]
+})];
+assert.equal(C.isValidDebtPositions(specialOwner, [specialOwner, specialIdAccount]), true,
+  'prototype-like account and position identifiers are ordinary identifiers');
+assert.equal(C.isValidDebtPositions(specialOwner, [specialOwner]), false,
+  'a missing prototype-like collateral account is still rejected');
+
 assert.equal(C.latestDebtBalanceSnapshot(position(), '2026-11-10T09:59:59.999Z'), null,
   'before the first report there is no liability');
 assert.equal(C.latestDebtBalanceSnapshot(position(), '2026-11-10T10:01:00.000Z').amount, 1000,

@@ -524,7 +524,7 @@ function ledgerMapIsClean(m) {
 }
 
 // Number of invalid optional fields on a stored account that passed isValidAccount.
-function accountFieldIssues(a) {
+function accountFieldIssues(a, accounts) {
   var n = 0;
   if (a.createdAt !== undefined && a.createdAt !== null) {
     if (typeof a.createdAt !== 'string' || a.createdAt.trim() === '' || !isFinite(Date.parse(a.createdAt))) n++;
@@ -12987,6 +12987,333 @@ function deleteAccountLedger(accountId, code, scopeIds) {
   });
 }
 
+
+// --- Debt position UI: reported totals only; no APR or interest arithmetic. ---
+function debtLocalDateTimeValue(date) {
+  var d = date instanceof Date ? date : new Date(date);
+  if (!isFinite(d.getTime())) d = new Date();
+  function pad(v) { return v < 10 ? '0' + v : String(v); }
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+    'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function debtCollateralRow(list, accounts, allocation) {
+  var row = document.createElement('div');
+  row.className = 'debt-collateral-row';
+  var select = document.createElement('select');
+  select.setAttribute('aria-label', 'Collateral account');
+  var empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = 'Select collateral account';
+  select.appendChild(empty);
+  (accounts || []).forEach(function (account) {
+    var option = document.createElement('option');
+    option.value = account.id;
+    option.textContent = account.name + ' · ' + String(account.ticker || '').toUpperCase();
+    if (allocation && allocation.accountId === account.id) option.selected = true;
+    select.appendChild(option);
+  });
+  var quantity = document.createElement('input');
+  quantity.type = 'number';
+  quantity.min = '0';
+  quantity.step = 'any';
+  quantity.placeholder = 'Pledged quantity';
+  quantity.setAttribute('aria-label', 'Pledged quantity');
+  quantity.value = allocation && isFinite(Number(allocation.quantity)) ? String(allocation.quantity) : '';
+  var remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'quiet debt-remove-collateral';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', function () { row.remove(); });
+  row.appendChild(select);
+  row.appendChild(quantity);
+  row.appendChild(remove);
+  list.appendChild(row);
+}
+
+function buildDebtPositionDialog() {
+  var existing = document.getElementById('debt-position-dialog');
+  if (existing) return existing;
+  var dlg = document.createElement('dialog');
+  dlg.id = 'debt-position-dialog';
+  dlg.setAttribute('aria-labelledby', 'debt-position-title');
+  dlg.innerHTML =
+    '<div class="dialog-head"><h2 id="debt-position-title">Debt position</h2>' +
+    '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
+    '<form id="debt-position-form">' +
+    '<label for="debt-position-name">Position name</label><input id="debt-position-name" maxlength="120" required autocomplete="off">' +
+    '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
+    '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
+    '<p class="muted debt-form-hint">Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.</p>' +
+    '<label for="debt-position-reported-at">Balance reported at</label><input id="debt-position-reported-at" type="datetime-local" required>' +
+    '<label for="debt-position-note">Snapshot note (optional)</label><textarea id="debt-position-note" maxlength="280" rows="2"></textarea>' +
+    '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
+    '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
+    '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
+    '<p id="debt-position-error" class="banner-error" role="alert" hidden></p>' +
+    '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
+    '<button type="submit" class="primary">Save reported balance</button></div></form>';
+  document.body.appendChild(dlg);
+  wireDialog('debt-position-dialog');
+  var form = document.getElementById('debt-position-form');
+  var add = document.getElementById('debt-add-collateral');
+  add.addEventListener('click', function () {
+    var st = loadState();
+    debtCollateralRow(document.getElementById('debt-collateral-list'), st.accounts || [], null);
+  });
+  form.addEventListener('submit', function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+    var error = document.getElementById('debt-position-error');
+    function fail(message) { error.textContent = message; error.hidden = false; }
+    error.hidden = true;
+    var state = loadState();
+    var ownerId = dlg.getAttribute('data-owner-id') || '';
+    var owner = accountById(state, ownerId);
+    if (!owner) { fail('The liability account no longer exists.'); return; }
+    var positionId = dlg.getAttribute('data-position-id') || '';
+    var position = null;
+    accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
+    if (positionId && !position) { fail('This debt position no longer exists. Refresh and try again.'); return; }
+    var name = String(document.getElementById('debt-position-name').value || '').trim();
+    var amount = Number(document.getElementById('debt-position-balance').value);
+    var reportedInput = document.getElementById('debt-position-reported-at').value;
+    var note = String(document.getElementById('debt-position-note').value || '').trim();
+    if (!name || name.length > 120) { fail('Enter a position name (up to 120 characters).'); return; }
+    if (!isFinite(amount) || amount < 0) { fail('Enter a valid non-negative total balance.'); return; }
+    var reportedDate = new Date(reportedInput);
+    if (!reportedInput || !isFinite(reportedDate.getTime())) { fail('Enter when the balance was reported.'); return; }
+    var collateral = [];
+    var sourceSeen = {};
+    var rows = document.querySelectorAll('#debt-collateral-list .debt-collateral-row');
+    for (var ri = 0; ri < rows.length; ri++) {
+      var sourceId = String(rows[ri].querySelector('select').value || '');
+      var quantityText = String(rows[ri].querySelector('input').value || '');
+      if (!sourceId && !quantityText) continue;
+      var quantity = Number(quantityText);
+      if (!sourceId || !isFinite(quantity) || quantity <= 0) {
+        fail('Choose a collateral account and enter a positive pledged quantity, or remove the empty row.');
+        return;
+      }
+      if (sourceSeen[sourceId]) { fail('Each collateral account can appear only once per position.'); return; }
+      if (!accountById(state, sourceId)) { fail('A selected collateral account no longer exists.'); return; }
+      sourceSeen[sourceId] = true;
+      collateral.push({ accountId: sourceId, quantity: quantity });
+    }
+    var now = new Date().toISOString();
+    var nextPosition = position ? {
+      id: position.id,
+      name: name,
+      createdAt: position.createdAt,
+      balanceSnapshots: position.balanceSnapshots.slice(),
+      collateral: collateral
+    } : {
+      id: uid(),
+      name: name,
+      createdAt: now,
+      balanceSnapshots: [],
+      collateral: collateral
+    };
+    if (position && position.notes) nextPosition.notes = position.notes;
+    nextPosition.balanceSnapshots.push({
+      id: uid(),
+      amount: amount,
+      reportedAt: reportedDate.toISOString(),
+      enteredAt: now,
+      note: note || undefined
+    });
+    if (!isValidDebtPosition(nextPosition, owner, state.accounts)) {
+      fail('The debt position is invalid. Check the balance, timestamp and collateral details.');
+      return;
+    }
+    if (!Array.isArray(owner.debtPositions)) owner.debtPositions = [];
+    if (position) {
+      owner.debtPositions = owner.debtPositions.map(function (p) { return p.id === position.id ? nextPosition : p; });
+    } else {
+      owner.debtPositions.push(nextPosition);
+    }
+    if (!saveStateGuarded(state)) { fail('Storage unavailable — the debt position was not saved.'); return; }
+    closeDialog(dlg);
+    clearBanner();
+    render();
+  });
+  return dlg;
+}
+
+function openDebtPositionDialog(ownerId, positionId) {
+  var state = loadState();
+  var owner = accountById(state, ownerId);
+  if (!owner) return;
+  var position = null;
+  accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
+  var dlg = buildDebtPositionDialog();
+  dlg.setAttribute('data-owner-id', owner.id);
+  dlg.setAttribute('data-position-id', position ? position.id : '');
+  var title = document.getElementById('debt-position-title');
+  var name = document.getElementById('debt-position-name');
+  var balance = document.getElementById('debt-position-balance');
+  var reported = document.getElementById('debt-position-reported-at');
+  var note = document.getElementById('debt-position-note');
+  var unit = document.getElementById('debt-position-unit');
+  var list = document.getElementById('debt-collateral-list');
+  var error = document.getElementById('debt-position-error');
+  title.textContent = position ? 'Update debt balance' : 'New debt position';
+  name.value = position ? position.name : '';
+  balance.value = position ? String((latestDebtBalanceSnapshot(position) || {}).amount || 0) : '';
+  reported.value = debtLocalDateTimeValue(new Date());
+  note.value = '';
+  unit.textContent = '(' + String(owner.ticker || '').toUpperCase() + ')';
+  error.hidden = true;
+  list.innerHTML = '';
+  var selectable = state.accounts || [];
+  if (position && Array.isArray(position.collateral)) {
+    position.collateral.forEach(function (allocation) { debtCollateralRow(list, selectable, allocation); });
+  }
+  openDialog('debt-position-dialog');
+}
+
+function removeDebtPosition(ownerId, positionId) {
+  var state = loadState();
+  var owner = accountById(state, ownerId);
+  if (!owner) return;
+  var position = null;
+  accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
+  if (!position) return;
+  confirmAction('Remove debt position', 'Permanently remove "' + position.name + '" and all of its reported balance history?', 'Remove', true).then(function (ok) {
+    if (!ok) return;
+    var fresh = loadState();
+    var currentOwner = accountById(fresh, ownerId);
+    if (!currentOwner) return;
+    currentOwner.debtPositions = accountDebtPositions(currentOwner).filter(function (p) { return p.id !== positionId; });
+    if (!currentOwner.debtPositions.length) delete currentOwner.debtPositions;
+    if (!saveStateGuarded(fresh)) return;
+    render();
+  });
+}
+
+function buildDebtPositionsSection(st, account, members, host, stats) {
+  var scope = [account].concat(members || []);
+  var section = document.createElement('section');
+  section.className = 'debt-positions-section';
+  var header = document.createElement('div');
+  header.className = 'section-head debt-section-head';
+  var details = document.createElement('details');
+  details.className = 'debt-positions-details';
+  var summary = document.createElement('summary');
+  var title = document.createElement('span');
+  title.className = 'section-title';
+  title.textContent = 'Debt positions';
+  summary.appendChild(title);
+  var totalCount = scope.reduce(function (count, owner) { return count + accountDebtPositions(owner).length; }, 0);
+  var count = document.createElement('span');
+  count.className = 'debt-position-count';
+  count.textContent = String(totalCount);
+  summary.appendChild(count);
+  details.appendChild(summary);
+  header.appendChild(details);
+  var add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'ghost';
+  add.textContent = '+ Position';
+  add.setAttribute('aria-label', 'Add debt position to ' + account.name);
+  add.addEventListener('click', function () { openDebtPositionDialog(account.id, null); });
+  header.appendChild(add);
+  section.appendChild(header);
+  var body = document.createElement('div');
+  body.className = 'debt-position-list';
+  var found = false;
+  scope.forEach(function (owner) {
+    var positions = accountDebtPositions(owner);
+    if (!positions.length) return;
+    if (scope.length > 1) {
+      var ownerTitle = document.createElement('p');
+      ownerTitle.className = 'debt-owner-title';
+      ownerTitle.textContent = owner.name + ' · ' + String(owner.ticker || '').toUpperCase();
+      body.appendChild(ownerTitle);
+    }
+    positions.forEach(function (position) {
+      found = true;
+      var item = document.createElement('article');
+      item.className = 'debt-position-card';
+      var top = document.createElement('div');
+      top.className = 'debt-position-top';
+      var nameEl = document.createElement('strong');
+      nameEl.textContent = position.name;
+      top.appendChild(nameEl);
+      var update = document.createElement('button');
+      update.type = 'button';
+      update.className = 'quiet';
+      update.textContent = 'Update balance';
+      update.addEventListener('click', function () { openDebtPositionDialog(owner.id, position.id); });
+      top.appendChild(update);
+      item.appendChild(top);
+      var latest = latestDebtBalanceSnapshot(position);
+      var amount = document.createElement('p');
+      amount.className = 'debt-position-amount';
+      amount.textContent = latest
+        ? fmtQty(latest.amount, owner.ticker) + ' ' + String(owner.ticker || '').toUpperCase()
+        : 'No reported balance';
+      item.appendChild(amount);
+      var reported = document.createElement('p');
+      reported.className = 'debt-position-reported';
+      reported.textContent = latest ? 'Last reported ' + new Date(latest.reportedAt).toLocaleString() : 'No snapshot recorded';
+      item.appendChild(reported);
+      if (Array.isArray(position.collateral) && position.collateral.length) {
+        var collateral = document.createElement('p');
+        collateral.className = 'debt-position-collateral';
+        collateral.textContent = 'Collateral: ' + position.collateral.map(function (allocation) {
+          var source = accountById(st, allocation.accountId);
+          return (source ? source.name : 'Missing account') + ' · ' +
+            fmtQty(allocation.quantity, source ? source.ticker : '') + ' ' +
+            String(source ? source.ticker : '').toUpperCase();
+        }).join(', ');
+        item.appendChild(collateral);
+      }
+      var history = document.createElement('details');
+      history.className = 'debt-snapshot-history';
+      var historySummary = document.createElement('summary');
+      historySummary.textContent = 'Balance history (' + position.balanceSnapshots.length + ')';
+      history.appendChild(historySummary);
+      var list = document.createElement('ol');
+      position.balanceSnapshots.slice().sort(function (a, b) {
+        return Date.parse(b.reportedAt) - Date.parse(a.reportedAt);
+      }).forEach(function (snapshot) {
+        var li = document.createElement('li');
+        var label = document.createElement('strong');
+        label.textContent = fmtQty(snapshot.amount, owner.ticker) + ' ' + String(owner.ticker || '').toUpperCase();
+        li.appendChild(label);
+        var when = document.createElement('span');
+        when.textContent = new Date(snapshot.reportedAt).toLocaleString();
+        li.appendChild(when);
+        if (snapshot.note) {
+          var memo = document.createElement('p');
+          memo.textContent = snapshot.note;
+          li.appendChild(memo);
+        }
+        list.appendChild(li);
+      });
+      history.appendChild(list);
+      item.appendChild(history);
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'quiet debt-position-delete';
+      remove.textContent = 'Remove position';
+      remove.addEventListener('click', function () { removeDebtPosition(owner.id, position.id); });
+      item.appendChild(remove);
+      body.appendChild(item);
+    });
+  });
+  if (!found) {
+    var empty = document.createElement('p');
+    empty.className = 'muted debt-empty';
+    empty.textContent = 'No debt positions recorded for this account.';
+    body.appendChild(empty);
+  }
+  details.appendChild(body);
+  section.appendChild(details);
+  if (stats && stats.parentNode === host) host.insertBefore(section, stats.nextSibling);
+  else host.appendChild(section);
+}
+
 function renderAccountDetail(st, id) {
   var host = document.getElementById('account-detail');
   if (!host) return;
@@ -13315,6 +13642,7 @@ function renderAccountDetail(st, id) {
       } catch (e) { /* Ledgers never break the detail view */ }
     }
   }
+  buildDebtPositionsSection(st, acc, members, host, stats);
   // Group mains: merged ledgers in the group currency plus sub-account
   // cards instead of the spent/fees lines and the trade history below.
   if (members.length) {
@@ -13803,6 +14131,29 @@ function deleteAccount(id) {
   if (!acc) return; // unknown id: no write, no dialog
   var n = accountTrades(st, id).length;
   var doomedSubs = groupMembers(st, id);
+  var deleteIds = expandDeleteIds(st, [id]);
+  var deleting = {};
+  deleteIds.forEach(function (accountId) { deleting[accountId] = true; });
+  var ownedDebt = deleteIds.some(function (accountId) {
+    var owner = accountById(st, accountId);
+    return owner && accountDebtPositions(owner).length > 0;
+  });
+  if (ownedDebt) {
+    showBanner('This account still owns debt positions. Remove or resolve them before deleting the account.');
+    return;
+  }
+  var collateralUsed = [];
+  (st.accounts || []).forEach(function (owner) {
+    accountDebtPositions(owner).forEach(function (position) {
+      (position.collateral || []).forEach(function (allocation) {
+        if (deleting[allocation.accountId]) collateralUsed.push(position.name);
+      });
+    });
+  });
+  if (collateralUsed.length) {
+    showBanner('This account is referenced as collateral by an open debt position. Remove that collateral reference before deleting the account.');
+    return;
+  }
   var msg = 'Delete account "' + acc.name + '" (' + acc.ticker + ')' +
     (n ? ' and its ' + n + ' trade' + (n === 1 ? '' : 's') : '') +
     (doomedSubs.length ? ' and delete ' + doomedSubs.length + ' sub-account' + (doomedSubs.length === 1 ? '' : 's') + ' with all their trades' : '') +

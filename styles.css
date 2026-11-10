@@ -1214,7 +1214,11 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   pointer-events: none;
   z-index: -1;
 }
-.t-dock button.primary {
+.t-dock button.primary,
+#trade-form .t-dock button.primary,
+#account-dialog-body .t-dock button.primary,
+#ledger-dialog-body .t-dock button.primary,
+#group-dialog-body .t-dock button.primary {
   position: relative;
   z-index: 2;
   width: 100%;
@@ -3432,7 +3436,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* The record form's button lives in .t-dock (sticky on every screen size);
      phones just get the taller target + the safe-area inset. */
   .t-dock { --t-btn-h: 3.25rem; --t-pad-b: calc(0.5rem + env(safe-area-inset-bottom, 0px)); --t-stick: calc(-1.25rem - env(safe-area-inset-bottom, 0px)); }
-  .t-dock button.primary { font-size: 1.02rem; }
+  .t-dock button.primary,
+  #trade-form .t-dock button.primary,
+  #account-dialog-body .t-dock button.primary,
+  #ledger-dialog-body .t-dock button.primary,
+  #group-dialog-body .t-dock button.primary { font-size: 1.02rem; }
   details.adv summary, details.opt summary { min-height: 2.75rem; line-height: 2.75rem; font-size: 0.92rem; }
   /* — Ledger rows go two-line: name (+ arrow) on top, amount + actions below. — */
   .ledger-row { flex-wrap: wrap; row-gap: 0.2rem; }

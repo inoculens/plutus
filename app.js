@@ -13596,8 +13596,7 @@ function buildDebtPositionDialog() {
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
     '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
     '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
-    '<input id="debt-position-asset-ticker" list="debt-position-ticker-datalist" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Ticker, e.g. BTC" aria-label="Ticker">' +
-    '<datalist id="debt-position-ticker-datalist"></datalist></div>' +
+    '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. BTC" aria-label="Ticker"></div>' +
     '<p id="debt-position-asset-status" class="muted debt-form-hint">Choose the unit in which the lender reports the debt.</p>' +
     '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
@@ -13757,12 +13756,6 @@ function openDebtPositionDialog(ownerId, positionId) {
     var ticker = String(assetTickerInput.value || '').trim().toUpperCase();
     unit.textContent = ticker ? '(' + ticker + ')' : '';
     assetTickerInput.placeholder = 'Ticker, e.g. ' + debtAssetTickerExample(kind, owner);
-    var datalist = document.getElementById('debt-position-ticker-datalist');
-    if (datalist) {
-      datalist.innerHTML = debtAssetSuggestions(kind, owner).map(function (sym) {
-        return '<option value="' + sym + '">';
-      }).join('');
-    }
     var status = document.getElementById('debt-position-asset-status');
     if (status) status.textContent = describeDebtAsset(kind, ticker);
   }

@@ -25,7 +25,10 @@ const context = {
   computePortfolio: function () {
     replayCount++;
     return { byAccount: { account: [{ qtyHeld: 1 }] } };
-  }
+  },
+  PRICE_KIND_BY_ACCOUNT: {},
+  PRICE_COLLISIONS: {},
+  priceKeyOf: function (symbol) { return String(symbol).toUpperCase(); }
 };
 vm.createContext(context);
 vm.runInContext(app.slice(start, end), context, { filename: 'app-history.js' });

@@ -5167,3 +5167,76 @@ label.sync-check {
 #trade-form .info-pill {
   margin-left: 0 !important;
 }
+
+
+/* ————— Debt positions ————— */
+.debt-positions-section { margin: 1.1rem 0 0.25rem; }
+.debt-section-head { align-items: center; gap: 0.75rem; }
+.debt-positions-details { min-width: 0; flex: 1 1 auto; }
+.debt-positions-details > summary {
+  display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
+  list-style: none; min-height: 2.5rem;
+}
+.debt-positions-details > summary::-webkit-details-marker { display: none; }
+.debt-positions-details > summary::after { content: '⌄'; color: var(--muted); margin-left: auto; }
+.debt-positions-details[open] > summary::after { content: '⌃'; }
+.debt-position-count {
+  display: inline-grid; place-items: center; min-width: 1.45rem; height: 1.45rem;
+  border: 1px solid var(--border); border-radius: 999px; color: var(--muted);
+  font-size: 0.75rem; font-variant-numeric: tabular-nums;
+}
+.debt-position-list { display: grid; gap: 0.7rem; padding-top: 0.5rem; }
+.debt-position-card {
+  padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface-2); min-width: 0;
+}
+.debt-position-top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.debt-position-top strong { overflow-wrap: anywhere; }
+.debt-position-amount {
+  margin: 0.6rem 0 0.1rem; font-family: var(--font-display);
+  font-size: clamp(1.15rem, 3vw, 1.45rem); font-variant-numeric: tabular-nums;
+}
+.debt-position-reported, .debt-position-collateral, .debt-position-notes, .debt-owner-title {
+  margin: 0.35rem 0 0; color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere;
+}
+.debt-owner-title { margin-top: 0.7rem; font-weight: 650; }
+.debt-snapshot-history { margin-top: 0.8rem; border-top: 1px solid var(--border); padding-top: 0.55rem; }
+.debt-snapshot-history > summary { color: var(--muted); font-size: 0.82rem; cursor: pointer; }
+.debt-snapshot-history ol { margin: 0.45rem 0 0; padding-left: 1.25rem; }
+.debt-snapshot-history li { padding: 0.35rem 0; font-size: 0.8rem; }
+.debt-snapshot-history li strong, .debt-snapshot-history li span { display: block; }
+.debt-snapshot-history li span, .debt-snapshot-history li p { color: var(--muted); margin: 0.15rem 0 0; }
+.debt-position-delete { margin-top: 0.5rem; color: var(--muted); min-height: 2rem; }
+.debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
+.debt-form-hint { margin: 0.35rem 0 0.75rem; font-size: 0.82rem; line-height: 1.5; }
+.debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.debt-collateral-heading label { margin-bottom: 0.35rem; }
+.debt-collateral-list { display: grid; gap: 0.55rem; }
+.debt-collateral-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.65fr) auto; gap: 0.45rem; align-items: center; }
+.debt-collateral-row input, .debt-collateral-row select { min-width: 0; }
+.debt-remove-collateral { min-width: 2.5rem; padding: 0.3rem; }
+.debt-position-delete:hover { color: var(--red); }
+@media (max-width: 520px) {
+  .debt-collateral-row { grid-template-columns: 1fr 1fr; }
+  .debt-remove-collateral { grid-column: 2; justify-self: end; }
+  .debt-position-top { align-items: flex-start; }
+}
+
+.acct-debt-indicator {
+  display: inline-flex; align-items: center; width: fit-content; margin-top: 0.25rem;
+  color: var(--muted); font-size: 0.68rem; line-height: 1.25;
+  border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.4rem;
+}
+.debt-net-summary {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
+  padding: 0.75rem 0.9rem; margin: 0 0 0.65rem;
+  border: 1px solid var(--border); border-radius: 13px;
+}
+.debt-net-line { display: grid; gap: 0.2rem; min-width: 0; }
+.debt-net-line span { color: var(--muted); font-size: 0.72rem; }
+.debt-net-line strong { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .debt-net-summary { gap: 0.3rem; padding: 0.65rem; }
+  .debt-net-line span { font-size: 0.66rem; }
+  .debt-net-line strong { font-size: 0.82rem; }
+}

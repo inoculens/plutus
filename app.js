@@ -135,7 +135,7 @@ function normalizeAccount(a, accountList) {
     out.groupCurrency = a.groupCurrency.trim().toUpperCase();
   }
   if (isValidDebtPositions(a, accountList || [a])) {
-    if (Array.isArray(a.debtPositions)) out.debtPositions = a.debtPositions.map(normalizeDebtPosition);
+    if (Array.isArray(a.debtPositions)) out.debtPositions = a.debtPositions.map(function (position) { return normalizeDebtPosition(position, a); });
   }
   return out;
 }
@@ -180,8 +180,17 @@ function isValidDebtSnapshot(snapshot) {
 
 function isValidDebtPosition(position, owningAccount, accounts) {
   if (!position || typeof position !== 'object' || Array.isArray(position)) return false;
-  var allowed = Object.assign(Object.create(null), { id: true, name: true, createdAt: true, balanceSnapshots: true, collateral: true, notes: true });
+  var allowed = Object.assign(Object.create(null), { id: true, name: true, assetKind: true, assetTicker: true, createdAt: true, balanceSnapshots: true, collateral: true, notes: true });
   if (Object.keys(position).some(function (key) { return !allowed[key]; })) return false;
+  // Both identity fields absent identifies a legacy position; a partial pair is damage.
+  var hasAssetKind = position.assetKind !== undefined && position.assetKind !== null;
+  var hasAssetTicker = position.assetTicker !== undefined && position.assetTicker !== null;
+  if (hasAssetKind !== hasAssetTicker) return false;
+  if (hasAssetKind) {
+    var assetKind = String(position.assetKind).trim().toLowerCase();
+    var assetTicker = String(position.assetTicker).trim().toUpperCase();
+    if (['crypto', 'stock', 'commodity', 'cash', 'custom'].indexOf(assetKind) === -1 || !/^[A-Z0-9._-]{1,12}$/.test(assetTicker)) return false;
+  }
   if (!isValidDebtId(position.id) || typeof position.name !== 'string' ||
       position.name.trim() === '' || position.name.length > 120 ||
       !isValidDebtTimestamp(position.createdAt)) return false;
@@ -230,7 +239,7 @@ function isValidDebtPositions(account, accounts) {
   return true;
 }
 
-function normalizeDebtPosition(position) {
+function normalizeDebtPosition(position, owningAccount) {
   var snapshots = position.balanceSnapshots.map(function (snapshot, index) {
     return {
       id: snapshot.id,
@@ -257,6 +266,8 @@ function normalizeDebtPosition(position) {
   var out = {
     id: position.id,
     name: position.name.trim(),
+    assetKind: String(position.assetKind || (owningAccount && owningAccount.kind) || 'crypto').trim().toLowerCase(),
+    assetTicker: String(position.assetTicker || (owningAccount && owningAccount.ticker) || '').trim().toUpperCase(),
     createdAt: position.createdAt,
     balanceSnapshots: snapshots
   };
@@ -292,13 +303,27 @@ function debtPositionBalanceAt(position, asOf) {
   return snapshot ? { amount: Number(snapshot.amount), snapshot: snapshot } : null;
 }
 
-function accountDebtBalanceAt(account, asOf) {
+function accountDebtBalanceAt(account, asOf, assetKind, assetTicker) {
   var total = 0;
-  ((account && Array.isArray(account.debtPositions)) ? account.debtPositions : []).forEach(function (position) {
+  var identities = Object.create(null);
+  var positions = accountDebtPositions(account);
+  positions.forEach(function (position) {
+    var kind = String(position.assetKind || (account && account.kind) || 'crypto').trim().toLowerCase();
+    var ticker = String(position.assetTicker || (account && account.ticker) || '').trim().toUpperCase();
+    if (assetKind && kind !== String(assetKind).trim().toLowerCase()) return;
+    if (assetTicker && ticker !== String(assetTicker).trim().toUpperCase()) return;
+    identities[kind + ':' + ticker] = true;
     var result = debtPositionBalanceAt(position, asOf);
     if (result && isFinite(result.amount)) total += result.amount;
   });
+  if (!assetKind && !assetTicker && Object.keys(identities).length > 1) return null;
   return total;
+}
+
+function formatDebtPositionAmount(amount, position) {
+  var ticker = String(position && position.assetTicker || '').trim().toUpperCase();
+  var kind = String(position && position.assetKind || 'crypto').trim().toLowerCase();
+  return isCashKind(kind) ? fmtMoney(amount, ticker) : fmtQty(amount, ticker) + ' ' + ticker;
 }
 
 function accountDebtPositions(account) {
@@ -2450,21 +2475,24 @@ function ensureDebtDisplayRates(accounts, main) {
   var seen = {};
   var jobs = [];
   (accounts || []).forEach(function (account) {
-    if (!account || !isCashKind(account.kind) || !account.ticker) return;
-    if (!accountDebtPositions(account).length) return;
-    var amount = accountDebtBalanceAt(account);
-    if (!(amount > 0)) return;
-    var from = String(account.ticker).trim().toUpperCase();
-    var to = String(main || '').trim().toUpperCase();
-    if (!from || !to || from === to) return;
-    var key = day + '|' + from + '|' + to;
-    if (seen[key] || getCachedRate(day, from, to)) return;
-    seen[key] = true;
-    jobs.push(fetchEcbRate(day, from, to).then(function (rate) {
-      if (!rate || !isFinite(Number(rate.rate)) || Number(rate.rate) <= 0) return false;
-      cacheRate(day, from, to, Number(rate.rate), rate.source || 'ECB');
-      return true;
-    }, function () { return false; }));
+    if (!account) return;
+    accountDebtPositions(account).forEach(function (position) {
+      var snapshot = latestDebtBalanceSnapshot(position, Date.now());
+      var amount = snapshot ? Number(snapshot.amount) : 0;
+      var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
+      if (!isCashKind(kind) || !(amount > 0)) return;
+      var from = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
+      var to = String(main || '').trim().toUpperCase();
+      if (!from || !to || from === to) return;
+      var key = day + '|' + from + '|' + to;
+      if (seen[key] || getCachedRate(day, from, to)) return;
+      seen[key] = true;
+      jobs.push(fetchEcbRate(day, from, to).then(function (rate) {
+        if (!rate || !isFinite(Number(rate.rate)) || Number(rate.rate) <= 0) return false;
+        cacheRate(day, from, to, Number(rate.rate), rate.source || 'ECB');
+        return true;
+      }, function () { return false; }));
+    });
   });
   if (!jobs.length) return Promise.resolve(false);
   return Promise.all(jobs).then(function (flags) {
@@ -7844,7 +7872,7 @@ function netWorthHistoryDate(timestamp) {
 
 function netWorthHistorySignature(st) {
   return JSON.stringify({
-    debtSnapshotModel: 1,
+    debtSnapshotModel: 2,
     accounts: st.accounts || [],
     trades: st.trades || [],
     priceOverrides: st.priceOverrides || {},
@@ -7863,6 +7891,12 @@ function netWorthHistoryKinds(st) {
     if (!trade || !trade.symbol) return;
     var account = accountById(st, trade.accountId);
     if (account && account.kind) kinds[String(trade.symbol).toUpperCase()] = account.kind;
+  });
+  (st.accounts || []).forEach(function (account) {
+    accountDebtPositions(account).forEach(function (position) {
+      var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
+      if (ticker) kinds[ticker] = position.assetKind || account.kind || 'crypto';
+    });
   });
   return kinds;
 }
@@ -8629,23 +8663,23 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
     }
   });
 
-  // Liabilities need market history even when their accounts have never held
-  // a trade. Cash/fiat liabilities use historical FX rather than a market series.
+  // Liabilities need market history even when their owner account has never
+  // held a trade. Each position is priced by its own denomination; fiat debt
+  // uses historical FX inside netWorthHistoryPointValue.
   (st.accounts || []).forEach(function (account) {
-    if (!account || !included[account.id] || isCashKind(account.kind)) return;
-    var ticker = String(account.ticker || '').trim().toUpperCase();
-    if (!ticker) return;
-    var identity = priceKeyOf(ticker, account.kind);
+    if (!account || !included[account.id]) return;
     accountDebtPositions(account).forEach(function (position) {
+      var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
+      var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
+      if (!ticker || isCashKind(kind)) return;
+      var identity = priceKeyOf(ticker, kind);
       var windows = debtPositionPositiveBalanceWindows(position);
       if (!windows.length) return;
-      symbols[identity] = account.kind || 'crypto';
+      symbols[identity] = kind;
       if (!debtWindowsBySymbol[identity]) debtWindowsBySymbol[identity] = [];
       Array.prototype.push.apply(debtWindowsBySymbol[identity], windows);
       windows.forEach(function (window) {
-        if (!isFinite(firstDebtBySymbol[identity]) || window.from < firstDebtBySymbol[identity]) {
-          firstDebtBySymbol[identity] = window.from;
-        }
+        if (!isFinite(firstDebtBySymbol[identity]) || window.from < firstDebtBySymbol[identity]) firstDebtBySymbol[identity] = window.from;
       });
     });
   });
@@ -9082,38 +9116,31 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     }));
   });
 
-  // Debt is evaluated independently from the trade ledger. Every liability
-  // uses its own account identity and the latest report at or before point.at.
+  // Each liability uses its own denomination and latest report at/before the chart point.
   var debtCashTotal = 0;
   var debtCashJobs = [];
   var debtAmounts = [];
   var includedDebtAccounts = netWorthHistoryIncludedAccounts(st);
   (st.accounts || []).forEach(function (account) {
     if (!account || !includedDebtAccounts[account.id]) return;
-    var amount = accountDebtBalanceAt(account, point.at);
-    if (!(amount > 0)) return;
-    var ticker = String(account.ticker || '').trim().toUpperCase();
-    if (!ticker) { complete = false; return; }
-    if (isCashKind(account.kind)) {
-      if (ticker === String(main || '').toUpperCase()) {
-        debtCashTotal += amount;
-      } else {
-        debtCashJobs.push(fetchNetWorthHistoryRate(day, ticker, main).then(function (rate) {
-          if (!rate) {
-            complete = false;
-            return;
-          }
+    accountDebtPositions(account).forEach(function (position) {
+      var snapshot = latestDebtBalanceSnapshot(position, point.at);
+      var amount = snapshot ? Number(snapshot.amount) : 0;
+      if (!(amount > 0)) return;
+      var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
+      var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
+      if (!ticker) { complete = false; return; }
+      if (isCashKind(kind)) {
+        if (ticker === String(main || '').toUpperCase()) debtCashTotal += amount;
+        else debtCashJobs.push(fetchNetWorthHistoryRate(day, ticker, main).then(function (rate) {
+          if (!rate) { complete = false; return; }
           var converted = amount * Number(rate.rate);
           if (isFinite(converted)) debtCashTotal += converted;
           else complete = false;
         }));
+        return;
       }
-      return;
-    }
-    debtAmounts.push({
-      identity: priceKeyOf(ticker, account.kind),
-      ticker: ticker,
-      amount: amount
+      debtAmounts.push({ identity: priceKeyOf(ticker, kind), ticker: ticker, kind: kind, amount: amount });
     });
   });
 
@@ -9297,28 +9324,26 @@ function currentDebtValuation(accounts, main, prices, asOf) {
     if (!positions.length) return;
     positionCount += positions.length;
     hasDebt = true;
-    var amount = accountDebtBalanceAt(account, cutoff);
-    if (!(amount > 0)) return;
-    var ticker = String(account.ticker || '').trim().toUpperCase();
-    if (!ticker) { complete = false; return; }
-    var value = null;
-    if (isCashKind(account.kind)) {
-      var rate = (ticker === String(main || '').toUpperCase())
-        ? { rate: 1 }
-        : getCachedRate(day, ticker, main);
-      if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) {
-        value = amount * Number(rate.rate);
+    positions.forEach(function (position) {
+      var snapshot = latestDebtBalanceSnapshot(position, cutoff);
+      var amount = snapshot ? Number(snapshot.amount) : 0;
+      if (!(amount > 0)) return;
+      var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
+      var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
+      if (!ticker) { complete = false; return; }
+      var value = null;
+      if (isCashKind(kind)) {
+        var rate = ticker === String(main || '').toUpperCase() ? { rate: 1 } : getCachedRate(day, ticker, main);
+        if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) value = amount * Number(rate.rate);
+      } else {
+        var key = priceKeyOf(ticker, kind);
+        var price = Number(priceMap[key]);
+        if (!(isFinite(price) && price > 0) && !PRICE_COLLISIONS[ticker]) price = Number(priceMap[ticker]);
+        if (isFinite(price) && price > 0) value = amount * price;
       }
-    } else {
-      var key = priceKeyOf(ticker, account.kind);
-      var price = Number(priceMap[key]);
-      if (!(isFinite(price) && price > 0) && !PRICE_COLLISIONS[ticker]) {
-        price = Number(priceMap[ticker]);
-      }
-      if (isFinite(price) && price > 0) value = amount * price;
-    }
-    if (value === null || !isFinite(value)) complete = false;
-    else total += value;
+      if (value === null || !isFinite(value)) complete = false;
+      else total += value;
+    });
   });
   return {
     value: complete ? total : null,
@@ -13400,6 +13425,12 @@ function buildDebtPositionDialog() {
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="debt-position-form">' +
     '<label for="debt-position-name">Position name</label><input id="debt-position-name" maxlength="120" required autocomplete="off">' +
+    '<label>Debt denomination</label><div class="debt-asset-fields">' +
+    '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
+    '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
+    '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
+    '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Asset ticker" aria-label="Debt asset ticker"></div>' +
+    '<p class="muted debt-form-hint">Independent of the account and collateral. Choose the unit in which the lender reports the debt.</p>' +
     '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
     '<p class="muted debt-form-hint">Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.</p>' +
@@ -13434,6 +13465,13 @@ function buildDebtPositionDialog() {
     accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
     if (positionId && !position) { fail('This debt position no longer exists. Refresh and try again.'); return; }
     var name = String(document.getElementById('debt-position-name').value || '').trim();
+    var assetKindInput = document.getElementById('debt-position-asset-kind');
+    var assetTickerInput = document.getElementById('debt-position-asset-ticker');
+    var assetKind = position ? position.assetKind : String(assetKindInput.value || '').trim().toLowerCase();
+    var assetTicker = position ? position.assetTicker : String(assetTickerInput.value || '').trim().toUpperCase();
+    if (['crypto', 'stock', 'commodity', 'cash', 'custom'].indexOf(assetKind) === -1 || !/^[A-Z0-9._-]{1,12}$/.test(assetTicker)) {
+      fail('Choose a supported debt asset type and enter a valid ticker.'); return;
+    }
     var amount = Number(document.getElementById('debt-position-balance').value);
     var reportedInput = document.getElementById('debt-position-reported-at').value;
     var note = String(document.getElementById('debt-position-note').value || '').trim();
@@ -13463,12 +13501,16 @@ function buildDebtPositionDialog() {
     var nextPosition = position ? {
       id: position.id,
       name: name,
+      assetKind: position.assetKind,
+      assetTicker: position.assetTicker,
       createdAt: position.createdAt,
       balanceSnapshots: position.balanceSnapshots.slice(),
       collateral: collateral
     } : {
       id: uid(),
       name: name,
+      assetKind: assetKind,
+      assetTicker: assetTicker,
       createdAt: now,
       balanceSnapshots: [],
       collateral: collateral
@@ -13515,6 +13557,8 @@ function openDebtPositionDialog(ownerId, positionId) {
   var balance = document.getElementById('debt-position-balance');
   var reported = document.getElementById('debt-position-reported-at');
   var note = document.getElementById('debt-position-note');
+  var assetKindInput = document.getElementById('debt-position-asset-kind');
+  var assetTickerInput = document.getElementById('debt-position-asset-ticker');
   var unit = document.getElementById('debt-position-unit');
   var list = document.getElementById('debt-collateral-list');
   var error = document.getElementById('debt-position-error');
@@ -13525,7 +13569,14 @@ function openDebtPositionDialog(ownerId, positionId) {
   reported.max = reported.value;
   note.value = '';
   document.getElementById('debt-position-notes').value = (position && typeof position.notes === 'string') ? position.notes : '';
-  unit.textContent = '(' + String(owner.ticker || '').toUpperCase() + ')';
+  assetKindInput.value = position ? position.assetKind : (owner.kind || 'crypto');
+  assetTickerInput.value = position ? position.assetTicker : String(owner.ticker || '').toUpperCase();
+  assetKindInput.disabled = !!position;
+  assetTickerInput.disabled = !!position;
+  function refreshDebtUnit() { unit.textContent = '(' + String(assetTickerInput.value || '').trim().toUpperCase() + ')'; }
+  assetKindInput.onchange = refreshDebtUnit;
+  assetTickerInput.oninput = refreshDebtUnit;
+  refreshDebtUnit();
   error.hidden = true;
   list.innerHTML = '';
   var selectable = state.accounts || [];
@@ -13636,9 +13687,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       var latest = latestDebtBalanceSnapshot(position, Date.now());
       var amount = document.createElement('p');
       amount.className = 'debt-position-amount';
-      amount.textContent = latest
-        ? fmtQty(latest.amount, owner.ticker) + ' ' + String(owner.ticker || '').toUpperCase()
-        : 'No reported balance';
+      amount.textContent = latest ? formatDebtPositionAmount(latest.amount, position) : 'No reported balance';
       item.appendChild(amount);
       var reported = document.createElement('p');
       reported.className = 'debt-position-reported';
@@ -13672,7 +13721,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       }).forEach(function (snapshot) {
         var li = document.createElement('li');
         var label = document.createElement('strong');
-        label.textContent = fmtQty(snapshot.amount, owner.ticker) + ' ' + String(owner.ticker || '').toUpperCase();
+        label.textContent = formatDebtPositionAmount(snapshot.amount, position);
         li.appendChild(label);
         var when = document.createElement('span');
         when.textContent = new Date(snapshot.reportedAt).toLocaleString();
@@ -13755,9 +13804,17 @@ function renderAccountDetail(st, id) {
     (st.accounts || []).forEach(function (a) {
       if (!a || scopeIds.indexOf(a.id) === -1) return;
       var symbol = String(a.ticker || '').trim().toUpperCase();
-      if (!symbol) return;
-      addHistorySymbol(symbol);
-      historyKinds[symbol] = a.kind || '';
+      if (symbol) {
+        addHistorySymbol(symbol);
+        historyKinds[symbol] = a.kind || '';
+      }
+      accountDebtPositions(a).forEach(function (position) {
+        var debtTicker = String(position.assetTicker || a.ticker || '').trim().toUpperCase();
+        var debtKind = String(position.assetKind || a.kind || 'crypto').trim().toLowerCase();
+        if (!debtTicker || isCashKind(debtKind)) return;
+        addHistorySymbol(debtTicker);
+        historyKinds[debtTicker] = debtKind;
+      });
     });
     scopeTrades.forEach(function (t) {
       addHistorySymbol(t.symbol);
@@ -17101,6 +17158,18 @@ function noteSymbolKinds(accounts, trades) {
     if (k === 'stock' || k === 'commodity') next[t] = true;
     else if (k === 'crypto') crypto[t] = true;
     noteKind(t, a.kind);
+  });
+  // Liability-only assets participate in kind-qualified price identity too.
+  (Array.isArray(accounts) ? accounts : []).forEach(function (account) {
+    if (!account) return;
+    accountDebtPositions(account).forEach(function (position) {
+      var debtTicker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
+      var debtKind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
+      if (!debtTicker) return;
+      if (debtKind === 'stock' || debtKind === 'commodity') next[debtTicker] = true;
+      else if (debtKind === 'crypto') crypto[debtTicker] = true;
+      noteKind(debtTicker, debtKind);
+    });
   });
   Object.keys(crypto).forEach(function (t) { delete next[t]; });
   QTY_NON_CRYPTO = next;
@@ -20776,7 +20845,13 @@ function refreshPrices() {
   }
   uniqueSymbols(st.trades).forEach(function (s) { addPrice(s); });
   (st.accounts || []).forEach(function (a) {
-    if (a && a.ticker) addPrice(a.ticker, a.kind);
+    if (!a) return;
+    if (a.ticker) addPrice(a.ticker, a.kind);
+    accountDebtPositions(a).forEach(function (position) {
+      var ticker = position.assetTicker || a.ticker;
+      var kind = position.assetKind || a.kind;
+      if (ticker && !isCashKind(kind)) addPrice(ticker, kind);
+    });
   });
   // Trade symbols inherit their account's kind (stock/commodity accounts fetch live).
   (st.trades || []).forEach(function (tr) {

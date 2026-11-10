@@ -102,7 +102,7 @@ function isValidAccount(a) {
   return true;
 }
 
-function normalizeAccount(a) {
+function normalizeAccount(a, accountList) {
   var tk = String(a.ticker || '').trim().toUpperCase();
   var nm = String(a.name == null ? '' : a.name).trim() || tk;
   var kd = (a && typeof a.kind === 'string') ? a.kind.trim().toLowerCase() : 'crypto';
@@ -134,7 +134,160 @@ function normalizeAccount(a) {
   if (typeof a.groupCurrency === 'string' && MAIN_CURRENCIES.indexOf(a.groupCurrency.trim().toUpperCase()) !== -1) {
     out.groupCurrency = a.groupCurrency.trim().toUpperCase();
   }
+  if (isValidDebtPositions(a, accountList || [a])) {
+    if (Array.isArray(a.debtPositions)) out.debtPositions = a.debtPositions.map(normalizeDebtPosition);
+  }
   return out;
+}
+
+// === Debt positions: manual reported-balance snapshots ===
+// A snapshot is the lender's total reported outstanding balance. There is
+// deliberately no interest, APR, accrual, interpolation or event arithmetic.
+function isValidDebtTimestamp(value) {
+  return typeof value === 'string' && value.trim() !== '' && isFinite(Date.parse(value));
+}
+
+function isValidDebtId(value) {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= 128;
+}
+
+function isValidDebtSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+  var allowed = { id: true, amount: true, reportedAt: true, enteredAt: true, note: true };
+  if (Object.keys(snapshot).some(function (key) { return !allowed[key]; })) return false;
+  if (!isValidDebtId(snapshot.id) || typeof snapshot.amount !== 'number' ||
+      !isFinite(snapshot.amount) || snapshot.amount < 0) return false;
+  if (!isValidDebtTimestamp(snapshot.reportedAt) || !isValidDebtTimestamp(snapshot.enteredAt)) return false;
+  if (snapshot.note !== undefined && snapshot.note !== null &&
+      (typeof snapshot.note !== 'string' || snapshot.note.length > 280)) return false;
+  return true;
+}
+
+function isValidDebtPosition(position, owningAccount, accounts) {
+  if (!position || typeof position !== 'object' || Array.isArray(position)) return false;
+  var allowed = { id: true, name: true, createdAt: true, balanceSnapshots: true, collateral: true, notes: true };
+  if (Object.keys(position).some(function (key) { return !allowed[key]; })) return false;
+  if (!isValidDebtId(position.id) || typeof position.name !== 'string' ||
+      position.name.trim() === '' || position.name.length > 120 ||
+      !isValidDebtTimestamp(position.createdAt)) return false;
+  if (!Array.isArray(position.balanceSnapshots) || position.balanceSnapshots.length < 1 ||
+      position.balanceSnapshots.length > 5000) return false;
+  var snapshotIds = {};
+  for (var si = 0; si < position.balanceSnapshots.length; si++) {
+    var snapshot = position.balanceSnapshots[si];
+    if (!isValidDebtSnapshot(snapshot) || snapshotIds[snapshot.id]) return false;
+    snapshotIds[snapshot.id] = true;
+  }
+  if (position.notes !== undefined && position.notes !== null &&
+      (typeof position.notes !== 'string' || position.notes.length > 280)) return false;
+  if (position.collateral !== undefined && position.collateral !== null) {
+    if (!Array.isArray(position.collateral) || position.collateral.length > 100) return false;
+    var accountList = Array.isArray(accounts) ? accounts : (owningAccount ? [owningAccount] : []);
+    var known = {};
+    accountList.forEach(function (account) {
+      if (account && typeof account.id === 'string') known[account.id] = true;
+    });
+    var sourceIds = {};
+    for (var ci = 0; ci < position.collateral.length; ci++) {
+      var allocation = position.collateral[ci];
+      if (!allocation || typeof allocation !== 'object' || Array.isArray(allocation)) return false;
+      var allocationKeys = Object.keys(allocation);
+      if (allocationKeys.some(function (key) { return key !== 'accountId' && key !== 'quantity'; })) return false;
+      if (!isValidDebtId(allocation.accountId) || !known[allocation.accountId] ||
+          sourceIds[allocation.accountId] || typeof allocation.quantity !== 'number' ||
+          !isFinite(allocation.quantity) || allocation.quantity <= 0) return false;
+      sourceIds[allocation.accountId] = true;
+    }
+  }
+  return true;
+}
+
+function isValidDebtPositions(account, accounts) {
+  if (!account || typeof account !== 'object') return false;
+  if (account.debtPositions === undefined || account.debtPositions === null) return true;
+  if (!Array.isArray(account.debtPositions) || account.debtPositions.length > 500) return false;
+  var ids = {};
+  for (var i = 0; i < account.debtPositions.length; i++) {
+    var position = account.debtPositions[i];
+    if (!isValidDebtPosition(position, account, accounts) || ids[position.id]) return false;
+    ids[position.id] = true;
+  }
+  return true;
+}
+
+function normalizeDebtPosition(position) {
+  var snapshots = position.balanceSnapshots.map(function (snapshot, index) {
+    return {
+      id: snapshot.id,
+      amount: Number(snapshot.amount),
+      reportedAt: snapshot.reportedAt,
+      enteredAt: snapshot.enteredAt,
+      note: (typeof snapshot.note === 'string' && snapshot.note !== '') ? snapshot.note : undefined,
+      _order: index
+    };
+  });
+  snapshots.sort(function (a, b) {
+    var delta = Date.parse(a.reportedAt) - Date.parse(b.reportedAt);
+    return delta || a._order - b._order;
+  });
+  snapshots = snapshots.map(function (snapshot) {
+    return {
+      id: snapshot.id,
+      amount: snapshot.amount,
+      reportedAt: snapshot.reportedAt,
+      enteredAt: snapshot.enteredAt,
+      note: snapshot.note
+    };
+  });
+  var out = {
+    id: position.id,
+    name: position.name.trim(),
+    createdAt: position.createdAt,
+    balanceSnapshots: snapshots
+  };
+  if (Array.isArray(position.collateral) && position.collateral.length) {
+    out.collateral = position.collateral.map(function (allocation) {
+      return { accountId: allocation.accountId, quantity: Number(allocation.quantity) };
+    });
+  }
+  if (typeof position.notes === 'string' && position.notes !== '') out.notes = position.notes;
+  return out;
+}
+
+function latestDebtBalanceSnapshot(position, asOf) {
+  if (!position || !Array.isArray(position.balanceSnapshots)) return null;
+  var cutoff = (asOf === undefined || asOf === null) ? Infinity :
+    (typeof asOf === 'number' ? asOf : Date.parse(asOf));
+  if (!isFinite(cutoff) && cutoff !== Infinity) return null;
+  var latest = null;
+  var latestAt = -Infinity;
+  position.balanceSnapshots.forEach(function (snapshot, index) {
+    if (!snapshot || !isValidDebtTimestamp(snapshot.reportedAt)) return;
+    var at = Date.parse(snapshot.reportedAt);
+    if (at <= cutoff && (at > latestAt || at === latestAt)) {
+      latest = snapshot;
+      latestAt = at;
+    }
+  });
+  return latest;
+}
+
+function debtPositionBalanceAt(position, asOf) {
+  var snapshot = latestDebtBalanceSnapshot(position, asOf);
+  return snapshot ? { amount: Number(snapshot.amount), snapshot: snapshot } : null;
+}
+
+function accountDebtBalanceAt(account, asOf) {
+  var total = 0;
+  ((account && Array.isArray(account.debtPositions)) ? account.debtPositions : []).forEach(function (position) {
+    var result = debtPositionBalanceAt(position, asOf);
+    if (result && isFinite(result.amount)) total += result.amount;
+  });
+  return total;
+}
+
+function accountDebtPositions(account) {
+  return (account && Array.isArray(account.debtPositions)) ? account.debtPositions : [];
 }
 
 // Flat groups, guaranteed: an account that is both a member (live main)
@@ -387,6 +540,7 @@ function accountFieldIssues(a) {
   if (fieldPresent(a.groupId) && (typeof a.groupId !== 'string' || a.groupId === a.id)) n++;
   if (fieldPresent(a.groupCurrency) &&
       (typeof a.groupCurrency !== 'string' || MAIN_CURRENCIES.indexOf(a.groupCurrency.trim().toUpperCase()) === -1)) n++;
+  if (a.debtPositions !== undefined && a.debtPositions !== null && !isValidDebtPositions(a, accounts)) n++;
   return n;
 }
 
@@ -460,9 +614,8 @@ function readStoredState(raw) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { parsed: null, damage: { kind: 'unreadable' } };
   }
-  var accounts = Array.isArray(parsed.accounts)
-    ? parsed.accounts.filter(isValidAccount).map(normalizeAccount)
-    : [];
+  var rawAccounts = Array.isArray(parsed.accounts) ? parsed.accounts.filter(isValidAccount) : [];
+  var accounts = rawAccounts.map(function (account) { return normalizeAccount(account, rawAccounts); });
   var nestedLinks = nestedGroupLinkCount(accounts); // must run before sanitizeGroups
   accounts = sanitizeGroups(accounts);
   var accountIds = accounts.map(function (a) { return a.id; });
@@ -473,7 +626,7 @@ function readStoredState(raw) {
   var accountFieldDamage = 0;
   var tradeFieldDamage = 0;
   if (Array.isArray(parsed.accounts)) {
-    parsed.accounts.forEach(function (a) { if (isValidAccount(a) && accountFieldIssues(a) > 0) accountFieldDamage++; });
+    parsed.accounts.forEach(function (a) { if (isValidAccount(a) && accountFieldIssues(a, rawAccounts) > 0) accountFieldDamage++; });
   }
   validTrades.forEach(function (t) { if (tradeFieldIssues(t) > 0) tradeFieldDamage++; });
   var droppedAccounts = Array.isArray(parsed.accounts) ? parsed.accounts.length - accounts.length : 0;
@@ -1698,9 +1851,8 @@ function isValidPriceOverrides(v) {
 
 function exportState(s) {
   var st = s || {};
-  var accounts = Array.isArray(st.accounts)
-    ? st.accounts.filter(isValidAccount).map(normalizeAccount)
-    : [];
+  var rawAccounts = Array.isArray(st.accounts) ? st.accounts.filter(isValidAccount) : [];
+  var accounts = rawAccounts.map(function (account) { return normalizeAccount(account, rawAccounts); });
   var accountIds = accounts.map(function (a) { return a.id; });
   var trades = Array.isArray(st.trades)
     ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
@@ -1759,6 +1911,11 @@ function importState(json) {
     }
     seenIds[accountIds[di]] = true;
   }
+  for (var dpa = 0; dpa < data.accounts.length; dpa++) {
+    if (!isValidDebtPositions(data.accounts[dpa], data.accounts)) {
+      throw new Error('import failed: invalid debt positions for account ' + data.accounts[dpa].id);
+    }
+  }
   if (!Array.isArray(data.trades)) {
     throw new Error('import failed: trades must be an array');
   }
@@ -1794,7 +1951,7 @@ function importState(json) {
   try { repairCashTradeAmounts(mappedTrades, data.accounts); } catch (e) { /* repair never breaks import */ }
   var next = {
     settings: normalizedSettings,
-    accounts: sanitizeGroups(data.accounts.map(normalizeAccount)),
+    accounts: sanitizeGroups(data.accounts.map(function (account) { return normalizeAccount(account, data.accounts); })),
     trades: mappedTrades,
     priceOverrides: priceOverrides
   };

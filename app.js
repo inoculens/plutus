@@ -13529,6 +13529,48 @@ function dockMarkup(errorId, label, buttonId, buttonType) {
     '<button class="primary" type="' + (buttonType || 'submit') + '"' + (buttonId ? ' id="' + buttonId + '"' : '') + '>' + label + '</button></div>';
 }
 
+// Empty mandatory fields turn red (instead of the browser's own bubble) and
+// the first one is focused; typing or choosing a value clears its highlight.
+var MISSING_FIELDS_MESSAGE = 'Fill all mandatory fields above first';
+
+function clearInvalidFields(form) {
+  if (!form) return;
+  Array.prototype.forEach.call(form.querySelectorAll('.fld-invalid'), function (el) {
+    el.classList.remove('fld-invalid');
+    el.removeAttribute('aria-invalid');
+  });
+}
+
+function flagMissingFields(form) {
+  if (!form) return false;
+  if (!form.getAttribute('data-invalid-wired')) {
+    form.setAttribute('data-invalid-wired', '1');
+    var unflag = function (event) {
+      var el = event && event.target;
+      if (el && el.classList && el.classList.contains('fld-invalid')) {
+        el.classList.remove('fld-invalid');
+        el.removeAttribute('aria-invalid');
+      }
+    };
+    form.addEventListener('input', unflag);
+    form.addEventListener('change', unflag);
+  }
+  var first = null;
+  Array.prototype.forEach.call(form.querySelectorAll('[required]'), function (el) {
+    if (el.disabled) return;
+    var empty = !String(el.value || '').trim();
+    el.classList.toggle('fld-invalid', empty);
+    if (empty) {
+      el.setAttribute('aria-invalid', 'true');
+      if (!first) first = el;
+    } else {
+      el.removeAttribute('aria-invalid');
+    }
+  });
+  if (first) { try { first.focus(); } catch (e) { /* ignore */ } }
+  return !!first;
+}
+
 function dockError(id, message) {
   if (message) dockErrorShow(id, message);
   else dockErrorClear(id);
@@ -13642,7 +13684,7 @@ function buildDebtPositionDialog() {
   dlg.innerHTML =
     '<div class="dialog-head"><h2 id="debt-position-title">Debt position</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
-    '<form id="debt-position-form">' +
+    '<form id="debt-position-form" novalidate>' +
     '<label for="debt-position-name">Position name</label><input id="debt-position-name" maxlength="120" required autocomplete="off">' +
     '<label>Debt denomination</label><div class="debt-asset-fields">' +
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
@@ -13672,6 +13714,7 @@ function buildDebtPositionDialog() {
     if (event && event.preventDefault) event.preventDefault();
     function fail(message) { dockError('debt-position-error', message); }
     dockError('debt-position-error', '');
+    if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
     var ownerId = dlg.getAttribute('data-owner-id') || '';
     var owner = accountById(state, ownerId);
@@ -13809,6 +13852,7 @@ function openDebtPositionDialog(ownerId, positionId) {
   assetTickerInput.oninput = syncDebtAssetUI;
   syncDebtAssetUI();
   dockError('debt-position-error', '');
+  clearInvalidFields(document.getElementById('debt-position-form'));
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13849,7 +13893,7 @@ function buildDebtSnapshotDialog() {
   dlg.innerHTML =
     '<div class="dialog-head"><h2 id="debt-snapshot-title">Edit reported balance</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
-    '<form id="debt-snapshot-form">' +
+    '<form id="debt-snapshot-form" novalidate>' +
     '<label for="debt-snapshot-amount">Reported balance <span id="debt-snapshot-unit"></span></label>' +
     '<input id="debt-snapshot-amount" type="number" min="0" step="any" required inputmode="decimal">' +
     '<label for="debt-snapshot-reported-at">Balance reported at</label>' +
@@ -13865,6 +13909,7 @@ function buildDebtSnapshotDialog() {
     if (event && event.preventDefault) event.preventDefault();
     function fail(message) { dockError('debt-snapshot-error', message); }
     dockError('debt-snapshot-error', '');
+    if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
     if (!owner) { fail('The liability account no longer exists.'); return; }
@@ -13935,6 +13980,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   dlg.setAttribute('data-reported-local', reported.value);
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
   dockError('debt-snapshot-error', '');
+  clearInvalidFields(document.getElementById('debt-snapshot-form'));
   openDialog('debt-snapshot-dialog');
 }
 

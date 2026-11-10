@@ -2725,6 +2725,12 @@ input:focus, select:focus, textarea:focus {
 }
 textarea { min-height: 4rem; }
 input::placeholder { color: var(--muted-2); }
+/* Missing mandatory field: red edge, kept visible while focused. */
+input.fld-invalid, select.fld-invalid, textarea.fld-invalid,
+input.fld-invalid:focus, select.fld-invalid:focus, textarea.fld-invalid:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-bg);
+}
 /* Number fields never show the browser's up/down stepper: amounts are typed. */
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button,

@@ -157,6 +157,23 @@ function sanitizeGroups(accounts) {
   return list;
 }
 
+// Links sanitizeGroups would remove: an account that is a member of an
+// existing main AND has members of its own (groups are flat; assignGroup never
+// creates this, so a stored one is an invariant violation). Same predicate as
+// sanitizeGroups, run on the accounts BEFORE it, so the loss is reported
+// instead of silent. Dangling links (no such main) stay, by design.
+function nestedGroupLinkCount(accounts) {
+  var list = accounts || [];
+  var byId = {};
+  list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
+  return list.filter(function (a) {
+    if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
+    var main = byId[a.groupId];
+    if (!main || main === a) return false;
+    return list.some(function (m) { return m && m.groupId === a.id; });
+  }).length;
+}
+
 function normalizeAccountFilter(v) {
   if (v === undefined || v === null) return null; // null = show all assets
   if (!Array.isArray(v)) return null;
@@ -267,7 +284,7 @@ function livePriceFor(live, sym, accountId) {
 // Only an explicit "Clear all data" discards recovery copies.
 var RECOVERY_KEY = STORAGE_KEY + '.recovery';
 var RECOVERY_KEEP = 3;
-var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, settings, overrides, accountFields, tradeFields, saved}
+var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, settings, overrides, accountFields, tradeFields, groups, saved}
 var lastSeenRaw = null;      // stored text last read clean, or last written by saveState
 var lastPreservedRaw = null; // stored text already kept as a recovery copy
 
@@ -319,6 +336,7 @@ function noteStorageDamage(raw, damage) {
     overrides: damage.overrides || 0,
     accountFields: damage.accountFields || 0,
     tradeFields: damage.tradeFields || 0,
+    groups: damage.groups || 0,
     saved: saved
   };
   return saved;
@@ -381,11 +399,36 @@ function tradeFieldIssues(t) {
     if (!Array.isArray(t.outputs)) n++;
     else if (t.outputs.some(function (o) { return !o || typeof o !== 'object' || Array.isArray(o); })) n++;
   }
-  if (Array.isArray(t.outputs) && t.outputs.length && fieldPresent(t.selfQty)) {
-    var sq = NaN;
-    try { sq = exactQtyValue(t.selfQty, String(t.symbol || '').toUpperCase()); } catch (e) { sq = NaN; }
-    if (!(isFinite(Number(sq)) && Number(sq) > 0)) n++;
+  var hasOutputs = Array.isArray(t.outputs) && t.outputs.length > 0;
+  // selfQty (received back, multi-output transfers). Zero is the same as
+  // absent (normalization removes it, the validator accepts it): not damage.
+  // Negative / non-finite / non-numeric values never get here (the validator
+  // rejects the record, which is counted as damage already).
+  if (fieldPresent(t.selfQty)) {
+    var zeroSelf = (typeof t.selfQty === 'number' || typeof t.selfQty === 'string') && Number(t.selfQty) === 0;
+    if (!zeroSelf) {
+      if (!hasOutputs) {
+        n++; // the app writes it only with outputs; normalization would delete it
+      } else {
+        var sq = NaN;
+        try { sq = exactQtyValue(t.selfQty, String(t.symbol || '').toUpperCase()); } catch (e) { sq = NaN; }
+        if (!(isFinite(Number(sq)) && Number(sq) > 0)) n++;
+      }
+    }
   }
+  // Per-source fee modes. normalizeTradeForStore only touches this field when
+  // the trade carries a sources list, so that is the only case reported (a
+  // lone sourceFeeAuto is kept as stored: nothing is lost). With a valid
+  // multi-source list the modes must be one boolean per source; a one-entry
+  // list may carry matching modes (legacy shape, both dropped quietly);
+  // anything else is deleted by normalization and therefore reported.
+  if (t.sources !== undefined && t.sources !== null && t.sourceFeeAuto !== undefined && t.sourceFeeAuto !== null) {
+    var srcs = (t.type === 'transfer') ? transferSourcesOf(t) : null;
+    var autoOk = Array.isArray(t.sourceFeeAuto) && t.sourceFeeAuto.every(function (v) { return typeof v === 'boolean'; });
+    if (!(srcs && srcs.length >= 1 && autoOk && t.sourceFeeAuto.length === srcs.length)) n++;
+  }
+  // sources only means something on a transfer; elsewhere normalization deletes it.
+  if (t.type !== 'transfer' && t.sources !== undefined && t.sources !== null) n++;
   return n;
 }
 
@@ -396,7 +439,9 @@ function settingsFieldIssues(s) {
   if (s.accountFilter !== undefined && s.accountFilter !== null) {
     if (!Array.isArray(s.accountFilter)) n++;
     else if (s.accountFilter.some(function (x) {
-      return !isValidSymbolCode(String(x === undefined || x === null ? '' : x).trim().toUpperCase());
+      if (typeof x !== 'string') return true; // malformed entry
+      var u = x.trim().toUpperCase();
+      return u !== '' && !isValidSymbolCode(u); // blank entries are ignored by normalization
     })) n++;
   }
   if (s.ledgerLabels !== undefined && s.ledgerLabels !== null && !ledgerMapIsClean(s.ledgerLabels)) n++;
@@ -416,8 +461,10 @@ function readStoredState(raw) {
     return { parsed: null, damage: { kind: 'unreadable' } };
   }
   var accounts = Array.isArray(parsed.accounts)
-    ? sanitizeGroups(parsed.accounts.filter(isValidAccount).map(normalizeAccount))
+    ? parsed.accounts.filter(isValidAccount).map(normalizeAccount)
     : [];
+  var nestedLinks = nestedGroupLinkCount(accounts); // must run before sanitizeGroups
+  accounts = sanitizeGroups(accounts);
   var accountIds = accounts.map(function (a) { return a.id; });
   var validTrades = Array.isArray(parsed.trades)
     ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); })
@@ -455,11 +502,11 @@ function readStoredState(raw) {
     }
   }
   var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape || settingsBad || droppedOverrides > 0 || overridesShape ||
-      accountFieldDamage > 0 || tradeFieldDamage > 0)
+      accountFieldDamage > 0 || tradeFieldDamage > 0 || nestedLinks > 0)
     ? {
         kind: 'rejected', accounts: droppedAccounts, trades: droppedTrades,
         shape: shape || overridesShape, settings: settingsBad, overrides: droppedOverrides,
-        accountFields: accountFieldDamage, tradeFields: tradeFieldDamage
+        accountFields: accountFieldDamage, tradeFields: tradeFieldDamage, groups: nestedLinks
       }
     : null;
   return { parsed: parsed, accounts: accounts, trades: trades, overrides: overrides, damage: damage };
@@ -19456,6 +19503,7 @@ function announceStorageRecovery() {
     if (r.trades) parts.push(r.trades + ' record(s)');
     if (r.accountFields) parts.push(r.accountFields + ' account(s) with invalid details');
     if (r.tradeFields) parts.push(r.tradeFields + ' record(s) with invalid details');
+    if (r.groups) parts.push(r.groups + ' invalid account group link(s)');
     if (r.overrides) parts.push(r.overrides + ' manual price override(s)');
     if (r.settings) parts.push('your settings');
     if (r.shape) parts.push('some malformed data');

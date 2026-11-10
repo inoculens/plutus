@@ -13455,14 +13455,89 @@ function debtCollateralMaxText(trades, account) {
   return ui;
 }
 
-// In-dialog errors use the same boxed, dismissible note the Settings dialog
-// already uses for messages shown above a modal.
-function debtDialogError(id, message) {
-  var box = document.getElementById(id);
+// Debt dialogs use the Add/Edit record dock: the Save button sticks to the
+// bottom of the dialog and the error rises from behind it with the same
+// bounce, dismiss button and draining timer bar (BANNER_* timings).
+var dockErrorState = Object.create(null);
+
+function dockErrorFor(id) {
+  if (!dockErrorState[id]) dockErrorState[id] = { timer: null, outTimer: null };
+  return dockErrorState[id];
+}
+
+function dockErrorCancel(st) {
+  if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+  if (st.outTimer) { clearTimeout(st.outTimer); st.outTimer = null; }
+}
+
+function dockErrorClear(id) {
+  var st = dockErrorFor(id);
+  dockErrorCancel(st);
+  var panel = document.getElementById(id);
   var text = document.getElementById(id + '-text');
-  if (!box) return;
-  if (text) text.textContent = message ? String(message) : '';
-  box.hidden = !message;
+  if (text) text.textContent = '';
+  if (panel) {
+    panel.classList.remove('show', 'hide', 'run');
+    panel.hidden = true;
+  }
+}
+
+function dockErrorDismiss(id) {
+  var st = dockErrorFor(id);
+  if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+  var panel = document.getElementById(id);
+  if (!panel || panel.hidden || panel.classList.contains('hide')) return;
+  panel.classList.remove('show'); // 'run' stays so the bar does not snap back during the exit
+  panel.classList.add('hide');
+  st.outTimer = setTimeout(function () {
+    st.outTimer = null;
+    var pn = document.getElementById(id);
+    if (pn && pn.classList.contains('hide')) dockErrorClear(id);
+  }, BANNER_OUT_MS + 50);
+}
+
+function dockErrorShow(id, msg) {
+  var panel = document.getElementById(id);
+  var text = document.getElementById(id + '-text');
+  if (!panel || !text) return;
+  var st = dockErrorFor(id);
+  var close = document.getElementById(id + '-close');
+  if (close && !close.getAttribute('data-wired')) {
+    close.setAttribute('data-wired', '1');
+    close.addEventListener('click', function () { dockErrorDismiss(id); });
+  }
+  text.textContent = String(msg);
+  var wasShowing = !panel.hidden && panel.classList.contains('show');
+  dockErrorCancel(st);
+  panel.hidden = false;
+  panel.classList.remove('hide');
+  if (!wasShowing) { panel.classList.remove('show'); void panel.offsetWidth; panel.classList.add('show'); }
+  var lead = wasShowing ? 0 : BANNER_IN_MS;
+  try {
+    panel.style.setProperty('--banner-in', BANNER_IN_MS + 'ms');
+    panel.style.setProperty('--banner-out', BANNER_OUT_MS + 'ms');
+    panel.style.setProperty('--banner-dwell', BANNER_DWELL_MS + 'ms');
+    panel.style.setProperty('--banner-lead', lead + 'ms');
+  } catch (e) { /* ignore */ }
+  panel.classList.remove('run');
+  void panel.offsetWidth; // restart the bar animation
+  panel.classList.add('run');
+  st.timer = setTimeout(function () { dockErrorDismiss(id); }, lead + BANNER_DWELL_MS);
+}
+
+// Markup for the sticky submit dock with its rising error panel.
+function dockMarkup(errorId, label) {
+  return '<div class="t-dock">' +
+    '<div id="' + errorId + '" class="t-err" role="alert" aria-live="assertive" hidden>' +
+    '<div class="t-err-row"><p id="' + errorId + '-text" class="banner-error t-err-text"></p>' +
+    '<button type="button" id="' + errorId + '-close" class="t-err-close" aria-label="Dismiss this message">✕</button></div>' +
+    '<div class="t-err-progress"><div class="t-err-bar"></div></div></div>' +
+    '<button class="primary" type="submit">' + label + '</button></div>';
+}
+
+function debtDialogError(id, message) {
+  if (message) dockErrorShow(id, message);
+  else dockErrorClear(id);
 }
 
 function debtCollateralError(message) {
@@ -13607,16 +13682,10 @@ function buildDebtPositionDialog() {
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
     '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
-    '<div id="debt-position-error" class="dlg-note error" role="alert" aria-live="assertive" hidden>' +
-    '<span id="debt-position-error-text"></span>' +
-    '<button type="button" id="debt-position-error-close" class="dlg-note-close" aria-label="Dismiss this message">✕</button></div>' +
-    '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
-    '<button type="submit" class="primary">Save reported balance</button></div></form>';
+    dockMarkup('debt-position-error', 'Save reported balance') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-position-dialog');
   var form = document.getElementById('debt-position-form');
-  var errorClose = document.getElementById('debt-position-error-close');
-  if (errorClose) errorClose.addEventListener('click', function () { debtDialogError('debt-position-error', ''); });
   var add = document.getElementById('debt-add-collateral');
   add.addEventListener('click', function () {
     var st = loadState();
@@ -13811,16 +13880,10 @@ function buildDebtSnapshotDialog() {
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
     '<p class="muted debt-form-hint">This corrects the selected entry. The position keeps its other reported balances.</p>' +
-    '<div id="debt-snapshot-error" class="dlg-note error" role="alert" aria-live="assertive" hidden>' +
-    '<span id="debt-snapshot-error-text"></span>' +
-    '<button type="button" id="debt-snapshot-error-close" class="dlg-note-close" aria-label="Dismiss this message">✕</button></div>' +
-    '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
-    '<button type="submit" class="primary">Save changes</button></div></form>';
+    dockMarkup('debt-snapshot-error', 'Save changes') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
   var form = document.getElementById('debt-snapshot-form');
-  var errorClose = document.getElementById('debt-snapshot-error-close');
-  if (errorClose) errorClose.addEventListener('click', function () { debtDialogError('debt-snapshot-error', ''); });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
     function fail(message) { debtDialogError('debt-snapshot-error', message); }
@@ -16571,9 +16634,9 @@ function buildTradeForm() {
     '</details>' +
     '<div class="t-dock">' +
     '<div id="t-error-panel" class="t-err" role="alert" aria-live="assertive" hidden>' +
-    '<div class="t-err-row"><p id="t-error" class="banner-error"></p>' +
-    '<button type="button" id="t-error-close" aria-label="Dismiss this message">✕</button></div>' +
-    '<div class="t-err-progress"><div id="t-err-bar"></div></div></div>' +
+    '<div class="t-err-row"><p id="t-error" class="banner-error t-err-text"></p>' +
+    '<button type="button" id="t-error-close" class="t-err-close" aria-label="Dismiss this message">✕</button></div>' +
+    '<div class="t-err-progress"><div id="t-err-bar" class="t-err-bar"></div></div></div>' +
     '<button class="primary" type="submit" id="t-submit">Add record</button>' +
     '</div>' +
     '</form>';

@@ -13686,15 +13686,13 @@ function buildDebtPositionDialog() {
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="debt-position-form" novalidate>' +
     '<label for="debt-position-name">Position name</label><input id="debt-position-name" maxlength="120" required autocomplete="off">' +
-    '<label>Debt denomination</label><div class="debt-asset-fields">' +
+    '<label>Debt denomination' + infoPill('Choose the unit in which the lender reports the debt.', 'debt-position-asset-status') + '</label><div class="debt-asset-fields">' +
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
     '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
     '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
     '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. BTC" aria-label="Ticker"></div>' +
-    '<p id="debt-position-asset-status" class="muted debt-form-hint">Choose the unit in which the lender reports the debt.</p>' +
-    '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
+    '<label for="debt-position-balance">Total outstanding balance<span id="debt-position-unit"></span>' + infoPill('Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.') + '</label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
-    '<p class="muted debt-form-hint">Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.</p>' +
     '<label for="debt-position-reported-at">Balance reported at</label><input id="debt-position-reported-at" type="datetime-local" required>' +
     '<label for="debt-position-note">Snapshot note (optional)</label><textarea id="debt-position-note" maxlength="280" rows="2"></textarea>' +
     '<label for="debt-position-notes">Position notes (optional)</label><textarea id="debt-position-notes" maxlength="280" rows="2"></textarea>' +
@@ -13843,9 +13841,9 @@ function openDebtPositionDialog(ownerId, positionId) {
   function syncDebtAssetUI() {
     var kind = String(assetKindInput.value || '').trim().toLowerCase();
     var ticker = String(assetTickerInput.value || '').trim().toUpperCase();
-    unit.textContent = ticker ? '(' + ticker + ')' : '';
+    unit.textContent = ticker ? ' (' + ticker + ')' : '';
     assetTickerInput.placeholder = 'Ticker, e.g. ' + debtAssetTickerExample(kind, owner);
-    var status = document.getElementById('debt-position-asset-status');
+    var status = hintTextTarget(document.getElementById('debt-position-asset-status'));
     if (status) status.textContent = describeDebtAsset(kind, ticker);
   }
   assetKindInput.onchange = syncDebtAssetUI;
@@ -13894,13 +13892,12 @@ function buildDebtSnapshotDialog() {
     '<div class="dialog-head"><h2 id="debt-snapshot-title">Edit reported balance</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="debt-snapshot-form" novalidate>' +
-    '<label for="debt-snapshot-amount">Reported balance <span id="debt-snapshot-unit"></span></label>' +
+    '<label for="debt-snapshot-amount">Reported balance<span id="debt-snapshot-unit"></span>' + infoPill('This corrects the selected entry. The position keeps its other reported balances.') + '</label>' +
     '<input id="debt-snapshot-amount" type="number" min="0" step="any" required inputmode="decimal">' +
     '<label for="debt-snapshot-reported-at">Balance reported at</label>' +
     '<input id="debt-snapshot-reported-at" type="datetime-local" required>' +
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
-    '<p class="muted debt-form-hint">This corrects the selected entry. The position keeps its other reported balances.</p>' +
     dockMarkup('debt-snapshot-error', 'Save changes') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
@@ -13971,7 +13968,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   dlg.setAttribute('data-position-id', position.id);
   dlg.setAttribute('data-snapshot-id', snapshot.id);
   var ticker = String(position.assetTicker || owner.ticker || '').trim().toUpperCase();
-  document.getElementById('debt-snapshot-unit').textContent = ticker ? '(' + ticker + ')' : '';
+  document.getElementById('debt-snapshot-unit').textContent = ticker ? ' (' + ticker + ')' : '';
   document.getElementById('debt-snapshot-amount').value = String(snapshot.amount);
   var reported = document.getElementById('debt-snapshot-reported-at');
   reported.value = debtLocalDateTimeValue(new Date(snapshot.reportedAt));

@@ -5267,7 +5267,6 @@ label.sync-check {
 .debt-snapshot-actions .debt-snapshot-delete:hover { color: var(--red); }
 .debt-position-delete { margin-top: 0.5rem; color: var(--muted); min-height: 2rem; }
 .debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
-.debt-form-hint { margin: 0.35rem 0 0.75rem; font-size: 0.82rem; line-height: 1.5; }
 .debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin-top: 1.25rem; }
 .debt-collateral-heading label { margin: 0; }
 #debt-add-collateral { flex-shrink: 0; white-space: nowrap; }

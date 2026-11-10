@@ -14102,7 +14102,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       top.appendChild(nameEl);
       var update = document.createElement('button');
       update.type = 'button';
-      update.className = 'quiet';
+      update.className = 'debt-position-update';
       update.textContent = 'Update balance';
       update.addEventListener('click', function () { openDebtPositionDialog(owner.id, position.id); });
       top.appendChild(update);
@@ -14153,22 +14153,28 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
         return Date.parse(b.reportedAt) - Date.parse(a.reportedAt);
       }).forEach(function (snapshot) {
         var li = document.createElement('li');
+        li.className = 'debt-snapshot-item';
+        var row = document.createElement('div');
+        row.className = 'debt-snapshot-row';
+        var snapBody = document.createElement('div');
+        snapBody.className = 'debt-snapshot-body';
         var label = document.createElement('strong');
         label.textContent = formatDebtPositionAmount(snapshot.amount, position);
-        li.appendChild(label);
+        snapBody.appendChild(label);
         var when = document.createElement('span');
         when.textContent = new Date(snapshot.reportedAt).toLocaleString();
-        li.appendChild(when);
+        snapBody.appendChild(when);
         if (snapshot.note) {
           var memo = document.createElement('p');
           memo.textContent = snapshot.note;
-          li.appendChild(memo);
+          snapBody.appendChild(memo);
         }
+        row.appendChild(snapBody);
         var actions = document.createElement('div');
         actions.className = 'debt-snapshot-actions';
         var edit = document.createElement('button');
         edit.type = 'button';
-        edit.className = 'quiet debt-snapshot-edit';
+        edit.className = 'debt-snapshot-edit';
         edit.textContent = 'Edit';
         edit.setAttribute('aria-label', 'Edit the ' + label.textContent + ' report from ' + when.textContent);
         edit.addEventListener('click', function () { openDebtSnapshotDialog(owner.id, position.id, snapshot.id); });
@@ -14178,20 +14184,21 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
         if (position.balanceSnapshots.length > 1) {
           var removeSnapshot = document.createElement('button');
           removeSnapshot.type = 'button';
-          removeSnapshot.className = 'quiet debt-snapshot-delete';
+          removeSnapshot.className = 'debt-snapshot-delete';
           removeSnapshot.textContent = 'Delete';
           removeSnapshot.setAttribute('aria-label', 'Delete the ' + label.textContent + ' report from ' + when.textContent);
           removeSnapshot.addEventListener('click', function () { removeDebtSnapshot(owner.id, position.id, snapshot.id); });
           actions.appendChild(removeSnapshot);
         }
-        li.appendChild(actions);
+        row.appendChild(actions);
+        li.appendChild(row);
         list.appendChild(li);
       });
       history.appendChild(list);
       item.appendChild(history);
       var remove = document.createElement('button');
       remove.type = 'button';
-      remove.className = 'quiet debt-position-delete';
+      remove.className = 'debt-position-delete';
       remove.textContent = 'Remove position';
       remove.addEventListener('click', function () { removeDebtPosition(owner.id, position.id); });
       item.appendChild(remove);

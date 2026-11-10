@@ -13455,11 +13455,18 @@ function debtCollateralMaxText(trades, account) {
   return ui;
 }
 
+// In-dialog errors use the same boxed, dismissible note the Settings dialog
+// already uses for messages shown above a modal.
+function debtDialogError(id, message) {
+  var box = document.getElementById(id);
+  var text = document.getElementById(id + '-text');
+  if (!box) return;
+  if (text) text.textContent = message ? String(message) : '';
+  box.hidden = !message;
+}
+
 function debtCollateralError(message) {
-  var error = document.getElementById('debt-position-error');
-  if (!error) return;
-  error.textContent = message;
-  error.hidden = false;
+  debtDialogError('debt-position-error', message);
 }
 
 function debtCollateralRow(list, accounts, allocation) {
@@ -13502,8 +13509,7 @@ function debtCollateralRow(list, accounts, allocation) {
       return;
     }
     quantity.value = maxText;
-    var error = document.getElementById('debt-position-error');
-    if (error) error.hidden = true;
+    debtDialogError('debt-position-error', '');
   });
   var remove = document.createElement('button');
   remove.type = 'button';
@@ -13602,12 +13608,16 @@ function buildDebtPositionDialog() {
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
     '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
-    '<p id="debt-position-error" class="banner-error" role="alert" hidden></p>' +
+    '<div id="debt-position-error" class="dlg-note error" role="alert" aria-live="assertive" hidden>' +
+    '<span id="debt-position-error-text"></span>' +
+    '<button type="button" id="debt-position-error-close" class="dlg-note-close" aria-label="Dismiss this message">✕</button></div>' +
     '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
     '<button type="submit" class="primary">Save reported balance</button></div></form>';
   document.body.appendChild(dlg);
   wireDialog('debt-position-dialog');
   var form = document.getElementById('debt-position-form');
+  var errorClose = document.getElementById('debt-position-error-close');
+  if (errorClose) errorClose.addEventListener('click', function () { debtDialogError('debt-position-error', ''); });
   var add = document.getElementById('debt-add-collateral');
   add.addEventListener('click', function () {
     var st = loadState();
@@ -13615,9 +13625,8 @@ function buildDebtPositionDialog() {
   });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    var error = document.getElementById('debt-position-error');
-    function fail(message) { error.textContent = message; error.hidden = false; }
-    error.hidden = true;
+    function fail(message) { debtDialogError('debt-position-error', message); }
+    debtDialogError('debt-position-error', '');
     var state = loadState();
     var ownerId = dlg.getAttribute('data-owner-id') || '';
     var owner = accountById(state, ownerId);
@@ -13732,7 +13741,6 @@ function openDebtPositionDialog(ownerId, positionId) {
   var assetTickerInput = document.getElementById('debt-position-asset-ticker');
   var unit = document.getElementById('debt-position-unit');
   var list = document.getElementById('debt-collateral-list');
-  var error = document.getElementById('debt-position-error');
   title.textContent = position ? 'Update debt balance' : 'New debt position';
   name.value = position ? position.name : '';
   balance.value = position ? String((latestDebtBalanceSnapshot(position, Date.now()) || {}).amount || 0) : '';
@@ -13761,7 +13769,7 @@ function openDebtPositionDialog(ownerId, positionId) {
   assetKindInput.onchange = syncDebtAssetUI;
   assetTickerInput.oninput = syncDebtAssetUI;
   syncDebtAssetUI();
-  error.hidden = true;
+  debtDialogError('debt-position-error', '');
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13810,17 +13818,20 @@ function buildDebtSnapshotDialog() {
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
     '<p class="muted debt-form-hint">This corrects the selected entry. The position keeps its other reported balances.</p>' +
-    '<p id="debt-snapshot-error" class="banner-error" role="alert" hidden></p>' +
+    '<div id="debt-snapshot-error" class="dlg-note error" role="alert" aria-live="assertive" hidden>' +
+    '<span id="debt-snapshot-error-text"></span>' +
+    '<button type="button" id="debt-snapshot-error-close" class="dlg-note-close" aria-label="Dismiss this message">✕</button></div>' +
     '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
     '<button type="submit" class="primary">Save changes</button></div></form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
   var form = document.getElementById('debt-snapshot-form');
+  var errorClose = document.getElementById('debt-snapshot-error-close');
+  if (errorClose) errorClose.addEventListener('click', function () { debtDialogError('debt-snapshot-error', ''); });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    var error = document.getElementById('debt-snapshot-error');
-    function fail(message) { error.textContent = message; error.hidden = false; }
-    error.hidden = true;
+    function fail(message) { debtDialogError('debt-snapshot-error', message); }
+    debtDialogError('debt-snapshot-error', '');
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
     if (!owner) { fail('The liability account no longer exists.'); return; }
@@ -13890,8 +13901,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   // through the form's own calm check (debtReportedAtIssue).
   dlg.setAttribute('data-reported-local', reported.value);
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
-  var error = document.getElementById('debt-snapshot-error');
-  if (error) error.hidden = true;
+  debtDialogError('debt-snapshot-error', '');
   openDialog('debt-snapshot-dialog');
 }
 
@@ -13924,6 +13934,18 @@ function removeDebtSnapshot(ownerId, positionId, snapshotId) {
     clearBanner();
     render();
   });
+}
+
+// A price refresh repaints the account view and rebuilds these panels, so the
+// <details> elements remember whether the owner left them open.
+var debtPanelState = Object.create(null);
+
+function debtPanel(details, key) {
+  if (debtPanelState[key]) details.open = true;
+  details.addEventListener('toggle', function () {
+    debtPanelState[key] = !!details.open;
+  });
+  return details;
 }
 
 function buildDebtPositionsSection(st, account, members, host, stats, financial) {
@@ -13959,7 +13981,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   }
   var header = document.createElement('div');
   header.className = 'section-head debt-section-head';
-  var details = document.createElement('details');
+  var details = debtPanel(document.createElement('details'), 'positions:' + account.id);
   details.className = 'debt-positions-details';
   var summary = document.createElement('summary');
   var title = document.createElement('span');
@@ -14045,7 +14067,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
         }).join(', ');
         item.appendChild(collateral);
       }
-      var history = document.createElement('details');
+      var history = debtPanel(document.createElement('details'), 'history:' + position.id);
       history.className = 'debt-snapshot-history';
       var historySummary = document.createElement('summary');
       historySummary.textContent = 'Balance history (' + position.balanceSnapshots.length + ')';

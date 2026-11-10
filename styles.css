@@ -1934,16 +1934,16 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
 
 .account-card:active { transform: scale(0.995); }
 
-/* The reorder grip stays out of sight until the row is hovered (always
-   visible on touch, where there is no hover). */
+/* The reorder grip uses the same touch-friendly dice grid at every width:
+   one size, one opacity, always visible. */
 .drag-handle {
-  width: 1rem;
-  height: 1.75rem;
+  width: 1.9rem;
+  height: 2.75rem;
   flex-shrink: 0;
   align-self: center;
   border-radius: 4px;
   cursor: grab;
-  opacity: 0.12;
+  opacity: 0.75;
   touch-action: none;
   background-image: radial-gradient(circle, var(--muted) 1.2px, transparent 1.4px);
   background-size: 0.5rem 0.58rem;
@@ -1953,12 +1953,9 @@ input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
 }
 
 .account-card:hover .drag-handle,
-.trade-block:hover .drag-handle { opacity: 0.6; }
+.trade-block:hover .drag-handle { opacity: 0.9; }
 .drag-handle:hover { opacity: 1 !important; }
 .drag-handle:active { cursor: grabbing; }
-@media (hover: none) {
-  .drag-handle { opacity: 0.4; }
-}
 
 .account-card.drag-src { opacity: 0.35; }
 .account-card.drop-before { box-shadow: 0 -2px 0 var(--accent); }
@@ -2318,7 +2315,7 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   top: 0;
   bottom: 0;
   left: 0;
-  width: 1.8rem;
+  width: 2.4rem;
   height: auto;
   align-self: auto;
   background: none;
@@ -2333,8 +2330,8 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 0.9rem;
-  height: 2.9rem;
+  width: 1.2rem;
+  height: 4.1rem;
   transform: translate(-50%, -50%);
   border-radius: 4px;
   background-image: radial-gradient(circle, var(--muted-2) 1.2px, transparent 1.4px);
@@ -2843,6 +2840,7 @@ details.opt + details.opt { margin-top: 0.65rem; }
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.dlg-note button.dlg-note-close { text-decoration: none; font-weight: 700; }
 #settings-alert-close { text-decoration: none; font-weight: 700; }
 /* ————— Header sync cloud (hidden until sync is configured) ————— */
 /* Black-glyph sync art sits on a lifted tile so the cloud reads on the dark bar. */
@@ -3268,12 +3266,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   .section-actions { flex-wrap: wrap; }
   .section-actions button { flex: 1 1 auto; min-height: 2.75rem; }
   .account-card { flex-wrap: nowrap; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; min-height: 4.2rem; }
-  .drag-handle { width: 1.9rem; height: 2.75rem; flex-shrink: 0; opacity: 0.75; }
-  /* Record rails on phones: a wider thumb rail, taller dot run. The reserved
-     column is written by this query's own .trade-block padding rule, so no
-     later shorthand can take the strip back. */
-  .trade-block .drag-handle { width: 2.4rem; }
-  .trade-block .drag-handle::before { width: 1.2rem; height: 4.1rem; }
   .acct-avatar { width: 2.6rem; height: 2.6rem; }
   .acct-mid { gap: 0.05rem; }
   .account-name { font-size: 0.95rem; }
@@ -5188,8 +5180,22 @@ label.sync-check {
   list-style: none; min-height: 1.25rem; user-select: none;
 }
 .debt-positions-details > summary::-webkit-details-marker { display: none; }
-.debt-positions-details > summary::after { content: '⌄'; color: var(--muted); margin-left: auto; }
-.debt-positions-details[open] > summary::after { content: '⌃'; }
+/* Disclosure chip: same ▾ in a 2rem square as the phone record cards, shown
+   at every width here, and it turns over when the panel opens. */
+.debt-positions-details > summary::after {
+  content: '▾';
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem; height: 2rem;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 0.9rem; line-height: 1;
+  transition: transform 0.15s ease;
+}
+.debt-positions-details[open] > summary::after { transform: rotate(180deg); }
 .debt-position-count {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 1.15rem; height: 1.15rem; padding: 0 0.3rem;

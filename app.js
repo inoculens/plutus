@@ -316,7 +316,7 @@ function accountDebtBalanceAt(account, asOf, assetKind, assetTicker) {
     var result = debtPositionBalanceAt(position, asOf);
     if (result && isFinite(result.amount)) total += result.amount;
   });
-  if (!assetKind && !assetTicker && Object.keys(identities).length > 1) return null;
+  if (Object.keys(identities).length > 1) return null;
   return total;
 }
 

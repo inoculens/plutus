@@ -5182,17 +5182,20 @@ label.sync-check {
 }
 .debt-section-head { align-items: center; gap: 0.75rem; margin-top: 0; margin-bottom: 0; }
 .debt-positions-details { min-width: 0; flex: 1 1 auto; }
+.debt-positions-details .section-title { margin: 0; line-height: 1; }
 .debt-positions-details > summary {
-  display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
-  list-style: none; min-height: 2.25rem;
+  display: flex; align-items: center; gap: 0.45rem; cursor: pointer;
+  list-style: none; min-height: 2.25rem; user-select: none;
 }
 .debt-positions-details > summary::-webkit-details-marker { display: none; }
 .debt-positions-details > summary::after { content: '⌄'; color: var(--muted); margin-left: auto; }
 .debt-positions-details[open] > summary::after { content: '⌃'; }
 .debt-position-count {
-  display: inline-grid; place-items: center; min-width: 1.3rem; height: 1.3rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 0.3rem;
   background: var(--surface-4); border-radius: 999px; color: var(--muted);
-  font-size: 0.7rem; font-variant-numeric: tabular-nums; padding: 0 0.3rem;
+  font-size: 0.65rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
 }
 .debt-position-list { display: grid; gap: 0.7rem; padding-top: 0.5rem; }
 .debt-position-card {

@@ -7453,7 +7453,9 @@ function fmtPct(n) {
   return (Math.round(v * 100) / 100) + '%';
 }
 
-function showBanner(msg, kind, details) {
+// Optional 4th arg `source` tags the banner with data-source so subsystem-
+// scoped clears (e.g. clearPriceBanner) only retire their own messages.
+function showBanner(msg, kind, details, source) {
   var b = document.getElementById('banner');
   if (!b) return;
   var hasDetails = !!(details && ((details.lines && details.lines.length) || details.message));
@@ -7470,7 +7472,7 @@ function showBanner(msg, kind, details) {
   // in the dialog mirror. Errors born here die with the dialog; a message
   // moved in from a pre-existing page banner moves back on close.
   if (!suppressMirror && settingsDialogOpen()) {
-    lastMirror = { msg: String(msg), kind: kind, details: details || null, fromPage: false };
+    lastMirror = { msg: String(msg), kind: kind, details: details || null, source: source || '', fromPage: false };
     try { mirrorBannerToSettings(String(msg), kind === 'info' ? 'info' : 'error', hasDetails); } catch (e) { /* never let the mirror break the banner */ }
     return;
   }
@@ -7486,6 +7488,7 @@ function showBanner(msg, kind, details) {
   b.classList.add(kind === 'info' ? 'info' : 'error');
   if (!wasShowing) { b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
   try { b.dataset.kind = kind === 'info' ? 'info' : 'error'; } catch (e) { /* ignore */ }
+  try { b.dataset.source = source ? String(source) : ''; } catch (e) { /* ignore */ }
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
   // Optional drill-down: every error with something more to say gets a
@@ -7778,11 +7781,12 @@ function openErrorDialog() {
 
 // Price notices are informational and transient: only clear the banner
 // when it shows a price notice, so FX/storage errors are never wiped.
+// Checks data-source === 'price' so sync-pull and other info banners survive.
 function clearPriceBanner() {
   // A mirrored info notice lives in the dialog while the page banner hides
   // (see showBanner): clear that copy too — but never an error mirror.
   try {
-    if (lastMirror && lastMirror.kind === 'info') {
+    if (lastMirror && lastMirror.kind === 'info' && lastMirror.source === 'price') {
       lastMirror = null;
       hideSettingsAlert();
     }
@@ -7790,8 +7794,10 @@ function clearPriceBanner() {
   var b = document.getElementById('banner');
   if (!b || b.hidden) return;
   var kind = null;
+  var src = null;
   try { kind = b.dataset.kind; } catch (e) { kind = null; }
-  if (kind === 'info') clearBanner();
+  try { src = b.dataset.source; } catch (e) { src = null; }
+  if (kind === 'info' && src === 'price') clearBanner();
 }
 
 // Guarded persistence for UI mutations: saveState throws
@@ -21428,7 +21434,7 @@ function refreshPrices() {
         showBanner('Live prices are unreachable right now — your data is safe and numbers will fill in automatically.', 'info', {
           title: 'Price errors',
           lines: detailLines
-        });
+        }, 'price');
       } else {
         clearPriceBanner();
       }

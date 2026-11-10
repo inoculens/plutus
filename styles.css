@@ -2723,7 +2723,8 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08);
   outline: none;
 }
-textarea { min-height: 4rem; }
+/* Resize downwards only: dragging sideways would push past the dialog edge. */
+textarea { min-height: 4rem; resize: vertical; max-width: 100%; }
 input::placeholder { color: var(--muted-2); }
 /* Missing mandatory field: red edge, kept visible while focused. */
 input.fld-invalid, select.fld-invalid, textarea.fld-invalid,

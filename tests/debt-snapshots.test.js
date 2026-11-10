@@ -53,6 +53,14 @@ assert.equal(C.isValidDebtTimestamp('November 10, 2026'), false,
 assert.equal(C.isValidDebtTimestamp('2026-11-10T12:30:00+02:00'), true);
 
 assert.equal(C.isValidDebtPosition(position(), accounts[0], accounts), true);
+const unknownSnapshotProperty = Object.assign(snap('unknown-field', 1, '2026-11-10T10:00:00.000Z'), {
+  toString: 'not an allowed snapshot field'
+});
+assert.equal(C.isValidDebtSnapshot(unknownSnapshotProperty), false,
+  'inherited Object.prototype names are not accepted as snapshot schema keys');
+assert.equal(C.isValidDebtPosition(position({ toString: 'not an allowed position field' }), accounts[0], accounts), false,
+  'inherited Object.prototype names are not accepted as position schema keys');
+
 const specialIdAccount = acc('__proto__', 'BTC', 'crypto');
 const specialOwner = acc('special-owner', 'USDC', 'crypto');
 specialOwner.debtPositions = [position({
@@ -88,6 +96,15 @@ assert.equal(btcValuation.hasDebt, true);
 assert.equal(btcValuation.complete, true);
 assert.equal(btcValuation.value, 50000,
   'crypto liability is valued using its owning account ticker/kind price');
+const prototypeIdDebt = acc('__proto__', 'BTC', 'crypto');
+prototypeIdDebt.debtPositions = [position({
+  collateral: [],
+  balanceSnapshots: [snap('prototype-s1', 3, '2026-11-10T10:00:00.000Z')]
+})];
+const prototypeIdValuation = C.currentDebtValuation([prototypeIdDebt], 'USD', { BTC: 25000 }, valuationAt);
+assert.equal(prototypeIdValuation.value, 75000,
+  'prototype-like account IDs must not cause a real liability to be skipped');
+
 const unknownValuation = C.currentDebtValuation([btcDebt], 'USD', {}, valuationAt);
 assert.equal(unknownValuation.value, null,
   'an unavailable liability price remains unknown, not zero');

@@ -5222,19 +5222,26 @@ label.sync-check {
 .debt-snapshot-history li { padding: 0.35rem 0; font-size: 0.8rem; }
 .debt-snapshot-history li strong, .debt-snapshot-history li span { display: block; }
 .debt-snapshot-history li span, .debt-snapshot-history li p { color: var(--muted); margin: 0.15rem 0 0; }
+.debt-snapshot-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
+.debt-snapshot-actions button { min-height: 2rem; padding: 0.15rem 0.55rem; font-size: 0.75rem; }
+.debt-snapshot-actions .debt-snapshot-delete:hover { color: var(--red); }
 .debt-position-delete { margin-top: 0.5rem; color: var(--muted); min-height: 2rem; }
 .debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
 .debt-form-hint { margin: 0.35rem 0 0.75rem; font-size: 0.82rem; line-height: 1.5; }
-.debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
-.debt-collateral-heading label { margin-bottom: 0.35rem; }
-.debt-collateral-list { display: grid; gap: 0.55rem; }
+.debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin-top: 1.25rem; }
+.debt-collateral-heading label { margin: 0; }
+#debt-add-collateral { flex-shrink: 0; white-space: nowrap; }
+.debt-collateral-list { display: grid; gap: 0.55rem; margin-top: 0.35rem; }
 .debt-collateral-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.65fr) auto; gap: 0.45rem; align-items: center; }
 .debt-collateral-row input, .debt-collateral-row select { min-width: 0; }
-.debt-remove-collateral { min-width: 2.5rem; padding: 0.3rem; }
+.debt-collateral-actions { display: flex; align-items: center; gap: 0.4rem; }
+.debt-collateral-actions button { min-height: 2.5rem; padding: 0.3rem 0.6rem; }
+.debt-collateral-actions .debt-max-collateral { background: var(--accent-soft); border-color: transparent; color: var(--text); }
+.debt-collateral-actions .debt-remove-collateral { min-width: 2.5rem; padding: 0.3rem; }
 .debt-position-delete:hover { color: var(--red); }
 @media (max-width: 520px) {
   .debt-collateral-row { grid-template-columns: 1fr 1fr; }
-  .debt-remove-collateral { grid-column: 2; justify-self: end; }
+  .debt-collateral-actions { grid-column: 2; justify-self: end; }
   .debt-position-top { align-items: flex-start; }
   .debt-positions-section { padding: 0.6rem 0.75rem 0.5rem; }
   .debt-positions-section > .debt-net-summary { margin: -0.6rem -0.75rem 0.55rem; padding: 0.65rem 0.75rem; }

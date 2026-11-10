@@ -5254,3 +5254,8 @@ label.sync-check {
   .debt-net-line span { font-size: 0.66rem; }
   .debt-net-line strong { font-size: 0.82rem; }
 }
+
+/* Debt denomination is independent of the owning account. */
+.debt-asset-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
+.debt-asset-fields select, .debt-asset-fields input { min-width: 0; width: 100%; }
+.debt-asset-fields :disabled { opacity: 0.72; cursor: not-allowed; }

@@ -8,11 +8,12 @@
 
 ## 1. Product decisions and invariants
 
-### 1.1 Accounts remain single-asset containers
-- Every account continues to represent exactly one asset identity, defined by its existing asset kind and ticker/currency.
-- A debt position belongs to the account whose asset identity denominates the liability: USDC debt in a USDC account, EUR debt in a EUR account, BTC debt in a BTC account, etc.
-- The liability identity is inherited from the owning account. Do not add an independently editable asset selector or a second source of truth.
-- Holdings/trades and liabilities are separate. An account may have no holdings and still have debt.
+### 1.1 Ownership and denomination are separate
+- Accounts remain single-asset containers. A debt position is nested under an owning account for organization, account-detail display, grouping, filtering, and ownership; it does **not** inherit that account's asset denomination.
+- Every new debt position stores its own `assetKind` and `assetTicker`, selected independently from the owning account. The supported kinds are `crypto`, `stock`, `commodity`, `cash` (fiat), and `custom`.
+- The default for a new position may be the owner's kind and ticker for convenience, but the user can choose any other supported kind/ticker. Examples: EUR or USD debt in a BTC account; BTC debt in an EUR account; gold debt in a stock account; stock debt in a fiat account.
+- The denomination is immutable after creation because every snapshot amount is expressed in that unit. To track a different denomination, create a separate position rather than reinterpreting existing snapshots.
+- Holdings/trades and liabilities remain separate. An account may have no holdings and still own debt.
 - Never introduce mixed-asset accounts, placeholder parent accounts, or synthetic debt subaccounts.
 
 ### 1.2 Collateral is a reference, not another liability
@@ -36,16 +37,17 @@
 ### 2.1 Account detail
 Add a collapsible **Debt positions** section immediately after the existing main account panel and before ledgers/records.
 - Show positions owned by the account. For grouped views, show member-owned positions under their real owning account and count each only once.
-- Each position shows its name, last reported outstanding balance in the account's asset unit, and reported-at timestamp.
+- Each position shows its name, last reported outstanding balance in the position's own asset/fiat unit, and reported-at timestamp.
 - Make clear that the amount is the last reported value, not a continuously updated estimate.
 - Expand to show balance-snapshot history, notes, and linked collateral accounts/pledged quantities.
 - Provide actions to add a position and enter a new balance snapshot.
 - Preserve history when the balance reaches zero; do not silently delete paid-off positions.
-- Creating a position captures a name and initial reported balance/time. The asset identity is inherited and not selectable. Collateral is optional and may include multiple accounts.
+- Creating a position captures a name, denomination (`assetKind` + `assetTicker`), and initial reported balance/time. The denomination defaults to the owner but is selectable independently. Collateral is optional and may include multiple accounts.
+- When updating a position, preserve its denomination; only the name, snapshot, notes, and collateral may change.
 - Updating a position asks for the new total outstanding balance, not a repayment/interest delta. The user may also set the observation time and add a note.
 
 ### 2.2 Account and home values
-- Account net value reflects gross assets less liabilities denominated in that same account asset.
+- Account net value reflects gross assets less the value of every liability position owned by that account, with each liability converted from its own denomination into the selected main currency.
 - Show gross holdings, debt, and net value as distinct concepts in account detail.
 - Account cards may show net worth and a subtle debt indicator while keeping the home structure minimal.
 - Debt-only accounts remain visible even without trades or holdings.
@@ -53,7 +55,7 @@ Add a collapsible **Debt positions** section immediately after the existing main
 - Portfolio totals are the sum of per-account net-worth results. Collateral accounts retain their gross asset values.
 
 ### 2.3 Precision and freshness
-- Use the owning account's native asset precision/formatting.
+- Use the debt position's own asset precision/formatting, based on `assetKind` + `assetTicker`.
 - Show the latest snapshot's reported-at timestamp; optionally also show when it was entered into Plutus, without confusing the two.
 - Do not display APR, interest estimates, projected balances, or fabricated precision.
 - A zero snapshot is valid and represents a paid-off position; retain its history.
@@ -67,6 +69,8 @@ Illustrative shape:
     account.debtPositions = [{
       id: 'debt_<stable-id>',
       name: 'AAVE USDC borrow',
+      assetKind: 'crypto',
+      assetTicker: 'USDC',
       createdAt: '2026-11-10T08:00:00.000Z',
       balanceSnapshots: [{
         id: 'snapshot_<stable-id>',
@@ -83,14 +87,15 @@ Illustrative shape:
     }];
 
 Rules:
-- The owning account's kind + ticker are the only source of truth for liability identity.
-- Snapshot amount is the total balance reported by the lender, not an amount to add/subtract. It must be finite and non-negative; zero is valid.
+- The owning account ID is the source of truth for ownership and scope. Each position's `assetKind` + `assetTicker` are the source of truth for its liability denomination.
+- Every new position must contain both `assetKind` and `assetTicker`. For backward compatibility, a legacy position with neither field is normalized once using its current owning account's kind/ticker; a partial or malformed identity is rejected. Existing snapshot amounts are never converted or rewritten during this migration.
+- Snapshot amount is the total balance reported by the lender in that position's asset/fiat unit, not an amount to add/subtract. It must be finite and non-negative; zero is valid.
 - A new position requires an initial snapshot; never assume an unknown opening balance.
 - reportedAt is when the external amount was observed. enteredAt is when it was saved in Plutus. Historical net worth uses reportedAt.
 - Snapshot IDs are stable and unique; timestamps must be valid. Sort effective snapshots by reportedAt and use stable stored order as a tie-breaker for equal timestamps.
 - Notes are optional bounded strings and never affect calculations.
 - Collateral IDs must resolve to existing accounts. Pledged quantities are positive, finite, and in the referenced account's units. Multiple sources and unsecured positions are allowed.
-- Do not store a duplicate liability asset identity, APR, rate history, computed current balance, or event deltas.
+- Do not store a duplicate current balance, APR, rate history, computed accrual, or event deltas.
 - Never mutate holdings or trade records when recording debt.
 
 Current outstanding amount is a pure lookup: return the latest snapshot with reportedAt at or before the requested as-of time. Before the first snapshot, the liability is absent; between snapshots, the previous reported amount remains unchanged. No interpolation or accrual occurs.
@@ -106,7 +111,7 @@ Add a standalone deterministic debt snapshot layer with pure helpers such as:
 Valuation stays separate from trade accounting:
 - Reuse existing market-price identity logic for all supported asset kinds.
 - Reuse existing fiat/FX conversion paths for fiat liabilities.
-- Resolve prices by the owning account's (kind, ticker) identity, never ticker alone where kinds collide.
+- Resolve market prices and fiat FX using each position's `(assetKind, assetTicker)` identity, never the owner's identity or ticker alone where kinds collide.
 - Unknown liability prices/FX remain unknown (null). Never coerce them to zero or claim a complete net worth when a liability cannot be valued.
 - Account net value = gross asset value - liability value when both are known. If liability valuation is unavailable, use the app's established incomplete/missing-price behavior rather than fabricating a number.
 - Do not alter computePositions, computeAverage, computeFifo, or the joint computePortfolio trade semantics. Compose debt at the account/net-worth boundary.
@@ -117,7 +122,7 @@ For each historical chart timestamp:
 1. Reconstruct gross holdings through the existing trade engine unchanged.
 2. Select the latest manual snapshot whose reportedAt is at or before that timestamp.
 3. Do not apply interest growth, rate curves, event replay, interpolation, or future snapshots.
-4. Value that reported amount using historical price/FX for the owning account's asset identity at that chart date.
+4. Value that reported amount using historical price/FX for the position's own `(assetKind, assetTicker)` at that chart date.
 5. Subtract the liability once from its owning account and aggregate per-account net worth.
 
 Before the first debt snapshot, the position contributes no historical liability. Between snapshots it contributes the last reported amount unchanged. A backdated snapshot may revise historical points at and after its reportedAt time; this is expected.
@@ -154,8 +159,8 @@ Account lifecycle:
 - Zero is accepted; negative, NaN, Infinity, malformed timestamps, duplicate IDs and malformed nested records are rejected.
 
 ### Accounts and collateral
-- BTC debt belongs only to BTC accounts, EUR debt only to EUR accounts, USDC debt only to USDC accounts, etc.
-- A EUR liability can reference multiple BTC/ETH/XAU/fiat collateral accounts.
+- A debt position can be denominated in any supported kind/ticker, independently of the owning account (e.g. a EUR liability owned by a BTC account or a gold liability owned by an EUR account).
+- Each liability denomination is valued independently; collateral references can point to multiple BTC/ETH/XAU/stock/fiat accounts.
 - Collateral never changes source quantity, cost basis, market value or net worth.
 - Debt is deducted exactly once; multiple positions sum correctly; debt-only accounts remain visible and can be negative.
 - Grouping and filters never omit or double-count liabilities.
@@ -191,7 +196,7 @@ Push each completed and verified commit to developing immediately. Each commit b
 
 ## 9. Repository invariants
 
-- Accounts remain single-asset containers; debt remains nested under the liability-asset account.
+- Accounts remain single-asset containers; positions remain nested under their owning account but carry an independent, immutable liability denomination.
 - Snapshots are manual total balances; Plutus never estimates or accrues interest.
 - Collateral links do not move, lock, subtract, or double-count assets.
 - The export envelope is unchanged.

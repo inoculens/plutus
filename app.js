@@ -13587,7 +13587,7 @@ function debtCollateralRow(list, accounts, allocation) {
   select.setAttribute('aria-label', 'Collateral account');
   var empty = document.createElement('option');
   empty.value = '';
-  empty.textContent = 'Select collateral account';
+  empty.textContent = 'Select collateral';
   select.appendChild(empty);
   (accounts || []).forEach(function (account) {
     var option = document.createElement('option');

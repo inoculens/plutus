@@ -13390,6 +13390,7 @@ function buildDebtPositionDialog() {
     '<p class="muted debt-form-hint">Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.</p>' +
     '<label for="debt-position-reported-at">Balance reported at</label><input id="debt-position-reported-at" type="datetime-local" required>' +
     '<label for="debt-position-note">Snapshot note (optional)</label><textarea id="debt-position-note" maxlength="280" rows="2"></textarea>' +
+    '<label for="debt-position-notes">Position notes (optional)</label><textarea id="debt-position-notes" maxlength="280" rows="2"></textarea>' +
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
     '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
@@ -13457,7 +13458,9 @@ function buildDebtPositionDialog() {
       balanceSnapshots: [],
       collateral: collateral
     };
-    if (position && position.notes) nextPosition.notes = position.notes;
+    var positionNotes = String(document.getElementById('debt-position-notes').value || '').trim();
+    if (positionNotes.length > 280) { fail('Position notes can be up to 280 characters.'); return; }
+    if (positionNotes) nextPosition.notes = positionNotes;
     nextPosition.balanceSnapshots.push({
       id: uid(),
       amount: amount,
@@ -13506,6 +13509,7 @@ function openDebtPositionDialog(ownerId, positionId) {
   reported.value = debtLocalDateTimeValue(new Date());
   reported.max = reported.value;
   note.value = '';
+  document.getElementById('debt-position-notes').value = (position && typeof position.notes === 'string') ? position.notes : '';
   unit.textContent = '(' + String(owner.ticker || '').toUpperCase() + ')';
   error.hidden = true;
   list.innerHTML = '';
@@ -13625,6 +13629,12 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       reported.className = 'debt-position-reported';
       reported.textContent = latest ? 'Last reported ' + new Date(latest.reportedAt).toLocaleString() : 'No snapshot recorded';
       item.appendChild(reported);
+      if (typeof position.notes === 'string' && position.notes !== '') {
+        var positionNotesEl = document.createElement('p');
+        positionNotesEl.className = 'debt-position-notes';
+        positionNotesEl.textContent = position.notes;
+        item.appendChild(positionNotesEl);
+      }
       if (Array.isArray(position.collateral) && position.collateral.length) {
         var collateral = document.createElement('p');
         collateral.className = 'debt-position-collateral';

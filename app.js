@@ -13441,6 +13441,27 @@ function debtLocalDateTimeValue(date) {
     'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
+// Most a collateral account can pledge: everything it currently holds, in
+// its own units, as form text ('' when it holds nothing). Pledges never move
+// holdings, so today's balance is the whole cap.
+function debtCollateralMaxText(trades, account) {
+  if (!account) return '';
+  var ticker = String(account.ticker || '').trim().toUpperCase();
+  if (!ticker) return '';
+  var txt = exactQtyHeldString(trades || [], account.id, ticker);
+  if (txt === null) return '';
+  var ui = qtyUiText(txt, ticker);
+  if (!ui || ui.charAt(0) === '-' || !/[1-9]/.test(ui)) return '';
+  return ui;
+}
+
+function debtCollateralError(message) {
+  var error = document.getElementById('debt-position-error');
+  if (!error) return;
+  error.textContent = message;
+  error.hidden = false;
+}
+
 function debtCollateralRow(list, accounts, allocation) {
   var row = document.createElement('div');
   row.className = 'debt-collateral-row';
@@ -13464,14 +13485,36 @@ function debtCollateralRow(list, accounts, allocation) {
   quantity.placeholder = 'Pledged quantity';
   quantity.setAttribute('aria-label', 'Pledged quantity');
   quantity.value = allocation && isFinite(Number(allocation.quantity)) ? String(allocation.quantity) : '';
+  var actions = document.createElement('div');
+  actions.className = 'debt-collateral-actions';
+  var max = document.createElement('button');
+  max.type = 'button';
+  max.className = 'debt-max-collateral';
+  max.textContent = 'Max';
+  max.addEventListener('click', function () {
+    var st = loadState();
+    var account = accountById(st, select.value);
+    var unit = account ? String(account.ticker || '').trim().toUpperCase() : '';
+    if (!account) { debtCollateralError('Choose a collateral account first.'); return; }
+    var maxText = debtCollateralMaxText(st.trades, account);
+    if (!maxText) {
+      debtCollateralError(account.name + ' holds no ' + (unit || 'units') + ' to pledge.');
+      return;
+    }
+    quantity.value = maxText;
+    var error = document.getElementById('debt-position-error');
+    if (error) error.hidden = true;
+  });
   var remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'quiet debt-remove-collateral';
   remove.textContent = 'Remove';
   remove.addEventListener('click', function () { row.remove(); });
+  actions.appendChild(max);
+  actions.appendChild(remove);
   row.appendChild(select);
   row.appendChild(quantity);
-  row.appendChild(remove);
+  row.appendChild(actions);
   list.appendChild(row);
 }
 
@@ -13612,7 +13655,15 @@ function buildDebtPositionDialog() {
         return;
       }
       if (sourceSeen[sourceId]) { fail('Each collateral account can appear only once per position.'); return; }
-      if (!accountById(state, sourceId)) { fail('A selected collateral account no longer exists.'); return; }
+      var sourceAccount = accountById(state, sourceId);
+      if (!sourceAccount) { fail('A selected collateral account no longer exists.'); return; }
+      var sourceMax = debtCollateralMaxText(state.trades, sourceAccount);
+      var sourceUnit = String(sourceAccount.ticker || '').trim().toUpperCase() || 'units';
+      if (!sourceMax || quantity > Number(sourceMax)) {
+        fail(sourceAccount.name + (sourceMax ? ' holds only ' + sourceMax : ' holds no') +
+          ' ' + sourceUnit + ' available to pledge.');
+        return;
+      }
       sourceSeen[sourceId] = true;
       collateral.push({ accountId: sourceId, quantity: quantity });
     }

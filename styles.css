@@ -2723,8 +2723,15 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08);
   outline: none;
 }
-textarea { min-height: 4rem; }
+/* Resize downwards only: dragging sideways would push past the dialog edge. */
+textarea { min-height: 4rem; resize: vertical; max-width: 100%; }
 input::placeholder { color: var(--muted-2); }
+/* Missing mandatory field: red edge, kept visible while focused. */
+input.fld-invalid, select.fld-invalid, textarea.fld-invalid,
+input.fld-invalid:focus, select.fld-invalid:focus, textarea.fld-invalid:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px var(--red-bg);
+}
 /* Number fields never show the browser's up/down stepper: amounts are typed. */
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button,
@@ -5260,24 +5267,26 @@ label.sync-check {
 .debt-snapshot-actions .debt-snapshot-delete:hover { color: var(--red); }
 .debt-position-delete { margin-top: 0.5rem; color: var(--muted); min-height: 2rem; }
 .debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
-.debt-form-hint { margin: 0.35rem 0 0.75rem; font-size: 0.82rem; line-height: 1.5; }
 .debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin-top: 1.25rem; }
 .debt-collateral-heading label { margin: 0; }
 #debt-add-collateral { flex-shrink: 0; white-space: nowrap; }
 .debt-collateral-list { display: grid; gap: 0.55rem; margin-top: 0.35rem; }
-.debt-collateral-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.65fr) auto; gap: 0.45rem; align-items: center; }
+.debt-collateral-row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(10.5rem, 1fr) auto; gap: 0.45rem; align-items: center; }
 .debt-collateral-row input, .debt-collateral-row select { min-width: 0; }
 .debt-collateral-actions { display: flex; align-items: center; gap: 0.4rem; }
 .debt-collateral-actions button { min-height: 2.5rem; padding: 0.3rem 0.6rem; }
-.debt-collateral-actions .debt-max-collateral { background: var(--accent-soft); border-color: transparent; color: var(--text); }
 .debt-collateral-actions .debt-remove-collateral { min-width: 2.5rem; padding: 0.3rem; }
 .debt-position-delete:hover { color: var(--red); }
 @media (max-width: 520px) {
-  .debt-collateral-row { grid-template-columns: 1fr 1fr; }
-  .debt-collateral-actions { grid-column: 2; justify-self: end; }
+  .debt-collateral-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .debt-collateral-row select { grid-column: 1 / -1; }
+  .debt-collateral-actions { justify-self: end; }
   .debt-position-top { align-items: flex-start; }
   .debt-positions-section { padding: 0.6rem 0.75rem 0.5rem; }
   .debt-positions-section > .debt-net-summary { margin: -0.6rem -0.75rem 0.55rem; padding: 0.65rem 0.75rem; }
+}
+@media (max-width: 360px) {
+  .debt-collateral-row { grid-template-columns: minmax(0, 1fr); }
 }
 
 .acct-debt-indicator {

@@ -13529,6 +13529,48 @@ function dockMarkup(errorId, label, buttonId, buttonType) {
     '<button class="primary" type="' + (buttonType || 'submit') + '"' + (buttonId ? ' id="' + buttonId + '"' : '') + '>' + label + '</button></div>';
 }
 
+// Empty mandatory fields turn red (instead of the browser's own bubble) and
+// the first one is focused; typing or choosing a value clears its highlight.
+var MISSING_FIELDS_MESSAGE = 'Fill all mandatory fields above first';
+
+function clearInvalidFields(form) {
+  if (!form) return;
+  Array.prototype.forEach.call(form.querySelectorAll('.fld-invalid'), function (el) {
+    el.classList.remove('fld-invalid');
+    el.removeAttribute('aria-invalid');
+  });
+}
+
+function flagMissingFields(form) {
+  if (!form) return false;
+  if (!form.getAttribute('data-invalid-wired')) {
+    form.setAttribute('data-invalid-wired', '1');
+    var unflag = function (event) {
+      var el = event && event.target;
+      if (el && el.classList && el.classList.contains('fld-invalid')) {
+        el.classList.remove('fld-invalid');
+        el.removeAttribute('aria-invalid');
+      }
+    };
+    form.addEventListener('input', unflag);
+    form.addEventListener('change', unflag);
+  }
+  var first = null;
+  Array.prototype.forEach.call(form.querySelectorAll('[required]'), function (el) {
+    if (el.disabled) return;
+    var empty = !String(el.value || '').trim();
+    el.classList.toggle('fld-invalid', empty);
+    if (empty) {
+      el.setAttribute('aria-invalid', 'true');
+      if (!first) first = el;
+    } else {
+      el.removeAttribute('aria-invalid');
+    }
+  });
+  if (first) { try { first.focus(); } catch (e) { /* ignore */ } }
+  return !!first;
+}
+
 function dockError(id, message) {
   if (message) dockErrorShow(id, message);
   else dockErrorClear(id);
@@ -13545,7 +13587,7 @@ function debtCollateralRow(list, accounts, allocation) {
   select.setAttribute('aria-label', 'Collateral account');
   var empty = document.createElement('option');
   empty.value = '';
-  empty.textContent = 'Select collateral account';
+  empty.textContent = 'Select collateral';
   select.appendChild(empty);
   (accounts || []).forEach(function (account) {
     var option = document.createElement('option');
@@ -13565,7 +13607,7 @@ function debtCollateralRow(list, accounts, allocation) {
   actions.className = 'debt-collateral-actions';
   var max = document.createElement('button');
   max.type = 'button';
-  max.className = 'debt-max-collateral';
+  max.className = 'quiet debt-max-collateral';
   max.textContent = 'Max';
   max.addEventListener('click', function () {
     var st = loadState();
@@ -13642,17 +13684,15 @@ function buildDebtPositionDialog() {
   dlg.innerHTML =
     '<div class="dialog-head"><h2 id="debt-position-title">Debt position</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
-    '<form id="debt-position-form">' +
+    '<form id="debt-position-form" novalidate>' +
     '<label for="debt-position-name">Position name</label><input id="debt-position-name" maxlength="120" required autocomplete="off">' +
-    '<label>Debt denomination</label><div class="debt-asset-fields">' +
+    '<label>Debt denomination' + infoPill('Choose the unit in which the lender reports the debt.', 'debt-position-asset-status') + '</label><div class="debt-asset-fields">' +
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
     '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
     '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
     '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. BTC" aria-label="Ticker"></div>' +
-    '<p id="debt-position-asset-status" class="muted debt-form-hint">Choose the unit in which the lender reports the debt.</p>' +
-    '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
+    '<label for="debt-position-balance">Total outstanding balance<span id="debt-position-unit"></span>' + infoPill('Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.') + '</label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
-    '<p class="muted debt-form-hint">Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.</p>' +
     '<label for="debt-position-reported-at">Balance reported at</label><input id="debt-position-reported-at" type="datetime-local" required>' +
     '<label for="debt-position-note">Snapshot note (optional)</label><textarea id="debt-position-note" maxlength="280" rows="2"></textarea>' +
     '<label for="debt-position-notes">Position notes (optional)</label><textarea id="debt-position-notes" maxlength="280" rows="2"></textarea>' +
@@ -13672,6 +13712,7 @@ function buildDebtPositionDialog() {
     if (event && event.preventDefault) event.preventDefault();
     function fail(message) { dockError('debt-position-error', message); }
     dockError('debt-position-error', '');
+    if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
     var ownerId = dlg.getAttribute('data-owner-id') || '';
     var owner = accountById(state, ownerId);
@@ -13800,15 +13841,16 @@ function openDebtPositionDialog(ownerId, positionId) {
   function syncDebtAssetUI() {
     var kind = String(assetKindInput.value || '').trim().toLowerCase();
     var ticker = String(assetTickerInput.value || '').trim().toUpperCase();
-    unit.textContent = ticker ? '(' + ticker + ')' : '';
+    unit.textContent = ticker ? ' (' + ticker + ')' : '';
     assetTickerInput.placeholder = 'Ticker, e.g. ' + debtAssetTickerExample(kind, owner);
-    var status = document.getElementById('debt-position-asset-status');
+    var status = hintTextTarget(document.getElementById('debt-position-asset-status'));
     if (status) status.textContent = describeDebtAsset(kind, ticker);
   }
   assetKindInput.onchange = syncDebtAssetUI;
   assetTickerInput.oninput = syncDebtAssetUI;
   syncDebtAssetUI();
   dockError('debt-position-error', '');
+  clearInvalidFields(document.getElementById('debt-position-form'));
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13849,14 +13891,13 @@ function buildDebtSnapshotDialog() {
   dlg.innerHTML =
     '<div class="dialog-head"><h2 id="debt-snapshot-title">Edit reported balance</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
-    '<form id="debt-snapshot-form">' +
-    '<label for="debt-snapshot-amount">Reported balance <span id="debt-snapshot-unit"></span></label>' +
+    '<form id="debt-snapshot-form" novalidate>' +
+    '<label for="debt-snapshot-amount">Reported balance<span id="debt-snapshot-unit"></span>' + infoPill('This corrects the selected entry. The position keeps its other reported balances.') + '</label>' +
     '<input id="debt-snapshot-amount" type="number" min="0" step="any" required inputmode="decimal">' +
     '<label for="debt-snapshot-reported-at">Balance reported at</label>' +
     '<input id="debt-snapshot-reported-at" type="datetime-local" required>' +
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
-    '<p class="muted debt-form-hint">This corrects the selected entry. The position keeps its other reported balances.</p>' +
     dockMarkup('debt-snapshot-error', 'Save changes') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
@@ -13865,6 +13906,7 @@ function buildDebtSnapshotDialog() {
     if (event && event.preventDefault) event.preventDefault();
     function fail(message) { dockError('debt-snapshot-error', message); }
     dockError('debt-snapshot-error', '');
+    if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
     if (!owner) { fail('The liability account no longer exists.'); return; }
@@ -13926,7 +13968,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   dlg.setAttribute('data-position-id', position.id);
   dlg.setAttribute('data-snapshot-id', snapshot.id);
   var ticker = String(position.assetTicker || owner.ticker || '').trim().toUpperCase();
-  document.getElementById('debt-snapshot-unit').textContent = ticker ? '(' + ticker + ')' : '';
+  document.getElementById('debt-snapshot-unit').textContent = ticker ? ' (' + ticker + ')' : '';
   document.getElementById('debt-snapshot-amount').value = String(snapshot.amount);
   var reported = document.getElementById('debt-snapshot-reported-at');
   reported.value = debtLocalDateTimeValue(new Date(snapshot.reportedAt));
@@ -13935,6 +13977,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   dlg.setAttribute('data-reported-local', reported.value);
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
   dockError('debt-snapshot-error', '');
+  clearInvalidFields(document.getElementById('debt-snapshot-form'));
   openDialog('debt-snapshot-dialog');
 }
 

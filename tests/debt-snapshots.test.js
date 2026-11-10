@@ -150,10 +150,8 @@ assert.equal(JSON.parse(damaged.store.get(REC))[0].raw, damagedRaw, 'a later sav
   });
   const windows = C.debtPositionPositiveBalanceWindows(windowPosition);
   assert.equal(windows.length, 2);
-  assert.deepEqual(windows[0], {
-    from: Date.parse('2026-11-10T10:00:00.000Z'),
-    to: Date.parse('2026-11-10T11:00:00.000Z')
-  });
+  assert.equal(windows[0].from, Date.parse('2026-11-10T10:00:00.000Z'));
+  assert.equal(windows[0].to, Date.parse('2026-11-10T11:00:00.000Z'));
   assert.equal(windows[1].from, Date.parse('2026-11-10T12:00:00.000Z'));
   assert.equal(windows[1].to, Infinity, 'the last positive snapshot remains effective until another report');
 

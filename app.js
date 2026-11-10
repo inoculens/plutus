@@ -2380,13 +2380,15 @@ function getCachedRate(date, from, to) {
   // pair "missing" forever — the trade kept its old-main lock in a USD view
   // (nominal numbers never converted) and the pair was refetched every paint.
   if ((f === 'USD' && stableToUsd(t)) || (stableToUsd(f) && t === 'USD')) return { rate: 1, source: '1:1' };
+  var effF = stableToUsd(f) ? 'USD' : f;
+  var effT = stableToUsd(t) ? 'USD' : t;
   var cache = loadFxCache();
-  var hit = cache[fxCacheKey(date, f, t)];
+  var hit = cache[fxCacheKey(date, f, t)] || ((effF !== f || effT !== t) ? cache[fxCacheKey(date, effF, effT)] : null);
   if (hit && isFinite(Number(hit.rate)) && Number(hit.rate) > 0 && typeof hit.source === 'string') {
     // Self-heal: a cached exactly-1 for two distinct, non-stable fiats is a
     // stale artifact, never a real ECB fixing — a 1:1 would pose as a rate
     // forever (fills skip cached pairs). Treat as missing so it refetches.
-    if (Number(hit.rate) === 1) return null;
+    if (Number(hit.rate) === 1 && !stableToUsd(f) && !stableToUsd(t)) return null;
     return { rate: Number(hit.rate), source: hit.source };
   }
   return null;
@@ -5188,6 +5190,11 @@ function fetchCryptoFallbackUsd(sym, fetchImpl) {
       if (isFinite(price) && price > 0) return price;
     }
     return fetchBinanceLiveUsd(sym, fetchImpl);
+  }).then(function (price) {
+    var p = Number(price);
+    if (isFinite(p) && p > 0) return p;
+    if (stableToUsd(sym)) return 1.0;
+    return null;
   });
 }
 
@@ -6545,7 +6552,7 @@ function fetchArchiveHistory(sym, dateStr, vs) {
 // Kraken public OHLC, daily close (no key, CORS-enabled). Majors only;
 // USD/EUR direct, other fiats via the USD pivot + historical ECB.
 var KRAKEN_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
-var KRAKEN_LIVE_SYMBOLS = KRAKEN_SYMBOLS.concat(['XMR', 'AAVE']);
+var KRAKEN_LIVE_SYMBOLS = KRAKEN_SYMBOLS.concat(['XMR', 'AAVE', 'USDC', 'USDT']);
 function fetchKrakenHistory(sym, dateStr, vs) {
   var s = String(sym || '').trim().toUpperCase();
   var c = String(vs || '').trim().toUpperCase();
@@ -6807,8 +6814,27 @@ function fetchHistoricalPrice(symbol, dateStr, vs, kind) {
   if (kd === 'custom' || kd === 'cash') return Promise.resolve(null);
   if (kd === 'stock') return fetchHistoricalStockPrice(sym, day, cur);
   if (kd === 'commodity') return fetchHistoricalCommodityPrice(sym, day, cur);
-  if (!SYMBOL_MAP[sym]) return Promise.resolve(null);
-  return fetchHistoricalCryptoPrice(sym, day, cur);
+  if (!SYMBOL_MAP[sym]) {
+    if (stableToUsd(sym)) {
+      if (cur === 'USD') return Promise.resolve(1.0);
+      return fetchEcbRate(day, 'USD', cur).then(function (r) {
+        var v = Number(r && r.rate);
+        return (isFinite(v) && v > 0) ? v : 1.0;
+      }, function () { return 1.0; });
+    }
+    return Promise.resolve(null);
+  }
+  return fetchHistoricalCryptoPrice(sym, day, cur).then(function (p) {
+    if (isFinite(Number(p)) && Number(p) > 0) return Number(p);
+    if (stableToUsd(sym)) {
+      if (cur === 'USD') return 1.0;
+      return fetchEcbRate(day, 'USD', cur).then(function (r) {
+        var v = Number(r && r.rate);
+        return (isFinite(v) && v > 0) ? v : 1.0;
+      }, function () { return 1.0; });
+    }
+    return null;
+  });
 }
 
 // Sync read for paint: override, else cache, else null (async fill follows).
@@ -9140,7 +9166,15 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
         }));
         return;
       }
-      debtAmounts.push({ identity: priceKeyOf(ticker, kind), ticker: ticker, kind: kind, amount: amount });
+      var debtIdentity = priceKeyOf(ticker, kind);
+      var currentDebtPrice = Number(prices[debtIdentity]);
+      if (!(isFinite(currentDebtPrice) && currentDebtPrice > 0) && !PRICE_COLLISIONS[ticker]) {
+        currentDebtPrice = Number(prices[ticker]);
+      }
+      if (!(isFinite(currentDebtPrice) && currentDebtPrice > 0)) {
+        missing[debtIdentity] = kind;
+      }
+      debtAmounts.push({ identity: debtIdentity, ticker: ticker, kind: kind, amount: amount });
     });
   });
 
@@ -9307,11 +9341,46 @@ function summaryLifetimeCost(st, rows, dtrades, visibleAccounts) {
 // Current liability valuation is separate from holdings/trade accounting.
 // Prices are already denominated in the selected main currency; fiat debt
 // uses the same date-pinned FX cache as other cash balance displays.
+function debtPositionValuation(position, main, prices, asOf, owningAccount) {
+  if (!position) return { value: null, known: false, amount: 0 };
+  var cutoff = asOf === undefined || asOf === null ? Date.now() : asOf;
+  var snapshot = latestDebtBalanceSnapshot(position, cutoff);
+  var amount = snapshot ? Number(snapshot.amount) : 0;
+  if (!(amount > 0)) return { value: 0, known: true, amount: 0 };
+  var ticker = String(position.assetTicker || (owningAccount && owningAccount.ticker) || '').trim().toUpperCase();
+  var kind = String(position.assetKind || (owningAccount && owningAccount.kind) || 'crypto').trim().toLowerCase();
+  if (!ticker) return { value: null, known: false, amount: amount };
+  var day = todayStr();
+  var mainUp = String(main || '').trim().toUpperCase();
+  var value = null;
+  if (isCashKind(kind)) {
+    var rate = ticker === mainUp ? { rate: 1 } : getCachedRate(day, ticker, mainUp);
+    if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) value = amount * Number(rate.rate);
+  } else {
+    var priceMap = prices || livePrices || {};
+    var key = priceKeyOf(ticker, kind);
+    var price = Number(priceMap[key]);
+    if (!(isFinite(price) && price > 0) && !PRICE_COLLISIONS[ticker]) price = Number(priceMap[ticker]);
+    if (isFinite(price) && price > 0) value = amount * price;
+    else if (stableToUsd(ticker)) {
+      if (mainUp === 'USD') value = amount;
+      else {
+        var fx = getCachedRate(day, 'USD', mainUp);
+        if (fx && isFinite(Number(fx.rate)) && Number(fx.rate) > 0) value = amount * Number(fx.rate);
+      }
+    }
+  }
+  return {
+    value: (value !== null && isFinite(value)) ? value : null,
+    known: (value !== null && isFinite(value)),
+    amount: amount
+  };
+}
+
 function currentDebtValuation(accounts, main, prices, asOf) {
   var source = Array.isArray(accounts) ? accounts : [];
   var priceMap = prices || livePrices || {};
   var cutoff = asOf === undefined || asOf === null ? Date.now() : asOf;
-  var day = todayStr();
   var seen = Object.create(null);
   var total = 0;
   var hasDebt = false;
@@ -9325,24 +9394,10 @@ function currentDebtValuation(accounts, main, prices, asOf) {
     positionCount += positions.length;
     hasDebt = true;
     positions.forEach(function (position) {
-      var snapshot = latestDebtBalanceSnapshot(position, cutoff);
-      var amount = snapshot ? Number(snapshot.amount) : 0;
-      if (!(amount > 0)) return;
-      var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
-      var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
-      if (!ticker) { complete = false; return; }
-      var value = null;
-      if (isCashKind(kind)) {
-        var rate = ticker === String(main || '').toUpperCase() ? { rate: 1 } : getCachedRate(day, ticker, main);
-        if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) value = amount * Number(rate.rate);
-      } else {
-        var key = priceKeyOf(ticker, kind);
-        var price = Number(priceMap[key]);
-        if (!(isFinite(price) && price > 0) && !PRICE_COLLISIONS[ticker]) price = Number(priceMap[ticker]);
-        if (isFinite(price) && price > 0) value = amount * price;
-      }
-      if (value === null || !isFinite(value)) complete = false;
-      else total += value;
+      var posVal = debtPositionValuation(position, main, priceMap, cutoff, account);
+      if (!(posVal.amount > 0)) return;
+      if (!posVal.known || posVal.value === null) complete = false;
+      else total += posVal.value;
     });
   });
   return {
@@ -10395,7 +10450,13 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   valv.className = 'acct-value';
   var plv = document.createElement('span');
   var accTick = String(acc.ticker || '').toUpperCase();
-  var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick, acc.id);
+  var debtLoading = debtInfo.hasDebt && !debtInfo.complete && scopeAccounts.some(function (a) {
+    return accountDebtPositions(a).some(function (p) {
+      var pt = String(p.assetTicker || '').trim().toUpperCase();
+      return pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
+    });
+  });
+  var accLoading = (!valKnown) && (debtLoading || (!!scopeTrades && isPriceLoading(accTick, acc.id)));
   valv.textContent = valKnown ? fmtMoney(valNum, main) : (debtInfo.hasDebt || scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
   paintLoading(valv, accLoading, acc.name + ' value');
   if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
@@ -13414,6 +13475,42 @@ function debtCollateralRow(list, accounts, allocation) {
   list.appendChild(row);
 }
 
+function describeDebtAsset(kind, ticker) {
+  var k = String(kind || '').trim().toLowerCase();
+  var t = String(ticker || '').trim().toUpperCase();
+  if (!t) return 'Choose the unit in which the lender reports the debt.';
+  if (k === 'crypto') {
+    if (t === 'USDC') return 'USD Coin (USDC) · Live crypto quote';
+    if (t === 'USDT') return 'Tether (USDT) · Live crypto quote';
+    if (t === 'DAI') return 'Dai (DAI) · Live crypto quote';
+    if (typeof SYMBOL_MAP === 'object' && SYMBOL_MAP && SYMBOL_MAP[t]) return SYMBOL_MAP[t] + ' (' + t + ') · Live CoinGecko quote';
+    return 'Crypto (' + t + ') · manual price override if unquoted';
+  }
+  if (k === 'cash') {
+    return 'Fiat currency (' + t + ') · ECB exchange rate';
+  }
+  if (k === 'commodity') {
+    if (typeof hasCommoditySource === 'function' && hasCommoditySource(t)) return 'Commodity (' + t + ') · Live market quote';
+    return 'Commodity (' + t + ') · manual price override';
+  }
+  if (k === 'stock') {
+    return 'Stock / ETF (' + t + ') · Live market quote';
+  }
+  if (k === 'custom') {
+    return 'Custom asset (' + t + ') · manual price override only';
+  }
+  return 'Debt denomination: ' + t;
+}
+
+function debtAssetSuggestions(kind) {
+  var k = String(kind || '').trim().toLowerCase();
+  if (k === 'crypto') return ['USDC', 'USDT', 'DAI', 'BTC', 'ETH', 'SOL', 'XMR', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
+  if (k === 'cash') return ['USD', 'EUR', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
+  if (k === 'commodity') return ['XAU', 'XAG', 'PA', 'PL'];
+  if (k === 'stock') return ['SPCX', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'];
+  return [];
+}
+
 function buildDebtPositionDialog() {
   var existing = document.getElementById('debt-position-dialog');
   if (existing) return existing;
@@ -13429,8 +13526,9 @@ function buildDebtPositionDialog() {
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
     '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
     '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
-    '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Asset ticker" aria-label="Debt asset ticker"></div>' +
-    '<p class="muted debt-form-hint">Independent of the account and collateral. Choose the unit in which the lender reports the debt.</p>' +
+    '<input id="debt-position-asset-ticker" list="debt-position-ticker-datalist" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Asset ticker" aria-label="Debt asset ticker">' +
+    '<datalist id="debt-position-ticker-datalist"></datalist></div>' +
+    '<p id="debt-position-asset-status" class="muted debt-form-hint">Choose the unit in which the lender reports the debt.</p>' +
     '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
     '<p class="muted debt-form-hint">Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.</p>' +
@@ -13539,6 +13637,7 @@ function buildDebtPositionDialog() {
     closeDialog(dlg);
     clearBanner();
     render();
+    try { refreshPrices(); } catch (e) { /* ignore */ }
   });
   return dlg;
 }
@@ -13573,10 +13672,26 @@ function openDebtPositionDialog(ownerId, positionId) {
   assetTickerInput.value = position ? position.assetTicker : String(owner.ticker || '').toUpperCase();
   assetKindInput.disabled = !!position;
   assetTickerInput.disabled = !!position;
-  function refreshDebtUnit() { unit.textContent = '(' + String(assetTickerInput.value || '').trim().toUpperCase() + ')'; }
-  assetKindInput.onchange = refreshDebtUnit;
-  assetTickerInput.oninput = refreshDebtUnit;
-  refreshDebtUnit();
+  function syncDebtAssetUI() {
+    var kind = String(assetKindInput.value || '').trim().toLowerCase();
+    var ticker = String(assetTickerInput.value || '').trim().toUpperCase();
+    unit.textContent = ticker ? '(' + ticker + ')' : '';
+    assetTickerInput.placeholder = kind === 'stock' ? 'e.g. SPCX'
+      : (kind === 'commodity' ? 'e.g. XAU'
+      : (kind === 'cash' ? 'e.g. USD'
+      : (kind === 'custom' ? 'e.g. LOAN' : 'e.g. USDC')));
+    var datalist = document.getElementById('debt-position-ticker-datalist');
+    if (datalist) {
+      datalist.innerHTML = debtAssetSuggestions(kind).map(function (sym) {
+        return '<option value="' + sym + '">';
+      }).join('');
+    }
+    var status = document.getElementById('debt-position-asset-status');
+    if (status) status.textContent = describeDebtAsset(kind, ticker);
+  }
+  assetKindInput.onchange = syncDebtAssetUI;
+  assetTickerInput.oninput = syncDebtAssetUI;
+  syncDebtAssetUI();
   error.hidden = true;
   list.innerHTML = '';
   var selectable = state.accounts || [];
@@ -13602,6 +13717,7 @@ function removeDebtPosition(ownerId, positionId) {
     if (!currentOwner.debtPositions.length) delete currentOwner.debtPositions;
     if (!saveStateGuarded(fresh)) return;
     render();
+    try { refreshPrices(); } catch (e) { /* ignore */ }
   });
 }
 
@@ -13624,8 +13740,14 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       line.appendChild(valueEl);
       summary.appendChild(line);
     }
+    var debtLoading = !financial.debt.complete && scope.some(function (owner) {
+      return accountDebtPositions(owner).some(function (p) {
+        var pt = String(p.assetTicker || '').trim().toUpperCase();
+        return pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
+      });
+    });
     summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, st.settings.mainCurrency) : '—');
-    summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, st.settings.mainCurrency) : '—');
+    summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, st.settings.mainCurrency) : (debtLoading ? PRICE_LOADING_TEXT : '—'));
     summaryLine('Net value', financial.gross && financial.gross.complete && financial.debt.complete
       ? fmtMoney(financial.gross.value - financial.debt.value, st.settings.mainCurrency) : '—');
     section.appendChild(summary);
@@ -13687,7 +13809,15 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       var latest = latestDebtBalanceSnapshot(position, Date.now());
       var amount = document.createElement('p');
       amount.className = 'debt-position-amount';
-      amount.textContent = latest ? formatDebtPositionAmount(latest.amount, position) : 'No reported balance';
+      var mainCur = String(st.settings.mainCurrency || '').trim().toUpperCase();
+      var pTicker = String(position.assetTicker || (owner && owner.ticker) || '').trim().toUpperCase();
+      var pKind = String(position.assetKind || (owner && owner.kind) || 'crypto').trim().toLowerCase();
+      var posVal = latest ? debtPositionValuation(position, mainCur, livePrices, null, owner) : null;
+      var posText = latest ? formatDebtPositionAmount(latest.amount, position) : 'No reported balance';
+      if (latest && posVal && posVal.known && posVal.value !== null && (!isCashKind(pKind) || pTicker !== mainCur)) {
+        posText += ' (≈ ' + fmtMoney(posVal.value, mainCur) + ')';
+      }
+      amount.textContent = posText;
       item.appendChild(amount);
       var reported = document.createElement('p');
       reported.className = 'debt-position-reported';

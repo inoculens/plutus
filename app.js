@@ -415,6 +415,7 @@ function loadState() {
   var settings = normalizeSettings(parsed.settings, fallback.settings);
   activeDateFormat = settings.dateFormat;
   try { noteSymbolKinds(accounts, trades); } catch (e) { /* never breaks load */ }
+  try { priceOverrides = migrateLegacyOverrides(priceOverrides); } catch (e) { /* never breaks load */ }
   return {
     settings: settings,
     accounts: accounts,
@@ -2106,7 +2107,7 @@ function displayPairs(trades, main, kinds) {
       try { fr = frozenExecOf(t); } catch (e) { fr = null; }
       if (fr && fr.vs && fr.vs !== m) need(d, fr.vs);
       var oe = null;
-      try { oe = priceOverrideEntry(t.symbol); } catch (e) { oe = null; }
+      try { oe = priceOverrideEntry(t.symbol, PRICE_KIND_BY_ACCOUNT[t.accountId]); } catch (e) { oe = null; }
       if (oe && oe.vs && oe.vs !== m) need(d, oe.vs);
     }
   });
@@ -4429,35 +4430,37 @@ function priceCacheKey(symbol, vs) {
   return String(symbol).toUpperCase() + ':' + String(vs).toUpperCase();
 }
 
-function priceOverrideFor(symbol) {
-  var e = null;
-  try { e = priceOverrideEntry(symbol); } catch (err) { e = null; }
-  return e ? e.price : null;
+// --- Manual override identity ---
+// Overrides follow the same asset-identity rule as live prices: a ticker is
+// not a unique asset. Entries are stored under "kind:SYM" (crypto:W, stock:W).
+// Legacy entries stored under the bare ticker keep working while the ticker
+// belongs to a single asset kind; once a ticker is shared by several kinds a
+// bare entry is ambiguous and is applied to NONE of them (it stays stored,
+// untouched, until the user assigns it to a kind in Settings).
+var OVERRIDE_KIND_RE = /^(crypto|stock|commodity|cash|custom):(.+)$/i;
+
+function overrideKey(kind, symbol) {
+  return normPriceKind(kind) + ':' + String(symbol === undefined || symbol === null ? '' : symbol).trim().toUpperCase();
 }
 
-// Raw override entry with its fiat: {price, vs} where vs is null for legacy
-// bare numbers (fiat unknown — treated as the requested fiat, exactly the
-// old behavior). New saves always tag the fiat they were entered in.
-function priceOverrideEntry(symbol) {
-  var sym = String(symbol).trim().toUpperCase();
-  var ov = null;
-  try {
-    var st = loadState();
-    ov = st ? st.priceOverrides : null;
-  } catch (e) {
-    ov = null;
-  }
-  if (!ov || typeof ov !== 'object') return null;
-  var raw = null;
-  if (Object.prototype.hasOwnProperty.call(ov, sym)) {
-    raw = ov[sym];
-  } else {
-    // Tolerate differently-cased keys without touching stored data.
-    var keys = Object.keys(ov);
-    for (var i = 0; i < keys.length; i++) {
-      if (String(keys[i]).toUpperCase() === sym) { raw = ov[keys[i]]; break; }
-    }
-  }
+// "stock:W" -> {kind:'stock', sym:'W'}; a bare ticker -> null.
+function splitOverrideKey(key) {
+  var m = OVERRIDE_KIND_RE.exec(String(key === undefined || key === null ? '' : key).trim());
+  return m ? { kind: m[1].toLowerCase(), sym: m[2].trim().toUpperCase() } : null;
+}
+
+// Kind a caller means: its explicit kind, else the only kind the portfolio
+// holds this ticker under, else null (unknown).
+function overrideKindFor(sym, kind) {
+  var k = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
+  if (k === 'crypto' || k === 'stock' || k === 'commodity' || k === 'cash' || k === 'custom') return k;
+  var held = Object.keys(PRICE_KINDS_BY_SYMBOL[sym] || {});
+  return held.length === 1 ? held[0] : null;
+}
+
+// Parse one stored override value into {price, vs} (vs null for a legacy bare
+// number), or null when invalid.
+function parseOverrideRaw(raw) {
   if (typeof raw === 'number') {
     return (isFinite(raw) && raw > 0) ? { price: raw, vs: null } : null;
   }
@@ -4467,6 +4470,133 @@ function priceOverrideEntry(symbol) {
     if (isFinite(p) && p > 0 && /^[A-Z]{2,10}$/.test(vs)) return { price: p, vs: vs };
   }
   return null;
+}
+
+// Which stored entry applies to this asset: {key, raw} or null.
+function findOverrideRaw(ov, symbol, kind) {
+  if (!ov || typeof ov !== 'object') return null;
+  var sym = String(symbol === undefined || symbol === null ? '' : symbol).trim().toUpperCase();
+  if (!sym) return null;
+  var keys = Object.keys(ov);
+  var eff = overrideKindFor(sym, kind);
+  var i, parts;
+  if (eff) {
+    for (i = 0; i < keys.length; i++) {
+      parts = splitOverrideKey(keys[i]);
+      if (parts && parts.sym === sym && parts.kind === eff) return { key: keys[i], raw: ov[keys[i]] };
+    }
+  }
+  if (PRICE_COLLISIONS[sym]) return null; // shared ticker: a bare/other-kind entry could be another asset's
+  for (i = 0; i < keys.length; i++) { // legacy bare entry (tolerates key casing)
+    if (!splitOverrideKey(keys[i]) && String(keys[i]).trim().toUpperCase() === sym) return { key: keys[i], raw: ov[keys[i]] };
+  }
+  if (!eff) { // kind unknown and ticker unshared: a single composite entry is unambiguous
+    var found = null;
+    for (i = 0; i < keys.length; i++) {
+      parts = splitOverrideKey(keys[i]);
+      if (parts && parts.sym === sym) { if (found) return null; found = { key: keys[i], raw: ov[keys[i]] }; }
+    }
+    return found;
+  }
+  return null;
+}
+
+// Move legacy bare entries to "kind:SYM" when the portfolio holds the ticker
+// under exactly one kind. Ambiguous (shared) and unheld tickers are left as
+// stored; nothing is deleted or overwritten. Returns a new object.
+function migrateLegacyOverrides(ov) {
+  var out = {};
+  if (!ov || typeof ov !== 'object' || Array.isArray(ov)) return out;
+  var keys = Object.keys(ov);
+  var taken = {};
+  keys.forEach(function (k) { var pr = splitOverrideKey(k); if (pr) taken[pr.kind + ':' + pr.sym] = true; });
+  keys.forEach(function (k) {
+    if (splitOverrideKey(k)) { out[k] = ov[k]; return; }
+    var sym = String(k).trim().toUpperCase();
+    var held = Object.keys(PRICE_KINDS_BY_SYMBOL[sym] || {});
+    if (held.length === 1 && !taken[held[0] + ':' + sym]) {
+      out[held[0] + ':' + sym] = ov[k];
+      taken[held[0] + ':' + sym] = true;
+    } else {
+      out[k] = ov[k];
+    }
+  });
+  return out;
+}
+
+// Settings-list operations on the stored map, by exact key. Each touches only
+// the one entry it names. Pure (mutate the passed map, no storage access).
+
+// Add/replace an override from the form. pickedKind: 'crypto'|'stock'|
+// 'commodity' or anything else for Auto (the kind the portfolio holds the
+// ticker under; a shared ticker must be chosen). Returns {ok, key} or {ok:false, error}.
+function overrideAdd(ov, symbol, price, vs, pickedKind) {
+  var sym = String(symbol === undefined || symbol === null ? '' : symbol).trim().toUpperCase();
+  var k = String(pickedKind === undefined || pickedKind === null ? '' : pickedKind).trim().toLowerCase();
+  var key = sym;
+  if (k === 'crypto' || k === 'stock' || k === 'commodity') {
+    key = overrideKey(k, sym);
+  } else {
+    var held = Object.keys(PRICE_KINDS_BY_SYMBOL[sym] || {});
+    if (held.length > 1) {
+      return { ok: false, error: sym + ' is held as more than one asset kind — choose which one this override is for.' };
+    }
+    if (held.length === 1) key = overrideKey(held[0], sym);
+  }
+  ov[key] = { price: price, vs: String(vs).toUpperCase() };
+  return { ok: true, key: key };
+}
+
+function overrideSetFiat(ov, key, vs) {
+  var fiat = String(vs === undefined || vs === null ? '' : vs).trim().toUpperCase();
+  if (!/^[A-Z]{2,10}$/.test(fiat)) return false;
+  if (!ov || !Object.prototype.hasOwnProperty.call(ov, key)) return false;
+  var cur = ov[key];
+  var price = (cur && typeof cur === 'object' && !Array.isArray(cur)) ? Number(cur.price) : Number(cur);
+  if (!isFinite(price) || price <= 0) return false;
+  ov[key] = { price: price, vs: fiat };
+  return true;
+}
+
+function overrideRemove(ov, key) {
+  if (!ov || !Object.prototype.hasOwnProperty.call(ov, key)) return false;
+  delete ov[key];
+  return true;
+}
+
+// Give an ambiguous bare entry to one asset kind. Never overwrites an
+// existing entry for that kind.
+function overrideAssignKind(ov, fromKey, kind) {
+  if (!ov || !Object.prototype.hasOwnProperty.call(ov, fromKey)) return { ok: false, error: 'missing' };
+  if (splitOverrideKey(fromKey)) return { ok: false, error: 'already assigned' };
+  var to = overrideKey(kind, fromKey);
+  if (Object.prototype.hasOwnProperty.call(ov, to)) return { ok: false, error: 'exists', key: to };
+  ov[to] = ov[fromKey];
+  delete ov[fromKey];
+  return { ok: true, key: to };
+}
+
+function priceOverrideFor(symbol, kind) {
+  var e = null;
+  try { e = priceOverrideEntry(symbol, kind); } catch (err) { e = null; }
+  return e ? e.price : null;
+}
+
+// Raw override entry with its fiat: {price, vs} where vs is null for legacy
+// bare numbers (fiat unknown — treated as the requested fiat, exactly the
+// old behavior). New saves always tag the fiat they were entered in.
+// `kind` is the asset kind of the position being priced; see "Manual
+// override identity" for how shared tickers are resolved.
+function priceOverrideEntry(symbol, kind) {
+  var ov = null;
+  try {
+    var st = loadState();
+    ov = st ? st.priceOverrides : null;
+  } catch (e) {
+    ov = null;
+  }
+  var hit = findOverrideRaw(ov, symbol, kind);
+  return hit ? parseOverrideRaw(hit.raw) : null;
 }
 
 function priceDefaultVs(vs) {
@@ -5194,7 +5324,7 @@ function fetchLivePrice(symbol, vs, kind) {
   // converts at the CURRENT rate (it stands in for the live price), and
   // resolves unknown — never mislabeled — when conversion fails.
   var ovEntry = null;
-  try { ovEntry = priceOverrideEntry(sym); } catch (e) { ovEntry = null; }
+  try { ovEntry = priceOverrideEntry(sym, kind); } catch (e) { ovEntry = null; }
   if (ovEntry !== null) {
     if (!ovEntry.vs || ovEntry.vs === cur) return Promise.resolve(ovEntry.price);
     var ovCached = priceCache[key];
@@ -5374,7 +5504,7 @@ function refreshAllPricesCore(symbols, vs, kinds) {
     // current rate (or resolve unknown when conversion fails — never
     // mislabeled).
     var ovE = null;
-    try { ovE = priceOverrideEntry(sym); } catch (e) { ovE = null; }
+    try { ovE = priceOverrideEntry(sym, kindFor(sym)); } catch (e) { ovE = null; }
     if (ovE !== null) {
       if (!ovE.vs || ovE.vs === cur) { out[sym] = ovE.price; return; }
       ovConvJobs.push({ sym: sym, price: ovE.price, vs: ovE.vs });
@@ -5659,23 +5789,19 @@ function dropBakedExecLocks(trades, overrides) {
   var changed = false;
   try {
     var ov = (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) ? overrides : {};
-    var keys = Object.keys(ov);
     (trades || []).forEach(function (t) {
       if (!t || typeof t !== 'object' || (t.type !== 'buy' && t.type !== 'sell')) return;
       var fr = null;
       try { fr = frozenExecOf(t); } catch (e) { fr = null; }
       if (!fr || String(fr.source).toLowerCase() === 'manual') return;
-      var sym = String((t && t.symbol) || '').toUpperCase();
-      for (var i = 0; i < keys.length; i++) {
-        if (String(keys[i]).toUpperCase() !== sym) continue;
-        var raw = ov[keys[i]];
-        var op = (typeof raw === 'number') ? raw
-          : ((raw && typeof raw === 'object' && !Array.isArray(raw)) ? Number(raw.price) : NaN);
-        if (isFinite(op) && op > 0 && op === fr.price) {
-          try { delete t.execLock; } catch (e) { t.execLock = undefined; }
-          changed = true;
-        }
-        break;
+      var hit = findOverrideRaw(ov, t.symbol, PRICE_KIND_BY_ACCOUNT[t.accountId]);
+      if (!hit) return;
+      var raw = hit.raw;
+      var op = (typeof raw === 'number') ? raw
+        : ((raw && typeof raw === 'object' && !Array.isArray(raw)) ? Number(raw.price) : NaN);
+      if (isFinite(op) && op > 0 && op === fr.price) {
+        try { delete t.execLock; } catch (e) { t.execLock = undefined; }
+        changed = true;
       }
     });
   } catch (e) { /* repair never breaks the run */ }
@@ -5763,7 +5889,7 @@ function freezeExecLock(tradeId, symbol, date, mainU, kind) {
   }
   // A live global override already serves this trade's Exec row: never stamp
   // a live price as a historical quote.
-  try { if (priceOverrideEntry(sym) !== null) return; } catch (e) { /* fall through */ }
+  try { if (priceOverrideEntry(sym, kd) !== null) return; } catch (e) { /* fall through */ }
   var kk = histKindFor(kd);
   var ckey = sym + '|' + day + '|' + m + '|' + kk;
   // Already known (e.g. the first paint filled it while saving): freeze with
@@ -6286,7 +6412,7 @@ function fetchHistoricalPrice(symbol, dateStr, vs, kind) {
   // HISTORICAL rate of the trade date (null when unconvertible — never a
   // nominal value in the wrong fiat).
   var ovE = null;
-  try { ovE = priceOverrideEntry(sym); } catch (e) { ovE = null; }
+  try { ovE = priceOverrideEntry(sym, kind); } catch (e) { ovE = null; }
   if (ovE !== null) {
     if (!ovE.vs || ovE.vs === cur) return Promise.resolve(ovE.price);
     return fetchEcbRate(day, ovE.vs, cur).then(function (r) {
@@ -6309,7 +6435,7 @@ function getHistoricalExec(symbol, dateStr, vs, kind) {
   var cur = String(priceDefaultVs(vs)).trim().toUpperCase();
   if (!sym || !isValidDateStr(day)) return null;
   var ov = null;
-  try { ov = priceOverrideFor(sym); } catch (e) { ov = null; }
+  try { ov = priceOverrideFor(sym, kind); } catch (e) { ov = null; }
   if (ov !== null) return { price: ov, source: 'manual', interpolated: false };
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   var hit = getHistCached(sym, day, cur, histKindFor(kd));
@@ -6349,7 +6475,7 @@ function ensureHistoricalExec(trades, main, kinds) {
     if (t.id) { (idsByKey[key] = idsByKey[key] || []).push(t.id); }
     if (seen[key]) return;
     seen[key] = true;
-    try { if (priceOverrideFor(sym) !== null) return; } catch (e) { /* fall through */ }
+    try { if (priceOverrideFor(sym, kd) !== null) return; } catch (e) { /* fall through */ }
     if (frozenExecOf(t)) return; // frozen quote on the trade: no network needed
     if (getHistCached(sym, day, m, kk)) return;
     if (histBlocked(key)) return; // failed recently: retry after cooldown, not every render
@@ -6425,7 +6551,6 @@ function isActionablePriceSymbol(s, kinds) {
   var keyParts = splitPriceKey(up); // KIND:SYM carries its own kind
   var keyKind = null;
   if (keyParts) { up = keyParts.sym; keyKind = keyParts.kind; }
-  try { if (priceOverrideEntry(up) !== null) return true; } catch (e) { /* fall through */ }
   var kd = null;
   try {
     if (keyKind !== null) kd = keyKind;
@@ -6438,6 +6563,7 @@ function isActionablePriceSymbol(s, kinds) {
     }
   } catch (e) { kd = null; }
   var kdl = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
+  try { if (priceOverrideEntry(up, kdl || undefined) !== null) return true; } catch (e) { /* fall through */ }
   if (kdl === 'cash' || kdl === 'custom') return false;
   if (kdl === 'stock') return true;
   if (kdl === 'commodity') return hasCommoditySource(up);
@@ -10471,7 +10597,7 @@ function resolveExecPrice(t, main, kind) {
     return { price: p, ccy: from };
   }
   var oe = null;
-  try { oe = priceOverrideEntry(t.symbol); } catch (e) { oe = null; }
+  try { oe = priceOverrideEntry(t.symbol, PRICE_KIND_BY_ACCOUNT[t.accountId]); } catch (e) { oe = null; }
   if (oe !== null && oe.vs) return converted(oe.price, oe.vs);
   var fr = null;
   try { fr = frozenExecOf(t); } catch (e) { fr = null; }
@@ -16892,7 +17018,7 @@ function openEditTrade(tradeId) {
     if (frMan && String(frMan.source).toLowerCase() === 'manual') {
       manualPx = String(frMan.price);
     } else {
-      var ovMan = priceOverrideEntry(pxTr.symbol);
+      var ovMan = priceOverrideEntry(pxTr.symbol, PRICE_KIND_BY_ACCOUNT[pxTr.accountId]);
       if (ovMan !== null) manualPx = String(ovMan.price);
     }
   } catch (e) { manualPx = ''; }
@@ -18725,6 +18851,8 @@ function buildSettings() {
     '<h3 class="set-heading">Market pricing ' + infoPill('Use a manual quote when a market price is unavailable or you prefer a specific source. It takes priority over fetched quotes for that symbol.') + '</h3>' +
     '<label for="o-symbol">Symbol</label>' +
     '<input id="o-symbol" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
+    '<label for="o-kind">Asset kind</label>' +
+    '<select id="o-kind"><option value="auto">Auto (from my accounts)</option><option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option></select>' +
     '<label for="o-price">Price (in current fiat)</label>' +
     '<input id="o-price" inputmode="decimal" placeholder="e.g. 67000">' +
     '<button id="o-add" type="button">Save override</button>' +
@@ -18953,9 +19081,14 @@ function buildSettings() {
     if (!isFinite(price) || price <= 0) { showBanner('Override price must be > 0.'); return; }
     var st = loadState();
     st.priceOverrides = (st.priceOverrides && typeof st.priceOverrides === 'object') ? st.priceOverrides : {};
-    st.priceOverrides[sym] = { price: price, vs: String(st.settings.mainCurrency).toUpperCase() };
+    // The override belongs to one asset kind (a coin and a stock can share a
+    // ticker). Auto picks the kind the portfolio holds this ticker under; a
+    // shared ticker must be chosen explicitly.
+    var added = overrideAdd(st.priceOverrides, sym, price, st.settings.mainCurrency, uiVal('o-kind', 'auto'));
+    if (!added.ok) { showBanner(added.error); return; }
     if (!saveStateGuarded(st)) return;
     uiSetVal('o-symbol', '');
+    uiSetVal('o-kind', 'auto');
     uiSetVal('o-price', '');
     clearBanner();
     refreshPrices(); // override wins over network; recompute + render
@@ -18964,8 +19097,7 @@ function buildSettings() {
     var btn = e && e.target && e.target.closest ? e.target.closest('[data-override-del]') : null;
     if (!btn) return;
     var st = loadState();
-    if (st.priceOverrides && Object.prototype.hasOwnProperty.call(st.priceOverrides, btn.getAttribute('data-override-del'))) {
-      delete st.priceOverrides[btn.getAttribute('data-override-del')];
+    if (overrideRemove(st.priceOverrides, btn.getAttribute('data-override-del'))) {
       if (!saveStateGuarded(st)) return;
     }
     refreshPrices();
@@ -19027,18 +19159,30 @@ function buildSettings() {
     var sel = e && e.target && e.target.closest ? e.target.closest('[data-override-fiat]') : null;
     if (!sel || !sel.value) return;
     var sym = sel.getAttribute('data-override-fiat');
-    var vs = String(sel.value).trim().toUpperCase();
-    if (!/^[A-Z]{2,10}$/.test(vs)) return;
     var st = loadState();
     if (!st.priceOverrides || typeof st.priceOverrides !== 'object') return;
-    var cur = Object.prototype.hasOwnProperty.call(st.priceOverrides, sym)
-      ? st.priceOverrides[sym] : null;
-    var price = (cur && typeof cur === 'object' && !Array.isArray(cur)) ? Number(cur.price) : Number(cur);
-    if (!isFinite(price) || price <= 0) return;
-    st.priceOverrides[sym] = { price: price, vs: vs };
+    if (!overrideSetFiat(st.priceOverrides, sym, sel.value)) return;
     if (!saveStateGuarded(st)) return;
     clearBanner();
     refreshPrices(); // re-resolve + repaint with the declared fiat
+  });
+  // Ambiguous legacy override (bare ticker shared by several asset kinds):
+  // the user says which asset it belongs to; nothing else is touched.
+  document.getElementById('o-list').addEventListener('change', function (e) {
+    var sel = e && e.target && e.target.closest ? e.target.closest('[data-override-assign]') : null;
+    if (!sel || !sel.value) return;
+    var from = sel.getAttribute('data-override-assign');
+    var kind = String(sel.value).trim().toLowerCase();
+    var st = loadState();
+    if (!st.priceOverrides) return;
+    var moved = overrideAssignKind(st.priceOverrides, from, kind);
+    if (!moved.ok) {
+      if (moved.error === 'exists') showBanner('A ' + kind + ' override for ' + String(from).toUpperCase() + ' already exists — remove one of them first.');
+      return;
+    }
+    if (!saveStateGuarded(st)) return;
+    clearBanner();
+    refreshPrices();
   });
   document.getElementById('s-download').addEventListener('click', downloadBackup);
   var recBtn = document.getElementById('s-recovery');
@@ -19122,17 +19266,38 @@ function syncTopbar(st) {
     Object.keys(ov).sort().forEach(function (sym) {
       var li = document.createElement('li');
       var label = document.createElement('span');
-      var oe = null;
-      try { oe = priceOverrideEntry(sym); } catch (e) { oe = null; }
+      var oe = parseOverrideRaw(ov[sym]);
       var op = (oe && isFinite(Number(oe.price))) ? Number(oe.price) : Number(ov[sym]);
       var oc = (oe && oe.vs) ? oe.vs : st.settings.mainCurrency;
-      label.textContent = sym + ' — ' + fmtMoney(op, oc) + ' ';
+      var parts = splitOverrideKey(sym);
+      var bareUp = String(sym).trim().toUpperCase();
+      var ambiguous = !parts && !!PRICE_COLLISIONS[bareUp];
+      var shown = parts ? parts.sym + ' (' + parts.kind + ')' : (ambiguous ? bareUp + ' (unassigned)' : sym);
+      label.textContent = shown + ' — ' + fmtMoney(op, oc) + ' ';
       li.appendChild(label);
+      if (ambiguous) {
+        // Shared ticker: this entry is applied to no asset until assigned.
+        var asg = document.createElement('select');
+        asg.setAttribute('data-override-assign', sym);
+        asg.setAttribute('aria-label', 'Assign ' + bareUp + ' override to an asset kind');
+        var aph = document.createElement('option');
+        aph.value = '';
+        aph.textContent = 'assign to…';
+        asg.appendChild(aph);
+        Object.keys(PRICE_KINDS_BY_SYMBOL[bareUp] || {}).forEach(function (k) {
+          var ao = document.createElement('option');
+          ao.value = k;
+          ao.textContent = k;
+          asg.appendChild(ao);
+        });
+        li.appendChild(asg);
+        li.appendChild(document.createTextNode(' '));
+      }
       // Untagged legacy entries get a one-time fiat declaration so they
       // convert instead of reading nominal; tagged ones show their fiat.
       var fiatSel = document.createElement('select');
       fiatSel.setAttribute('data-override-fiat', sym);
-      fiatSel.setAttribute('aria-label', 'Fiat for ' + sym + ' override');
+      fiatSel.setAttribute('aria-label', 'Fiat for ' + shown + ' override');
       var ph = document.createElement('option');
       ph.value = '';
       ph.textContent = (oe && oe.vs) ? oe.vs : 'fiat…';
@@ -19150,7 +19315,7 @@ function syncTopbar(st) {
       rm.type = 'button';
       rm.textContent = 'Remove';
       rm.setAttribute('data-override-del', sym);
-      rm.setAttribute('aria-label', 'Remove override for ' + sym);
+      rm.setAttribute('aria-label', 'Remove override for ' + shown);
       li.appendChild(rm);
       list.appendChild(li);
     });

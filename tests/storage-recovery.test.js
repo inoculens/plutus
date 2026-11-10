@@ -159,10 +159,10 @@ const recoveryRaws = store => JSON.parse(store.get(REC) || '[]').map(c => c.raw)
   const st = C.loadState();
   assert.equal(C.storageRecovery.kind, 'rejected');
   assert.equal(C.storageRecovery.overrides, 3, 'three invalid entries counted');
-  assert.deepEqual(JSON.parse(JSON.stringify(st.priceOverrides)), { XMR: { price: 150, vs: 'EUR' } }, 'valid entry survives');
+  assert.deepEqual(JSON.parse(JSON.stringify(st.priceOverrides)), { 'crypto:XMR': { price: 150, vs: 'EUR' } }, 'valid entry survives (legacy key migrated to its kind)');
   assert.deepEqual(recoveryRaws(store), [raw]);
   C.saveState(st);
-  assert.deepEqual(Object.keys(JSON.parse(store.get(KEY)).priceOverrides), ['XMR']);
+  assert.deepEqual(Object.keys(JSON.parse(store.get(KEY)).priceOverrides), ['crypto:XMR']);
   const kept = JSON.parse(recoveryRaws(store)[0]).priceOverrides;
   assert.deepEqual(Object.keys(kept).sort(), ['BTC', 'ETH', 'LTC', 'XMR'], 'recovery copy still holds every override');
 }
@@ -176,14 +176,15 @@ for (const bad of [[1, 2], 'x', 5]) {
   assert.deepEqual(recoveryRaws(store), [raw]);
 }
 
-// 9. Valid legacy overrides (bare numbers and {price,vs}) load untouched, no recovery.
+// 9. Valid legacy overrides (bare numbers and {price,vs}) keep their prices and
+//    fiat, raise no recovery; the held ticker's key migrates to its kind.
 {
   const ov = { XMR: 150, BTC: { price: 60000, vs: 'USD' } };
   const raw = JSON.stringify({ settings, accounts, trades: [good1], priceOverrides: ov });
   const { C, store } = createApp({ [KEY]: raw });
   const st = C.loadState();
   assert.equal(C.storageRecovery, null);
-  assert.deepEqual(JSON.parse(JSON.stringify(st.priceOverrides)), ov);
+  assert.deepEqual(JSON.parse(JSON.stringify(st.priceOverrides)), { 'crypto:XMR': 150, BTC: { price: 60000, vs: 'USD' } });
   assert.equal(store.has(REC), false);
 }
 

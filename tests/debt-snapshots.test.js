@@ -138,4 +138,85 @@ assert.equal(JSON.parse(damaged.store.get(REC))[0].raw, damagedRaw, 'the exact s
 damaged.C.saveState(repaired);
 assert.equal(JSON.parse(damaged.store.get(REC))[0].raw, damagedRaw, 'a later save keeps the recovery copy');
 
-console.log('debt snapshot checks passed');
+(async function runHistoricalDebtChecks() {
+  // Positive-debt windows split at zero snapshots and resume at later
+  // positive reports. They are price-fetch windows, not accrued balances.
+  const windowPosition = position({
+    balanceSnapshots: [
+      snap('w1', 2, '2026-11-10T10:00:00.000Z'),
+      snap('w2', 0, '2026-11-10T11:00:00.000Z'),
+      snap('w3', 1, '2026-11-10T12:00:00.000Z')
+    ]
+  });
+  const windows = C.debtPositionPositiveBalanceWindows(windowPosition);
+  assert.deepEqual(JSON.parse(JSON.stringify(windows)), [
+    { from: Date.parse('2026-11-10T10:00:00.000Z'), to: Date.parse('2026-11-10T11:00:00.000Z') },
+    { from: Date.parse('2026-11-10T12:00:00.000Z'), to: Infinity }
+  ]);
+
+  const historyState = {
+    settings: state.settings,
+    accounts: [btcDebt],
+    trades: [],
+    priceOverrides: {}
+  };
+  const beforeReport = await C.netWorthHistoryPointValue({
+    at: Date.parse('2026-11-10T09:59:00.000Z'), prices: {}
+  }, historyState, 'USD', false);
+  assert.equal(beforeReport.value, 0, 'a future debt snapshot must not leak backward');
+
+  const firstReport = await C.netWorthHistoryPointValue({
+    at: Date.parse('2026-11-10T11:00:00.000Z'), prices: { BTC: 25000 }
+  }, historyState, 'USD', false);
+  assert.equal(firstReport.value, -50000,
+    'historical net worth subtracts the first reported balance at and after its timestamp');
+
+  btcDebt.debtPositions[0].balanceSnapshots.push(
+    snap('btc-s2', 1.5, '2026-11-10T12:00:00.000Z')
+  );
+  const betweenReports = await C.netWorthHistoryPointValue({
+    at: Date.parse('2026-11-10T11:59:59.000Z'), prices: { BTC: 25000 }
+  }, historyState, 'USD', false);
+  assert.equal(betweenReports.value, -50000,
+    'the previous reported total remains unchanged between snapshots');
+  const afterSecondReport = await C.netWorthHistoryPointValue({
+    at: Date.parse('2026-11-10T13:00:00.000Z'), prices: { BTC: 25000 }
+  }, historyState, 'USD', false);
+  assert.equal(afterSecondReport.value, -37500,
+    'a later report replaces the outstanding total for later historical points');
+  const missingHistoricalPrice = await C.netWorthHistoryPointValue({
+    at: Date.parse('2026-11-10T13:00:00.000Z'), prices: {}
+  }, historyState, 'USD', false);
+  assert.equal(missingHistoricalPrice.value, null,
+    'historical liability prices remain unknown rather than zero');
+
+  const cashDebt = acc('historical-eur-debt', 'EUR', 'cash');
+  cashDebt.debtPositions = [position({
+    collateral: [],
+    balanceSnapshots: [snap('eur-h1', 100, '2026-11-10T10:00:00.000Z')]
+  })];
+  C.cacheRate('2026-11-10', 'EUR', 'USD', 1.1, 'test-history');
+  const historicalCash = await C.netWorthHistoryPointValue({
+    at: Date.parse('2026-11-10T13:00:00.000Z'), prices: {}
+  }, { settings: state.settings, accounts: [cashDebt], trades: [], priceOverrides: {} }, 'USD', false);
+  assert.ok(Math.abs(historicalCash.value + 110) < 1e-9,
+    'fiat liabilities use historical FX for the chart date');
+
+  const earliestDebtState = {
+    settings: state.settings,
+    accounts: [btcDebt],
+    trades: [],
+    priceOverrides: {}
+  };
+  assert.equal(C.netWorthHistoryStart(earliestDebtState, { 'btc-debt': true }),
+    Date.parse('2026-11-10T10:00:00.000Z'),
+    'debt-only accounts establish the historical chart start');
+  const signature = JSON.parse(C.netWorthHistorySignature(earliestDebtState));
+  assert.equal(signature.debtSnapshotModel, 1,
+    'historical cache signatures explicitly identify debt snapshot valuation');
+
+  console.log('debt snapshot and historical valuation checks passed');
+})().catch(function (error) {
+  console.error(error);
+  process.exitCode = 1;
+});

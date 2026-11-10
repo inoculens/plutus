@@ -7799,6 +7799,7 @@ function netWorthHistoryDate(timestamp) {
 
 function netWorthHistorySignature(st) {
   return JSON.stringify({
+    debtSnapshotModel: 1,
     accounts: st.accounts || [],
     trades: st.trades || [],
     priceOverrides: st.priceOverrides || {},
@@ -7832,12 +7833,64 @@ function netWorthHistoryIncludedAccounts(st) {
   return included;
 }
 
+function mergeNetWorthHistoryWindows(windows) {
+  var sorted = (Array.isArray(windows) ? windows : []).filter(function (window) {
+    return window && isFinite(Number(window.from)) &&
+      (isFinite(Number(window.to)) || window.to === Infinity) &&
+      Number(window.to) >= Number(window.from);
+  }).map(function (window) {
+    return { from: Number(window.from), to: window.to === Infinity ? Infinity : Number(window.to) };
+  }).sort(function (a, b) {
+    return a.from - b.from || a.to - b.to;
+  });
+  var merged = [];
+  sorted.forEach(function (window) {
+    var last = merged[merged.length - 1];
+    if (!last || window.from > last.to) {
+      merged.push({ from: window.from, to: window.to });
+    } else if (window.to > last.to) {
+      last.to = window.to;
+    }
+  });
+  return merged;
+}
+
+// Return intervals in which the last reported total balance is positive.
+// These intervals only decide when market history is needed; they never
+// alter a balance or derive interest between snapshots.
+function debtPositionPositiveBalanceWindows(position) {
+  var snapshots = (position && Array.isArray(position.balanceSnapshots))
+    ? position.balanceSnapshots.map(function (snapshot, index) {
+      return { snapshot: snapshot, index: index, at: Date.parse(snapshot.reportedAt) };
+    }).filter(function (item) { return isFinite(item.at); }).sort(function (a, b) {
+      return a.at - b.at || a.index - b.index;
+    })
+    : [];
+  var windows = [];
+  snapshots.forEach(function (item, index) {
+    if (!(Number(item.snapshot.amount) > 0)) return;
+    var next = snapshots[index + 1];
+    var end = next ? next.at : Infinity;
+    if (end > item.at) windows.push({ from: item.at, to: end });
+  });
+  return mergeNetWorthHistoryWindows(windows);
+}
+
 function netWorthHistoryStart(st, included) {
   var earliest = Infinity;
   (st.trades || []).forEach(function (trade) {
     if (!trade || !included[trade.accountId] || typeof trade.date !== 'string') return;
     var timestamp = Date.parse(trade.date + 'T00:00:00');
     if (isFinite(timestamp) && timestamp < earliest) earliest = timestamp;
+  });
+  (st.accounts || []).forEach(function (account) {
+    if (!account || !included[account.id]) return;
+    accountDebtPositions(account).forEach(function (position) {
+      (position.balanceSnapshots || []).forEach(function (snapshot) {
+        var timestamp = Date.parse(snapshot.reportedAt);
+        if (isFinite(timestamp) && timestamp < earliest) earliest = timestamp;
+      });
+    });
   });
   return isFinite(earliest) ? earliest : null;
 }
@@ -8444,8 +8497,11 @@ function netWorthHistoryHeldPeriods(st, included, main, signature) {
         Object.keys(included).forEach(function (accountId) {
           var rows = portfolio.byAccount[accountId];
           if (!rows) return;
+          var accountKind = PRICE_KIND_BY_ACCOUNT[accountId] || 'crypto';
           rows.forEach(function (row, symbol) {
-            if (Number(row.qtyHeld) > 0) heldNow[String(symbol).toUpperCase()] = true;
+            if (Number(row.qtyHeld) > 0) {
+              heldNow[priceKeyOf(String(symbol).toUpperCase(), accountKind)] = true;
+            }
           });
         });
         Object.keys(heldNow).forEach(function (symbol) {
@@ -8503,17 +8559,50 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
   var kinds = netWorthHistoryKinds(st);
   var symbols = {};
   var historyCashIds = cashAccountIds(st);
-  (st.trades || []).forEach(function (trade) {
-    var symbol = String((trade && (trade.symbol || trade.ticker)) || '').toUpperCase();
-    if (!trade || !symbol || !included[trade.accountId] || historyCashIds[trade.accountId]) return;
-    symbols[symbol] = kinds[symbol] || 'crypto';
-  });
   var firstTradeBySymbol = {};
+  var firstDebtBySymbol = {};
+  var debtWindowsBySymbol = {};
+
+  function noteHistorySymbol(rawSymbol, kind) {
+    var symbol = String(rawSymbol || '').trim().toUpperCase();
+    if (!symbol) return '';
+    var normalizedKind = (typeof kind === 'string' && kind) ? kind : 'crypto';
+    var identity = priceKeyOf(symbol, normalizedKind);
+    symbols[identity] = normalizedKind;
+    return identity;
+  }
+
   (st.trades || []).forEach(function (trade) {
-    if (!trade || !included[trade.accountId]) return;
-    var symbol = String(trade.symbol || trade.ticker || '').toUpperCase();
-    if (!symbol || !trade.date || (firstTradeBySymbol[symbol] && firstTradeBySymbol[symbol] <= trade.date)) return;
-    firstTradeBySymbol[symbol] = trade.date;
+    if (!trade || !included[trade.accountId] || historyCashIds[trade.accountId]) return;
+    var symbol = String((trade.symbol || trade.ticker) || '').toUpperCase();
+    if (!symbol) return;
+    var owner = accountById(st, trade.accountId);
+    var kind = owner && owner.kind ? owner.kind : (kinds[symbol] || 'crypto');
+    var identity = noteHistorySymbol(symbol, kind);
+    if (trade.date && (!firstTradeBySymbol[identity] || trade.date < firstTradeBySymbol[identity])) {
+      firstTradeBySymbol[identity] = trade.date;
+    }
+  });
+
+  // Liabilities need market history even when their accounts have never held
+  // a trade. Cash/fiat liabilities use historical FX rather than a market series.
+  (st.accounts || []).forEach(function (account) {
+    if (!account || !included[account.id] || isCashKind(account.kind)) return;
+    var ticker = String(account.ticker || '').trim().toUpperCase();
+    if (!ticker) return;
+    var identity = priceKeyOf(ticker, account.kind);
+    accountDebtPositions(account).forEach(function (position) {
+      var windows = debtPositionPositiveBalanceWindows(position);
+      if (!windows.length) return;
+      symbols[identity] = account.kind || 'crypto';
+      if (!debtWindowsBySymbol[identity]) debtWindowsBySymbol[identity] = [];
+      Array.prototype.push.apply(debtWindowsBySymbol[identity], windows);
+      windows.forEach(function (window) {
+        if (!isFinite(firstDebtBySymbol[identity]) || window.from < firstDebtBySymbol[identity]) {
+          firstDebtBySymbol[identity] = window.from;
+        }
+      });
+    });
   });
   var names = Object.keys(symbols);
   if (typeof onProgress === 'function') {
@@ -8538,22 +8627,27 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
   // null periods (scan skipped) = legacy behaviour: first trade -> range end.
   var neededBySymbol = {};
   names.forEach(function (symbol) {
+    var windows = [];
+    function addClippedWindow(period) {
+      if (!period) return;
+      var from = Math.max(start, Number(period.from));
+      var to = Math.min(end, period.to === Infinity ? end : Number(period.to));
+      if (!isFinite(from) || !isFinite(to) || to < from) return;
+      if (to === from) to = Math.min(end, from + 1);
+      if (to >= from) windows.push({ from: from, to: to });
+    }
     var firstTradeAt = firstTradeBySymbol[symbol]
       ? Date.parse(firstTradeBySymbol[symbol] + 'T00:00:00')
       : NaN;
-    var base = isFinite(firstTradeAt) ? Math.max(start, firstTradeAt) : start;
     if (!heldPeriods) {
-      neededBySymbol[symbol] = [{ from: base, to: end }];
-      return;
+      // Fallback only for trade assets when the ledger scan is too large.
+      // Debt-only assets still use their exact positive-balance snapshot windows.
+      if (isFinite(firstTradeAt)) addClippedWindow({ from: Math.max(start, firstTradeAt), to: end });
+    } else {
+      (heldPeriods[symbol] || []).forEach(addClippedWindow);
     }
-    var windows = [];
-    (heldPeriods[symbol] || []).forEach(function (period) {
-      var from = Math.max(start, period.from);
-      var to = Math.min(end, period.to);
-      if (to > from) windows.push({ from: from, to: to });
-      else if (to === from && period.to !== Infinity) windows.push({ from: from, to: from + 86400000 });
-    });
-    neededBySymbol[symbol] = windows;
+    (debtWindowsBySymbol[symbol] || []).forEach(addClippedWindow);
+    neededBySymbol[symbol] = mergeNetWorthHistoryWindows(windows);
   });
   function neededAt(symbol, at) {
     var windows = neededBySymbol[symbol] || [];
@@ -8593,7 +8687,10 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
     var parts = [];
     function loadWindow(index) {
       if (index >= windows.length) return Promise.resolve();
-      return fetchNetWorthHistorySeries(symbol, symbols[symbol], main, windows[index].from, windows[index].to, onProgress)
+      var identityParts = splitPriceKey(symbol);
+      var seriesSymbol = identityParts ? identityParts.sym : symbol;
+      var seriesKind = identityParts ? identityParts.kind : symbols[symbol];
+      return fetchNetWorthHistorySeries(seriesSymbol, seriesKind, main, windows[index].from, windows[index].to, onProgress)
         .then(function (part) {
           parts.push(part);
           return loadWindow(index + 1);
@@ -8651,10 +8748,17 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
         var priceJobs = names.map(function (symbol) {
           return netWorthHistorySeriesPrice(seriesBySymbol[symbol], at, main).then(function (price) {
             if (price !== null) prices[symbol] = price;
-            else if (firstTradeBySymbol[symbol] && neededAt(symbol, at) &&
-                new Date(at).toISOString().slice(0, 10) >= firstTradeBySymbol[symbol]) {
-              incomplete = true;
-              missingSymbols[symbol] = true;
+            else {
+              var tradeRequiredAt = firstTradeBySymbol[symbol]
+                ? Date.parse(firstTradeBySymbol[symbol] + 'T00:00:00')
+                : Infinity;
+              var debtRequiredAt = isFinite(firstDebtBySymbol[symbol])
+                ? firstDebtBySymbol[symbol]
+                : Infinity;
+              if (neededAt(symbol, at) && at >= Math.min(tradeRequiredAt, debtRequiredAt)) {
+                incomplete = true;
+                missingSymbols[symbol] = true;
+              }
             }
           });
         });
@@ -8888,7 +8992,6 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     rows.forEach(function (row, symbol) {
       if (!(Number(row.qtyHeld) > 0)) return;
       if (row.marketValue === null) {
-        // A ticker held under several asset kinds is priced per kind.
         var upSym = String(symbol).toUpperCase();
         if (PRICE_COLLISIONS[upSym]) {
           var accKind = PRICE_KIND_BY_ACCOUNT[accountId] || 'crypto';
@@ -8934,6 +9037,41 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     }));
   });
 
+  // Debt is evaluated independently from the trade ledger. Every liability
+  // uses its own account identity and the latest report at or before point.at.
+  var debtCashTotal = 0;
+  var debtCashJobs = [];
+  var debtAmounts = [];
+  var includedDebtAccounts = netWorthHistoryIncludedAccounts(st);
+  (st.accounts || []).forEach(function (account) {
+    if (!account || !includedDebtAccounts[account.id]) return;
+    var amount = accountDebtBalanceAt(account, point.at);
+    if (!(amount > 0)) return;
+    var ticker = String(account.ticker || '').trim().toUpperCase();
+    if (!ticker) { complete = false; return; }
+    if (isCashKind(account.kind)) {
+      if (ticker === String(main || '').toUpperCase()) {
+        debtCashTotal += amount;
+      } else {
+        debtCashJobs.push(fetchNetWorthHistoryRate(day, ticker, main).then(function (rate) {
+          if (!rate) {
+            complete = false;
+            return;
+          }
+          var converted = amount * Number(rate.rate);
+          if (isFinite(converted)) debtCashTotal += converted;
+          else complete = false;
+        }));
+      }
+      return;
+    }
+    debtAmounts.push({
+      identity: priceKeyOf(ticker, account.kind),
+      ticker: ticker,
+      amount: amount
+    });
+  });
+
   var symbols = Object.keys(missing);
   var jobs = symbols.map(function (symbol) {
     var kind = missing[symbol];
@@ -8952,7 +9090,7 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     });
   });
 
-  return Promise.all(jobs.concat(cashJobs)).then(function () {
+  return Promise.all(jobs.concat(cashJobs, debtCashJobs)).then(function () {
     if (symbols.length) saveHistCache();
     if (symbols.length) {
       var repriced = computePortfolio(trades, prices, st.settings.costMethod);
@@ -8972,7 +9110,21 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
         groupMembers(st, account.id).forEach(function (member) { addRows(member.id); });
       });
     }
+
+    var debtTotal = debtCashTotal;
+    debtAmounts.forEach(function (debt) {
+      var price = Number(prices[debt.identity]);
+      if (!(isFinite(price) && price > 0) && !PRICE_COLLISIONS[debt.ticker]) {
+        price = Number(prices[debt.ticker]);
+      }
+      if (isFinite(price) && price > 0) {
+        debtTotal += debt.amount * price;
+      } else {
+        complete = false;
+      }
+    });
     total += cashTotal;
+    total -= debtTotal;
     return {
       value: complete ? total : null,
       prices: prices,
@@ -8980,7 +9132,6 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     };
   });
 }
-
 function updateNetWorthHistory(st, value, main) {
   if (typeof window === 'undefined' || !window.NetWorthHistory || !st || !st.settings) return;
   var historyStart = netWorthHistoryStart(st, netWorthHistoryIncludedAccounts(st));

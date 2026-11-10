@@ -5170,25 +5170,34 @@ label.sync-check {
 
 
 /* ————— Debt positions ————— */
-.debt-positions-section { margin: 1.1rem 0 0.25rem; }
-.debt-section-head { align-items: center; gap: 0.75rem; }
+.debt-positions-section {
+  margin: 1.1rem 0 0.25rem;
+  border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface-2); padding: 0.75rem 1rem 0.85rem;
+}
+.debt-positions-section > .debt-net-summary {
+  margin: -0.75rem -1rem 0.65rem; border: 0; border-bottom: 1px solid var(--border);
+  border-radius: 14px 14px 0 0; background: var(--surface-3);
+  padding: 0.75rem 1rem;
+}
+.debt-section-head { align-items: center; gap: 0.75rem; margin-top: 0; margin-bottom: 0; }
 .debt-positions-details { min-width: 0; flex: 1 1 auto; }
 .debt-positions-details > summary {
   display: flex; align-items: center; gap: 0.6rem; cursor: pointer;
-  list-style: none; min-height: 2.5rem;
+  list-style: none; min-height: 2.25rem;
 }
 .debt-positions-details > summary::-webkit-details-marker { display: none; }
 .debt-positions-details > summary::after { content: '⌄'; color: var(--muted); margin-left: auto; }
 .debt-positions-details[open] > summary::after { content: '⌃'; }
 .debt-position-count {
-  display: inline-grid; place-items: center; min-width: 1.45rem; height: 1.45rem;
-  border: 1px solid var(--border); border-radius: 999px; color: var(--muted);
-  font-size: 0.75rem; font-variant-numeric: tabular-nums;
+  display: inline-grid; place-items: center; min-width: 1.3rem; height: 1.3rem;
+  background: var(--surface-4); border-radius: 999px; color: var(--muted);
+  font-size: 0.7rem; font-variant-numeric: tabular-nums; padding: 0 0.3rem;
 }
 .debt-position-list { display: grid; gap: 0.7rem; padding-top: 0.5rem; }
 .debt-position-card {
-  padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: 14px;
-  background: var(--surface-2); min-width: 0;
+  padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-3); min-width: 0;
 }
 .debt-position-top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
 .debt-position-top strong { overflow-wrap: anywhere; }
@@ -5220,6 +5229,8 @@ label.sync-check {
   .debt-collateral-row { grid-template-columns: 1fr 1fr; }
   .debt-remove-collateral { grid-column: 2; justify-self: end; }
   .debt-position-top { align-items: flex-start; }
+  .debt-positions-section { padding: 0.6rem 0.75rem 0.7rem; }
+  .debt-positions-section > .debt-net-summary { margin: -0.6rem -0.75rem 0.55rem; padding: 0.65rem 0.75rem; }
 }
 
 .acct-debt-indicator {
@@ -5230,7 +5241,7 @@ label.sync-check {
 .debt-net-summary {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
   padding: 0.75rem 0.9rem; margin: 0 0 0.65rem;
-  border: 1px solid var(--border); border-radius: 13px;
+  border: 1px solid var(--border); border-radius: 14px;
 }
 .debt-net-line { display: grid; gap: 0.2rem; min-width: 0; }
 .debt-net-line span { color: var(--muted); font-size: 0.72rem; }

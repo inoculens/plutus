@@ -41,6 +41,7 @@ Add a collapsible **Debt positions** section immediately after the existing main
 - Make clear that the amount is the last reported value, not a continuously updated estimate.
 - Expand to show balance-snapshot history, notes, and linked collateral accounts/pledged quantities.
 - Provide actions to add a position and enter a new balance snapshot.
+- Each balance-history entry can be corrected in place or removed on its own; a position always keeps at least one report. Correcting or removing one entry never rewrites the position's other snapshots or its denomination.
 - Preserve history when the balance reaches zero; do not silently delete paid-off positions.
 - Creating a position captures a name, denomination (`assetKind` + `assetTicker`), and initial reported balance/time. The denomination defaults to the owner but is selectable independently. Collateral is optional and may include multiple accounts.
 - When updating a position, preserve its denomination; only the name, snapshot, notes, and collateral may change.

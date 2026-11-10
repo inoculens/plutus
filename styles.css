@@ -5222,6 +5222,9 @@ label.sync-check {
 .debt-snapshot-history li { padding: 0.35rem 0; font-size: 0.8rem; }
 .debt-snapshot-history li strong, .debt-snapshot-history li span { display: block; }
 .debt-snapshot-history li span, .debt-snapshot-history li p { color: var(--muted); margin: 0.15rem 0 0; }
+.debt-snapshot-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
+.debt-snapshot-actions button { min-height: 2rem; padding: 0.15rem 0.55rem; font-size: 0.75rem; }
+.debt-snapshot-actions .debt-snapshot-delete:hover { color: var(--red); }
 .debt-position-delete { margin-top: 0.5rem; color: var(--muted); min-height: 2rem; }
 .debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
 .debt-form-hint { margin: 0.35rem 0 0.75rem; font-size: 0.82rem; line-height: 1.5; }

@@ -13790,6 +13790,142 @@ function removeDebtPosition(ownerId, positionId) {
   });
 }
 
+// Correcting a reported balance rewrites that one snapshot in place: same
+// id, same enteredAt, so the rest of the history and the net-worth timeline
+// keep their identity. A position always keeps at least one report.
+function buildDebtSnapshotDialog() {
+  var existing = document.getElementById('debt-snapshot-dialog');
+  if (existing) return existing;
+  var dlg = document.createElement('dialog');
+  dlg.id = 'debt-snapshot-dialog';
+  dlg.setAttribute('aria-labelledby', 'debt-snapshot-title');
+  dlg.innerHTML =
+    '<div class="dialog-head"><h2 id="debt-snapshot-title">Edit reported balance</h2>' +
+    '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
+    '<form id="debt-snapshot-form">' +
+    '<label for="debt-snapshot-amount">Reported balance <span id="debt-snapshot-unit"></span></label>' +
+    '<input id="debt-snapshot-amount" type="number" min="0" step="any" required inputmode="decimal">' +
+    '<label for="debt-snapshot-reported-at">Balance reported at</label>' +
+    '<input id="debt-snapshot-reported-at" type="datetime-local" required>' +
+    '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
+    '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
+    '<p class="muted debt-form-hint">This corrects the selected entry. The position keeps its other reported balances.</p>' +
+    '<p id="debt-snapshot-error" class="banner-error" role="alert" hidden></p>' +
+    '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
+    '<button type="submit" class="primary">Save changes</button></div></form>';
+  document.body.appendChild(dlg);
+  wireDialog('debt-snapshot-dialog');
+  var form = document.getElementById('debt-snapshot-form');
+  form.addEventListener('submit', function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+    var error = document.getElementById('debt-snapshot-error');
+    function fail(message) { error.textContent = message; error.hidden = false; }
+    error.hidden = true;
+    var state = loadState();
+    var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
+    if (!owner) { fail('The liability account no longer exists.'); return; }
+    var position = null;
+    var positionId = dlg.getAttribute('data-position-id') || '';
+    accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
+    if (!position) { fail('This debt position no longer exists. Refresh and try again.'); return; }
+    var snapshotId = dlg.getAttribute('data-snapshot-id') || '';
+    var index = -1;
+    for (var i = 0; i < position.balanceSnapshots.length; i++) {
+      if (position.balanceSnapshots[i].id === snapshotId) { index = i; break; }
+    }
+    if (index === -1) { fail('This reported balance no longer exists. Refresh and try again.'); return; }
+    var amount = Number(document.getElementById('debt-snapshot-amount').value);
+    var reportedInput = document.getElementById('debt-snapshot-reported-at').value;
+    var note = String(document.getElementById('debt-snapshot-note').value || '').trim();
+    if (!isFinite(amount) || amount < 0) { fail('Enter a valid non-negative reported balance.'); return; }
+    if (!reportedInput) { fail('Enter when the balance was reported.'); return; }
+    var reportedDate = new Date(reportedInput);
+    var reportedIssue = debtReportedAtIssue(reportedDate.getTime(), Date.now());
+    if (reportedIssue) { fail(reportedIssue); return; }
+    if (note.length > 280) { fail('Snapshot notes can be up to 280 characters.'); return; }
+    var previous = position.balanceSnapshots[index];
+    // The datetime field is minute-precise: an untouched timestamp keeps its
+    // original seconds instead of being silently truncated on save.
+    var sameTime = reportedInput === (dlg.getAttribute('data-reported-local') || '');
+    var edited = {
+      id: previous.id,
+      amount: amount,
+      reportedAt: sameTime ? previous.reportedAt : reportedDate.toISOString(),
+      enteredAt: previous.enteredAt
+    };
+    if (note) edited.note = note;
+    position.balanceSnapshots[index] = edited;
+    if (!isValidDebtPosition(position, owner, state.accounts)) {
+      fail('The reported balance is invalid. Check the amount and timestamp.');
+      return;
+    }
+    if (!saveStateGuarded(state)) { fail('Storage unavailable — the reported balance was not saved.'); return; }
+    closeDialog(dlg);
+    clearBanner();
+    render();
+  });
+  return dlg;
+}
+
+function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
+  var state = loadState();
+  var owner = accountById(state, ownerId);
+  if (!owner) return;
+  var position = null;
+  accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
+  if (!position) return;
+  var snapshot = null;
+  position.balanceSnapshots.forEach(function (s) { if (s.id === snapshotId) snapshot = s; });
+  if (!snapshot) return;
+  var dlg = buildDebtSnapshotDialog();
+  dlg.setAttribute('data-owner-id', owner.id);
+  dlg.setAttribute('data-position-id', position.id);
+  dlg.setAttribute('data-snapshot-id', snapshot.id);
+  var ticker = String(position.assetTicker || owner.ticker || '').trim().toUpperCase();
+  document.getElementById('debt-snapshot-unit').textContent = ticker ? '(' + ticker + ')' : '';
+  document.getElementById('debt-snapshot-amount').value = String(snapshot.amount);
+  var reported = document.getElementById('debt-snapshot-reported-at');
+  reported.value = debtLocalDateTimeValue(new Date(snapshot.reportedAt));
+  // No native max here: an imported future timestamp must still be fixable
+  // through the form's own calm check (debtReportedAtIssue).
+  dlg.setAttribute('data-reported-local', reported.value);
+  document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
+  var error = document.getElementById('debt-snapshot-error');
+  if (error) error.hidden = true;
+  openDialog('debt-snapshot-dialog');
+}
+
+function removeDebtSnapshot(ownerId, positionId, snapshotId) {
+  var state = loadState();
+  var owner = accountById(state, ownerId);
+  if (!owner) return;
+  var position = null;
+  accountDebtPositions(owner).forEach(function (p) { if (p.id === positionId) position = p; });
+  if (!position) return;
+  var snapshot = null;
+  position.balanceSnapshots.forEach(function (s) { if (s.id === snapshotId) snapshot = s; });
+  if (!snapshot) return;
+  if (position.balanceSnapshots.length < 2) return;
+  var when = new Date(snapshot.reportedAt).toLocaleString();
+  confirmAction('Remove reported balance', 'Remove the ' + formatDebtPositionAmount(snapshot.amount, position) +
+    ' report from ' + when + '? The position keeps its other reported balances.', 'Remove', true).then(function (ok) {
+    if (!ok) return;
+    var fresh = loadState();
+    var freshOwner = accountById(fresh, ownerId);
+    if (!freshOwner) return;
+    var freshPosition = null;
+    accountDebtPositions(freshOwner).forEach(function (p) { if (p.id === positionId) freshPosition = p; });
+    if (!freshPosition || freshPosition.balanceSnapshots.length < 2) return;
+    var kept = freshPosition.balanceSnapshots.filter(function (s) { return s.id !== snapshotId; });
+    if (kept.length === freshPosition.balanceSnapshots.length) return;
+    freshPosition.balanceSnapshots = kept;
+    if (!isValidDebtPosition(freshPosition, freshOwner, fresh.accounts)) return;
+    if (!saveStateGuarded(fresh)) return;
+    clearBanner();
+    render();
+  });
+}
+
 function buildDebtPositionsSection(st, account, members, host, stats, financial) {
   var scope = [account].concat(members || []);
   var section = document.createElement('section');
@@ -13930,6 +14066,27 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
           memo.textContent = snapshot.note;
           li.appendChild(memo);
         }
+        var actions = document.createElement('div');
+        actions.className = 'debt-snapshot-actions';
+        var edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'quiet debt-snapshot-edit';
+        edit.textContent = 'Edit';
+        edit.setAttribute('aria-label', 'Edit the ' + label.textContent + ' report from ' + when.textContent);
+        edit.addEventListener('click', function () { openDebtSnapshotDialog(owner.id, position.id, snapshot.id); });
+        actions.appendChild(edit);
+        // A position always needs one reported balance; the only remaining
+        // report is corrected with Edit (or the whole position removed).
+        if (position.balanceSnapshots.length > 1) {
+          var removeSnapshot = document.createElement('button');
+          removeSnapshot.type = 'button';
+          removeSnapshot.className = 'quiet debt-snapshot-delete';
+          removeSnapshot.textContent = 'Delete';
+          removeSnapshot.setAttribute('aria-label', 'Delete the ' + label.textContent + ' report from ' + when.textContent);
+          removeSnapshot.addEventListener('click', function () { removeDebtSnapshot(owner.id, position.id, snapshot.id); });
+          actions.appendChild(removeSnapshot);
+        }
+        li.appendChild(actions);
         list.appendChild(li);
       });
       history.appendChild(list);

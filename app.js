@@ -13123,13 +13123,11 @@ function buildLedgerDialog() {
     '<input id="ld-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="ld-label">Label</label>' +
     '<input id="ld-label" autocomplete="off" spellcheck="false" placeholder="e.g. Projects" maxlength="80">' +
-    '<p id="ld-error" class="banner-error" role="alert" hidden></p>' +
-    '<button id="ld-save" class="primary" type="button">Save ledger</button>';
+    dockMarkup('ld-error', 'Save ledger', 'ld-save', 'button');
   host.appendChild(wrap);
   document.getElementById('ld-save').addEventListener('click', function () {
-    var err = document.getElementById('ld-error');
-    function fail(msg) { if (err) { err.textContent = String(msg); err.hidden = false; } }
-    if (err) { err.textContent = ''; err.hidden = true; }
+    function fail(msg) { dockError('ld-error', msg); }
+    dockError('ld-error', '');
     var accId = ledgerDialogAccountId;
     var editing = ledgerDialogEditingCode;
     var code = uiVal('ld-code', '').trim();
@@ -13170,7 +13168,6 @@ function openLedgerDialog(accountId, editCode, scopeIds) {
   buildLedgerDialog();
   var title = document.getElementById('ledger-dialog-title');
   var save = document.getElementById('ld-save');
-  var err = document.getElementById('ld-error');
   if (ledgerDialogEditingCode) {
     var lbl = '';
     try {
@@ -13187,7 +13184,7 @@ function openLedgerDialog(accountId, editCode, scopeIds) {
     if (title) title.textContent = 'New ledger';
     if (save) save.textContent = 'Save ledger';
   }
-  if (err) { err.textContent = ''; err.hidden = true; }
+  dockError('ld-error', '');
   openDialog('ledger-dialog');
 }
 
@@ -13205,13 +13202,11 @@ function buildGroupDialog() {
     '<p class="muted" id="g-count"></p>' +
     '<label for="g-target">Main account</label>' +
     '<select id="g-target"></select>' +
-    '<p id="g-error" class="banner-error" role="alert" hidden></p>' +
-    '<button id="g-save" class="primary" type="button">Group</button>';
+    dockMarkup('g-error', 'Group', 'g-save', 'button');
   host.appendChild(wrap);
   document.getElementById('g-save').addEventListener('click', function () {
-    var err = document.getElementById('g-error');
-    function fail(msg) { if (err) { err.textContent = String(msg); err.hidden = false; } }
-    if (err) { err.textContent = ''; err.hidden = true; }
+    function fail(msg) { dockError('g-error', msg); }
+    dockError('g-error', '');
     var target = uiVal('g-target', '');
     if (!target) { fail('Pick a main account.'); return; }
     if (target === '__new') {
@@ -13260,8 +13255,7 @@ function openGroupDialog(ids) {
   }
   var count = document.getElementById('g-count');
   if (count) count.textContent = 'Group ' + groupDialogIds.length + ' account' + (groupDialogIds.length === 1 ? '' : 's') + ' under:';
-  var gerr = document.getElementById('g-error');
-  if (gerr) { gerr.textContent = ''; gerr.hidden = true; }
+  dockError('g-error', '');
   openDialog('group-dialog');
 }
 
@@ -13526,22 +13520,22 @@ function dockErrorShow(id, msg) {
 }
 
 // Markup for the sticky submit dock with its rising error panel.
-function dockMarkup(errorId, label) {
+function dockMarkup(errorId, label, buttonId, buttonType) {
   return '<div class="t-dock">' +
     '<div id="' + errorId + '" class="t-err" role="alert" aria-live="assertive" hidden>' +
     '<div class="t-err-row"><p id="' + errorId + '-text" class="banner-error t-err-text"></p>' +
     '<button type="button" id="' + errorId + '-close" class="t-err-close" aria-label="Dismiss this message">✕</button></div>' +
     '<div class="t-err-progress"><div class="t-err-bar"></div></div></div>' +
-    '<button class="primary" type="submit">' + label + '</button></div>';
+    '<button class="primary" type="' + (buttonType || 'submit') + '"' + (buttonId ? ' id="' + buttonId + '"' : '') + '>' + label + '</button></div>';
 }
 
-function debtDialogError(id, message) {
+function dockError(id, message) {
   if (message) dockErrorShow(id, message);
   else dockErrorClear(id);
 }
 
 function debtCollateralError(message) {
-  debtDialogError('debt-position-error', message);
+  dockError('debt-position-error', message);
 }
 
 function debtCollateralRow(list, accounts, allocation) {
@@ -13584,7 +13578,7 @@ function debtCollateralRow(list, accounts, allocation) {
       return;
     }
     quantity.value = maxText;
-    debtDialogError('debt-position-error', '');
+    dockError('debt-position-error', '');
   });
   var remove = document.createElement('button');
   remove.type = 'button';
@@ -13693,8 +13687,8 @@ function buildDebtPositionDialog() {
   });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { debtDialogError('debt-position-error', message); }
-    debtDialogError('debt-position-error', '');
+    function fail(message) { dockError('debt-position-error', message); }
+    dockError('debt-position-error', '');
     var state = loadState();
     var ownerId = dlg.getAttribute('data-owner-id') || '';
     var owner = accountById(state, ownerId);
@@ -13831,7 +13825,7 @@ function openDebtPositionDialog(ownerId, positionId) {
   assetKindInput.onchange = syncDebtAssetUI;
   assetTickerInput.oninput = syncDebtAssetUI;
   syncDebtAssetUI();
-  debtDialogError('debt-position-error', '');
+  dockError('debt-position-error', '');
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13886,8 +13880,8 @@ function buildDebtSnapshotDialog() {
   var form = document.getElementById('debt-snapshot-form');
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { debtDialogError('debt-snapshot-error', message); }
-    debtDialogError('debt-snapshot-error', '');
+    function fail(message) { dockError('debt-snapshot-error', message); }
+    dockError('debt-snapshot-error', '');
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
     if (!owner) { fail('The liability account no longer exists.'); return; }
@@ -13957,7 +13951,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   // through the form's own calm check (debtReportedAtIssue).
   dlg.setAttribute('data-reported-local', reported.value);
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
-  debtDialogError('debt-snapshot-error', '');
+  dockError('debt-snapshot-error', '');
   openDialog('debt-snapshot-dialog');
 }
 
@@ -16437,15 +16431,7 @@ function accountKindExample(kind, field) {
 }
 
 function naError(msg) {
-  var p = document.getElementById('na-error');
-  if (!p) return;
-  if (!msg) {
-    p.textContent = '';
-    p.hidden = true;
-    return;
-  }
-  p.textContent = String(msg);
-  p.hidden = false;
+  dockError('na-error', msg);
 }
 
 function buildAccountDialog() {
@@ -16475,8 +16461,7 @@ function buildAccountDialog() {
     '<input id="na-fiatcode" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY"></div>' +
     '<label for="na-address">Label (optional)</label>' +
     '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('cash', 'label') + '">' +
-    '<p id="na-error" class="banner-error" role="alert" hidden></p>' +
-    '<button id="na-create" class="primary" type="button">Create account</button>';
+    dockMarkup('na-error', 'Create account', 'na-create', 'button');
   host.appendChild(wrap);
   function syncAccountKindUI() {
     // Cash is the first option, so it is the default when the dialog opens.

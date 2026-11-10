@@ -112,7 +112,9 @@ function normalizeAccount(a) {
     name: nm,
     ticker: tk,
     kind: kd,
-    createdAt: (typeof a.createdAt === 'string' && a.createdAt.length > 0)
+    // An unparsable value is replaced (the original survives in the recovery
+    // copy, see accountFieldIssues) so the repaired state is clean on reload.
+    createdAt: (typeof a.createdAt === 'string' && a.createdAt.trim().length > 0 && isFinite(Date.parse(a.createdAt)))
       ? a.createdAt
       : new Date().toISOString()
   };
@@ -153,6 +155,23 @@ function sanitizeGroups(accounts) {
     try { delete a.groupId; } catch (e) { a.groupId = undefined; }
   });
   return list;
+}
+
+// Links sanitizeGroups would remove: an account that is a member of an
+// existing main AND has members of its own (groups are flat; assignGroup never
+// creates this, so a stored one is an invariant violation). Same predicate as
+// sanitizeGroups, run on the accounts BEFORE it, so the loss is reported
+// instead of silent. Dangling links (no such main) stay, by design.
+function nestedGroupLinkCount(accounts) {
+  var list = accounts || [];
+  var byId = {};
+  list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
+  return list.filter(function (a) {
+    if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
+    var main = byId[a.groupId];
+    if (!main || main === a) return false;
+    return list.some(function (m) { return m && m.groupId === a.id; });
+  }).length;
 }
 
 function normalizeAccountFilter(v) {
@@ -211,6 +230,288 @@ var QTY_NATIVE_DECIMALS = {
 // up a same-named crypto's precision. Rebuilt whenever accounts load/save.
 var QTY_NON_CRYPTO = {};
 
+// --- Price identity ---
+// A ticker alone is not a unique asset: the same symbol can be a coin in one
+// account and a stock in another (W, OP, AR, ...). Prices are keyed by the
+// bare ticker (SYM) -- unless the portfolio holds that ticker under more than
+// one asset kind, in which case every price for it is keyed KIND:SYM
+// (e.g. STOCK:W, CRYPTO:W) so the two can never share or overwrite a price.
+// Rebuilt whenever accounts load/save (noteSymbolKinds).
+var PRICE_KIND_BY_ACCOUNT = {}; // accountId -> normalized kind
+var PRICE_KINDS_BY_SYMBOL = {}; // SYM -> { kind: true } for every held kind
+var PRICE_COLLISIONS = {};      // SYM -> true when held under 2+ kinds
+var PRICE_KIND_NAMES = ['CRYPTO', 'STOCK', 'COMMODITY', 'CASH', 'CUSTOM'];
+
+function normPriceKind(kind) {
+  var k = String(kind === undefined || kind === null ? '' : kind).trim().toLowerCase();
+  return (k === 'stock' || k === 'commodity' || k === 'cash' || k === 'custom') ? k : 'crypto';
+}
+
+// Price key for a symbol held under `kind`: bare SYM unless the ticker is
+// shared by several kinds.
+function priceKeyOf(sym, kind) {
+  var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
+  if (!up) return up;
+  return PRICE_COLLISIONS[up] ? normPriceKind(kind).toUpperCase() + ':' + up : up;
+}
+
+function priceKeyForAccount(sym, accountId) {
+  return priceKeyOf(sym, PRICE_KIND_BY_ACCOUNT[accountId]);
+}
+
+// "STOCK:W" -> {sym:'W', kind:'stock'}; anything else (plain ticker) -> null.
+function splitPriceKey(key) {
+  var m = /^([A-Z]+):([A-Z0-9._-]+)$/.exec(String(key === undefined || key === null ? '' : key));
+  if (!m || PRICE_KIND_NAMES.indexOf(m[1]) === -1) return null;
+  return { sym: m[2], kind: m[1].toLowerCase() };
+}
+
+// Live price for `sym` as held in `accountId`. A shared ticker only ever
+// reads its own kind-qualified entry -- never the bare ticker, which could be
+// another asset's price -- so an unresolved price stays unknown (null).
+function livePriceFor(live, sym, accountId) {
+  if (!live) return undefined;
+  var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
+  if (up && PRICE_COLLISIONS[up]) return live[priceKeyForAccount(up, accountId)];
+  return live[sym] !== undefined ? live[sym] : live[up];
+}
+
+// --- Damaged-data protection ---
+// A stored state that cannot be read (bad JSON / wrong shape) or that loses
+// records in validation must never be silently replaced by the next save.
+// The raw text is first preserved as a recovery copy under a separate key,
+// the user is told, and the copy can be downloaded from Settings > Backups.
+// Only an explicit "Clear all data" discards recovery copies.
+var RECOVERY_KEY = STORAGE_KEY + '.recovery';
+var RECOVERY_KEEP = 3;
+var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, settings, overrides, accountFields, tradeFields, groups, saved}
+var lastSeenRaw = null;      // stored text last read clean, or last written by saveState
+var lastPreservedRaw = null; // stored text already kept as a recovery copy
+
+function readRecoveryCopies() {
+  try {
+    var r = localStorage.getItem(RECOVERY_KEY);
+    if (!r) return [];
+    var list = JSON.parse(r);
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (c) { return c && typeof c.raw === 'string'; });
+  } catch (e) {
+    return [];
+  }
+}
+
+function preserveRawState(raw, reason) {
+  if (typeof raw !== 'string') return false;
+  if (raw === lastPreservedRaw) return true;
+  var list = readRecoveryCopies();
+  var have = list.some(function (c) { return c.raw === raw; });
+  if (!have) {
+    list.push({ at: new Date().toISOString(), reason: reason, raw: raw });
+    while (list.length > RECOVERY_KEEP) list.shift();
+    var ok = false;
+    while (list.length) {
+      try {
+        localStorage.setItem(RECOVERY_KEY, JSON.stringify(list));
+        ok = true;
+        break;
+      } catch (e) {
+        if (list.length <= 1) break; // keep the newest; drop older copies to make room
+        list.shift();
+      }
+    }
+    if (!ok) return false;
+  }
+  lastPreservedRaw = raw;
+  return true;
+}
+
+function noteStorageDamage(raw, damage) {
+  var saved = preserveRawState(raw, damage.kind);
+  storageRecovery = {
+    kind: damage.kind,
+    accounts: damage.accounts || 0,
+    trades: damage.trades || 0,
+    shape: !!damage.shape,
+    settings: !!damage.settings,
+    overrides: damage.overrides || 0,
+    accountFields: damage.accountFields || 0,
+    tradeFields: damage.tradeFields || 0,
+    groups: damage.groups || 0,
+    saved: saved
+  };
+  return saved;
+}
+
+function clearRecoveryCopies() {
+  try { localStorage.removeItem(RECOVERY_KEY); } catch (e) { /* ignore */ }
+  storageRecovery = null;
+  lastPreservedRaw = null;
+  lastSeenRaw = null;
+  try {
+    var rb = document.getElementById('s-recovery');
+    if (rb) rb.style.display = 'none';
+  } catch (e) { /* ignore */ }
+}
+
+// --- Optional-field damage detection ---
+// normalizeAccount / normalizeSettings / normalizeTradeForStore quietly drop
+// or default optional fields that fail validation. Before that can happen to
+// stored data, these counters (run on the RAW stored objects) report how many
+// objects carry an invalid optional field, so recovery preserves the original.
+// The record itself still loads (a bad colour must not hide an account and
+// all its history). Absent / null / blank means "not set" and is never damage;
+// legitimate normalization (trim, upper-casing, de-duplication) is not damage.
+function fieldPresent(v) {
+  return v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');
+}
+
+function ledgerMapIsClean(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return false;
+  return Object.keys(normalizeLedgerLabels(m)).length === Object.keys(m).length;
+}
+
+// Number of invalid optional fields on a stored account that passed isValidAccount.
+function accountFieldIssues(a) {
+  var n = 0;
+  if (a.createdAt !== undefined && a.createdAt !== null) {
+    if (typeof a.createdAt !== 'string' || a.createdAt.trim() === '' || !isFinite(Date.parse(a.createdAt))) n++;
+  }
+  if (a.address !== undefined && a.address !== null) {
+    if (typeof a.address !== 'string' || a.address.trim().length > 128) n++;
+  }
+  if (a.note !== undefined && a.note !== null) {
+    if (typeof a.note !== 'string' || a.note.trim().length > 280) n++;
+  }
+  if (fieldPresent(a.color) && !isValidHexColor(a.color)) n++;
+  if (a.ledgers !== undefined && a.ledgers !== null && !ledgerMapIsClean(a.ledgers)) n++;
+  if (fieldPresent(a.groupId) && (typeof a.groupId !== 'string' || a.groupId === a.id)) n++;
+  if (fieldPresent(a.groupCurrency) &&
+      (typeof a.groupCurrency !== 'string' || MAIN_CURRENCIES.indexOf(a.groupCurrency.trim().toUpperCase()) === -1)) n++;
+  return n;
+}
+
+// Same for a stored trade that passed isValidImportTrade (which already
+// rejects bad attachment, ledger, fee and quantity fields).
+function tradeFieldIssues(t) {
+  var n = 0;
+  if (fieldPresent(t.color) && !isValidHexColor(t.color)) n++;
+  if (t.outputs !== undefined && t.outputs !== null) {
+    if (!Array.isArray(t.outputs)) n++;
+    else if (t.outputs.some(function (o) { return !o || typeof o !== 'object' || Array.isArray(o); })) n++;
+  }
+  var hasOutputs = Array.isArray(t.outputs) && t.outputs.length > 0;
+  // selfQty (received back, multi-output transfers). Zero is the same as
+  // absent (normalization removes it, the validator accepts it): not damage.
+  // Negative / non-finite / non-numeric values never get here (the validator
+  // rejects the record, which is counted as damage already).
+  if (fieldPresent(t.selfQty)) {
+    var zeroSelf = (typeof t.selfQty === 'number' || typeof t.selfQty === 'string') && Number(t.selfQty) === 0;
+    if (!zeroSelf) {
+      if (!hasOutputs) {
+        n++; // the app writes it only with outputs; normalization would delete it
+      } else {
+        var sq = NaN;
+        try { sq = exactQtyValue(t.selfQty, String(t.symbol || '').toUpperCase()); } catch (e) { sq = NaN; }
+        if (!(isFinite(Number(sq)) && Number(sq) > 0)) n++;
+      }
+    }
+  }
+  // Per-source fee modes. normalizeTradeForStore only touches this field when
+  // the trade carries a sources list, so that is the only case reported (a
+  // lone sourceFeeAuto is kept as stored: nothing is lost). With a valid
+  // multi-source list the modes must be one boolean per source; a one-entry
+  // list may carry matching modes (legacy shape, both dropped quietly);
+  // anything else is deleted by normalization and therefore reported.
+  if (t.sources !== undefined && t.sources !== null && t.sourceFeeAuto !== undefined && t.sourceFeeAuto !== null) {
+    var srcs = (t.type === 'transfer') ? transferSourcesOf(t) : null;
+    var autoOk = Array.isArray(t.sourceFeeAuto) && t.sourceFeeAuto.every(function (v) { return typeof v === 'boolean'; });
+    if (!(srcs && srcs.length >= 1 && autoOk && t.sourceFeeAuto.length === srcs.length)) n++;
+  }
+  // sources only means something on a transfer; elsewhere normalization deletes it.
+  if (t.type !== 'transfer' && t.sources !== undefined && t.sources !== null) n++;
+  return n;
+}
+
+// Number of invalid optional settings (settings that passed isValidSettings).
+function settingsFieldIssues(s) {
+  var n = 0;
+  if (s.assetLedgers !== undefined && s.assetLedgers !== null && typeof s.assetLedgers !== 'boolean') n++;
+  if (s.accountFilter !== undefined && s.accountFilter !== null) {
+    if (!Array.isArray(s.accountFilter)) n++;
+    else if (s.accountFilter.some(function (x) {
+      if (typeof x !== 'string') return true; // malformed entry
+      var u = x.trim().toUpperCase();
+      return u !== '' && !isValidSymbolCode(u); // blank entries are ignored by normalization
+    })) n++;
+  }
+  if (s.ledgerLabels !== undefined && s.ledgerLabels !== null && !ledgerMapIsClean(s.ledgerLabels)) n++;
+  return n;
+}
+
+// Parse + validate stored text without side effects. `parsed` is null when
+// the text is unreadable. `damage` is null when nothing was lost.
+function readStoredState(raw) {
+  var parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { parsed: null, damage: { kind: 'unreadable' } };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { parsed: null, damage: { kind: 'unreadable' } };
+  }
+  var accounts = Array.isArray(parsed.accounts)
+    ? parsed.accounts.filter(isValidAccount).map(normalizeAccount)
+    : [];
+  var nestedLinks = nestedGroupLinkCount(accounts); // must run before sanitizeGroups
+  accounts = sanitizeGroups(accounts);
+  var accountIds = accounts.map(function (a) { return a.id; });
+  var validTrades = Array.isArray(parsed.trades)
+    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); })
+    : [];
+  var trades = validTrades.map(normalizeTradeForStore);
+  var accountFieldDamage = 0;
+  var tradeFieldDamage = 0;
+  if (Array.isArray(parsed.accounts)) {
+    parsed.accounts.forEach(function (a) { if (isValidAccount(a) && accountFieldIssues(a) > 0) accountFieldDamage++; });
+  }
+  validTrades.forEach(function (t) { if (tradeFieldIssues(t) > 0) tradeFieldDamage++; });
+  var droppedAccounts = Array.isArray(parsed.accounts) ? parsed.accounts.length - accounts.length : 0;
+  var droppedTrades = Array.isArray(parsed.trades) ? parsed.trades.length - trades.length : 0;
+  var shape = (parsed.accounts !== undefined && parsed.accounts !== null && !Array.isArray(parsed.accounts)) ||
+    (parsed.trades !== undefined && parsed.trades !== null && !Array.isArray(parsed.trades));
+  // Settings: present but invalid (or with chart labels that fail validation)
+  // would be replaced by defaults on load -- report it instead.
+  var settingsBad = false;
+  if (parsed.settings !== undefined && parsed.settings !== null) {
+    if (!isValidSettings(parsed.settings) || settingsFieldIssues(parsed.settings) > 0) settingsBad = true;
+  }
+  // Manual price overrides: keep every valid entry, count the rest.
+  var overrides = {};
+  var droppedOverrides = 0;
+  var overridesShape = false;
+  var po = parsed.priceOverrides;
+  if (po !== undefined && po !== null) {
+    if (typeof po !== 'object' || Array.isArray(po)) {
+      overridesShape = true;
+    } else {
+      Object.keys(po).forEach(function (k) {
+        if (isValidOverrideValue(po[k])) overrides[k] = po[k];
+        else droppedOverrides++;
+      });
+    }
+  }
+  var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape || settingsBad || droppedOverrides > 0 || overridesShape ||
+      accountFieldDamage > 0 || tradeFieldDamage > 0 || nestedLinks > 0)
+    ? {
+        kind: 'rejected', accounts: droppedAccounts, trades: droppedTrades,
+        shape: shape || overridesShape, settings: settingsBad, overrides: droppedOverrides,
+        accountFields: accountFieldDamage, tradeFields: tradeFieldDamage, groups: nestedLinks
+      }
+    : null;
+  return { parsed: parsed, accounts: accounts, trades: trades, overrides: overrides, damage: damage };
+}
+
 function loadState() {
   var fallback = defaultState();
   activeDateFormat = fallback.settings.dateFormat;
@@ -221,28 +522,22 @@ function loadState() {
     return fallback;
   }
   if (raw === null || raw === undefined) return fallback;
-  var parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    return fallback;
+  var info = readStoredState(raw);
+  if (info.damage) {
+    noteStorageDamage(raw, info.damage);
+  } else {
+    lastSeenRaw = raw;
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
-  var accounts = Array.isArray(parsed.accounts)
-    ? sanitizeGroups(parsed.accounts.filter(isValidAccount).map(normalizeAccount))
-    : [];
-  var accountIds = accounts.map(function (a) { return a.id; });
-  var trades = Array.isArray(parsed.trades)
-    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
-    : [];
+  if (!info.parsed) return fallback;
+  var parsed = info.parsed;
+  var accounts = info.accounts;
+  var trades = info.trades;
   try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
-  var priceOverrides = {};
-  if (parsed.priceOverrides && typeof parsed.priceOverrides === 'object' && !Array.isArray(parsed.priceOverrides) && isValidPriceOverrides(parsed.priceOverrides)) {
-    priceOverrides = parsed.priceOverrides;
-  }
+  var priceOverrides = info.overrides;
   var settings = normalizeSettings(parsed.settings, fallback.settings);
   activeDateFormat = settings.dateFormat;
-  try { noteSymbolKinds(accounts); } catch (e) { /* never breaks load */ }
+  try { noteSymbolKinds(accounts, trades); } catch (e) { /* never breaks load */ }
+  try { priceOverrides = migrateLegacyOverrides(priceOverrides); } catch (e) { /* never breaks load */ }
   return {
     settings: settings,
     accounts: accounts,
@@ -251,13 +546,34 @@ function loadState() {
   };
 }
 
-function saveState(s) {
-  try { noteSymbolKinds(s && s.accounts); } catch (e) { /* ignore */ }
+// Before a save replaces the stored text, make sure that text is either
+// clean or already preserved. If a damaged original cannot be preserved
+// (quota), or the stored value cannot be read at all, the save is refused
+// rather than risking the existing data.
+function guardStoredStateBeforeSave() {
+  var raw;
+  // If the existing data cannot even be read, we cannot know it is safe to
+  // replace: block the save (the next attempt re-checks, so retry works).
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { throw new Error('storage-unreadable'); }
+  if (raw === null || raw === undefined || raw === lastSeenRaw) return;
+  var info = readStoredState(raw);
+  if (!info.damage) { lastSeenRaw = raw; return; }
+  if (!noteStorageDamage(raw, info.damage)) throw new Error('storage-unavailable');
+}
+
+// opts.replaceDamaged: explicit user action (Clear all data) that is allowed
+// to drop a damaged original without keeping a recovery copy.
+function saveState(s, opts) {
+  try { noteSymbolKinds(s && s.accounts, s && s.trades); } catch (e) { /* ignore */ }
+  if (!(opts && opts.replaceDamaged)) guardStoredStateBeforeSave();
+  var out;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    out = JSON.stringify(s);
+    localStorage.setItem(STORAGE_KEY, out);
   } catch (e) {
     throw new Error('storage-unavailable');
   }
+  lastSeenRaw = out;
   // Any persisted change may make the drive copy stale: let auto-sync
   // (opt-in, Sync tab) schedule an encrypted push. Never breaks saving.
   try { syncScheduleAuto(); } catch (e) { /* ignore */ }
@@ -1913,7 +2229,7 @@ function displayPairs(trades, main, kinds) {
       try { fr = frozenExecOf(t); } catch (e) { fr = null; }
       if (fr && fr.vs && fr.vs !== m) need(d, fr.vs);
       var oe = null;
-      try { oe = priceOverrideEntry(t.symbol); } catch (e) { oe = null; }
+      try { oe = priceOverrideEntry(t.symbol, PRICE_KIND_BY_ACCOUNT[t.accountId]); } catch (e) { oe = null; }
       if (oe && oe.vs && oe.vs !== m) need(d, oe.vs);
     }
   });
@@ -2079,8 +2395,9 @@ function cashIncomeRate(t, main) {
 // remainder_qty * today_rate + sum(consumed_qty_i * spend_rate_i), where
 // each spend_rate_i is the consuming expense's frozen display rate
 // (trade-date fixing into the current main). Consumption is FIFO, oldest
-// income first, same account + same fiat, expenses only. Transfers are
-// moves, never spends. Qty-less (fiat-only) expenses consume nothing and
+// income first among income already received on or before the expense's
+// date (same-date incomes book before same-date expenses), same account +
+// same fiat, expenses only. Transfers are moves, never spends. Qty-less (fiat-only) expenses consume nothing and
 // book straight through. Asset incomes stay frozen (never in the map).
 // Record lines, linkage, cost basis, invested/spent and native balances
 // are untouched — only the converted view numbers use this.
@@ -2126,11 +2443,27 @@ function buildCashRealization(allTrades, main, isCash) {
     }
     Object.keys(byKey).forEach(function (key) {
       var g = byKey[key];
-      var incomes = g.incomes.slice().sort(byDate);
-      var expenses = g.expenses.slice().sort(byDate);
-      var lots = incomes.map(function (t) { return { t: t, left: cashQtyOf(t), consumedMain: 0 }; });
-      var li = 0;
-      expenses.forEach(function (e) {
+      // One chronological stream: an expense may only consume income lots
+      // that already exist on or before its date. Dates carry no time of day,
+      // so on the SAME date incomes book first (money received that day can
+      // fund that day's spend); remaining ties keep store order.
+      var events = [];
+      g.incomes.forEach(function (t, i) { events.push({ t: t, income: true, idx: i }); });
+      g.expenses.forEach(function (t, i) { events.push({ t: t, income: false, idx: i }); });
+      events.sort(function (a, b) {
+        var c = byDate(a.t, b.t);
+        if (c !== 0) return c;
+        if (a.income !== b.income) return a.income ? -1 : 1;
+        return a.idx - b.idx;
+      });
+      var lots = [];
+      var li = 0; // oldest lot that may still have a balance
+      events.forEach(function (ev) {
+        if (ev.income) {
+          lots.push({ t: ev.t, left: cashQtyOf(ev.t), consumedMain: 0 });
+          return;
+        }
+        var e = ev.t;
         var need = cashQtyOf(e);
         if (!(need > 0)) return;
         var spendRate = ledgerFxRate(e.fxLock);
@@ -2143,8 +2476,9 @@ function buildCashRealization(allTrades, main, isCash) {
           need -= take;
           if (lot.left <= LEDGER_EPS) { lot.left = 0; li++; }
         }
-        // Overspend beyond held income consumes nothing further: the excess
-        // stays as a frozen expense (negative balances allowed).
+        // Overspend beyond income received so far consumes nothing further
+        // (never later income): the excess stays as a frozen expense
+        // (negative balances allowed).
       });
       lots.forEach(function (lot) {
         var rem = lot.left;
@@ -2589,6 +2923,12 @@ function computePositions(trades, live, method) {
   var engine = method === 'fifo' ? computeFifo(trades) : computeAverage(trades);
   var buyCost = {}; // sym -> lifetime all-in buy+income cost (denominator for returnPct)
   var hasBuy = {};
+  var accOfSym = {}; // sym -> account holding it (picks the price kind for shared tickers)
+  (trades || []).forEach(function (t) {
+    if (!t) return;
+    var symAny = ledgerSym(t);
+    if (symAny && accOfSym[symAny] === undefined && t.accountId !== undefined) accOfSym[symAny] = t.accountId;
+  });
   (trades || []).forEach(function (t) {
     if (!t || (t.type !== 'buy' && t.type !== 'income')) return;
     var sym = ledgerSym(t);
@@ -2605,8 +2945,7 @@ function computePositions(trades, live, method) {
     if (!hasBuy[sym] && !(v.qty > qtyEps) && !(Math.abs(v.realized || 0) > LEDGER_EPS)) return; // skip phantom sell-only rows
     // Unknown live price stays unknown (null) — never coerced to 0, which
     // fabricated a full loss (value 0, unrealized -cost, return -100%).
-    var lookup = String(sym).toUpperCase();
-    var raw = live ? (live[sym] !== undefined ? live[sym] : live[lookup]) : undefined;
+    var raw = livePriceFor(live, sym, accOfSym[sym]);
     var num = Number(raw);
     var known = isFinite(num) && num > 0;
     var livePrice = known ? num : null;
@@ -3031,8 +3370,7 @@ function computePortfolio(allTrades, live, method) {
     Object.keys(syms).forEach(function (sym) {
       var s = syms[sym];
       if (!s.touched) return; // never active: drop phantom (e.g. sell-only with no inventory)
-      var lookup = String(sym).toUpperCase();
-      var raw = live ? (live[sym] !== undefined ? live[sym] : live[lookup]) : undefined;
+      var raw = livePriceFor(live, sym, accId);
       var num = Number(raw);
       var known = isFinite(num) && num > 0;
       var qtyHeld = Math.abs(s.qty) < ledgerQtyEpsilon(sym) ? 0 : s.qty;
@@ -4214,35 +4552,37 @@ function priceCacheKey(symbol, vs) {
   return String(symbol).toUpperCase() + ':' + String(vs).toUpperCase();
 }
 
-function priceOverrideFor(symbol) {
-  var e = null;
-  try { e = priceOverrideEntry(symbol); } catch (err) { e = null; }
-  return e ? e.price : null;
+// --- Manual override identity ---
+// Overrides follow the same asset-identity rule as live prices: a ticker is
+// not a unique asset. Entries are stored under "kind:SYM" (crypto:W, stock:W).
+// Legacy entries stored under the bare ticker keep working while the ticker
+// belongs to a single asset kind; once a ticker is shared by several kinds a
+// bare entry is ambiguous and is applied to NONE of them (it stays stored,
+// untouched, until the user assigns it to a kind in Settings).
+var OVERRIDE_KIND_RE = /^(crypto|stock|commodity|cash|custom):(.+)$/i;
+
+function overrideKey(kind, symbol) {
+  return normPriceKind(kind) + ':' + String(symbol === undefined || symbol === null ? '' : symbol).trim().toUpperCase();
 }
 
-// Raw override entry with its fiat: {price, vs} where vs is null for legacy
-// bare numbers (fiat unknown — treated as the requested fiat, exactly the
-// old behavior). New saves always tag the fiat they were entered in.
-function priceOverrideEntry(symbol) {
-  var sym = String(symbol).trim().toUpperCase();
-  var ov = null;
-  try {
-    var st = loadState();
-    ov = st ? st.priceOverrides : null;
-  } catch (e) {
-    ov = null;
-  }
-  if (!ov || typeof ov !== 'object') return null;
-  var raw = null;
-  if (Object.prototype.hasOwnProperty.call(ov, sym)) {
-    raw = ov[sym];
-  } else {
-    // Tolerate differently-cased keys without touching stored data.
-    var keys = Object.keys(ov);
-    for (var i = 0; i < keys.length; i++) {
-      if (String(keys[i]).toUpperCase() === sym) { raw = ov[keys[i]]; break; }
-    }
-  }
+// "stock:W" -> {kind:'stock', sym:'W'}; a bare ticker -> null.
+function splitOverrideKey(key) {
+  var m = OVERRIDE_KIND_RE.exec(String(key === undefined || key === null ? '' : key).trim());
+  return m ? { kind: m[1].toLowerCase(), sym: m[2].trim().toUpperCase() } : null;
+}
+
+// Kind a caller means: its explicit kind, else the only kind the portfolio
+// holds this ticker under, else null (unknown).
+function overrideKindFor(sym, kind) {
+  var k = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
+  if (k === 'crypto' || k === 'stock' || k === 'commodity' || k === 'cash' || k === 'custom') return k;
+  var held = Object.keys(PRICE_KINDS_BY_SYMBOL[sym] || {});
+  return held.length === 1 ? held[0] : null;
+}
+
+// Parse one stored override value into {price, vs} (vs null for a legacy bare
+// number), or null when invalid.
+function parseOverrideRaw(raw) {
   if (typeof raw === 'number') {
     return (isFinite(raw) && raw > 0) ? { price: raw, vs: null } : null;
   }
@@ -4252,6 +4592,133 @@ function priceOverrideEntry(symbol) {
     if (isFinite(p) && p > 0 && /^[A-Z]{2,10}$/.test(vs)) return { price: p, vs: vs };
   }
   return null;
+}
+
+// Which stored entry applies to this asset: {key, raw} or null.
+function findOverrideRaw(ov, symbol, kind) {
+  if (!ov || typeof ov !== 'object') return null;
+  var sym = String(symbol === undefined || symbol === null ? '' : symbol).trim().toUpperCase();
+  if (!sym) return null;
+  var keys = Object.keys(ov);
+  var eff = overrideKindFor(sym, kind);
+  var i, parts;
+  if (eff) {
+    for (i = 0; i < keys.length; i++) {
+      parts = splitOverrideKey(keys[i]);
+      if (parts && parts.sym === sym && parts.kind === eff) return { key: keys[i], raw: ov[keys[i]] };
+    }
+  }
+  if (PRICE_COLLISIONS[sym]) return null; // shared ticker: a bare/other-kind entry could be another asset's
+  for (i = 0; i < keys.length; i++) { // legacy bare entry (tolerates key casing)
+    if (!splitOverrideKey(keys[i]) && String(keys[i]).trim().toUpperCase() === sym) return { key: keys[i], raw: ov[keys[i]] };
+  }
+  if (!eff) { // kind unknown and ticker unshared: a single composite entry is unambiguous
+    var found = null;
+    for (i = 0; i < keys.length; i++) {
+      parts = splitOverrideKey(keys[i]);
+      if (parts && parts.sym === sym) { if (found) return null; found = { key: keys[i], raw: ov[keys[i]] }; }
+    }
+    return found;
+  }
+  return null;
+}
+
+// Move legacy bare entries to "kind:SYM" when the portfolio holds the ticker
+// under exactly one kind. Ambiguous (shared) and unheld tickers are left as
+// stored; nothing is deleted or overwritten. Returns a new object.
+function migrateLegacyOverrides(ov) {
+  var out = {};
+  if (!ov || typeof ov !== 'object' || Array.isArray(ov)) return out;
+  var keys = Object.keys(ov);
+  var taken = {};
+  keys.forEach(function (k) { var pr = splitOverrideKey(k); if (pr) taken[pr.kind + ':' + pr.sym] = true; });
+  keys.forEach(function (k) {
+    if (splitOverrideKey(k)) { out[k] = ov[k]; return; }
+    var sym = String(k).trim().toUpperCase();
+    var held = Object.keys(PRICE_KINDS_BY_SYMBOL[sym] || {});
+    if (held.length === 1 && !taken[held[0] + ':' + sym]) {
+      out[held[0] + ':' + sym] = ov[k];
+      taken[held[0] + ':' + sym] = true;
+    } else {
+      out[k] = ov[k];
+    }
+  });
+  return out;
+}
+
+// Settings-list operations on the stored map, by exact key. Each touches only
+// the one entry it names. Pure (mutate the passed map, no storage access).
+
+// Add/replace an override from the form. pickedKind: 'crypto'|'stock'|
+// 'commodity' or anything else for Auto (the kind the portfolio holds the
+// ticker under; a shared ticker must be chosen). Returns {ok, key} or {ok:false, error}.
+function overrideAdd(ov, symbol, price, vs, pickedKind) {
+  var sym = String(symbol === undefined || symbol === null ? '' : symbol).trim().toUpperCase();
+  var k = String(pickedKind === undefined || pickedKind === null ? '' : pickedKind).trim().toLowerCase();
+  var key = sym;
+  if (k === 'crypto' || k === 'stock' || k === 'commodity') {
+    key = overrideKey(k, sym);
+  } else {
+    var held = Object.keys(PRICE_KINDS_BY_SYMBOL[sym] || {});
+    if (held.length > 1) {
+      return { ok: false, error: sym + ' is held as more than one asset kind — choose which one this override is for.' };
+    }
+    if (held.length === 1) key = overrideKey(held[0], sym);
+  }
+  ov[key] = { price: price, vs: String(vs).toUpperCase() };
+  return { ok: true, key: key };
+}
+
+function overrideSetFiat(ov, key, vs) {
+  var fiat = String(vs === undefined || vs === null ? '' : vs).trim().toUpperCase();
+  if (!/^[A-Z]{2,10}$/.test(fiat)) return false;
+  if (!ov || !Object.prototype.hasOwnProperty.call(ov, key)) return false;
+  var cur = ov[key];
+  var price = (cur && typeof cur === 'object' && !Array.isArray(cur)) ? Number(cur.price) : Number(cur);
+  if (!isFinite(price) || price <= 0) return false;
+  ov[key] = { price: price, vs: fiat };
+  return true;
+}
+
+function overrideRemove(ov, key) {
+  if (!ov || !Object.prototype.hasOwnProperty.call(ov, key)) return false;
+  delete ov[key];
+  return true;
+}
+
+// Give an ambiguous bare entry to one asset kind. Never overwrites an
+// existing entry for that kind.
+function overrideAssignKind(ov, fromKey, kind) {
+  if (!ov || !Object.prototype.hasOwnProperty.call(ov, fromKey)) return { ok: false, error: 'missing' };
+  if (splitOverrideKey(fromKey)) return { ok: false, error: 'already assigned' };
+  var to = overrideKey(kind, fromKey);
+  if (Object.prototype.hasOwnProperty.call(ov, to)) return { ok: false, error: 'exists', key: to };
+  ov[to] = ov[fromKey];
+  delete ov[fromKey];
+  return { ok: true, key: to };
+}
+
+function priceOverrideFor(symbol, kind) {
+  var e = null;
+  try { e = priceOverrideEntry(symbol, kind); } catch (err) { e = null; }
+  return e ? e.price : null;
+}
+
+// Raw override entry with its fiat: {price, vs} where vs is null for legacy
+// bare numbers (fiat unknown — treated as the requested fiat, exactly the
+// old behavior). New saves always tag the fiat they were entered in.
+// `kind` is the asset kind of the position being priced; see "Manual
+// override identity" for how shared tickers are resolved.
+function priceOverrideEntry(symbol, kind) {
+  var ov = null;
+  try {
+    var st = loadState();
+    ov = st ? st.priceOverrides : null;
+  } catch (e) {
+    ov = null;
+  }
+  var hit = findOverrideRaw(ov, symbol, kind);
+  return hit ? parseOverrideRaw(hit.raw) : null;
 }
 
 function priceDefaultVs(vs) {
@@ -4979,7 +5446,7 @@ function fetchLivePrice(symbol, vs, kind) {
   // converts at the CURRENT rate (it stands in for the live price), and
   // resolves unknown — never mislabeled — when conversion fails.
   var ovEntry = null;
-  try { ovEntry = priceOverrideEntry(sym); } catch (e) { ovEntry = null; }
+  try { ovEntry = priceOverrideEntry(sym, kind); } catch (e) { ovEntry = null; }
   if (ovEntry !== null) {
     if (!ovEntry.vs || ovEntry.vs === cur) return Promise.resolve(ovEntry.price);
     var ovCached = priceCache[key];
@@ -5085,7 +5552,48 @@ function fetchLivePrice(symbol, vs, kind) {
   });
 }
 
+// Public entry. Plain tickers resolve exactly as before. Kind-qualified keys
+// (STOCK:W, CRYPTO:W -- see "Price identity") are resolved per kind so two
+// assets sharing a ticker are fetched, cached and returned separately; the
+// result stays one flat object, qualified entries keyed by their KIND:SYM.
 function refreshAllPrices(symbols, vs, kinds) {
+  var plain = [];
+  var groups = {}; // kind -> [sym]
+  var qualified = false;
+  (symbols || []).forEach(function (s) {
+    var up = String(s === undefined || s === null ? '' : s).toUpperCase();
+    var parts = splitPriceKey(up);
+    if (!parts) { plain.push(s); return; }
+    qualified = true;
+    if (!groups[parts.kind]) groups[parts.kind] = [];
+    if (groups[parts.kind].indexOf(parts.sym) === -1) groups[parts.kind].push(parts.sym);
+  });
+  if (!qualified) return refreshAllPricesCore(symbols, vs, kinds);
+  var merged = {};
+  var mergedErrors = {};
+  // Sequential: each core run reports its errors through lastPriceErrors.
+  var chain = plain.length
+    ? refreshAllPricesCore(plain, vs, kinds).then(function (out) {
+        Object.keys(out).forEach(function (k) { merged[k] = out[k]; });
+        Object.keys(lastPriceErrors).forEach(function (k) { mergedErrors[k] = lastPriceErrors[k]; });
+      })
+    : Promise.resolve();
+  Object.keys(groups).forEach(function (kind) {
+    chain = chain.then(function () {
+      return refreshAllPricesCore(groups[kind], vs, function () { return kind; }).then(function (out) {
+        var errs = lastPriceErrors;
+        groups[kind].forEach(function (sym) {
+          var key = kind.toUpperCase() + ':' + sym;
+          if (Object.prototype.hasOwnProperty.call(out, sym)) merged[key] = out[sym];
+          if (errs && errs[sym]) mergedErrors[key] = errs[sym];
+        });
+      });
+    });
+  });
+  return chain.then(function () { lastPriceErrors = mergedErrors; return merged; });
+}
+
+function refreshAllPricesCore(symbols, vs, kinds) {
   var cur = priceDefaultVs(vs);
   var seen = {};
   var uniq = [];
@@ -5118,7 +5626,7 @@ function refreshAllPrices(symbols, vs, kinds) {
     // current rate (or resolve unknown when conversion fails — never
     // mislabeled).
     var ovE = null;
-    try { ovE = priceOverrideEntry(sym); } catch (e) { ovE = null; }
+    try { ovE = priceOverrideEntry(sym, kindFor(sym)); } catch (e) { ovE = null; }
     if (ovE !== null) {
       if (!ovE.vs || ovE.vs === cur) { out[sym] = ovE.price; return; }
       ovConvJobs.push({ sym: sym, price: ovE.price, vs: ovE.vs });
@@ -5403,23 +5911,19 @@ function dropBakedExecLocks(trades, overrides) {
   var changed = false;
   try {
     var ov = (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) ? overrides : {};
-    var keys = Object.keys(ov);
     (trades || []).forEach(function (t) {
       if (!t || typeof t !== 'object' || (t.type !== 'buy' && t.type !== 'sell')) return;
       var fr = null;
       try { fr = frozenExecOf(t); } catch (e) { fr = null; }
       if (!fr || String(fr.source).toLowerCase() === 'manual') return;
-      var sym = String((t && t.symbol) || '').toUpperCase();
-      for (var i = 0; i < keys.length; i++) {
-        if (String(keys[i]).toUpperCase() !== sym) continue;
-        var raw = ov[keys[i]];
-        var op = (typeof raw === 'number') ? raw
-          : ((raw && typeof raw === 'object' && !Array.isArray(raw)) ? Number(raw.price) : NaN);
-        if (isFinite(op) && op > 0 && op === fr.price) {
-          try { delete t.execLock; } catch (e) { t.execLock = undefined; }
-          changed = true;
-        }
-        break;
+      var hit = findOverrideRaw(ov, t.symbol, PRICE_KIND_BY_ACCOUNT[t.accountId]);
+      if (!hit) return;
+      var raw = hit.raw;
+      var op = (typeof raw === 'number') ? raw
+        : ((raw && typeof raw === 'object' && !Array.isArray(raw)) ? Number(raw.price) : NaN);
+      if (isFinite(op) && op > 0 && op === fr.price) {
+        try { delete t.execLock; } catch (e) { t.execLock = undefined; }
+        changed = true;
       }
     });
   } catch (e) { /* repair never breaks the run */ }
@@ -5507,7 +6011,7 @@ function freezeExecLock(tradeId, symbol, date, mainU, kind) {
   }
   // A live global override already serves this trade's Exec row: never stamp
   // a live price as a historical quote.
-  try { if (priceOverrideEntry(sym) !== null) return; } catch (e) { /* fall through */ }
+  try { if (priceOverrideEntry(sym, kd) !== null) return; } catch (e) { /* fall through */ }
   var kk = histKindFor(kd);
   var ckey = sym + '|' + day + '|' + m + '|' + kk;
   // Already known (e.g. the first paint filled it while saving): freeze with
@@ -6030,7 +6534,7 @@ function fetchHistoricalPrice(symbol, dateStr, vs, kind) {
   // HISTORICAL rate of the trade date (null when unconvertible — never a
   // nominal value in the wrong fiat).
   var ovE = null;
-  try { ovE = priceOverrideEntry(sym); } catch (e) { ovE = null; }
+  try { ovE = priceOverrideEntry(sym, kind); } catch (e) { ovE = null; }
   if (ovE !== null) {
     if (!ovE.vs || ovE.vs === cur) return Promise.resolve(ovE.price);
     return fetchEcbRate(day, ovE.vs, cur).then(function (r) {
@@ -6053,7 +6557,7 @@ function getHistoricalExec(symbol, dateStr, vs, kind) {
   var cur = String(priceDefaultVs(vs)).trim().toUpperCase();
   if (!sym || !isValidDateStr(day)) return null;
   var ov = null;
-  try { ov = priceOverrideFor(sym); } catch (e) { ov = null; }
+  try { ov = priceOverrideFor(sym, kind); } catch (e) { ov = null; }
   if (ov !== null) return { price: ov, source: 'manual', interpolated: false };
   var kd = (typeof kind === 'string') ? kind.trim().toLowerCase() : '';
   var hit = getHistCached(sym, day, cur, histKindFor(kd));
@@ -6093,7 +6597,7 @@ function ensureHistoricalExec(trades, main, kinds) {
     if (t.id) { (idsByKey[key] = idsByKey[key] || []).push(t.id); }
     if (seen[key]) return;
     seen[key] = true;
-    try { if (priceOverrideFor(sym) !== null) return; } catch (e) { /* fall through */ }
+    try { if (priceOverrideFor(sym, kd) !== null) return; } catch (e) { /* fall through */ }
     if (frozenExecOf(t)) return; // frozen quote on the trade: no network needed
     if (getHistCached(sym, day, m, kk)) return;
     if (histBlocked(key)) return; // failed recently: retry after cooldown, not every render
@@ -6166,10 +6670,13 @@ function hasCommoditySource(sym) {
 
 function isActionablePriceSymbol(s, kinds) {
   var up = String(s || '').toUpperCase();
-  try { if (priceOverrideEntry(up) !== null) return true; } catch (e) { /* fall through */ }
+  var keyParts = splitPriceKey(up); // KIND:SYM carries its own kind
+  var keyKind = null;
+  if (keyParts) { up = keyParts.sym; keyKind = keyParts.kind; }
   var kd = null;
   try {
-    if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
+    if (keyKind !== null) kd = keyKind;
+    else if (kinds && Object.prototype.hasOwnProperty.call(kinds, up)) kd = kinds[up];
     else if (kinds) {
       var ks = Object.keys(kinds);
       for (var i = 0; i < ks.length; i++) {
@@ -6178,6 +6685,7 @@ function isActionablePriceSymbol(s, kinds) {
     }
   } catch (e) { kd = null; }
   var kdl = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
+  try { if (priceOverrideEntry(up, kdl || undefined) !== null) return true; } catch (e) { /* fall through */ }
   if (kdl === 'cash' || kdl === 'custom') return false;
   if (kdl === 'stock') return true;
   if (kdl === 'commodity') return hasCommoditySource(up);
@@ -6185,8 +6693,11 @@ function isActionablePriceSymbol(s, kinds) {
   return false;
 }
 
-function isPriceLoading(sym) {
-  try { return !!priceLoading[String(sym || '').toUpperCase()]; } catch (e) { return false; }
+function isPriceLoading(sym, accountId) {
+  try {
+    var up = String(sym || '').toUpperCase();
+    return !!priceLoading[accountId === undefined ? up : priceKeyForAccount(up, accountId)];
+  } catch (e) { return false; }
 }
 
 function anyPriceLoading() {
@@ -6953,11 +7464,27 @@ function clearPriceBanner() {
 // Error('storage-unavailable') on private-mode/quota failure. Every UI
 // mutation must go through here so no storage failure bricks the UI
 // uncaught — the failure surfaces via the existing banner path.
-function saveStateGuarded(s) {
+// Errors saveState throws when it refuses or fails to write.
+function isStorageWriteError(e) {
+  return !!e && (e.message === 'storage-unavailable' || e.message === 'storage-unreadable');
+}
+
+function saveStateGuarded(s, opts) {
   try {
-    saveState(s);
+    saveState(s, opts);
     return true;
   } catch (e) {
+    if (e && e.message === 'storage-unreadable') {
+      showBanner('Save blocked — stored data could not be checked.', 'error', {
+        title: 'Save blocked',
+        lines: [
+          'What happened: the data already saved in this browser could not be read, so replacing it was not safe.',
+          'Your change was NOT saved and the existing data was left untouched.',
+          'Make storage accessible again (leave private mode, allow site data), then retry the change.'
+        ]
+      });
+      return false;
+    }
     if (e && e.message === 'storage-unavailable') {
       showBanner('Storage unavailable — change was not saved.', 'error', {
         title: 'Storage error',
@@ -8173,7 +8700,14 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     rows.forEach(function (row, symbol) {
       if (!(Number(row.qtyHeld) > 0)) return;
       if (row.marketValue === null) {
-        missing[String(symbol).toUpperCase()] = kinds[String(symbol).toUpperCase()] || 'crypto';
+        // A ticker held under several asset kinds is priced per kind.
+        var upSym = String(symbol).toUpperCase();
+        if (PRICE_COLLISIONS[upSym]) {
+          var accKind = PRICE_KIND_BY_ACCOUNT[accountId] || 'crypto';
+          missing[priceKeyOf(upSym, accKind)] = accKind;
+        } else {
+          missing[upSym] = kinds[upSym] || 'crypto';
+        }
       } else {
         total += Number(row.marketValue);
       }
@@ -8219,7 +8753,8 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
       complete = false;
       return Promise.resolve(false);
     }
-    return fetchNetWorthHistoryPrice(symbol, day, main, kind).then(function (price) {
+    var keyParts = splitPriceKey(symbol);
+    return fetchNetWorthHistoryPrice(keyParts ? keyParts.sym : symbol, day, main, kind).then(function (price) {
       if (isFinite(Number(price)) && Number(price) > 0) {
         prices[symbol] = Number(price);
         return true;
@@ -9331,7 +9866,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   valv.className = 'acct-value';
   var plv = document.createElement('span');
   var accTick = String(acc.ticker || '').toUpperCase();
-  var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick);
+  var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick, acc.id);
   valv.textContent = valKnown ? fmtMoney(valNum, main) : (scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
   paintLoading(valv, accLoading, acc.name + ' value');
   if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
@@ -9355,7 +9890,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     }
   } else {
     plv.className = 'acct-pl';
-    var plLoading = !!scopeTrades && isPriceLoading(accTick);
+    var plLoading = !!scopeTrades && isPriceLoading(accTick, acc.id);
     plv.textContent = scopeTrades ? (plLoading ? PRICE_LOADING_TEXT : '—') : 'New';
     paintLoading(plv, plLoading, acc.name + ' profit');
   }
@@ -10189,7 +10724,7 @@ function resolveExecPrice(t, main, kind) {
     return { price: p, ccy: from };
   }
   var oe = null;
-  try { oe = priceOverrideEntry(t.symbol); } catch (e) { oe = null; }
+  try { oe = priceOverrideEntry(t.symbol, PRICE_KIND_BY_ACCOUNT[t.accountId]); } catch (e) { oe = null; }
   if (oe !== null && oe.vs) return converted(oe.price, oe.vs);
   var fr = null;
   try { fr = frozenExecOf(t); } catch (e) { fr = null; }
@@ -10907,7 +11442,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     var nowMeta = null;
     try {
       var nwSym = String(t.symbol || '').toUpperCase();
-      var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePrices[nwSym] : null;
+      var lvRaw = (typeof livePrices !== 'undefined' && livePrices) ? livePriceFor(livePrices, nwSym, t.accountId) : null;
       nowMeta = tradeNowMeta(t, main, lvRaw, kind);
     } catch (e) { nowMeta = null; }
     if (nowMeta) {
@@ -12361,6 +12896,17 @@ function renderAccountDetail(st, id) {
         ? Number(hit.price)
         : null;
     });
+    // A ticker held under several asset kinds is priced per kind
+    // (see "Price identity"): the bare entry above is never read for it.
+    historySymbols.forEach(function (symbol) {
+      if (!PRICE_COLLISIONS[symbol]) return;
+      Object.keys(PRICE_KINDS_BY_SYMBOL[symbol] || {}).forEach(function (kind) {
+        var kh = getHistoricalExec(symbol, dateFilter.to, main, kind);
+        detailPrices[priceKeyOf(symbol, kind)] = kh && isFinite(Number(kh.price)) && Number(kh.price) > 0
+          ? Number(kh.price)
+          : null;
+      });
+    });
     if (!rangeIssue && historySymbols.length) {
       var historyRequests = historySymbols.map(function (symbol) {
         return { type: 'buy', symbol: symbol, date: dateFilter.to, qty: 1, accountId: id };
@@ -12536,7 +13082,7 @@ function renderAccountDetail(st, id) {
   var lvRaw = tickSym ? (detailPrices ? detailPrices[tickSym] : null) : null;
   var lvNum = Number(lvRaw);
   var liveShow = pos ? pos.livePrice : ((isFinite(lvNum) && lvNum > 0) ? lvNum : null);
-  var detLoading = !historicalEnd && isPriceLoading(tickSym);
+  var detLoading = !historicalEnd && isPriceLoading(tickSym, acc.id);
   stats.appendChild(statCard('Value', mvKnown ? fmtMoney(mv, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), mvKnown ? mv : null, !mvKnown && detLoading));
   stats.appendChild(statCard(historicalEnd ? 'Price on ' + fmtDateDmy(dateFilter.to) : 'Live price', liveShow !== null ? fmtMoney(liveShow, main) : (detLoading ? PRICE_LOADING_TEXT : '—'), liveShow, liveShow === null && detLoading));
   stats.appendChild(statCard('Average entry', (pos && !closed) ? fmtMoney(pos.avgEntry, main) : '—', (pos && !closed) ? pos.avgEntry : null));
@@ -12621,9 +13167,11 @@ function renderAccountDetail(st, id) {
     }
     return;
   }
-  // Per-account spent (this account only): lifetime sell proceeds, cash legs
-  // and crypto fees at the frozen tx-date rate — same definition as the home
-  // SPENT AMOUNT, scoped to atrades. Orange pill above the red fees pill.
+  // Per-account spent (this account only): lifetime cash legs of expense and
+  // transfer records, plus crypto fees and crypto expenses at the frozen
+  // tx-date rate — same definition as the home SPENT AMOUNT, scoped to
+  // atrades. Sales and swap legs are conversions, never spending: they land
+  // in Realized. Orange pill above the red fees pill.
   var spentSum = 0;
   try {
     atrades.forEach(function (t) {
@@ -12643,8 +13191,6 @@ function renderAccountDetail(st, id) {
           try { kr = resolveExecPrice(t, main, accKind); } catch (e) { kr = null; }
           if (kr !== null && isFinite(Number(kr.price)) && Number(kr.price) > 0) spentSum += cq * Number(kr.price);
         }
-      } else if (t.accountId === acc.id && t.type === 'sell') {
-        if (isFinite(sn.totalMain) && sn.totalMain > 0) spentSum += sn.totalMain;
       } else if (t.accountId === acc.id && t.type === 'expense') {
         spentSum += expenseSpentMain(t, main, accKind);
       }
@@ -15646,18 +16192,42 @@ function qtyDecimals(symbol) {
   return 8;
 }
 
-function noteSymbolKinds(accounts) {
+function noteSymbolKinds(accounts, trades) {
   var next = {};
   var crypto = {};
+  var kindByAccount = {};
+  var kindsBySym = {};
+  function noteKind(sym, kind) {
+    var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
+    if (!up) return;
+    if (!kindsBySym[up]) kindsBySym[up] = {};
+    kindsBySym[up][normPriceKind(kind)] = true;
+  }
   (Array.isArray(accounts) ? accounts : []).forEach(function (a) {
-    if (!a || a.ticker === undefined || a.ticker === null) return;
+    if (!a) return;
+    if (a.id !== undefined && a.id !== null) kindByAccount[a.id] = normPriceKind(a.kind);
+    if (a.ticker === undefined || a.ticker === null) return;
     var t = String(a.ticker).trim().toUpperCase();
     var k = String(a.kind || '').trim().toLowerCase();
     if (k === 'stock' || k === 'commodity') next[t] = true;
     else if (k === 'crypto') crypto[t] = true;
+    noteKind(t, a.kind);
   });
   Object.keys(crypto).forEach(function (t) { delete next[t]; });
   QTY_NON_CRYPTO = next;
+  // Trade symbols inherit their account's kind.
+  (Array.isArray(trades) ? trades : []).forEach(function (tr) {
+    if (!tr || !tr.symbol || tr.accountId === undefined || tr.accountId === null) return;
+    if (!Object.prototype.hasOwnProperty.call(kindByAccount, tr.accountId)) return;
+    noteKind(tr.symbol, kindByAccount[tr.accountId]);
+  });
+  var collisions = {};
+  Object.keys(kindsBySym).forEach(function (sym) {
+    if (Object.keys(kindsBySym[sym]).length > 1) collisions[sym] = true;
+  });
+  PRICE_KIND_BY_ACCOUNT = kindByAccount;
+  PRICE_KINDS_BY_SYMBOL = kindsBySym;
+  PRICE_COLLISIONS = collisions;
 }
 
 var EX_ACT_POW10 = [1n, 10n, 100n]; // grows on demand, one entry per exponent
@@ -16575,7 +17145,7 @@ function openEditTrade(tradeId) {
     if (frMan && String(frMan.source).toLowerCase() === 'manual') {
       manualPx = String(frMan.price);
     } else {
-      var ovMan = priceOverrideEntry(pxTr.symbol);
+      var ovMan = priceOverrideEntry(pxTr.symbol, PRICE_KIND_BY_ACCOUNT[pxTr.accountId]);
       if (ovMan !== null) manualPx = String(ovMan.price);
     }
   } catch (e) { manualPx = ''; }
@@ -18408,6 +18978,8 @@ function buildSettings() {
     '<h3 class="set-heading">Market pricing ' + infoPill('Use a manual quote when a market price is unavailable or you prefer a specific source. It takes priority over fetched quotes for that symbol.') + '</h3>' +
     '<label for="o-symbol">Symbol</label>' +
     '<input id="o-symbol" autocomplete="off" spellcheck="false" placeholder="e.g. BTC">' +
+    '<label for="o-kind">Asset kind</label>' +
+    '<select id="o-kind"><option value="auto">Auto (from my accounts)</option><option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option></select>' +
     '<label for="o-price">Price (in current fiat)</label>' +
     '<input id="o-price" inputmode="decimal" placeholder="e.g. 67000">' +
     '<button id="o-add" type="button">Save override</button>' +
@@ -18443,6 +19015,7 @@ function buildSettings() {
     '<section data-setpanel="backup" role="tabpanel" aria-label="Backup and restore" hidden>' +
     '<h3 class="set-heading">Backups ' + infoPill('Records live on this device. Download a JSON backup to keep a safe copy or move to another device. CSV exports are for spreadsheets and tax-lot review.') + '</h3>' +
     '<button id="s-download" type="button">Download backup</button>' +
+    '<button id="s-recovery" type="button" style="display:none">Download recovery copy</button>' +
     '<button id="s-csv-trades" type="button">Trades CSV</button>' +
     '<button id="s-csv-lots" type="button">FIFO tax lots CSV</button>' +
     '<span id="s-upload-label">Restore from file</span>' +
@@ -18635,9 +19208,14 @@ function buildSettings() {
     if (!isFinite(price) || price <= 0) { showBanner('Override price must be > 0.'); return; }
     var st = loadState();
     st.priceOverrides = (st.priceOverrides && typeof st.priceOverrides === 'object') ? st.priceOverrides : {};
-    st.priceOverrides[sym] = { price: price, vs: String(st.settings.mainCurrency).toUpperCase() };
+    // The override belongs to one asset kind (a coin and a stock can share a
+    // ticker). Auto picks the kind the portfolio holds this ticker under; a
+    // shared ticker must be chosen explicitly.
+    var added = overrideAdd(st.priceOverrides, sym, price, st.settings.mainCurrency, uiVal('o-kind', 'auto'));
+    if (!added.ok) { showBanner(added.error); return; }
     if (!saveStateGuarded(st)) return;
     uiSetVal('o-symbol', '');
+    uiSetVal('o-kind', 'auto');
     uiSetVal('o-price', '');
     clearBanner();
     refreshPrices(); // override wins over network; recompute + render
@@ -18646,8 +19224,7 @@ function buildSettings() {
     var btn = e && e.target && e.target.closest ? e.target.closest('[data-override-del]') : null;
     if (!btn) return;
     var st = loadState();
-    if (st.priceOverrides && Object.prototype.hasOwnProperty.call(st.priceOverrides, btn.getAttribute('data-override-del'))) {
-      delete st.priceOverrides[btn.getAttribute('data-override-del')];
+    if (overrideRemove(st.priceOverrides, btn.getAttribute('data-override-del'))) {
       if (!saveStateGuarded(st)) return;
     }
     refreshPrices();
@@ -18709,20 +19286,34 @@ function buildSettings() {
     var sel = e && e.target && e.target.closest ? e.target.closest('[data-override-fiat]') : null;
     if (!sel || !sel.value) return;
     var sym = sel.getAttribute('data-override-fiat');
-    var vs = String(sel.value).trim().toUpperCase();
-    if (!/^[A-Z]{2,10}$/.test(vs)) return;
     var st = loadState();
     if (!st.priceOverrides || typeof st.priceOverrides !== 'object') return;
-    var cur = Object.prototype.hasOwnProperty.call(st.priceOverrides, sym)
-      ? st.priceOverrides[sym] : null;
-    var price = (cur && typeof cur === 'object' && !Array.isArray(cur)) ? Number(cur.price) : Number(cur);
-    if (!isFinite(price) || price <= 0) return;
-    st.priceOverrides[sym] = { price: price, vs: vs };
+    if (!overrideSetFiat(st.priceOverrides, sym, sel.value)) return;
     if (!saveStateGuarded(st)) return;
     clearBanner();
     refreshPrices(); // re-resolve + repaint with the declared fiat
   });
+  // Ambiguous legacy override (bare ticker shared by several asset kinds):
+  // the user says which asset it belongs to; nothing else is touched.
+  document.getElementById('o-list').addEventListener('change', function (e) {
+    var sel = e && e.target && e.target.closest ? e.target.closest('[data-override-assign]') : null;
+    if (!sel || !sel.value) return;
+    var from = sel.getAttribute('data-override-assign');
+    var kind = String(sel.value).trim().toLowerCase();
+    var st = loadState();
+    if (!st.priceOverrides) return;
+    var moved = overrideAssignKind(st.priceOverrides, from, kind);
+    if (!moved.ok) {
+      if (moved.error === 'exists') showBanner('A ' + kind + ' override for ' + String(from).toUpperCase() + ' already exists — remove one of them first.');
+      return;
+    }
+    if (!saveStateGuarded(st)) return;
+    clearBanner();
+    refreshPrices();
+  });
   document.getElementById('s-download').addEventListener('click', downloadBackup);
+  var recBtn = document.getElementById('s-recovery');
+  if (recBtn) recBtn.addEventListener('click', downloadRecoveryCopy);
   var csvT = document.getElementById('s-csv-trades');
   if (csvT) csvT.addEventListener('click', downloadTradesCsv);
   var csvL = document.getElementById('s-csv-lots');
@@ -18802,17 +19393,38 @@ function syncTopbar(st) {
     Object.keys(ov).sort().forEach(function (sym) {
       var li = document.createElement('li');
       var label = document.createElement('span');
-      var oe = null;
-      try { oe = priceOverrideEntry(sym); } catch (e) { oe = null; }
+      var oe = parseOverrideRaw(ov[sym]);
       var op = (oe && isFinite(Number(oe.price))) ? Number(oe.price) : Number(ov[sym]);
       var oc = (oe && oe.vs) ? oe.vs : st.settings.mainCurrency;
-      label.textContent = sym + ' — ' + fmtMoney(op, oc) + ' ';
+      var parts = splitOverrideKey(sym);
+      var bareUp = String(sym).trim().toUpperCase();
+      var ambiguous = !parts && !!PRICE_COLLISIONS[bareUp];
+      var shown = parts ? parts.sym + ' (' + parts.kind + ')' : (ambiguous ? bareUp + ' (unassigned)' : sym);
+      label.textContent = shown + ' — ' + fmtMoney(op, oc) + ' ';
       li.appendChild(label);
+      if (ambiguous) {
+        // Shared ticker: this entry is applied to no asset until assigned.
+        var asg = document.createElement('select');
+        asg.setAttribute('data-override-assign', sym);
+        asg.setAttribute('aria-label', 'Assign ' + bareUp + ' override to an asset kind');
+        var aph = document.createElement('option');
+        aph.value = '';
+        aph.textContent = 'assign to…';
+        asg.appendChild(aph);
+        Object.keys(PRICE_KINDS_BY_SYMBOL[bareUp] || {}).forEach(function (k) {
+          var ao = document.createElement('option');
+          ao.value = k;
+          ao.textContent = k;
+          asg.appendChild(ao);
+        });
+        li.appendChild(asg);
+        li.appendChild(document.createTextNode(' '));
+      }
       // Untagged legacy entries get a one-time fiat declaration so they
       // convert instead of reading nominal; tagged ones show their fiat.
       var fiatSel = document.createElement('select');
       fiatSel.setAttribute('data-override-fiat', sym);
-      fiatSel.setAttribute('aria-label', 'Fiat for ' + sym + ' override');
+      fiatSel.setAttribute('aria-label', 'Fiat for ' + shown + ' override');
       var ph = document.createElement('option');
       ph.value = '';
       ph.textContent = (oe && oe.vs) ? oe.vs : 'fiat…';
@@ -18830,7 +19442,7 @@ function syncTopbar(st) {
       rm.type = 'button';
       rm.textContent = 'Remove';
       rm.setAttribute('data-override-del', sym);
-      rm.setAttribute('aria-label', 'Remove override for ' + sym);
+      rm.setAttribute('aria-label', 'Remove override for ' + shown);
       li.appendChild(rm);
       list.appendChild(li);
     });
@@ -18859,6 +19471,53 @@ function downloadBackup() {
     try { urls.revokeObjectURL(url); } catch (e) { /* ignore */ }
     if (a.parentNode) a.parentNode.removeChild(a);
   }, 1000);
+}
+
+// The newest preserved copy of stored data that could not be read in full.
+// Written as plain text: an unreadable original is not valid JSON.
+function downloadRecoveryCopy() {
+  var list = readRecoveryCopies();
+  if (!list.length) return;
+  downloadTextFile('plutus.inoculens.com-recovery-' + backupStamp() + '.txt', list[list.length - 1].raw, 'text/plain');
+}
+
+// One calm banner when saved data was unreadable or partly rejected.
+function announceStorageRecovery() {
+  var r = storageRecovery;
+  if (!r) return;
+  try {
+    var rb = document.getElementById('s-recovery');
+    if (rb && r.saved) rb.style.display = '';
+  } catch (e) { /* ignore */ }
+  var lines;
+  var msg;
+  if (r.kind === 'unreadable') {
+    msg = 'Saved data in this browser could not be read.';
+    lines = [
+      'What happened: the stored data is damaged, so the app started empty.'
+    ];
+  } else {
+    msg = 'Some saved data could not be loaded.';
+    var parts = [];
+    if (r.accounts) parts.push(r.accounts + ' account(s)');
+    if (r.trades) parts.push(r.trades + ' record(s)');
+    if (r.accountFields) parts.push(r.accountFields + ' account(s) with invalid details');
+    if (r.tradeFields) parts.push(r.tradeFields + ' record(s) with invalid details');
+    if (r.groups) parts.push(r.groups + ' invalid account group link(s)');
+    if (r.overrides) parts.push(r.overrides + ' manual price override(s)');
+    if (r.settings) parts.push('your settings');
+    if (r.shape) parts.push('some malformed data');
+    lines = [
+      'What happened: ' + (parts.join(', ') || 'part of the saved data') + ' failed validation. The invalid parts were not loaded' + (r.settings ? ' (settings fall back to defaults)' : '') + '.'
+    ];
+  }
+  if (r.saved) {
+    lines.push('The original data is kept as a recovery copy in this browser. Download it from Settings > Backups > Download recovery copy.');
+  } else {
+    lines.push('The original data could NOT be copied (browser storage is full). Free space before making changes — saving is blocked to protect it.');
+  }
+  lines.push('Your next change will replace the active data; the recovery copy stays until you use Clear all data.');
+  showBanner(msg, 'error', { title: 'Saved data problem', lines: lines });
 }
 
 function csvEsc(v) {
@@ -19185,7 +19844,9 @@ function clearAllData() {
     if (!ok) return;
     livePrices = {};
     priceLoading = {};
-    if (!saveStateGuarded(defaultState())) return;
+    // Explicit wipe: discard any recovery copies too ("cannot be undone").
+    if (!saveStateGuarded(defaultState(), { replaceDamaged: true })) return;
+    clearRecoveryCopies();
     clearBanner();
     render();
     closeDialog('settings-dialog');
@@ -19205,22 +19866,34 @@ var priceReqGen = 0;
 function refreshPrices() {
   var st = loadState();
   var mainNow = st.settings.mainCurrency;
-  var syms = uniqueSymbols(st.trades);
+  // One entry per price identity (see "Price identity"): the bare ticker, or
+  // KIND:SYM for a ticker held under several asset kinds.
+  var syms = [];
   var kinds = {};
-  (st.accounts || []).forEach(function (a) {
-    if (a && a.ticker) {
-      var t = String(a.ticker).toUpperCase();
-      if (syms.indexOf(t) === -1) syms.push(t); // unique: trades may already list it
-      if (a.kind) kinds[t] = a.kind;
+  function addPrice(sym, kind) {
+    var up = String(sym || '').toUpperCase();
+    if (!up) return;
+    if (PRICE_COLLISIONS[up]) {
+      var held = PRICE_KINDS_BY_SYMBOL[up] || {};
+      Object.keys(held).forEach(function (k) {
+        var key = priceKeyOf(up, k);
+        if (syms.indexOf(key) === -1) syms.push(key);
+        kinds[key] = k;
+      });
+      return;
     }
+    if (syms.indexOf(up) === -1) syms.push(up);
+    if (kind && !kinds[up]) kinds[up] = kind;
+  }
+  uniqueSymbols(st.trades).forEach(function (s) { addPrice(s); });
+  (st.accounts || []).forEach(function (a) {
+    if (a && a.ticker) addPrice(a.ticker, a.kind);
   });
   // Trade symbols inherit their account's kind (stock/commodity accounts fetch live).
   (st.trades || []).forEach(function (tr) {
     if (!tr || !tr.symbol || !tr.accountId) return;
-    var s = String(tr.symbol).toUpperCase();
-    if (kinds[s]) return;
     var a = accountById(st, tr.accountId);
-    if (a && a.kind) kinds[s] = a.kind;
+    if (a && a.kind) addPrice(tr.symbol, a.kind);
   });
   if (!syms.length) {
     priceLoading = {};
@@ -19285,7 +19958,9 @@ function refreshPrices() {
       var actionableStill = stillMissing.filter(isActionable);
       if (actionableStill.length) {
         var detailLines = actionableStill.map(function (s) {
-          return s + ' — ' + (lastPriceErrors[s] || 'price unavailable');
+          var kp = splitPriceKey(s);
+          var label = kp ? kp.sym + ' (' + kp.kind + ')' : s;
+          return label + ' — ' + (lastPriceErrors[s] || 'price unavailable');
         });
         showBanner('Live prices are unreachable right now — your data is safe and numbers will fill in automatically.', 'info', {
           title: 'Price errors',
@@ -19445,6 +20120,7 @@ function init() {
   uiBooted = true;
   render();
   finishStartupLoader();
+  try { announceStorageRecovery(); } catch (e) { /* the notice never breaks boot */ }
   refreshPrices();
   try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
   try {
@@ -20216,6 +20892,10 @@ function syncNetErr(label) {
 
 // All sync traffic goes through here: a hung connection aborts after
 // SYNC_TIMEOUT_MS so the UI can never wedge with its buttons disabled.
+// The timer covers the whole exchange: it keeps running after the response
+// headers arrive and stops only once the body has been read (a stalled body
+// aborts and rejects like a stalled request). A response whose body is never
+// read is cut off by the timer, which is harmless.
 // Degrades to plain fetch where AbortController/timers are unavailable.
 var SYNC_TIMEOUT_MS = 30000;
 
@@ -20226,14 +20906,35 @@ function syncFetch(url, opts, label) {
       var ctrl = new AbortController();
       o.signal = ctrl.signal;
       var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) { /* ignore */ } }, SYNC_TIMEOUT_MS);
+      var stop = function () { try { clearTimeout(timer); } catch (e) { /* ignore */ } };
+      var timedOut = function () {
+        return new Error('sync failed: timed out reaching ' + label + '. Check your connection.');
+      };
       return fetch(url, o).then(function (res) {
-        try { clearTimeout(timer); } catch (e) { /* ignore */ }
+        if (!res) { stop(); return res; }
+        if (res.body === null) { stop(); return res; } // HEAD / 204: nothing left to wait for
+        ['json', 'text', 'arrayBuffer', 'blob', 'formData'].forEach(function (name) {
+          var orig = res[name];
+          if (typeof orig !== 'function') return;
+          try {
+            res[name] = function () {
+              var p;
+              try { p = orig.apply(res, arguments); } catch (e) { stop(); throw e; }
+              return Promise.resolve(p).then(function (v) {
+                stop();
+                return v;
+              }, function (err) {
+                stop();
+                if (err && err.name === 'AbortError') throw timedOut();
+                throw err;
+              });
+            };
+          } catch (e) { /* read-only response object: timer still bounds it */ }
+        });
         return res;
       }, function (err) {
-        try { clearTimeout(timer); } catch (e) { /* ignore */ }
-        if (err && err.name === 'AbortError') {
-          throw new Error('sync failed: timed out reaching ' + label + '. Check your connection.');
-        }
+        stop();
+        if (err && err.name === 'AbortError') throw timedOut();
         throw new Error('sync failed: cannot reach ' + label + '. Check your connection.');
       });
     }
@@ -22040,7 +22741,7 @@ function syncAdoptRemote(cfg, remotePlain) {
   try {
     next = importState(remotePlain);
   } catch (e) {
-    if (e && e.message === 'storage-unavailable') throw e;
+    if (isStorageWriteError(e)) throw e;
     throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
   }
   if (!saveStateGuarded(next)) return 'failed';
@@ -22369,7 +23070,7 @@ function syncPullFlow() {
     try {
       next = importState(plain);
     } catch (e) {
-      if (e && e.message === 'storage-unavailable') throw e;
+      if (isStorageWriteError(e)) throw e;
       throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
     }
     syncSetBusy(false);
@@ -22905,10 +23606,10 @@ function syncRestoreEncryptedFile(file) {
       try {
         next = importState(plain);
       } catch (e) {
-        if (e && e.message === 'storage-unavailable') {
-          showBanner('Storage unavailable — change was not saved.', 'error', {
-            title: 'Storage error',
-            lines: ['Your data was left untouched. Free space or leave private mode, then retry.']
+        if (isStorageWriteError(e)) {
+          showBanner(e.message === 'storage-unreadable' ? 'Save blocked — stored data could not be checked.' : 'Storage unavailable — change was not saved.', 'error', {
+            title: e.message === 'storage-unreadable' ? 'Save blocked' : 'Storage error',
+            lines: ['Your data was left untouched. Make storage accessible (leave private mode, free space), then retry.']
           });
           return;
         }

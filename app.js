@@ -13633,23 +13633,6 @@ function debtAssetTickerExample(kind, owner) {
   return 'BTC';
 }
 
-function debtAssetSuggestions(kind, owner) {
-  var k = String(kind || '').trim().toLowerCase();
-  var base = [];
-  if (k === 'crypto') base = ['USDC', 'USDT', 'DAI', 'BTC', 'ETH', 'SOL', 'XMR', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
-  else if (k === 'cash') base = ['USD', 'EUR', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
-  else if (k === 'commodity') base = ['XAU', 'XAG', 'PA', 'PL'];
-  else if (k === 'stock') base = ['SPCX', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'];
-  else base = [];
-  var ownerKind = owner ? String(owner.kind || '').trim().toLowerCase() : '';
-  var ownerTicker = owner ? String(owner.ticker || '').trim().toUpperCase() : '';
-  var sameKind = owner && ownerTicker && (ownerKind === k || (isCashKind(ownerKind) && isCashKind(k)));
-  if (sameKind && ownerTicker && base.indexOf(ownerTicker) === -1) {
-    base = [ownerTicker].concat(base);
-  }
-  return base;
-}
-
 function buildDebtPositionDialog() {
   var existing = document.getElementById('debt-position-dialog');
   if (existing) return existing;

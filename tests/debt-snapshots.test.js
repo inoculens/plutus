@@ -138,14 +138,12 @@ assert.ok(C.KRAKEN_LIVE_SYMBOLS.indexOf('USDC') !== -1, 'Kraken live symbols cov
 assert.ok(C.KRAKEN_LIVE_SYMBOLS.indexOf('USDT') !== -1, 'Kraken live symbols cover USDT');
 assert.ok(/Live crypto quote/i.test(C.describeDebtAsset('crypto', 'USDC')), 'describeDebtAsset detects USDC crypto');
 assert.ok(/ECB exchange rate/i.test(C.describeDebtAsset('cash', 'USD')), 'describeDebtAsset detects USD fiat');
-assert.ok(C.debtAssetSuggestions('crypto').indexOf('USDC') !== -1, 'debtAssetSuggestions suggests USDC for crypto');
 assert.equal(C.debtAssetTickerExample('crypto', { kind: 'crypto', ticker: 'BTC' }), 'BTC', 'uses account ticker when kinds match');
 assert.equal(C.debtAssetTickerExample('crypto', { kind: 'crypto', ticker: 'ETH' }), 'ETH', 'uses account ticker for ETH');
 assert.equal(C.debtAssetTickerExample('cash', { kind: 'crypto', ticker: 'BTC' }), 'USD', 'defaults to USD for fiat debt on crypto account');
 assert.equal(C.debtAssetTickerExample('commodity', { kind: 'crypto', ticker: 'BTC' }), 'XAU', 'defaults to XAU for commodity debt');
 assert.equal(C.debtAssetTickerExample('stock', { kind: 'crypto', ticker: 'BTC' }), 'SPCX', 'defaults to SPCX for stock debt');
 assert.equal(C.debtAssetTickerExample('cash', { kind: 'cash', ticker: 'EUR' }), 'EUR', 'uses account fiat ticker when cash account');
-assert.ok(C.debtAssetSuggestions('crypto', { kind: 'crypto', ticker: 'SOL' }).indexOf('SOL') !== -1, 'suggests account ticker in datalist');
 
 const unknownValuation = C.currentDebtValuation([btcDebt], 'USD', {}, valuationAt);
 assert.equal(unknownValuation.value, null,

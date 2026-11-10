@@ -13322,6 +13322,16 @@ function deleteAccountLedger(accountId, code, scopeIds) {
 
 
 // --- Debt position UI: reported totals only; no APR or interest arithmetic. ---
+// A reported balance is something the lender already showed, so its
+// observation time can never lie in the future (5 minutes of clock skew
+// tolerated). Returns the form error sentence, or '' when acceptable.
+function debtReportedAtIssue(reportedMs, nowMs) {
+  if (typeof reportedMs !== 'number' || !isFinite(reportedMs)) return 'Enter when the balance was reported.';
+  var now = (typeof nowMs === 'number' && isFinite(nowMs)) ? nowMs : Date.now();
+  if (reportedMs > now + 5 * 60 * 1000) return 'The reported time cannot be in the future.';
+  return '';
+}
+
 function debtLocalDateTimeValue(date) {
   var d = date instanceof Date ? date : new Date(date);
   if (!isFinite(d.getTime())) d = new Date();
@@ -13414,7 +13424,8 @@ function buildDebtPositionDialog() {
     if (!name || name.length > 120) { fail('Enter a position name (up to 120 characters).'); return; }
     if (!isFinite(amount) || amount < 0) { fail('Enter a valid non-negative total balance.'); return; }
     var reportedDate = new Date(reportedInput);
-    if (!reportedInput || !isFinite(reportedDate.getTime())) { fail('Enter when the balance was reported.'); return; }
+    var reportedIssue = reportedInput ? debtReportedAtIssue(reportedDate.getTime(), Date.now()) : 'Enter when the balance was reported.';
+    if (reportedIssue) { fail(reportedIssue); return; }
     var collateral = [];
     var sourceSeen = {};
     var rows = document.querySelectorAll('#debt-collateral-list .debt-collateral-row');
@@ -13491,8 +13502,9 @@ function openDebtPositionDialog(ownerId, positionId) {
   var error = document.getElementById('debt-position-error');
   title.textContent = position ? 'Update debt balance' : 'New debt position';
   name.value = position ? position.name : '';
-  balance.value = position ? String((latestDebtBalanceSnapshot(position) || {}).amount || 0) : '';
+  balance.value = position ? String((latestDebtBalanceSnapshot(position, Date.now()) || {}).amount || 0) : '';
   reported.value = debtLocalDateTimeValue(new Date());
+  reported.max = reported.value;
   note.value = '';
   unit.textContent = '(' + String(owner.ticker || '').toUpperCase() + ')';
   error.hidden = true;
@@ -13599,7 +13611,9 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       update.addEventListener('click', function () { openDebtPositionDialog(owner.id, position.id); });
       top.appendChild(update);
       item.appendChild(top);
-      var latest = latestDebtBalanceSnapshot(position);
+      // As of now, exactly like the totals: a snapshot dated in the future
+      // (legacy or imported data) is never shown as the current balance.
+      var latest = latestDebtBalanceSnapshot(position, Date.now());
       var amount = document.createElement('p');
       amount.className = 'debt-position-amount';
       amount.textContent = latest

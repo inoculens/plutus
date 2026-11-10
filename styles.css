@@ -1227,7 +1227,8 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 
 /* Busy state while a record is being saved: spinner + label, not clickable. */
-#t-submit.is-busy {
+#t-submit.is-busy,
+.t-dock button.primary.is-busy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1235,7 +1236,8 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   cursor: progress;
   pointer-events: none;
 }
-#t-submit.is-busy:disabled { opacity: 0.88; }
+#t-submit.is-busy:disabled,
+.t-dock button.primary.is-busy:disabled { opacity: 0.88; }
 .btn-spin {
   flex-shrink: 0;
   width: 1.05em;

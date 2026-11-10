@@ -13752,7 +13752,7 @@ function buildDebtPositionDialog() {
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
     '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
-    dockMarkup('debt-position-error', 'Save reported balance') + '</form>';
+    dockMarkup('debt-position-error', 'Save reported balance', 'debt-position-save') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-position-dialog');
   var form = document.getElementById('debt-position-form');
@@ -13763,7 +13763,12 @@ function buildDebtPositionDialog() {
   });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { dockError('debt-position-error', message); }
+    var saveBtn = form.querySelector('.t-dock button.primary');
+    if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
+    function fail(message) {
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save reported balance');
+      dockError('debt-position-error', message);
+    }
     dockError('debt-position-error', '');
     if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
@@ -13847,17 +13852,24 @@ function buildDebtPositionDialog() {
       fail('The debt position is invalid. Check the balance, timestamp and collateral details.');
       return;
     }
-    if (!Array.isArray(owner.debtPositions)) owner.debtPositions = [];
-    if (position) {
-      owner.debtPositions = owner.debtPositions.map(function (p) { return p.id === position.id ? nextPosition : p; });
-    } else {
-      owner.debtPositions.push(nextPosition);
-    }
-    if (!saveStateGuarded(state)) { fail('Storage unavailable — the debt position was not saved.'); return; }
-    closeDialog(dlg);
-    clearBanner();
-    render();
-    try { refreshPrices(); } catch (e) { /* ignore */ }
+    setTradeSubmitBusy(saveBtn, true, 'Saving…');
+    deferTradeSubmitWork(function () {
+      if (!Array.isArray(owner.debtPositions)) owner.debtPositions = [];
+      if (position) {
+        owner.debtPositions = owner.debtPositions.map(function (p) { return p.id === position.id ? nextPosition : p; });
+      } else {
+        owner.debtPositions.push(nextPosition);
+      }
+      if (!saveStateGuarded(state)) {
+        fail('Storage unavailable — the debt position was not saved.');
+        return;
+      }
+      setTradeSubmitBusy(saveBtn, false, 'Save reported balance');
+      closeDialog(dlg);
+      clearBanner();
+      render();
+      try { refreshPrices(); } catch (e) { /* ignore */ }
+    });
   });
   return dlg;
 }
@@ -13904,6 +13916,8 @@ function openDebtPositionDialog(ownerId, positionId) {
   syncDebtAssetUI();
   dockError('debt-position-error', '');
   clearInvalidFields(document.getElementById('debt-position-form'));
+  var saveBtn = document.getElementById('debt-position-save');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save reported balance');
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13951,13 +13965,18 @@ function buildDebtSnapshotDialog() {
     '<input id="debt-snapshot-reported-at" type="datetime-local" required>' +
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
-    dockMarkup('debt-snapshot-error', 'Save changes') + '</form>';
+    dockMarkup('debt-snapshot-error', 'Save changes', 'debt-snapshot-save') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
   var form = document.getElementById('debt-snapshot-form');
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { dockError('debt-snapshot-error', message); }
+    var saveBtn = form.querySelector('.t-dock button.primary');
+    if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
+    function fail(message) {
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save changes');
+      dockError('debt-snapshot-error', message);
+    }
     dockError('debt-snapshot-error', '');
     if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
@@ -13998,10 +14017,17 @@ function buildDebtSnapshotDialog() {
       fail('The reported balance is invalid. Check the amount and timestamp.');
       return;
     }
-    if (!saveStateGuarded(state)) { fail('Storage unavailable — the reported balance was not saved.'); return; }
-    closeDialog(dlg);
-    clearBanner();
-    render();
+    setTradeSubmitBusy(saveBtn, true, 'Saving…');
+    deferTradeSubmitWork(function () {
+      if (!saveStateGuarded(state)) {
+        fail('Storage unavailable — the reported balance was not saved.');
+        return;
+      }
+      setTradeSubmitBusy(saveBtn, false, 'Save changes');
+      closeDialog(dlg);
+      clearBanner();
+      render();
+    });
   });
   return dlg;
 }
@@ -14031,6 +14057,8 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
   dockError('debt-snapshot-error', '');
   clearInvalidFields(document.getElementById('debt-snapshot-form'));
+  var saveBtn = document.getElementById('debt-snapshot-save');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save changes');
   openDialog('debt-snapshot-dialog');
 }
 
@@ -18673,7 +18701,7 @@ function tErrDismiss() {
 var tradeSubmitBusy = false;
 function setTradeSubmitBusy(btn, busy, label) {
   if (!btn) return;
-  tradeSubmitBusy = !!busy;
+  if (btn.id === 't-submit') tradeSubmitBusy = !!busy;
   if (busy) {
     if (!btn.classList.contains('is-busy')) btn.setAttribute('data-idle-label', btn.textContent || '');
     btn.classList.add('is-busy');
@@ -18695,7 +18723,7 @@ function setTradeSubmitBusy(btn, busy, label) {
   btn.removeAttribute('data-idle-label');
   btn.disabled = false;
   if (label) btn.textContent = label;
-  else if (btn.querySelector('.btn-spin')) btn.textContent = idle || 'Add record';
+  else if (btn.querySelector('.btn-spin')) btn.textContent = idle || (btn.id === 't-submit' ? 'Add record' : 'Save');
 }
 
 // Lets the "Saving…" state paint before heavy save work runs. Animation

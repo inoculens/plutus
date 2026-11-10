@@ -5190,9 +5190,11 @@ label.sync-check {
 .debt-positions-details > summary::after { content: '⌄'; color: var(--muted); margin-left: auto; }
 .debt-positions-details[open] > summary::after { content: '⌃'; }
 .debt-position-count {
-  display: inline-grid; place-items: center; min-width: 1.3rem; height: 1.3rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.05rem; height: 1.05rem; padding: 0 0.25rem;
   background: var(--surface-4); border-radius: 999px; color: var(--muted);
-  font-size: 0.7rem; font-variant-numeric: tabular-nums; padding: 0 0.3rem;
+  font-size: 0.62rem; line-height: 1; font-variant-numeric: tabular-nums;
+  vertical-align: middle;
 }
 .debt-position-list { display: grid; gap: 0.7rem; padding-top: 0.5rem; }
 .debt-position-card {

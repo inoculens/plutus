@@ -265,7 +265,7 @@ function livePriceFor(live, sym, accountId) {
 // Only an explicit "Clear all data" discards recovery copies.
 var RECOVERY_KEY = STORAGE_KEY + '.recovery';
 var RECOVERY_KEEP = 3;
-var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, saved}
+var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, settings, overrides, saved}
 var lastSeenRaw = null;      // stored text last read clean, or last written by saveState
 var lastPreservedRaw = null; // stored text already kept as a recovery copy
 
@@ -313,6 +313,8 @@ function noteStorageDamage(raw, damage) {
     accounts: damage.accounts || 0,
     trades: damage.trades || 0,
     shape: !!damage.shape,
+    settings: !!damage.settings,
+    overrides: damage.overrides || 0,
     saved: saved
   };
   return saved;
@@ -352,10 +354,40 @@ function readStoredState(raw) {
   var droppedTrades = Array.isArray(parsed.trades) ? parsed.trades.length - trades.length : 0;
   var shape = (parsed.accounts !== undefined && parsed.accounts !== null && !Array.isArray(parsed.accounts)) ||
     (parsed.trades !== undefined && parsed.trades !== null && !Array.isArray(parsed.trades));
-  var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape)
-    ? { kind: 'rejected', accounts: droppedAccounts, trades: droppedTrades, shape: shape }
+  // Settings: present but invalid (or with chart labels that fail validation)
+  // would be replaced by defaults on load -- report it instead.
+  var settingsBad = false;
+  if (parsed.settings !== undefined && parsed.settings !== null) {
+    if (!isValidSettings(parsed.settings)) {
+      settingsBad = true;
+    } else {
+      var ll = parsed.settings.ledgerLabels;
+      if (ll && typeof ll === 'object' && !Array.isArray(ll) &&
+          Object.keys(normalizeLedgerLabels(ll)).length < Object.keys(ll).length) settingsBad = true;
+    }
+  }
+  // Manual price overrides: keep every valid entry, count the rest.
+  var overrides = {};
+  var droppedOverrides = 0;
+  var overridesShape = false;
+  var po = parsed.priceOverrides;
+  if (po !== undefined && po !== null) {
+    if (typeof po !== 'object' || Array.isArray(po)) {
+      overridesShape = true;
+    } else {
+      Object.keys(po).forEach(function (k) {
+        if (isValidOverrideValue(po[k])) overrides[k] = po[k];
+        else droppedOverrides++;
+      });
+    }
+  }
+  var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape || settingsBad || droppedOverrides > 0 || overridesShape)
+    ? {
+        kind: 'rejected', accounts: droppedAccounts, trades: droppedTrades,
+        shape: shape || overridesShape, settings: settingsBad, overrides: droppedOverrides
+      }
     : null;
-  return { parsed: parsed, accounts: accounts, trades: trades, damage: damage };
+  return { parsed: parsed, accounts: accounts, trades: trades, overrides: overrides, damage: damage };
 }
 
 function loadState() {
@@ -379,10 +411,7 @@ function loadState() {
   var accounts = info.accounts;
   var trades = info.trades;
   try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
-  var priceOverrides = {};
-  if (parsed.priceOverrides && typeof parsed.priceOverrides === 'object' && !Array.isArray(parsed.priceOverrides) && isValidPriceOverrides(parsed.priceOverrides)) {
-    priceOverrides = parsed.priceOverrides;
-  }
+  var priceOverrides = info.overrides;
   var settings = normalizeSettings(parsed.settings, fallback.settings);
   activeDateFormat = settings.dateFormat;
   try { noteSymbolKinds(accounts, trades); } catch (e) { /* never breaks load */ }
@@ -396,10 +425,13 @@ function loadState() {
 
 // Before a save replaces the stored text, make sure that text is either
 // clean or already preserved. If a damaged original cannot be preserved
-// (quota), the save is refused rather than destroying it.
+// (quota), or the stored value cannot be read at all, the save is refused
+// rather than risking the existing data.
 function guardStoredStateBeforeSave() {
   var raw;
-  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { return; }
+  // If the existing data cannot even be read, we cannot know it is safe to
+  // replace: block the save (the next attempt re-checks, so retry works).
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { throw new Error('storage-unreadable'); }
   if (raw === null || raw === undefined || raw === lastSeenRaw) return;
   var info = readStoredState(raw);
   if (!info.damage) { lastSeenRaw = raw; return; }
@@ -7189,6 +7221,17 @@ function saveStateGuarded(s, opts) {
     saveState(s, opts);
     return true;
   } catch (e) {
+    if (e && e.message === 'storage-unreadable') {
+      showBanner('Save blocked — stored data could not be checked.', 'error', {
+        title: 'Save blocked',
+        lines: [
+          'What happened: the data already saved in this browser could not be read, so replacing it was not safe.',
+          'Your change was NOT saved and the existing data was left untouched.',
+          'Make storage accessible again (leave private mode, allow site data), then retry the change.'
+        ]
+      });
+      return false;
+    }
     if (e && e.message === 'storage-unavailable') {
       showBanner('Storage unavailable — change was not saved.', 'error', {
         title: 'Storage error',
@@ -19163,9 +19206,14 @@ function announceStorageRecovery() {
     ];
   } else {
     msg = 'Some saved records could not be loaded.';
+    var parts = [];
+    if (r.accounts) parts.push(r.accounts + ' account(s)');
+    if (r.trades) parts.push(r.trades + ' record(s)');
+    if (r.overrides) parts.push(r.overrides + ' manual price override(s)');
+    if (r.settings) parts.push('your settings');
+    if (r.shape) parts.push('some malformed data');
     lines = [
-      'What happened: ' + (r.accounts ? r.accounts + ' account(s) ' : '') + (r.accounts && r.trades ? 'and ' : '') + (r.trades ? r.trades + ' record(s) ' : '') +
-        (r.shape ? 'and some malformed data ' : '') + 'failed validation and are not shown.'
+      'What happened: ' + (parts.join(', ') || 'part of the saved data') + ' failed validation and ' + 'were not loaded' + (r.settings ? ' (settings fall back to defaults)' : '') + '.'
     ];
   }
   if (r.saved) {

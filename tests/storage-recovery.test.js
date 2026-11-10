@@ -16,10 +16,11 @@ const noop = () => {};
 function createApp(initial, opts) {
   const store = new Map(Object.entries(initial || {}));
   const failRecovery = !!(opts && opts.failRecovery);
+  const ctl = { failRead: false };
   const C = {
     console, setTimeout: noop, clearTimeout: noop, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
     localStorage: {
-      getItem: k => store.has(k) ? store.get(k) : null,
+      getItem: k => { if (ctl.failRead) throw new Error('SecurityError'); return store.has(k) ? store.get(k) : null; },
       setItem: (k, v) => {
         if (failRecovery && k.endsWith('.recovery')) throw new Error('QuotaExceededError');
         store.set(k, String(v));
@@ -35,7 +36,7 @@ function createApp(initial, opts) {
   C.window = C; C.self = C; C.globalThis = C;
   vm.createContext(C);
   vm.runInContext(src, C, { filename: 'app.js' });
-  return { C, store };
+  return { C, store, ctl };
 }
 
 const fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
@@ -147,6 +148,91 @@ const recoveryRaws = store => JSON.parse(store.get(REC) || '[]').map(c => c.raw)
   store.set(KEY, damaged);
   C.saveState(st);
   assert.deepEqual(recoveryRaws(store), [damaged]);
+}
+
+// 8. Invalid priceOverrides are damage: detected, original preserved, valid
+//    entries kept, and a later save cannot destroy the original.
+{
+  const withOv = ov => JSON.stringify({ settings, accounts, trades: [good1], priceOverrides: ov });
+  const raw = withOv({ XMR: { price: 150, vs: 'EUR' }, BTC: 'oops', ETH: { price: -3, vs: 'EUR' }, LTC: { price: 5 } });
+  const { C, store } = createApp({ [KEY]: raw });
+  const st = C.loadState();
+  assert.equal(C.storageRecovery.kind, 'rejected');
+  assert.equal(C.storageRecovery.overrides, 3, 'three invalid entries counted');
+  assert.deepEqual(JSON.parse(JSON.stringify(st.priceOverrides)), { XMR: { price: 150, vs: 'EUR' } }, 'valid entry survives');
+  assert.deepEqual(recoveryRaws(store), [raw]);
+  C.saveState(st);
+  assert.deepEqual(Object.keys(JSON.parse(store.get(KEY)).priceOverrides), ['XMR']);
+  const kept = JSON.parse(recoveryRaws(store)[0]).priceOverrides;
+  assert.deepEqual(Object.keys(kept).sort(), ['BTC', 'ETH', 'LTC', 'XMR'], 'recovery copy still holds every override');
+}
+
+// 8b. priceOverrides of the wrong shape (array / string) are damage too.
+for (const bad of [[1, 2], 'x', 5]) {
+  const raw = JSON.stringify({ settings, accounts, trades: [good1], priceOverrides: bad });
+  const { C, store } = createApp({ [KEY]: raw });
+  C.loadState();
+  assert.equal(C.storageRecovery && C.storageRecovery.kind, 'rejected');
+  assert.deepEqual(recoveryRaws(store), [raw]);
+}
+
+// 9. Valid legacy overrides (bare numbers and {price,vs}) load untouched, no recovery.
+{
+  const ov = { XMR: 150, BTC: { price: 60000, vs: 'USD' } };
+  const raw = JSON.stringify({ settings, accounts, trades: [good1], priceOverrides: ov });
+  const { C, store } = createApp({ [KEY]: raw });
+  const st = C.loadState();
+  assert.equal(C.storageRecovery, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(st.priceOverrides)), ov);
+  assert.equal(store.has(REC), false);
+}
+
+// 10. A localStorage.getItem exception blocks the save; retry works once readable.
+{
+  const { C, store, ctl } = createApp({ [KEY]: stateOf([good1]) });
+  const st = C.loadState();
+  const before = store.get(KEY);
+  ctl.failRead = true;
+  assert.throws(() => C.saveState(st), /storage-unreadable/);
+  assert.equal(store.get(KEY), before, 'nothing was written');
+  ctl.failRead = false;
+  C.saveState(st); // storage readable again: the retry goes through
+  assert.equal(JSON.parse(store.get(KEY)).trades.length, 1);
+}
+
+// 11. Invalid settings are reported and preserved, not silently defaulted.
+for (const badSettings of [{ mainCurrency: 'XXX', costMethod: 'average' }, { mainCurrency: 'EUR', costMethod: 'bogus' }, 'nope', [1]]) {
+  const raw = JSON.stringify({ settings: badSettings, accounts, trades: [good1], priceOverrides: {} });
+  const { C, store } = createApp({ [KEY]: raw });
+  const st = C.loadState();
+  assert.equal(C.storageRecovery.kind, 'rejected');
+  assert.equal(C.storageRecovery.settings, true);
+  assert.equal(st.settings.mainCurrency, 'EUR', 'defaults shown');
+  assert.deepEqual(recoveryRaws(store), [raw]);
+  C.saveState(st);
+  assert.deepEqual(recoveryRaws(store), [raw], 'original settings survive the save in the recovery copy');
+}
+
+// 11b. Invalid ledger labels inside otherwise valid settings are reported.
+{
+  const s2 = Object.assign({}, settings, { ledgerLabels: { '1100': 'Cash', '': 'bad', 'zz zz': 5 } });
+  const raw = JSON.stringify({ settings: s2, accounts, trades: [good1], priceOverrides: {} });
+  const { C, store } = createApp({ [KEY]: raw });
+  C.loadState();
+  assert.equal(C.storageRecovery && C.storageRecovery.settings, true);
+  assert.deepEqual(recoveryRaws(store), [raw]);
+}
+
+// 12. Valid existing state still loads and saves normally, no recovery noise.
+{
+  const raw = JSON.stringify({ settings, accounts, trades: [good1, good2], priceOverrides: { XMR: { price: 1, vs: 'EUR' } } });
+  const { C, store } = createApp({ [KEY]: raw });
+  const st = C.loadState();
+  assert.equal(C.storageRecovery, null);
+  assert.equal(st.trades.length, 2);
+  C.saveState(st);
+  C.saveState(C.loadState());
+  assert.equal(store.has(REC), false);
 }
 
 console.log('storage recovery checks passed');

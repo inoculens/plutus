@@ -13123,13 +13123,11 @@ function buildLedgerDialog() {
     '<input id="ld-code" autocomplete="off" spellcheck="false" placeholder="e.g. 1100" maxlength="24">' +
     '<label for="ld-label">Label</label>' +
     '<input id="ld-label" autocomplete="off" spellcheck="false" placeholder="e.g. Projects" maxlength="80">' +
-    '<p id="ld-error" class="banner-error" role="alert" hidden></p>' +
-    '<button id="ld-save" class="primary" type="button">Save ledger</button>';
+    dockMarkup('ld-error', 'Save ledger', 'ld-save', 'button');
   host.appendChild(wrap);
   document.getElementById('ld-save').addEventListener('click', function () {
-    var err = document.getElementById('ld-error');
-    function fail(msg) { if (err) { err.textContent = String(msg); err.hidden = false; } }
-    if (err) { err.textContent = ''; err.hidden = true; }
+    function fail(msg) { dockError('ld-error', msg); }
+    dockError('ld-error', '');
     var accId = ledgerDialogAccountId;
     var editing = ledgerDialogEditingCode;
     var code = uiVal('ld-code', '').trim();
@@ -13170,7 +13168,6 @@ function openLedgerDialog(accountId, editCode, scopeIds) {
   buildLedgerDialog();
   var title = document.getElementById('ledger-dialog-title');
   var save = document.getElementById('ld-save');
-  var err = document.getElementById('ld-error');
   if (ledgerDialogEditingCode) {
     var lbl = '';
     try {
@@ -13187,7 +13184,7 @@ function openLedgerDialog(accountId, editCode, scopeIds) {
     if (title) title.textContent = 'New ledger';
     if (save) save.textContent = 'Save ledger';
   }
-  if (err) { err.textContent = ''; err.hidden = true; }
+  dockError('ld-error', '');
   openDialog('ledger-dialog');
 }
 
@@ -13205,13 +13202,11 @@ function buildGroupDialog() {
     '<p class="muted" id="g-count"></p>' +
     '<label for="g-target">Main account</label>' +
     '<select id="g-target"></select>' +
-    '<p id="g-error" class="banner-error" role="alert" hidden></p>' +
-    '<button id="g-save" class="primary" type="button">Group</button>';
+    dockMarkup('g-error', 'Group', 'g-save', 'button');
   host.appendChild(wrap);
   document.getElementById('g-save').addEventListener('click', function () {
-    var err = document.getElementById('g-error');
-    function fail(msg) { if (err) { err.textContent = String(msg); err.hidden = false; } }
-    if (err) { err.textContent = ''; err.hidden = true; }
+    function fail(msg) { dockError('g-error', msg); }
+    dockError('g-error', '');
     var target = uiVal('g-target', '');
     if (!target) { fail('Pick a main account.'); return; }
     if (target === '__new') {
@@ -13260,8 +13255,7 @@ function openGroupDialog(ids) {
   }
   var count = document.getElementById('g-count');
   if (count) count.textContent = 'Group ' + groupDialogIds.length + ' account' + (groupDialogIds.length === 1 ? '' : 's') + ' under:';
-  var gerr = document.getElementById('g-error');
-  if (gerr) { gerr.textContent = ''; gerr.hidden = true; }
+  dockError('g-error', '');
   openDialog('group-dialog');
 }
 
@@ -13455,18 +13449,93 @@ function debtCollateralMaxText(trades, account) {
   return ui;
 }
 
-// In-dialog errors use the same boxed, dismissible note the Settings dialog
-// already uses for messages shown above a modal.
-function debtDialogError(id, message) {
-  var box = document.getElementById(id);
+// Debt dialogs use the Add/Edit record dock: the Save button sticks to the
+// bottom of the dialog and the error rises from behind it with the same
+// bounce, dismiss button and draining timer bar (BANNER_* timings).
+var dockErrorState = Object.create(null);
+
+function dockErrorFor(id) {
+  if (!dockErrorState[id]) dockErrorState[id] = { timer: null, outTimer: null };
+  return dockErrorState[id];
+}
+
+function dockErrorCancel(st) {
+  if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+  if (st.outTimer) { clearTimeout(st.outTimer); st.outTimer = null; }
+}
+
+function dockErrorClear(id) {
+  var st = dockErrorFor(id);
+  dockErrorCancel(st);
+  var panel = document.getElementById(id);
   var text = document.getElementById(id + '-text');
-  if (!box) return;
-  if (text) text.textContent = message ? String(message) : '';
-  box.hidden = !message;
+  if (text) text.textContent = '';
+  if (panel) {
+    panel.classList.remove('show', 'hide', 'run');
+    panel.hidden = true;
+  }
+}
+
+function dockErrorDismiss(id) {
+  var st = dockErrorFor(id);
+  if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+  var panel = document.getElementById(id);
+  if (!panel || panel.hidden || panel.classList.contains('hide')) return;
+  panel.classList.remove('show'); // 'run' stays so the bar does not snap back during the exit
+  panel.classList.add('hide');
+  st.outTimer = setTimeout(function () {
+    st.outTimer = null;
+    var pn = document.getElementById(id);
+    if (pn && pn.classList.contains('hide')) dockErrorClear(id);
+  }, BANNER_OUT_MS + 50);
+}
+
+function dockErrorShow(id, msg) {
+  var panel = document.getElementById(id);
+  var text = document.getElementById(id + '-text');
+  if (!panel || !text) return;
+  var st = dockErrorFor(id);
+  var close = document.getElementById(id + '-close');
+  if (close && !close.getAttribute('data-wired')) {
+    close.setAttribute('data-wired', '1');
+    close.addEventListener('click', function () { dockErrorDismiss(id); });
+  }
+  text.textContent = String(msg);
+  var wasShowing = !panel.hidden && panel.classList.contains('show');
+  dockErrorCancel(st);
+  panel.hidden = false;
+  panel.classList.remove('hide');
+  if (!wasShowing) { panel.classList.remove('show'); void panel.offsetWidth; panel.classList.add('show'); }
+  var lead = wasShowing ? 0 : BANNER_IN_MS;
+  try {
+    panel.style.setProperty('--banner-in', BANNER_IN_MS + 'ms');
+    panel.style.setProperty('--banner-out', BANNER_OUT_MS + 'ms');
+    panel.style.setProperty('--banner-dwell', BANNER_DWELL_MS + 'ms');
+    panel.style.setProperty('--banner-lead', lead + 'ms');
+  } catch (e) { /* ignore */ }
+  panel.classList.remove('run');
+  void panel.offsetWidth; // restart the bar animation
+  panel.classList.add('run');
+  st.timer = setTimeout(function () { dockErrorDismiss(id); }, lead + BANNER_DWELL_MS);
+}
+
+// Markup for the sticky submit dock with its rising error panel.
+function dockMarkup(errorId, label, buttonId, buttonType) {
+  return '<div class="t-dock">' +
+    '<div id="' + errorId + '" class="t-err" role="alert" aria-live="assertive" hidden>' +
+    '<div class="t-err-row"><p id="' + errorId + '-text" class="banner-error t-err-text"></p>' +
+    '<button type="button" id="' + errorId + '-close" class="t-err-close" aria-label="Dismiss this message">✕</button></div>' +
+    '<div class="t-err-progress"><div class="t-err-bar"></div></div></div>' +
+    '<button class="primary" type="' + (buttonType || 'submit') + '"' + (buttonId ? ' id="' + buttonId + '"' : '') + '>' + label + '</button></div>';
+}
+
+function dockError(id, message) {
+  if (message) dockErrorShow(id, message);
+  else dockErrorClear(id);
 }
 
 function debtCollateralError(message) {
-  debtDialogError('debt-position-error', message);
+  dockError('debt-position-error', message);
 }
 
 function debtCollateralRow(list, accounts, allocation) {
@@ -13509,7 +13578,7 @@ function debtCollateralRow(list, accounts, allocation) {
       return;
     }
     quantity.value = maxText;
-    debtDialogError('debt-position-error', '');
+    dockError('debt-position-error', '');
   });
   var remove = document.createElement('button');
   remove.type = 'button';
@@ -13564,23 +13633,6 @@ function debtAssetTickerExample(kind, owner) {
   return 'BTC';
 }
 
-function debtAssetSuggestions(kind, owner) {
-  var k = String(kind || '').trim().toLowerCase();
-  var base = [];
-  if (k === 'crypto') base = ['USDC', 'USDT', 'DAI', 'BTC', 'ETH', 'SOL', 'XMR', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'LTC', 'BCH'];
-  else if (k === 'cash') base = ['USD', 'EUR', 'GBP', 'CHF', 'RON', 'JPY', 'CAD', 'AUD'];
-  else if (k === 'commodity') base = ['XAU', 'XAG', 'PA', 'PL'];
-  else if (k === 'stock') base = ['SPCX', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA'];
-  else base = [];
-  var ownerKind = owner ? String(owner.kind || '').trim().toLowerCase() : '';
-  var ownerTicker = owner ? String(owner.ticker || '').trim().toUpperCase() : '';
-  var sameKind = owner && ownerTicker && (ownerKind === k || (isCashKind(ownerKind) && isCashKind(k)));
-  if (sameKind && ownerTicker && base.indexOf(ownerTicker) === -1) {
-    base = [ownerTicker].concat(base);
-  }
-  return base;
-}
-
 function buildDebtPositionDialog() {
   var existing = document.getElementById('debt-position-dialog');
   if (existing) return existing;
@@ -13596,8 +13648,7 @@ function buildDebtPositionDialog() {
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
     '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
     '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
-    '<input id="debt-position-asset-ticker" list="debt-position-ticker-datalist" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" placeholder="Ticker, e.g. BTC" aria-label="Ticker">' +
-    '<datalist id="debt-position-ticker-datalist"></datalist></div>' +
+    '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. BTC" aria-label="Ticker"></div>' +
     '<p id="debt-position-asset-status" class="muted debt-form-hint">Choose the unit in which the lender reports the debt.</p>' +
     '<label for="debt-position-balance">Total outstanding balance <span id="debt-position-unit"></span></label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
@@ -13608,16 +13659,10 @@ function buildDebtPositionDialog() {
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
     '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
-    '<div id="debt-position-error" class="dlg-note error" role="alert" aria-live="assertive" hidden>' +
-    '<span id="debt-position-error-text"></span>' +
-    '<button type="button" id="debt-position-error-close" class="dlg-note-close" aria-label="Dismiss this message">✕</button></div>' +
-    '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
-    '<button type="submit" class="primary">Save reported balance</button></div></form>';
+    dockMarkup('debt-position-error', 'Save reported balance') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-position-dialog');
   var form = document.getElementById('debt-position-form');
-  var errorClose = document.getElementById('debt-position-error-close');
-  if (errorClose) errorClose.addEventListener('click', function () { debtDialogError('debt-position-error', ''); });
   var add = document.getElementById('debt-add-collateral');
   add.addEventListener('click', function () {
     var st = loadState();
@@ -13625,8 +13670,8 @@ function buildDebtPositionDialog() {
   });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { debtDialogError('debt-position-error', message); }
-    debtDialogError('debt-position-error', '');
+    function fail(message) { dockError('debt-position-error', message); }
+    dockError('debt-position-error', '');
     var state = loadState();
     var ownerId = dlg.getAttribute('data-owner-id') || '';
     var owner = accountById(state, ownerId);
@@ -13757,19 +13802,13 @@ function openDebtPositionDialog(ownerId, positionId) {
     var ticker = String(assetTickerInput.value || '').trim().toUpperCase();
     unit.textContent = ticker ? '(' + ticker + ')' : '';
     assetTickerInput.placeholder = 'Ticker, e.g. ' + debtAssetTickerExample(kind, owner);
-    var datalist = document.getElementById('debt-position-ticker-datalist');
-    if (datalist) {
-      datalist.innerHTML = debtAssetSuggestions(kind, owner).map(function (sym) {
-        return '<option value="' + sym + '">';
-      }).join('');
-    }
     var status = document.getElementById('debt-position-asset-status');
     if (status) status.textContent = describeDebtAsset(kind, ticker);
   }
   assetKindInput.onchange = syncDebtAssetUI;
   assetTickerInput.oninput = syncDebtAssetUI;
   syncDebtAssetUI();
-  debtDialogError('debt-position-error', '');
+  dockError('debt-position-error', '');
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13818,20 +13857,14 @@ function buildDebtSnapshotDialog() {
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
     '<p class="muted debt-form-hint">This corrects the selected entry. The position keeps its other reported balances.</p>' +
-    '<div id="debt-snapshot-error" class="dlg-note error" role="alert" aria-live="assertive" hidden>' +
-    '<span id="debt-snapshot-error-text"></span>' +
-    '<button type="button" id="debt-snapshot-error-close" class="dlg-note-close" aria-label="Dismiss this message">✕</button></div>' +
-    '<div class="dialog-actions"><button type="button" data-close>Cancel</button>' +
-    '<button type="submit" class="primary">Save changes</button></div></form>';
+    dockMarkup('debt-snapshot-error', 'Save changes') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
   var form = document.getElementById('debt-snapshot-form');
-  var errorClose = document.getElementById('debt-snapshot-error-close');
-  if (errorClose) errorClose.addEventListener('click', function () { debtDialogError('debt-snapshot-error', ''); });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { debtDialogError('debt-snapshot-error', message); }
-    debtDialogError('debt-snapshot-error', '');
+    function fail(message) { dockError('debt-snapshot-error', message); }
+    dockError('debt-snapshot-error', '');
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
     if (!owner) { fail('The liability account no longer exists.'); return; }
@@ -13901,7 +13934,7 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   // through the form's own calm check (debtReportedAtIssue).
   dlg.setAttribute('data-reported-local', reported.value);
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
-  debtDialogError('debt-snapshot-error', '');
+  dockError('debt-snapshot-error', '');
   openDialog('debt-snapshot-dialog');
 }
 
@@ -16381,15 +16414,7 @@ function accountKindExample(kind, field) {
 }
 
 function naError(msg) {
-  var p = document.getElementById('na-error');
-  if (!p) return;
-  if (!msg) {
-    p.textContent = '';
-    p.hidden = true;
-    return;
-  }
-  p.textContent = String(msg);
-  p.hidden = false;
+  dockError('na-error', msg);
 }
 
 function buildAccountDialog() {
@@ -16419,8 +16444,7 @@ function buildAccountDialog() {
     '<input id="na-fiatcode" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY"></div>' +
     '<label for="na-address">Label (optional)</label>' +
     '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('cash', 'label') + '">' +
-    '<p id="na-error" class="banner-error" role="alert" hidden></p>' +
-    '<button id="na-create" class="primary" type="button">Create account</button>';
+    dockMarkup('na-error', 'Create account', 'na-create', 'button');
   host.appendChild(wrap);
   function syncAccountKindUI() {
     // Cash is the first option, so it is the default when the dialog opens.
@@ -16578,9 +16602,9 @@ function buildTradeForm() {
     '</details>' +
     '<div class="t-dock">' +
     '<div id="t-error-panel" class="t-err" role="alert" aria-live="assertive" hidden>' +
-    '<div class="t-err-row"><p id="t-error" class="banner-error"></p>' +
-    '<button type="button" id="t-error-close" aria-label="Dismiss this message">✕</button></div>' +
-    '<div class="t-err-progress"><div id="t-err-bar"></div></div></div>' +
+    '<div class="t-err-row"><p id="t-error" class="banner-error t-err-text"></p>' +
+    '<button type="button" id="t-error-close" class="t-err-close" aria-label="Dismiss this message">✕</button></div>' +
+    '<div class="t-err-progress"><div id="t-err-bar" class="t-err-bar"></div></div></div>' +
     '<button class="primary" type="submit" id="t-submit">Add record</button>' +
     '</div>' +
     '</form>';

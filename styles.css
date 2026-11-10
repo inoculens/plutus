@@ -1214,7 +1214,11 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   pointer-events: none;
   z-index: -1;
 }
-#trade-form .t-dock button.primary {
+.t-dock button.primary,
+#trade-form .t-dock button.primary,
+#account-dialog-body .t-dock button.primary,
+#ledger-dialog-body .t-dock button.primary,
+#group-dialog-body .t-dock button.primary {
   position: relative;
   z-index: 2;
   width: 100%;
@@ -1288,8 +1292,8 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 
 .t-err-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.35rem 0.3rem 0.8rem; flex: 1; }
-#t-error { flex: 1; min-width: 0; margin: 0; font-size: 0.86rem; line-height: 1.3; overflow-wrap: anywhere; }
-#t-error-close {
+.t-err-text { flex: 1; min-width: 0; margin: 0; font-size: 0.86rem; line-height: 1.3; overflow-wrap: anywhere; }
+.t-err-close {
   flex-shrink: 0;
   min-height: 1.8rem;
   min-width: 1.8rem;
@@ -1300,11 +1304,11 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   font-weight: 700;
   border-radius: 999px;
 }
-#t-error-close:hover { background: rgba(255, 255, 255, 0.1); border-color: transparent; }
+.t-err-close:hover { background: rgba(255, 255, 255, 0.1); border-color: transparent; }
 
 /* Time-remaining bar: drains right-to-left after the rise. */
 .t-err-progress { width: 100%; height: 2px; background: rgba(255, 255, 255, 0.08); flex-shrink: 0; }
-#t-err-bar {
+.t-err-bar {
   height: 100%;
   width: 100%;
   background: var(--red);
@@ -1312,11 +1316,11 @@ select:focus-visible, textarea:focus-visible, summary:focus-visible {
   transform: scaleX(1);
   transform-origin: left;
 }
-.t-err.run #t-err-bar { animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both; }
+.t-err.run .t-err-bar { animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both; }
 
 @media (prefers-reduced-motion: reduce) {
   /* Timer, not decoration: exempt it from the global animation:none rule. */
-  .t-err.run #t-err-bar {
+  .t-err.run .t-err-bar {
     animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both !important; }
 }
 
@@ -2721,6 +2725,10 @@ input:focus, select:focus, textarea:focus {
 }
 textarea { min-height: 4rem; }
 input::placeholder { color: var(--muted-2); }
+/* Number fields never show the browser's up/down stepper: amounts are typed. */
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
 select {
   appearance: none;
   -webkit-appearance: none;
@@ -3428,7 +3436,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   /* The record form's button lives in .t-dock (sticky on every screen size);
      phones just get the taller target + the safe-area inset. */
   .t-dock { --t-btn-h: 3.25rem; --t-pad-b: calc(0.5rem + env(safe-area-inset-bottom, 0px)); --t-stick: calc(-1.25rem - env(safe-area-inset-bottom, 0px)); }
-  #trade-form .t-dock button.primary { font-size: 1.02rem; }
+  .t-dock button.primary,
+  #trade-form .t-dock button.primary,
+  #account-dialog-body .t-dock button.primary,
+  #ledger-dialog-body .t-dock button.primary,
+  #group-dialog-body .t-dock button.primary { font-size: 1.02rem; }
   details.adv summary, details.opt summary { min-height: 2.75rem; line-height: 2.75rem; font-size: 0.92rem; }
   /* — Ledger rows go two-line: name (+ arrow) on top, amount + actions below. — */
   .ledger-row { flex-wrap: wrap; row-gap: 0.2rem; }

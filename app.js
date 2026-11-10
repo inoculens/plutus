@@ -2399,6 +2399,37 @@ function displayPairs(trades, main, kinds) {
 // instead of printing fallback figures as if they were fresh.
 var fxFailedList = [];
 var fxWarnedSession = false;
+
+function ensureDebtDisplayRates(accounts, main) {
+  var day = todayStr();
+  var seen = {};
+  var jobs = [];
+  (accounts || []).forEach(function (account) {
+    if (!account || !isCashKind(account.kind) || !account.ticker) return;
+    if (!accountDebtPositions(account).length) return;
+    var amount = accountDebtBalanceAt(account);
+    if (!(amount > 0)) return;
+    var from = String(account.ticker).trim().toUpperCase();
+    var to = String(main || '').trim().toUpperCase();
+    if (!from || !to || from === to) return;
+    var key = day + '|' + from + '|' + to;
+    if (seen[key] || getCachedRate(day, from, to)) return;
+    seen[key] = true;
+    jobs.push(fetchEcbRate(day, from, to).then(function (rate) {
+      if (!rate || !isFinite(Number(rate.rate)) || Number(rate.rate) <= 0) return false;
+      cacheRate(day, from, to, Number(rate.rate), rate.source || 'ECB');
+      return true;
+    }, function () { return false; }));
+  });
+  if (!jobs.length) return Promise.resolve(false);
+  return Promise.all(jobs).then(function (flags) {
+    var changed = flags.some(Boolean);
+    if (changed) saveFxCache();
+    return changed;
+  });
+}
+
+
 function ensureDisplayRates(trades, main, kinds) {
   var m = String(main || '').toUpperCase();
   var pairs = displayPairs(trades, m, kinds);
@@ -9049,6 +9080,92 @@ function summaryLifetimeCost(st, rows, dtrades, visibleAccounts) {
   return lifetime > 0 ? lifetime : 0;
 }
 
+
+// Current liability valuation is separate from holdings/trade accounting.
+// Prices are already denominated in the selected main currency; fiat debt
+// uses the same date-pinned FX cache as other cash balance displays.
+function currentDebtValuation(accounts, main, prices, asOf) {
+  var source = Array.isArray(accounts) ? accounts : [];
+  var priceMap = prices || livePrices || {};
+  var cutoff = asOf === undefined || asOf === null ? Date.now() : asOf;
+  var day = todayStr();
+  var seen = {};
+  var total = 0;
+  var hasDebt = false;
+  var complete = true;
+  var positionCount = 0;
+  source.forEach(function (account) {
+    if (!account || !account.id || seen[account.id]) return;
+    seen[account.id] = true;
+    var positions = accountDebtPositions(account);
+    if (!positions.length) return;
+    positionCount += positions.length;
+    hasDebt = true;
+    var amount = accountDebtBalanceAt(account, cutoff);
+    if (!(amount > 0)) return;
+    var ticker = String(account.ticker || '').trim().toUpperCase();
+    if (!ticker) { complete = false; return; }
+    var value = null;
+    if (isCashKind(account.kind)) {
+      var rate = (ticker === String(main || '').toUpperCase())
+        ? { rate: 1 }
+        : getCachedRate(day, ticker, main);
+      if (rate && isFinite(Number(rate.rate)) && Number(rate.rate) > 0) {
+        value = amount * Number(rate.rate);
+      }
+    } else {
+      var key = priceKeyOf(ticker, account.kind);
+      var price = Number(priceMap[key]);
+      if (!(isFinite(price) && price > 0) && !PRICE_COLLISIONS[ticker]) {
+        price = Number(priceMap[ticker]);
+      }
+      if (isFinite(price) && price > 0) value = amount * price;
+    }
+    if (value === null || !isFinite(value)) complete = false;
+    else total += value;
+  });
+  return {
+    value: complete ? total : null,
+    partialValue: total,
+    hasDebt: hasDebt,
+    complete: complete,
+    positionCount: positionCount
+  };
+}
+
+function currentAccountGrossValue(accounts, rows, trades, main) {
+  var total = 0;
+  var complete = true;
+  (rows || []).forEach(function (row) {
+    if (!(Number(row.qtyHeld) > 0)) return;
+    if (row.marketValue === null || !isFinite(Number(row.marketValue))) complete = false;
+    else total += Number(row.marketValue);
+  });
+  (accounts || []).forEach(function (account) {
+    if (!account || !isCashKind(account.kind)) return;
+    var balance = null;
+    try { balance = cashBalance(trades || [], account.id, main); } catch (e) { balance = null; }
+    if (!balance || !isFinite(Number(balance.main))) complete = false;
+    else total += Number(balance.main);
+  });
+  return { value: complete ? total : null, partialValue: total, complete: complete };
+}
+
+function debtAccountsForScope(st, baseAccounts) {
+  var list = [];
+  var seen = {};
+  (baseAccounts || []).forEach(function (account) {
+    if (!account || !account.id) return;
+    var scope = [account].concat(groupMembers(st, account.id) || []);
+    scope.forEach(function (item) {
+      if (!item || !item.id || seen[item.id]) return;
+      seen[item.id] = true;
+      list.push(item);
+    });
+  });
+  return list;
+}
+
 function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
   var main = st.settings.mainCurrency;
   var mv = 0;
@@ -9092,7 +9209,10 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
     if (isFinite(b.main)) { cashBalTotal += b.main; cashBalKnown = true; }
   });
   if (cashBalKnown) { mv += cashBalTotal; mvKnown = true; }
-  var anyContent = rows.length > 0 || cashTrades > 0;
+  var debtAccountsForSummary = debtAccountsForScope(st, visibleAccounts || st.accounts || []);
+  var debtSummary = currentDebtValuation(debtAccountsForSummary, main, livePrices);
+  var grossIncomplete = rows.some(function (p) { return Number(p.qtyHeld) > 0 && p.marketValue === null; });
+  var anyContent = rows.length > 0 || cashTrades > 0 || debtSummary.hasDebt;
   rows.forEach(function (p) {
     rz += p.realized;
     if (Math.abs(p.realized || 0) > 1e-9) hasRealized = true;
@@ -9104,6 +9224,10 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
     if (p.marketValue !== null) { mv += p.marketValue; mvKnown = true; }
     if (p.unrealized !== null) { un += p.unrealized; unKnown = true; }
   });
+  if (debtSummary.hasDebt) {
+    if (!debtSummary.complete || grossIncomplete) mvKnown = false;
+    else { mv -= debtSummary.value; mvKnown = true; }
+  }
   var lifetime = 0;
   try { lifetime = summaryLifetimeCost(st, rows, dtradesOpt || convertTrades(st.trades, main), visibleAccounts || []); } catch (e) { lifetime = 0; }
   var plKnown = unKnown || hasRealized;
@@ -10015,8 +10139,31 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     pl += r.totalPL;
     if (r.marketValue !== null) { mv += r.marketValue; mvKnown = true; }
   });
-  var valKnown = mvKnown || cashKnown;
-  var valNum = (mvKnown ? mv : 0) + (cashKnown ? cashMain : 0);
+  var grossValKnown = mvKnown || cashKnown;
+  var grossValNum = (mvKnown ? mv : 0) + (cashKnown ? cashMain : 0);
+  var scopeAccounts = scope.map(function (sid) { return accountById(st, sid); }).filter(Boolean);
+  var debtInfo = currentDebtValuation(scopeAccounts, main, livePrices);
+  var grossIncomplete = rows.some(function (row) { return Number(row.qtyHeld) > 0 && row.marketValue === null; });
+  scopeAccounts.forEach(function (account) {
+    if (!isCashKind(account.kind)) return;
+    var cashHasTrades = accountTrades({ trades: dtrades || [] }, account.id).length > 0;
+    if (cashHasTrades) {
+      var balance = cashBalance(dtrades || [], account.id, main);
+      if (!balance || !isFinite(Number(balance.main))) grossIncomplete = true;
+    }
+  });
+  if (debtInfo.hasDebt) {
+    var debtIndicator = document.createElement('span');
+    debtIndicator.className = 'acct-debt-indicator';
+    debtIndicator.textContent = 'Debt · ' + debtInfo.positionCount;
+    mid.appendChild(debtIndicator);
+  }
+  var valKnown = debtInfo.hasDebt
+    ? (debtInfo.complete && !grossIncomplete)
+    : grossValKnown;
+  var valNum = debtInfo.hasDebt
+    ? (grossValNum - (debtInfo.complete ? debtInfo.value : 0))
+    : grossValNum;
   var figs = document.createElement('span');
   figs.className = 'acct-figs';
   var valv = document.createElement('span');
@@ -10024,7 +10171,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var plv = document.createElement('span');
   var accTick = String(acc.ticker || '').toUpperCase();
   var accLoading = !!scopeTrades && !valKnown && isPriceLoading(accTick, acc.id);
-  valv.textContent = valKnown ? fmtMoney(valNum, main) : (scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
+  valv.textContent = valKnown ? fmtMoney(valNum, main) : (debtInfo.hasDebt || scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
   paintLoading(valv, accLoading, acc.name + ' value');
   if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
   var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
@@ -10171,7 +10318,8 @@ function renderAccounts(st) {
   var overview = document.getElementById('overview');
   var fab = document.getElementById('fab-trade');
   var emptyState = !accounts.length;
-  var noTrades = !emptyState && !(st.trades || []).length;
+  var hasDebtPositions = accounts.some(function (account) { return accountDebtPositions(account).length > 0; });
+  var noTrades = !emptyState && !(st.trades || []).length && !hasDebtPositions;
   if (landing) landing.hidden = !emptyState;
   var landingTicker = document.getElementById('landing-ticker-wrap');
   if (landingTicker) landingTicker.hidden = !emptyState;
@@ -13190,10 +13338,30 @@ function removeDebtPosition(ownerId, positionId) {
   });
 }
 
-function buildDebtPositionsSection(st, account, members, host, stats) {
+function buildDebtPositionsSection(st, account, members, host, stats, financial) {
   var scope = [account].concat(members || []);
   var section = document.createElement('section');
   section.className = 'debt-positions-section';
+  if (financial && financial.debt && financial.debt.hasDebt) {
+    var summary = document.createElement('div');
+    summary.className = 'debt-net-summary';
+    function summaryLine(label, value) {
+      var line = document.createElement('div');
+      line.className = 'debt-net-line';
+      var labelEl = document.createElement('span');
+      labelEl.textContent = label;
+      var valueEl = document.createElement('strong');
+      valueEl.textContent = value;
+      line.appendChild(labelEl);
+      line.appendChild(valueEl);
+      summary.appendChild(line);
+    }
+    summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, st.settings.mainCurrency) : '—');
+    summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, st.settings.mainCurrency) : '—');
+    summaryLine('Net value', financial.gross && financial.gross.complete && financial.debt.complete
+      ? fmtMoney(financial.gross.value - financial.debt.value, st.settings.mainCurrency) : '—');
+    section.appendChild(summary);
+  }
   var header = document.createElement('div');
   header.className = 'section-head debt-section-head';
   var details = document.createElement('details');
@@ -13642,7 +13810,14 @@ function renderAccountDetail(st, id) {
       } catch (e) { /* Ledgers never break the detail view */ }
     }
   }
-  buildDebtPositionsSection(st, acc, members, host, stats);
+  var debtSummaryForDetail = null;
+  if (!historicalEnd) {
+    var detailScopeAccounts = scopeIds.map(function (scopeId) { return accountById(st, scopeId); }).filter(Boolean);
+    var detailGross = currentAccountGrossValue(detailScopeAccounts, rows, allDtrades, main);
+    var detailDebt = currentDebtValuation(detailScopeAccounts, main, livePrices);
+    debtSummaryForDetail = { gross: detailGross, debt: detailDebt };
+  }
+  buildDebtPositionsSection(st, acc, members, host, stats, debtSummaryForDetail);
   // Group mains: merged ledgers in the group currency plus sub-account
   // cards instead of the spent/fees lines and the trade history below.
   if (members.length) {
@@ -20536,7 +20711,10 @@ function refreshDisplayRates(st) {
         if (a && a.id) kindsByAccount[a.id] = (typeof a.kind === 'string') ? a.kind : '';
       });
     } catch (e) { kindsByAccount = {}; }
-    var fills = [ensureDisplayRates(trades, main, kindsByAccount).catch(function () { return false; })];
+    var fills = [
+      ensureDisplayRates(trades, main, kindsByAccount).catch(function () { return false; }),
+      ensureDebtDisplayRates(st.accounts || [], main).catch(function () { return false; })
+    ];
     var gf = [];
     try { gf = groupFillFiats(st); } catch (e) { gf = []; }
     gf.forEach(function (f) { fills.push(ensureDisplayRates(trades, f, kindsByAccount).catch(function () { return false; })); });

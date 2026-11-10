@@ -5221,3 +5221,22 @@ label.sync-check {
   .debt-remove-collateral { grid-column: 2; justify-self: end; }
   .debt-position-top { align-items: flex-start; }
 }
+
+.acct-debt-indicator {
+  display: inline-flex; align-items: center; width: fit-content; margin-top: 0.25rem;
+  color: var(--muted); font-size: 0.68rem; line-height: 1.25;
+  border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.4rem;
+}
+.debt-net-summary {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
+  padding: 0.75rem 0.9rem; margin: 0 0 0.65rem;
+  border: 1px solid var(--border); border-radius: 13px;
+}
+.debt-net-line { display: grid; gap: 0.2rem; min-width: 0; }
+.debt-net-line span { color: var(--muted); font-size: 0.72rem; }
+.debt-net-line strong { font-size: 0.92rem; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .debt-net-summary { gap: 0.3rem; padding: 0.65rem; }
+  .debt-net-line span { font-size: 0.66rem; }
+  .debt-net-line strong { font-size: 0.82rem; }
+}

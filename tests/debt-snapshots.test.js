@@ -56,6 +56,35 @@ assert.equal(C.latestDebtBalanceSnapshot(position()).amount, 1001.4,
   'the latest manually entered total is the current balance');
 assert.equal(C.accountDebtBalanceAt(accounts[0], '2026-11-10T11:00:00.000Z'), 1000);
 assert.equal(C.accountDebtBalanceAt(accounts[0]), 1001.4);
+
+// Current valuation subtracts the reported total using the owning account's
+// asset identity. Collateral accounts are never treated as liabilities.
+const btcDebt = acc('btc-debt', 'BTC', 'crypto');
+btcDebt.debtPositions = [position({
+  collateral: [],
+  balanceSnapshots: [snap('btc-s1', 2, '2026-11-10T10:00:00.000Z')]
+})];
+const valuationAt = Date.parse('2026-11-10T13:00:00.000Z');
+const btcValuation = C.currentDebtValuation([btcDebt], 'USD', { BTC: 25000 }, valuationAt);
+assert.equal(btcValuation.hasDebt, true);
+assert.equal(btcValuation.complete, true);
+assert.equal(btcValuation.value, 50000,
+  'crypto liability is valued using its owning account ticker/kind price');
+const unknownValuation = C.currentDebtValuation([btcDebt], 'USD', {}, valuationAt);
+assert.equal(unknownValuation.value, null,
+  'an unavailable liability price remains unknown, not zero');
+const eurDebt = acc('eur-debt', 'EUR', 'cash');
+eurDebt.debtPositions = [position({
+  collateral: [],
+  balanceSnapshots: [snap('eur-s1', 100, '2026-11-10T10:00:00.000Z')]
+})];
+C.cacheRate(C.todayStr(), 'EUR', 'USD', 1.1, 'test');
+const eurValuation = C.currentDebtValuation([eurDebt], 'USD', {}, valuationAt);
+assert.equal(eurValuation.value, 110,
+  'fiat debt is converted using the main-currency FX rate');
+const collateralOnly = C.currentDebtValuation([accounts[1], accounts[2]], 'USD', { BTC: 25000, XAU: 2000 }, valuationAt);
+assert.equal(collateralOnly.hasDebt, false,
+  'collateral account balances are not deducted as liabilities');
 const zero = position({ balanceSnapshots: [snap('z1', 0, '2026-11-10T13:00:00.000Z')] });
 assert.equal(C.isValidDebtPosition(zero, accounts[0], accounts), true, 'zero represents a valid paid-off snapshot');
 for (const invalid of [

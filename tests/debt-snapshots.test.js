@@ -128,6 +128,18 @@ assert.equal(goldValuation.value, 4000, 'gold debt owned by a stock account is v
 assert.equal(C.accountDebtBalanceAt({ debtPositions: [position(), position({ assetKind: 'cash', assetTicker: 'EUR' })] }, valuationAt), null,
   'an unqualified account debt total refuses to add different denominations');
 
+const btcOwnerUsdcDebt = acc('btc-owner-usdc-debt', 'BTC', 'crypto');
+btcOwnerUsdcDebt.debtPositions = [position({ assetKind: 'crypto', assetTicker: 'USDC', collateral: [], balanceSnapshots: [snap('usdc-s1', 1000, '2026-11-10T10:00:00.000Z')] })];
+const usdcValuation = C.currentDebtValuation([btcOwnerUsdcDebt], 'USD', {}, valuationAt);
+assert.equal(usdcValuation.value, 1000, 'USDC crypto debt converts at USD parity even when external quote is offline');
+const usdcSingleVal = C.debtPositionValuation(btcOwnerUsdcDebt.debtPositions[0], 'USD', {}, valuationAt);
+assert.equal(usdcSingleVal.value, 1000, 'debtPositionValuation computes single position value');
+assert.ok(C.KRAKEN_LIVE_SYMBOLS.indexOf('USDC') !== -1, 'Kraken live symbols cover USDC');
+assert.ok(C.KRAKEN_LIVE_SYMBOLS.indexOf('USDT') !== -1, 'Kraken live symbols cover USDT');
+assert.ok(/Live crypto quote/i.test(C.describeDebtAsset('crypto', 'USDC')), 'describeDebtAsset detects USDC crypto');
+assert.ok(/ECB exchange rate/i.test(C.describeDebtAsset('cash', 'USD')), 'describeDebtAsset detects USD fiat');
+assert.ok(C.debtAssetSuggestions('crypto').indexOf('USDC') !== -1, 'debtAssetSuggestions suggests USDC for crypto');
+
 const unknownValuation = C.currentDebtValuation([btcDebt], 'USD', {}, valuationAt);
 assert.equal(unknownValuation.value, null,
   'an unavailable liability price remains unknown, not zero');
@@ -279,7 +291,7 @@ assert.equal(JSON.parse(damaged.store.get(REC))[0].raw, damagedRaw, 'a later sav
     Date.parse('2026-11-10T10:00:00.000Z'),
     'debt-only accounts establish the historical chart start');
   const signature = JSON.parse(C.netWorthHistorySignature(earliestDebtState));
-  assert.equal(signature.debtSnapshotModel, 1,
+  assert.equal(signature.debtSnapshotModel, 2,
     'historical cache signatures explicitly identify debt snapshot valuation');
 
   console.log('debt snapshot and historical valuation checks passed');

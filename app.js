@@ -290,6 +290,36 @@ function accountDebtPositions(account) {
   return (account && Array.isArray(account.debtPositions)) ? account.debtPositions : [];
 }
 
+// Debt dependency guard for every account-delete path (single and bulk).
+// Returns '' when the ids may be deleted, else the calm banner sentence.
+// An account that owns debt positions, or that an open position references
+// as collateral, is never deleted: a dangling collateral id would make the
+// owner's whole debtPositions list invalid on the next load.
+function debtAccountDeleteBlock(st, ids) {
+  var deleting = {};
+  (ids || []).forEach(function (accountId) {
+    if (typeof accountId === 'string' && accountId !== '') deleting[accountId] = true;
+  });
+  var accounts = (st && Array.isArray(st.accounts)) ? st.accounts : [];
+  var ownsDebt = accounts.some(function (owner) {
+    return !!owner && deleting[owner.id] === true && accountDebtPositions(owner).length > 0;
+  });
+  if (ownsDebt) {
+    return 'This account still owns debt positions. Remove or resolve them before deleting the account.';
+  }
+  var referenced = accounts.some(function (owner) {
+    return accountDebtPositions(owner).some(function (position) {
+      return Array.isArray(position.collateral) && position.collateral.some(function (allocation) {
+        return !!allocation && deleting[allocation.accountId] === true;
+      });
+    });
+  });
+  if (referenced) {
+    return 'This account is referenced as collateral by an open debt position. Remove that collateral reference before deleting the account.';
+  }
+  return '';
+}
+
 // Flat groups, guaranteed: an account that is both a member (live main)
 // and a main (has members) loses its member link and stays a main — one
 // main, one round of subs, never nested. In-memory only (load + import
@@ -9830,6 +9860,8 @@ function buildAccountAction() {
     var s0 = loadState();
     var picked = Object.keys(selectedAccounts).filter(function (id) { return !!accountById(s0, id); });
     var full = expandDeleteIds(s0, picked);
+    var bulkDebtBlock = debtAccountDeleteBlock(s0, full);
+    if (bulkDebtBlock) { showBanner(bulkDebtBlock); return; }
     var extra = full.length - picked.length;
     confirmAction('Delete accounts', 'Delete ' + full.length + (full.length === 1 ? ' account' : ' accounts') +
       (extra > 0 ? ' (including ' + extra + ' sub-account' + (extra === 1 ? '' : 's') + ')' : '') +
@@ -9838,6 +9870,8 @@ function buildAccountAction() {
       var s2 = loadState();
       var inSet = {};
       expandDeleteIds(s2, Object.keys(selectedAccounts)).forEach(function (id) { inSet[id] = true; });
+      var bulkDebtBlockNow = debtAccountDeleteBlock(s2, Object.keys(inSet));
+      if (bulkDebtBlockNow) { showBanner(bulkDebtBlockNow); return; }
       if (!Object.keys(inSet).length) {
         selectedAccounts = {};
         selectionMode = false;
@@ -14457,29 +14491,8 @@ function deleteAccount(id) {
   if (!acc) return; // unknown id: no write, no dialog
   var n = accountTrades(st, id).length;
   var doomedSubs = groupMembers(st, id);
-  var deleteIds = expandDeleteIds(st, [id]);
-  var deleting = {};
-  deleteIds.forEach(function (accountId) { deleting[accountId] = true; });
-  var ownedDebt = deleteIds.some(function (accountId) {
-    var owner = accountById(st, accountId);
-    return owner && accountDebtPositions(owner).length > 0;
-  });
-  if (ownedDebt) {
-    showBanner('This account still owns debt positions. Remove or resolve them before deleting the account.');
-    return;
-  }
-  var collateralUsed = [];
-  (st.accounts || []).forEach(function (owner) {
-    accountDebtPositions(owner).forEach(function (position) {
-      (position.collateral || []).forEach(function (allocation) {
-        if (deleting[allocation.accountId]) collateralUsed.push(position.name);
-      });
-    });
-  });
-  if (collateralUsed.length) {
-    showBanner('This account is referenced as collateral by an open debt position. Remove that collateral reference before deleting the account.');
-    return;
-  }
+  var debtBlock = debtAccountDeleteBlock(st, expandDeleteIds(st, [id]));
+  if (debtBlock) { showBanner(debtBlock); return; }
   var msg = 'Delete account "' + acc.name + '" (' + acc.ticker + ')' +
     (n ? ' and its ' + n + ' trade' + (n === 1 ? '' : 's') : '') +
     (doomedSubs.length ? ' and delete ' + doomedSubs.length + ' sub-account' + (doomedSubs.length === 1 ? '' : 's') + ' with all their trades' : '') +
@@ -14490,6 +14503,8 @@ function deleteAccount(id) {
     if (!accountById(s2, id)) return;
     var inSet = {};
     expandDeleteIds(s2, [id]).forEach(function (x) { inSet[x] = true; });
+    var debtBlockNow = debtAccountDeleteBlock(s2, Object.keys(inSet));
+    if (debtBlockNow) { showBanner(debtBlockNow); return; }
     s2.trades = (s2.trades || []).filter(function (t) {
       if (!t) return true;
       return !Object.keys(inSet).some(function (accountId) { return transferInvolvesAccount(t, accountId); });

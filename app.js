@@ -7453,7 +7453,9 @@ function fmtPct(n) {
   return (Math.round(v * 100) / 100) + '%';
 }
 
-function showBanner(msg, kind, details) {
+// Optional 4th arg `source` tags the banner with data-source so subsystem-
+// scoped clears (e.g. clearPriceBanner) only retire their own messages.
+function showBanner(msg, kind, details, source) {
   var b = document.getElementById('banner');
   if (!b) return;
   var hasDetails = !!(details && ((details.lines && details.lines.length) || details.message));
@@ -7470,7 +7472,7 @@ function showBanner(msg, kind, details) {
   // in the dialog mirror. Errors born here die with the dialog; a message
   // moved in from a pre-existing page banner moves back on close.
   if (!suppressMirror && settingsDialogOpen()) {
-    lastMirror = { msg: String(msg), kind: kind, details: details || null, fromPage: false };
+    lastMirror = { msg: String(msg), kind: kind, details: details || null, source: source || '', fromPage: false };
     try { mirrorBannerToSettings(String(msg), kind === 'info' ? 'info' : 'error', hasDetails); } catch (e) { /* never let the mirror break the banner */ }
     return;
   }
@@ -7486,6 +7488,7 @@ function showBanner(msg, kind, details) {
   b.classList.add(kind === 'info' ? 'info' : 'error');
   if (!wasShowing) { b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
   try { b.dataset.kind = kind === 'info' ? 'info' : 'error'; } catch (e) { /* ignore */ }
+  try { b.dataset.source = source ? String(source) : ''; } catch (e) { /* ignore */ }
   var old = document.getElementById('banner-details');
   if (old && old.parentNode) old.parentNode.removeChild(old);
   // Optional drill-down: every error with something more to say gets a
@@ -7517,16 +7520,20 @@ function showBanner(msg, kind, details) {
   b.classList.remove('run');
   void b.offsetWidth; // restart the bar animation
   b.classList.add('run');
-  bannerTimer = setTimeout(dismissBanner, lead + BANNER_DWELL_MS);}
+  var bannerDelay = lead + BANNER_DWELL_MS;
+  bannerTimerEnd = Date.now() + bannerDelay;
+  bannerTimer = setTimeout(dismissBanner, bannerDelay);}
 
 function cancelBannerTimers() {
   if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
-  if (bannerOutTimer) { clearTimeout(bannerOutTimer); bannerOutTimer = null; }}
+  if (bannerOutTimer) { clearTimeout(bannerOutTimer); bannerOutTimer = null; }
+  bannerTimerEnd = 0;}
 
 // Animated exit (progress bar ran out, or the X was pressed): dip, then
 // slide back up off-screen; only then is the element really hidden.
 function dismissBanner() {
   if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  bannerTimerEnd = 0;
   var b = document.getElementById('banner');
   if (!b || b.hidden || b.classList.contains('hide')) return;
   b.classList.remove('show'); // 'run' stays so the bar does not snap back to full during the exit
@@ -7564,6 +7571,49 @@ var BANNER_OUT_MS = 550;     // slide-out duration (CSS --banner-out)
 var BANNER_DWELL_MS = 5000;  // on-screen time = progress bar run time
 var bannerTimer = null;      // starts the animated exit when the bar runs out
 var bannerOutTimer = null;   // finishes the exit (really hides) after the slide-out
+// Page-visibility pause/resume: CSS animations freeze for background tabs but
+// setTimeout does not, so the timer can fire while the bar still shows time.
+// bannerTimerEnd stores the absolute wall-clock time the timer should fire at;
+// on visibility restore we schedule a new timeout for the remaining duration.
+var bannerTimerEnd = 0;
+(function () {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      // Tab going background: cancel the timeout but remember when it was due.
+      if (bannerTimer && bannerTimerEnd) {
+        clearTimeout(bannerTimer);
+        bannerTimer = null;
+        // bannerTimerEnd already set to the correct future timestamp.
+      }
+    } else {
+      // Tab becoming visible again: re-arm for the remaining dwell time.
+      // Also resume the CSS progress bar animation from where it paused.
+      if (!bannerTimer && bannerTimerEnd) {
+        var remaining = bannerTimerEnd - Date.now();
+        if (remaining <= 0) {
+          // Time already elapsed while hidden: dismiss immediately.
+          dismissBanner();
+        } else {
+          var b = document.getElementById('banner');
+          if (b && b.classList.contains('run')) {
+            // Re-sync CSS animation: set the remaining time as the new dwell,
+            // with zero lead (bar is already mid-drain), so animation duration
+            // matches the rescheduled JS timer exactly.
+            try {
+              b.style.setProperty('--banner-dwell', remaining + 'ms');
+              b.style.setProperty('--banner-lead', '0ms');
+            } catch (e) { /* ignore */ }
+            b.classList.remove('run');
+            void b.offsetWidth;
+            b.classList.add('run');
+          }
+          bannerTimer = setTimeout(dismissBanner, remaining);
+        }
+      }
+    }
+  });
+}());
 
 // Settings-dialog mirror of the page banner: modal dialogs paint above the
 // page, so without this an error fired from the Sync tab hides behind the
@@ -7731,11 +7781,12 @@ function openErrorDialog() {
 
 // Price notices are informational and transient: only clear the banner
 // when it shows a price notice, so FX/storage errors are never wiped.
+// Checks data-source === 'price' so sync-pull and other info banners survive.
 function clearPriceBanner() {
   // A mirrored info notice lives in the dialog while the page banner hides
   // (see showBanner): clear that copy too — but never an error mirror.
   try {
-    if (lastMirror && lastMirror.kind === 'info') {
+    if (lastMirror && lastMirror.kind === 'info' && lastMirror.source === 'price') {
       lastMirror = null;
       hideSettingsAlert();
     }
@@ -7743,8 +7794,10 @@ function clearPriceBanner() {
   var b = document.getElementById('banner');
   if (!b || b.hidden) return;
   var kind = null;
+  var src = null;
   try { kind = b.dataset.kind; } catch (e) { kind = null; }
-  if (kind === 'info') clearBanner();
+  try { src = b.dataset.source; } catch (e) { src = null; }
+  if (kind === 'info' && src === 'price') clearBanner();
 }
 
 // Guarded persistence for UI mutations: saveState throws
@@ -13699,7 +13752,7 @@ function buildDebtPositionDialog() {
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
     '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
-    dockMarkup('debt-position-error', 'Save reported balance') + '</form>';
+    dockMarkup('debt-position-error', 'Save reported balance', 'debt-position-save') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-position-dialog');
   var form = document.getElementById('debt-position-form');
@@ -13710,7 +13763,12 @@ function buildDebtPositionDialog() {
   });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { dockError('debt-position-error', message); }
+    var saveBtn = form.querySelector('.t-dock button.primary');
+    if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
+    function fail(message) {
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save reported balance');
+      dockError('debt-position-error', message);
+    }
     dockError('debt-position-error', '');
     if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
@@ -13794,17 +13852,24 @@ function buildDebtPositionDialog() {
       fail('The debt position is invalid. Check the balance, timestamp and collateral details.');
       return;
     }
-    if (!Array.isArray(owner.debtPositions)) owner.debtPositions = [];
-    if (position) {
-      owner.debtPositions = owner.debtPositions.map(function (p) { return p.id === position.id ? nextPosition : p; });
-    } else {
-      owner.debtPositions.push(nextPosition);
-    }
-    if (!saveStateGuarded(state)) { fail('Storage unavailable — the debt position was not saved.'); return; }
-    closeDialog(dlg);
-    clearBanner();
-    render();
-    try { refreshPrices(); } catch (e) { /* ignore */ }
+    setTradeSubmitBusy(saveBtn, true, 'Saving…');
+    deferTradeSubmitWork(function () {
+      if (!Array.isArray(owner.debtPositions)) owner.debtPositions = [];
+      if (position) {
+        owner.debtPositions = owner.debtPositions.map(function (p) { return p.id === position.id ? nextPosition : p; });
+      } else {
+        owner.debtPositions.push(nextPosition);
+      }
+      if (!saveStateGuarded(state)) {
+        fail('Storage unavailable — the debt position was not saved.');
+        return;
+      }
+      setTradeSubmitBusy(saveBtn, false, 'Save reported balance');
+      closeDialog(dlg);
+      clearBanner();
+      render();
+      try { refreshPrices(); } catch (e) { /* ignore */ }
+    });
   });
   return dlg;
 }
@@ -13851,6 +13916,8 @@ function openDebtPositionDialog(ownerId, positionId) {
   syncDebtAssetUI();
   dockError('debt-position-error', '');
   clearInvalidFields(document.getElementById('debt-position-form'));
+  var saveBtn = document.getElementById('debt-position-save');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save reported balance');
   list.innerHTML = '';
   var selectable = state.accounts || [];
   if (position && Array.isArray(position.collateral)) {
@@ -13898,13 +13965,18 @@ function buildDebtSnapshotDialog() {
     '<input id="debt-snapshot-reported-at" type="datetime-local" required>' +
     '<label for="debt-snapshot-note">Snapshot note (optional)</label>' +
     '<textarea id="debt-snapshot-note" maxlength="280" rows="2"></textarea>' +
-    dockMarkup('debt-snapshot-error', 'Save changes') + '</form>';
+    dockMarkup('debt-snapshot-error', 'Save changes', 'debt-snapshot-save') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('debt-snapshot-dialog');
   var form = document.getElementById('debt-snapshot-form');
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
-    function fail(message) { dockError('debt-snapshot-error', message); }
+    var saveBtn = form.querySelector('.t-dock button.primary');
+    if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
+    function fail(message) {
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save changes');
+      dockError('debt-snapshot-error', message);
+    }
     dockError('debt-snapshot-error', '');
     if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
@@ -13945,10 +14017,17 @@ function buildDebtSnapshotDialog() {
       fail('The reported balance is invalid. Check the amount and timestamp.');
       return;
     }
-    if (!saveStateGuarded(state)) { fail('Storage unavailable — the reported balance was not saved.'); return; }
-    closeDialog(dlg);
-    clearBanner();
-    render();
+    setTradeSubmitBusy(saveBtn, true, 'Saving…');
+    deferTradeSubmitWork(function () {
+      if (!saveStateGuarded(state)) {
+        fail('Storage unavailable — the reported balance was not saved.');
+        return;
+      }
+      setTradeSubmitBusy(saveBtn, false, 'Save changes');
+      closeDialog(dlg);
+      clearBanner();
+      render();
+    });
   });
   return dlg;
 }
@@ -13978,6 +14057,8 @@ function openDebtSnapshotDialog(ownerId, positionId, snapshotId) {
   document.getElementById('debt-snapshot-note').value = (typeof snapshot.note === 'string') ? snapshot.note : '';
   dockError('debt-snapshot-error', '');
   clearInvalidFields(document.getElementById('debt-snapshot-form'));
+  var saveBtn = document.getElementById('debt-snapshot-save');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save changes');
   openDialog('debt-snapshot-dialog');
 }
 
@@ -14102,7 +14183,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       top.appendChild(nameEl);
       var update = document.createElement('button');
       update.type = 'button';
-      update.className = 'quiet';
+      update.className = 'debt-position-update';
       update.textContent = 'Update balance';
       update.addEventListener('click', function () { openDebtPositionDialog(owner.id, position.id); });
       top.appendChild(update);
@@ -14153,22 +14234,28 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
         return Date.parse(b.reportedAt) - Date.parse(a.reportedAt);
       }).forEach(function (snapshot) {
         var li = document.createElement('li');
+        li.className = 'debt-snapshot-item';
+        var row = document.createElement('div');
+        row.className = 'debt-snapshot-row';
+        var snapBody = document.createElement('div');
+        snapBody.className = 'debt-snapshot-body';
         var label = document.createElement('strong');
         label.textContent = formatDebtPositionAmount(snapshot.amount, position);
-        li.appendChild(label);
+        snapBody.appendChild(label);
         var when = document.createElement('span');
         when.textContent = new Date(snapshot.reportedAt).toLocaleString();
-        li.appendChild(when);
+        snapBody.appendChild(when);
         if (snapshot.note) {
           var memo = document.createElement('p');
           memo.textContent = snapshot.note;
-          li.appendChild(memo);
+          snapBody.appendChild(memo);
         }
+        row.appendChild(snapBody);
         var actions = document.createElement('div');
         actions.className = 'debt-snapshot-actions';
         var edit = document.createElement('button');
         edit.type = 'button';
-        edit.className = 'quiet debt-snapshot-edit';
+        edit.className = 'debt-snapshot-edit';
         edit.textContent = 'Edit';
         edit.setAttribute('aria-label', 'Edit the ' + label.textContent + ' report from ' + when.textContent);
         edit.addEventListener('click', function () { openDebtSnapshotDialog(owner.id, position.id, snapshot.id); });
@@ -14178,20 +14265,21 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
         if (position.balanceSnapshots.length > 1) {
           var removeSnapshot = document.createElement('button');
           removeSnapshot.type = 'button';
-          removeSnapshot.className = 'quiet debt-snapshot-delete';
+          removeSnapshot.className = 'debt-snapshot-delete';
           removeSnapshot.textContent = 'Delete';
           removeSnapshot.setAttribute('aria-label', 'Delete the ' + label.textContent + ' report from ' + when.textContent);
           removeSnapshot.addEventListener('click', function () { removeDebtSnapshot(owner.id, position.id, snapshot.id); });
           actions.appendChild(removeSnapshot);
         }
-        li.appendChild(actions);
+        row.appendChild(actions);
+        li.appendChild(row);
         list.appendChild(li);
       });
       history.appendChild(list);
       item.appendChild(history);
       var remove = document.createElement('button');
       remove.type = 'button';
-      remove.className = 'quiet debt-position-delete';
+      remove.className = 'debt-position-delete';
       remove.textContent = 'Remove position';
       remove.addEventListener('click', function () { removeDebtPosition(owner.id, position.id); });
       item.appendChild(remove);
@@ -18613,7 +18701,7 @@ function tErrDismiss() {
 var tradeSubmitBusy = false;
 function setTradeSubmitBusy(btn, busy, label) {
   if (!btn) return;
-  tradeSubmitBusy = !!busy;
+  if (btn.id === 't-submit') tradeSubmitBusy = !!busy;
   if (busy) {
     if (!btn.classList.contains('is-busy')) btn.setAttribute('data-idle-label', btn.textContent || '');
     btn.classList.add('is-busy');
@@ -18635,7 +18723,7 @@ function setTradeSubmitBusy(btn, busy, label) {
   btn.removeAttribute('data-idle-label');
   btn.disabled = false;
   if (label) btn.textContent = label;
-  else if (btn.querySelector('.btn-spin')) btn.textContent = idle || 'Add record';
+  else if (btn.querySelector('.btn-spin')) btn.textContent = idle || (btn.id === 't-submit' ? 'Add record' : 'Save');
 }
 
 // Lets the "Saving…" state paint before heavy save work runs. Animation
@@ -21374,7 +21462,7 @@ function refreshPrices() {
         showBanner('Live prices are unreachable right now — your data is safe and numbers will fill in automatically.', 'info', {
           title: 'Price errors',
           lines: detailLines
-        });
+        }, 'price');
       } else {
         clearPriceBanner();
       }

@@ -168,7 +168,7 @@ function isValidDebtId(value) {
 
 function isValidDebtSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
-  var allowed = Object.assign(Object.create(null), { id: true, amount: true, reportedAt: true, enteredAt: true, note: true });
+  var allowed = { id: true, amount: true, reportedAt: true, enteredAt: true, note: true };
   if (Object.keys(snapshot).some(function (key) { return !allowed[key]; })) return false;
   if (!isValidDebtId(snapshot.id) || typeof snapshot.amount !== 'number' ||
       !isFinite(snapshot.amount) || snapshot.amount < 0) return false;
@@ -180,7 +180,7 @@ function isValidDebtSnapshot(snapshot) {
 
 function isValidDebtPosition(position, owningAccount, accounts) {
   if (!position || typeof position !== 'object' || Array.isArray(position)) return false;
-  var allowed = Object.assign(Object.create(null), { id: true, name: true, createdAt: true, balanceSnapshots: true, collateral: true, notes: true });
+  var allowed = { id: true, name: true, createdAt: true, balanceSnapshots: true, collateral: true, notes: true };
   if (Object.keys(position).some(function (key) { return !allowed[key]; })) return false;
   if (!isValidDebtId(position.id) || typeof position.name !== 'string' ||
       position.name.trim() === '' || position.name.length > 120 ||
@@ -9285,7 +9285,7 @@ function currentDebtValuation(accounts, main, prices, asOf) {
   var priceMap = prices || livePrices || {};
   var cutoff = asOf === undefined || asOf === null ? Date.now() : asOf;
   var day = todayStr();
-  var seen = Object.create(null);
+  var seen = {};
   var total = 0;
   var hasDebt = false;
   var complete = true;
@@ -13443,7 +13443,7 @@ function buildDebtPositionDialog() {
     var reportedIssue = reportedInput ? debtReportedAtIssue(reportedDate.getTime(), Date.now()) : 'Enter when the balance was reported.';
     if (reportedIssue) { fail(reportedIssue); return; }
     var collateral = [];
-    var sourceSeen = {};
+    var sourceSeen = Object.create(null);
     var rows = document.querySelectorAll('#debt-collateral-list .debt-collateral-row');
     for (var ri = 0; ri < rows.length; ri++) {
       var sourceId = String(rows[ri].querySelector('select').value || '');

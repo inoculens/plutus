@@ -112,7 +112,9 @@ function normalizeAccount(a) {
     name: nm,
     ticker: tk,
     kind: kd,
-    createdAt: (typeof a.createdAt === 'string' && a.createdAt.length > 0)
+    // An unparsable value is replaced (the original survives in the recovery
+    // copy, see accountFieldIssues) so the repaired state is clean on reload.
+    createdAt: (typeof a.createdAt === 'string' && a.createdAt.trim().length > 0 && isFinite(Date.parse(a.createdAt)))
       ? a.createdAt
       : new Date().toISOString()
   };
@@ -265,7 +267,7 @@ function livePriceFor(live, sym, accountId) {
 // Only an explicit "Clear all data" discards recovery copies.
 var RECOVERY_KEY = STORAGE_KEY + '.recovery';
 var RECOVERY_KEEP = 3;
-var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, settings, overrides, saved}
+var storageRecovery = null; // {kind:'unreadable'|'rejected', accounts, trades, shape, settings, overrides, accountFields, tradeFields, saved}
 var lastSeenRaw = null;      // stored text last read clean, or last written by saveState
 var lastPreservedRaw = null; // stored text already kept as a recovery copy
 
@@ -315,6 +317,8 @@ function noteStorageDamage(raw, damage) {
     shape: !!damage.shape,
     settings: !!damage.settings,
     overrides: damage.overrides || 0,
+    accountFields: damage.accountFields || 0,
+    tradeFields: damage.tradeFields || 0,
     saved: saved
   };
   return saved;
@@ -329,6 +333,74 @@ function clearRecoveryCopies() {
     var rb = document.getElementById('s-recovery');
     if (rb) rb.style.display = 'none';
   } catch (e) { /* ignore */ }
+}
+
+// --- Optional-field damage detection ---
+// normalizeAccount / normalizeSettings / normalizeTradeForStore quietly drop
+// or default optional fields that fail validation. Before that can happen to
+// stored data, these counters (run on the RAW stored objects) report how many
+// objects carry an invalid optional field, so recovery preserves the original.
+// The record itself still loads (a bad colour must not hide an account and
+// all its history). Absent / null / blank means "not set" and is never damage;
+// legitimate normalization (trim, upper-casing, de-duplication) is not damage.
+function fieldPresent(v) {
+  return v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '');
+}
+
+function ledgerMapIsClean(m) {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return false;
+  return Object.keys(normalizeLedgerLabels(m)).length === Object.keys(m).length;
+}
+
+// Number of invalid optional fields on a stored account that passed isValidAccount.
+function accountFieldIssues(a) {
+  var n = 0;
+  if (a.createdAt !== undefined && a.createdAt !== null) {
+    if (typeof a.createdAt !== 'string' || a.createdAt.trim() === '' || !isFinite(Date.parse(a.createdAt))) n++;
+  }
+  if (a.address !== undefined && a.address !== null) {
+    if (typeof a.address !== 'string' || a.address.trim().length > 128) n++;
+  }
+  if (a.note !== undefined && a.note !== null) {
+    if (typeof a.note !== 'string' || a.note.trim().length > 280) n++;
+  }
+  if (fieldPresent(a.color) && !isValidHexColor(a.color)) n++;
+  if (a.ledgers !== undefined && a.ledgers !== null && !ledgerMapIsClean(a.ledgers)) n++;
+  if (fieldPresent(a.groupId) && (typeof a.groupId !== 'string' || a.groupId === a.id)) n++;
+  if (fieldPresent(a.groupCurrency) &&
+      (typeof a.groupCurrency !== 'string' || MAIN_CURRENCIES.indexOf(a.groupCurrency.trim().toUpperCase()) === -1)) n++;
+  return n;
+}
+
+// Same for a stored trade that passed isValidImportTrade (which already
+// rejects bad attachment, ledger, fee and quantity fields).
+function tradeFieldIssues(t) {
+  var n = 0;
+  if (fieldPresent(t.color) && !isValidHexColor(t.color)) n++;
+  if (t.outputs !== undefined && t.outputs !== null) {
+    if (!Array.isArray(t.outputs)) n++;
+    else if (t.outputs.some(function (o) { return !o || typeof o !== 'object' || Array.isArray(o); })) n++;
+  }
+  if (Array.isArray(t.outputs) && t.outputs.length && fieldPresent(t.selfQty)) {
+    var sq = NaN;
+    try { sq = exactQtyValue(t.selfQty, String(t.symbol || '').toUpperCase()); } catch (e) { sq = NaN; }
+    if (!(isFinite(Number(sq)) && Number(sq) > 0)) n++;
+  }
+  return n;
+}
+
+// Number of invalid optional settings (settings that passed isValidSettings).
+function settingsFieldIssues(s) {
+  var n = 0;
+  if (s.assetLedgers !== undefined && s.assetLedgers !== null && typeof s.assetLedgers !== 'boolean') n++;
+  if (s.accountFilter !== undefined && s.accountFilter !== null) {
+    if (!Array.isArray(s.accountFilter)) n++;
+    else if (s.accountFilter.some(function (x) {
+      return !isValidSymbolCode(String(x === undefined || x === null ? '' : x).trim().toUpperCase());
+    })) n++;
+  }
+  if (s.ledgerLabels !== undefined && s.ledgerLabels !== null && !ledgerMapIsClean(s.ledgerLabels)) n++;
+  return n;
 }
 
 // Parse + validate stored text without side effects. `parsed` is null when
@@ -347,9 +419,16 @@ function readStoredState(raw) {
     ? sanitizeGroups(parsed.accounts.filter(isValidAccount).map(normalizeAccount))
     : [];
   var accountIds = accounts.map(function (a) { return a.id; });
-  var trades = Array.isArray(parsed.trades)
-    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
+  var validTrades = Array.isArray(parsed.trades)
+    ? parsed.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); })
     : [];
+  var trades = validTrades.map(normalizeTradeForStore);
+  var accountFieldDamage = 0;
+  var tradeFieldDamage = 0;
+  if (Array.isArray(parsed.accounts)) {
+    parsed.accounts.forEach(function (a) { if (isValidAccount(a) && accountFieldIssues(a) > 0) accountFieldDamage++; });
+  }
+  validTrades.forEach(function (t) { if (tradeFieldIssues(t) > 0) tradeFieldDamage++; });
   var droppedAccounts = Array.isArray(parsed.accounts) ? parsed.accounts.length - accounts.length : 0;
   var droppedTrades = Array.isArray(parsed.trades) ? parsed.trades.length - trades.length : 0;
   var shape = (parsed.accounts !== undefined && parsed.accounts !== null && !Array.isArray(parsed.accounts)) ||
@@ -358,13 +437,7 @@ function readStoredState(raw) {
   // would be replaced by defaults on load -- report it instead.
   var settingsBad = false;
   if (parsed.settings !== undefined && parsed.settings !== null) {
-    if (!isValidSettings(parsed.settings)) {
-      settingsBad = true;
-    } else {
-      var ll = parsed.settings.ledgerLabels;
-      if (ll && typeof ll === 'object' && !Array.isArray(ll) &&
-          Object.keys(normalizeLedgerLabels(ll)).length < Object.keys(ll).length) settingsBad = true;
-    }
+    if (!isValidSettings(parsed.settings) || settingsFieldIssues(parsed.settings) > 0) settingsBad = true;
   }
   // Manual price overrides: keep every valid entry, count the rest.
   var overrides = {};
@@ -381,10 +454,12 @@ function readStoredState(raw) {
       });
     }
   }
-  var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape || settingsBad || droppedOverrides > 0 || overridesShape)
+  var damage = (droppedAccounts > 0 || droppedTrades > 0 || shape || settingsBad || droppedOverrides > 0 || overridesShape ||
+      accountFieldDamage > 0 || tradeFieldDamage > 0)
     ? {
         kind: 'rejected', accounts: droppedAccounts, trades: droppedTrades,
-        shape: shape || overridesShape, settings: settingsBad, overrides: droppedOverrides
+        shape: shape || overridesShape, settings: settingsBad, overrides: droppedOverrides,
+        accountFields: accountFieldDamage, tradeFields: tradeFieldDamage
       }
     : null;
   return { parsed: parsed, accounts: accounts, trades: trades, overrides: overrides, damage: damage };
@@ -7342,6 +7417,11 @@ function clearPriceBanner() {
 // Error('storage-unavailable') on private-mode/quota failure. Every UI
 // mutation must go through here so no storage failure bricks the UI
 // uncaught — the failure surfaces via the existing banner path.
+// Errors saveState throws when it refuses or fails to write.
+function isStorageWriteError(e) {
+  return !!e && (e.message === 'storage-unavailable' || e.message === 'storage-unreadable');
+}
+
 function saveStateGuarded(s, opts) {
   try {
     saveState(s, opts);
@@ -19370,15 +19450,17 @@ function announceStorageRecovery() {
       'What happened: the stored data is damaged, so the app started empty.'
     ];
   } else {
-    msg = 'Some saved records could not be loaded.';
+    msg = 'Some saved data could not be loaded.';
     var parts = [];
     if (r.accounts) parts.push(r.accounts + ' account(s)');
     if (r.trades) parts.push(r.trades + ' record(s)');
+    if (r.accountFields) parts.push(r.accountFields + ' account(s) with invalid details');
+    if (r.tradeFields) parts.push(r.tradeFields + ' record(s) with invalid details');
     if (r.overrides) parts.push(r.overrides + ' manual price override(s)');
     if (r.settings) parts.push('your settings');
     if (r.shape) parts.push('some malformed data');
     lines = [
-      'What happened: ' + (parts.join(', ') || 'part of the saved data') + ' failed validation and ' + 'were not loaded' + (r.settings ? ' (settings fall back to defaults)' : '') + '.'
+      'What happened: ' + (parts.join(', ') || 'part of the saved data') + ' failed validation. The invalid parts were not loaded' + (r.settings ? ' (settings fall back to defaults)' : '') + '.'
     ];
   }
   if (r.saved) {
@@ -22611,7 +22693,7 @@ function syncAdoptRemote(cfg, remotePlain) {
   try {
     next = importState(remotePlain);
   } catch (e) {
-    if (e && e.message === 'storage-unavailable') throw e;
+    if (isStorageWriteError(e)) throw e;
     throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
   }
   if (!saveStateGuarded(next)) return 'failed';
@@ -22940,7 +23022,7 @@ function syncPullFlow() {
     try {
       next = importState(plain);
     } catch (e) {
-      if (e && e.message === 'storage-unavailable') throw e;
+      if (isStorageWriteError(e)) throw e;
       throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
     }
     syncSetBusy(false);
@@ -23476,10 +23558,10 @@ function syncRestoreEncryptedFile(file) {
       try {
         next = importState(plain);
       } catch (e) {
-        if (e && e.message === 'storage-unavailable') {
-          showBanner('Storage unavailable — change was not saved.', 'error', {
-            title: 'Storage error',
-            lines: ['Your data was left untouched. Free space or leave private mode, then retry.']
+        if (isStorageWriteError(e)) {
+          showBanner(e.message === 'storage-unreadable' ? 'Save blocked — stored data could not be checked.' : 'Storage unavailable — change was not saved.', 'error', {
+            title: e.message === 'storage-unreadable' ? 'Save blocked' : 'Storage error',
+            lines: ['Your data was left untouched. Make storage accessible (leave private mode, free space), then retry.']
           });
           return;
         }

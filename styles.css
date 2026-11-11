@@ -5354,7 +5354,7 @@ label.sync-check {
 .debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
 .debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin-top: 1.25rem; }
 .debt-collateral-heading label { margin: 0; }
-#debt-add-collateral { flex-shrink: 0; white-space: nowrap; }
+#debt-add-collateral { flex-shrink: 0; white-space: nowrap; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
 .debt-collateral-list { display: grid; gap: 0.55rem; margin-top: 0.35rem; }
 .debt-collateral-row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(10.5rem, 1fr) auto; gap: 0.45rem; align-items: center; }
 .debt-collateral-row input, .debt-collateral-row select { min-width: 0; }

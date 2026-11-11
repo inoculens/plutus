@@ -13741,8 +13741,8 @@ function buildDebtPositionDialog() {
     '<label for="debt-position-name">Position name</label><input id="debt-position-name" maxlength="120" required autocomplete="off">' +
     '<label>Debt denomination' + infoPill('Choose the unit in which the lender reports the debt.', 'debt-position-asset-status') + '</label><div class="debt-asset-fields">' +
     '<select id="debt-position-asset-kind" aria-label="Debt asset type">' +
-    '<option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
-    '<option value="cash">Fiat</option><option value="custom">Custom</option></select>' +
+    '<option value="cash">Fiat</option><option value="crypto">Crypto</option><option value="stock">Stock</option><option value="commodity">Commodity</option>' +
+    '<option value="custom">Custom</option></select>' +
     '<input id="debt-position-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. BTC" aria-label="Ticker"></div>' +
     '<label for="debt-position-balance">Total outstanding balance<span id="debt-position-unit"></span>' + infoPill('Enter the total balance currently reported by the lender. Plutus will keep this exact amount until you report a new one.') + '</label>' +
     '<input id="debt-position-balance" type="number" min="0" step="any" required inputmode="decimal">' +
@@ -13899,7 +13899,7 @@ function openDebtPositionDialog(ownerId, positionId) {
   reported.max = reported.value;
   note.value = '';
   document.getElementById('debt-position-notes').value = (position && typeof position.notes === 'string') ? position.notes : '';
-  assetKindInput.value = position ? position.assetKind : (owner.kind || 'crypto');
+  assetKindInput.value = position ? position.assetKind : (owner.kind || 'cash');
   assetTickerInput.value = position ? position.assetTicker : '';
   assetKindInput.disabled = !!position;
   assetTickerInput.disabled = !!position;

@@ -13899,7 +13899,7 @@ function openDebtPositionDialog(ownerId, positionId) {
   reported.max = reported.value;
   note.value = '';
   document.getElementById('debt-position-notes').value = (position && typeof position.notes === 'string') ? position.notes : '';
-  assetKindInput.value = position ? position.assetKind : (owner.kind || 'cash');
+  assetKindInput.value = position ? position.assetKind : 'cash';
   assetTickerInput.value = position ? position.assetTicker : '';
   assetKindInput.disabled = !!position;
   assetTickerInput.disabled = !!position;

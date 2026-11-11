@@ -13750,7 +13750,7 @@ function buildDebtPositionDialog() {
     '<label for="debt-position-note">Snapshot note (optional)</label><textarea id="debt-position-note" maxlength="280" rows="2"></textarea>' +
     '<label for="debt-position-notes">Position notes (optional)</label><textarea id="debt-position-notes" maxlength="280" rows="2"></textarea>' +
     '<div class="debt-collateral-heading"><label>Collateral sources (optional)</label>' +
-    '<button id="debt-add-collateral" type="button" class="quiet">+ Add account</button></div>' +
+    '<button id="debt-add-collateral" type="button">+ Add account</button></div>' +
     '<div id="debt-collateral-list" class="debt-collateral-list"></div>' +
     dockMarkup('debt-position-error', 'Save reported balance', 'debt-position-save') + '</form>';
   document.body.appendChild(dlg);

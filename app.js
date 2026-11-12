@@ -104,9 +104,30 @@ function isValidSettings(v) {
     (v.dateFormat === undefined || isValidDateFormat(v.dateFormat));
 }
 
+// Prototype-less dictionary for maps keyed by user-controlled identifiers
+// (account ids, trade ids, ledger codes). A plain {} resolves keys such as
+// "__proto__", "constructor" or "toString" through Object.prototype, which
+// silently drops entries and can write into the global prototype.
+function dict() {
+  return Object.create(null);
+}
+
+var ACCOUNT_ID_MAX_LENGTH = 128;
+
+// Account ids: 1-128 chars of [A-Za-z0-9._:-] (uid() emits 't' + base36),
+// never a name that already exists on Object.prototype ("__proto__",
+// "constructor", "toString", "hasOwnProperty", ...). Pure.
+function isValidAccountId(id) {
+  if (typeof id !== 'string') return false;
+  if (id.length === 0 || id.length > ACCOUNT_ID_MAX_LENGTH) return false;
+  if (!/^[A-Za-z0-9._:-]+$/.test(id)) return false;
+  if (id === '__proto__' || id === 'prototype' || (id in Object.prototype)) return false;
+  return true;
+}
+
 function isValidAccount(a) {
   if (!a || typeof a !== 'object' || Array.isArray(a)) return false;
-  if (typeof a.id !== 'string' || a.id.length === 0) return false;
+  if (!isValidAccountId(a.id)) return false;
   if (typeof a.name !== 'string' || a.name.trim().length === 0) return false;
   if (typeof a.ticker !== 'string') return false;
   var tk = a.ticker.trim().toUpperCase();
@@ -383,7 +404,7 @@ function debtAccountDeleteBlock(st, ids) {
 // stay (they match no main and render standalone).
 function sanitizeGroups(accounts) {
   var list = accounts || [];
-  var byId = {};
+  var byId = dict();
   list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
   list.filter(function (a) {
     if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
@@ -403,7 +424,7 @@ function sanitizeGroups(accounts) {
 // instead of silent. Dangling links (no such main) stay, by design.
 function nestedGroupLinkCount(accounts) {
   var list = accounts || [];
-  var byId = {};
+  var byId = dict();
   list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
   return list.filter(function (a) {
     if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
@@ -476,7 +497,7 @@ var QTY_NON_CRYPTO = {};
 // one asset kind, in which case every price for it is keyed KIND:SYM
 // (e.g. STOCK:W, CRYPTO:W) so the two can never share or overwrite a price.
 // Rebuilt whenever accounts load/save (noteSymbolKinds).
-var PRICE_KIND_BY_ACCOUNT = {}; // accountId -> normalized kind
+var PRICE_KIND_BY_ACCOUNT = dict(); // accountId -> normalized kind
 var PRICE_KINDS_BY_SYMBOL = {}; // SYM -> { kind: true } for every held kind
 var PRICE_COLLISIONS = {};      // SYM -> true when held under 2+ kinds
 var PRICE_KIND_NAMES = ['CRYPTO', 'STOCK', 'COMMODITY', 'CASH', 'CUSTOM'];
@@ -1094,7 +1115,7 @@ function assignGroup(st, memberIds, mainId) {
   var main = accountById(st, mainId);
   if (!main) return 'Main account not found.';
   if (groupMainOf(st, mainId)) return '"' + main.name + '" is already grouped — ungroup it first or pick another main.';
-  var seen = {};
+  var seen = dict();
   var ids = [];
   (memberIds || []).forEach(function (id) {
     if (typeof id !== 'string' || id === '' || id === mainId || seen[id]) return;
@@ -1126,7 +1147,7 @@ function ungroupAll(st, mainId) {
 // Delete scope: ids plus the members of any main among them, so removing
 // a main removes its whole group (records included). Pure.
 function expandDeleteIds(st, ids) {
-  var set = {};
+  var set = dict();
   (ids || []).forEach(function (id) {
     if (typeof id === 'string' && id !== '' && accountById(st, id)) set[id] = true;
   });
@@ -1156,7 +1177,7 @@ function assetLedgersOn(st) {
 }
 
 function cashAccountIds(st) {
-  var out = {};
+  var out = dict();
   ((st && st.accounts) || []).forEach(function (a) {
     if (a && a.id && isCashKind(a.kind)) out[a.id] = true;
   });
@@ -1566,7 +1587,7 @@ function transferOutputsOf(t) {
 }
 
 function transferDestIds(t) {
-  var seen = {};
+  var seen = dict();
   var out = [];
   function add(id) {
     var s = String(id === undefined || id === null ? '' : id).trim();
@@ -1990,7 +2011,7 @@ function importState(json) {
     }
   }
   var accountIds = data.accounts.map(function (a) { return a.id; });
-  var seenIds = {};
+  var seenIds = dict();
   for (var di = 0; di < accountIds.length; di++) {
     if (Object.prototype.hasOwnProperty.call(seenIds, accountIds[di])) {
       throw new Error('import failed: duplicate account id ' + accountIds[di]);
@@ -2010,7 +2031,7 @@ function importState(json) {
       throw new Error('import failed: invalid trade at index ' + ti);
     }
   }
-  var seenTradeIds = {};
+  var seenTradeIds = dict();
   for (var tdi = 0; tdi < data.trades.length; tdi++) {
     var tid = data.trades[tdi] && data.trades[tdi].id;
     if (typeof tid === 'string' && tid.length > 0) {
@@ -3266,7 +3287,7 @@ function computePositions(trades, live, method) {
 function computePortfolio(allTrades, live, method) {
   var isFifo = method === 'fifo';
   var sorted = ledgerSortByDate(allTrades || []);
-  var acctState = {}; // accId -> sym -> {qty,cost,realized,income,fees,fiatFees,queue,lots}
+  var acctState = dict(); // accId -> sym -> {qty,cost,realized,income,fees,fiatFees,queue,lots}
   function stFor(accId, sym) {
     var a = acctState[accId];
     if (!a) { a = {}; acctState[accId] = a; }
@@ -3642,7 +3663,7 @@ function computePortfolio(allTrades, live, method) {
     }
   });
   // Build per-account position maps with live prices.
-  var byAccount = {};
+  var byAccount = dict();
   Object.keys(acctState).forEach(function (accId) {
     var m = new Map();
     var syms = acctState[accId];
@@ -4016,7 +4037,7 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
 // trade label first, then the chart map, then the bare code.
 function ledgerParentOf(code, known) {
   var c = String(code);
-  var set = {};
+  var set = dict();
   (known || []).forEach(function (k) { set[String(k)] = true; });
   delete set[c];
   var best = null;
@@ -4052,7 +4073,7 @@ function ledgerDescendantsOf(target, allCodes) {
   var out = [];
   keys.forEach(function (c) {
     var cur = c;
-    var seen = {};
+    var seen = dict();
     while (cur && !seen[cur]) {
       seen[cur] = true;
       var p = ledgerParentOf(cur, full);
@@ -4101,7 +4122,7 @@ function groupFillFiats(st) {
 // Every ledger code known to an account: chart keys plus codes posted on
 // its records (posted-only codes nest like charted ones).
 function ledgerAccountCodes(st, accountId) {
-  var set = {};
+  var set = dict();
   try {
     var eff = ledgerChartFor(st, accountId);
     Object.keys(eff).forEach(function (k) { var ck = String(k).trim(); if (ck) set[ck] = true; });
@@ -4141,7 +4162,7 @@ function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode, scope
   if (!code) return null;
   var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
   var chartAcc = scope[0];
-  var set = {};
+  var set = dict();
   try {
     var eff = ledgerChartFor(st, chartAcc);
     Object.keys(eff).forEach(function (k) { var ck = String(k).trim(); if (ck) set[ck] = true; });
@@ -4164,7 +4185,7 @@ function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode, scope
   if (kids.length) return { kind: 'parent', code: code, kids: kids.slice().sort() };
   var parents = [];
   var cur = code;
-  var seen = {};
+  var seen = dict();
   while (cur && !seen[cur]) {
     seen[cur] = true;
     var p = ledgerParentOf(cur, all);
@@ -4208,7 +4229,7 @@ function ledgerConflictMessage(conf) {
 // saves today). Positive totals are never touched. Idempotent.
 function repairCashTradeAmounts(trades, accounts) {
   try {
-    var kinds = {};
+    var kinds = dict();
     ((accounts) || []).forEach(function (a) {
       if (a && a.id) kinds[a.id] = (typeof a.kind === 'string') ? a.kind.trim().toLowerCase() : '';
     });
@@ -4295,7 +4316,7 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
 // posts -sent on the source and +received on the arrival under one code.
 function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
   var labels = labelMap || {};
-  var inScope = {};
+  var inScope = dict();
   (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') inScope[id] = true; });
   function cashScope(id) {
     if (!kinds || typeof kinds[id] !== 'string') return true;
@@ -5672,7 +5693,7 @@ function fetchBatchPrices(syms, vs) {
   var cur = String(vs || '').toUpperCase();
   var curLow = cur.toLowerCase();
   var ids = syms.map(function (s) { return SYMBOL_MAP[String(s).toUpperCase()]; });
-  var seenIds = {};
+  var seenIds = dict();
   var uniqIds = [];
   ids.forEach(function (id) { if (id && !seenIds[id]) { seenIds[id] = true; uniqIds.push(id); } });
   var needUsd = curLow !== 'usd'; // bridge for mains CoinGecko doesn't quote (e.g. RON)
@@ -8024,7 +8045,7 @@ function netWorthHistoryKinds(st) {
 
 function netWorthHistoryIncludedAccounts(st) {
   var filter = selectedTickers(st);
-  var included = {};
+  var included = dict();
   (st.accounts || []).forEach(function (account) {
     if (!account || (filter !== null && filter.indexOf(String(account.ticker || '').toUpperCase()) === -1)) return;
     included[account.id] = true;
@@ -9181,7 +9202,7 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
   var complete = true;
   var missing = {};
   var cashTotal = 0;
-  var seenAccount = {};
+  var seenAccount = dict();
   var cashIds = cashAccountIds(st);
 
   function addAccountPositions(accountId) {
@@ -9402,7 +9423,7 @@ function updateNetWorthHistory(st, value, main) {
 
 function summaryLifetimeCost(st, rows, dtrades, visibleAccounts) {
   var cashIds = cashAccountIds(st);
-  var included = {};
+  var included = dict();
   (visibleAccounts || []).forEach(function (account) {
     if (!account || !account.id) return;
     included[account.id] = true;
@@ -9525,7 +9546,7 @@ function currentAccountGrossValue(accounts, rows, trades, main) {
 
 function debtAccountsForScope(st, baseAccounts) {
   var list = [];
-  var seen = {};
+  var seen = dict();
   (baseAccounts || []).forEach(function (account) {
     if (!account || !account.id) return;
     var scope = [account].concat(groupMembers(st, account.id) || []);
@@ -13004,7 +13025,7 @@ function groupLedgerCurrency(st, mainAcc) {
 // code (income/expense/buy/sell plus labeled transfers, which also post
 // tree rows). Unlabeled buckets alone never open the panel.
 function groupHasLabels(allTrades, ids) {
-  var set = {};
+  var set = dict();
   (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') set[id] = true; });
   return (allTrades || []).some(function (t) {
     if (!t || !set[t.accountId]) return false;
@@ -13066,7 +13087,7 @@ function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
     return;
   }
   var gdtrades = (gCcy === headerMain) ? dtrades : convertTrades(st.trades, gCcy);
-  var kinds = {};
+  var kinds = dict();
   ids.forEach(function (id) {
     var a = accountById(st, id);
     kinds[id] = (a && typeof a.kind === 'string') ? a.kind : '';
@@ -13186,7 +13207,7 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
 // + Ledger bootstrap instead).
 function buildAssetLedgers(st, acc, dtrades, main, host) {
   var ids = [acc.id];
-  var kinds = {};
+  var kinds = dict();
   kinds[acc.id] = (acc && typeof acc.kind === 'string') ? acc.kind : '';
   var tree = ledgerTreeMulti(dtrades, ids, main, ledgerChartFor(st, acc.id), kinds);
   if (!tree.roots.length) return false;
@@ -13414,7 +13435,7 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel, scopeIds
     return false;
   }
   function violationsUnion(s) {
-    var set = {};
+    var set = dict();
     scope.forEach(function (sid) {
       var v = [];
       try { v = ledgerViolations(s, sid); } catch (e) { v = []; }
@@ -15702,11 +15723,11 @@ function filterTradesByDateRange(trades, filter) {
 }
 
 function dateRangeOutflowIssue(scopeTrades, scopeIds, st, allTrades) {
-  var inScope = {};
+  var inScope = dict();
   (scopeIds || []).forEach(function (id) {
     if (typeof id === 'string' && id !== '') inScope[id] = true;
   });
-  var transferSources = {};
+  var transferSources = dict();
   (scopeTrades || []).forEach(function (t) {
     if (!t || t.type !== 'transfer') return;
     var linked = (scopeIds || []).some(function (id) { return transferInvolvesAccount(t, id); });
@@ -17215,7 +17236,7 @@ function transferHasAdditionalSources(rows){return Array.isArray(rows)&&rows.len
 
 function buildTransferSources(rows, symbol) {
   var sources = [];
-  var seen = {};
+  var seen = dict();
   var symDec = qtyDecimals(symbol);
   var currentState = loadState();
   var primaryAccount = accountById(currentState, uiVal('t-account', ''));
@@ -17728,7 +17749,7 @@ function qtyDecimals(symbol) {
 function noteSymbolKinds(accounts, trades) {
   var next = {};
   var crypto = {};
-  var kindByAccount = {};
+  var kindByAccount = dict();
   var kindsBySym = {};
   function noteKind(sym, kind) {
     var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
@@ -18878,7 +18899,7 @@ function findLedgerLabel(st, accountId, code, scopeIds) {
   } catch (e) { /* ignore */ }
   var found = '';
   try {
-    var inScope = {};
+    var inScope = dict();
     scope.forEach(function (sid) { if (typeof sid === 'string' && sid !== '') inScope[sid] = true; });
     (st.trades || []).forEach(function (t) {
       if (found || !t) return;

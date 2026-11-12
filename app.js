@@ -81,6 +81,22 @@ function isFutureDateStr(d) {
   return d.slice(0, 10) > today;
 }
 
+// Persisted records are stored with the calendar date of the device that
+// created them. A device in a timezone behind that one sees the same date as
+// "tomorrow", so the strict local check above must never gate stored,
+// imported, exported or synced data. A date is rejected there only when it is
+// later than today in UTC+14, the furthest-ahead timezone on Earth (the
+// latest calendar date that exists anywhere right now). The strict
+// isFutureDateStr stays in use for dates typed into the record form.
+function maxCalendarDateAnywhere() {
+  return new Date(Date.now() + 14 * 3600000).toISOString().slice(0, 10);
+}
+
+function isFutureEverywhereDateStr(d) {
+  if (!isValidDateStr(d)) return false;
+  return d.slice(0, 10) > maxCalendarDateAnywhere();
+}
+
 function isValidSettings(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v) &&
     typeof v.mainCurrency === 'string' && MAIN_CURRENCIES.indexOf(v.mainCurrency.toUpperCase()) !== -1 &&
@@ -1655,7 +1671,7 @@ function isValidImportTrade(t, accountIds, accounts) {
   if (TRADE_TYPES.indexOf(t.type) === -1) return false;
   if (!isValidSymbolCode(t.symbol)) return false;
   if (!isValidDateStr(t.date)) return false;
-  if (isFutureDateStr(t.date)) return false;
+  if (isFutureEverywhereDateStr(t.date)) return false;
   // fee (fiat) is always optional >= 0 when present
   var feeChk = numGte0(t.fee, true);
   if (feeChk === false) return false;
@@ -4794,14 +4810,16 @@ function fetchYahooHistory(yahooSym, wantDay, cur, fetchImpl) {
   return fetchFirstJson(yahooProxyUrls(yahooSym, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d'), f).then(function (data) {
     var r = data && data.chart && data.chart.result && data.chart.result[0];
     if (!r) throw new Error('no-quotes');
-    var nat = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var unitInfo = normalizeQuoteUnit((r.meta && r.meta.currency) || 'USD', 1);
+    var nat = unitInfo.currency;
     var candles = parseYahooDaily(data).filter(function (c) { return c.day <= wantDay; });
     if (!candles.length) throw new Error('no-fixing');
     var pick = candles[candles.length - 1];
     var back = (pick.day !== wantDay);
-    if (nat === cur) return { price: pick.close, interpolated: back, day: pick.day };
+    var closeMain = pick.close / unitInfo.divisor;
+    if (nat === cur) return { price: closeMain, interpolated: back, day: pick.day };
     return fetchEcbRate(pick.day, nat, cur).then(function (fx) {
-      var v = pick.close * Number(fx.rate);
+      var v = closeMain * Number(fx.rate);
       if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
       return { price: v, interpolated: back || !!fx.interpolated, day: pick.day };
     });
@@ -5260,20 +5278,43 @@ function fetchFirstJson(urls, fetchImpl, timeoutMs) {
   return next(0);
 }
 
+// Quote currencies that providers report in a minor unit (1/100 of the main
+// unit): London pence ("GBp" / "GBX"), Johannesburg cents ("ZAc" / "ZAC") and
+// Israeli agorot ("ILA"). The lookup is case-sensitive on purpose: "GBp" is
+// pence while "GBP" is pounds, so upper-casing first would silently turn
+// pence into pounds (a 100x overstated price). Returns the price in the main
+// unit, the upper-case ISO currency and the divisor that was applied, so
+// callers with a series of prices can apply the same divisor to every point.
+var MINOR_UNIT_QUOTES = { GBp: 'GBP', GBX: 'GBP', ZAc: 'ZAR', ZAC: 'ZAR', ILA: 'ILS' };
+function normalizeQuoteUnit(rawCurrency, price) {
+  var raw = String(rawCurrency == null ? '' : rawCurrency).trim();
+  if (Object.prototype.hasOwnProperty.call(MINOR_UNIT_QUOTES, raw)) {
+    return { price: Number(price) / 100, currency: MINOR_UNIT_QUOTES[raw], divisor: 100 };
+  }
+  return { price: Number(price), currency: (raw || 'USD').toUpperCase(), divisor: 1 };
+}
+
 // Latest quote from a Yahoo chart payload: regularMarketPrice first, else
 // the newest non-null daily close. Returns {price, currency} or null.
 function parseYahooQuote(data) {
   try {
     var r = data && data.chart && data.chart.result && data.chart.result[0];
     if (!r) return null;
-    var cur = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var rawCur = (r.meta && r.meta.currency) || 'USD';
     var px = r.meta ? Number(r.meta.regularMarketPrice) : NaN;
-    if (isFinite(px) && px > 0) return { price: px, currency: cur };
+    var u;
+    if (isFinite(px) && px > 0) {
+      u = normalizeQuoteUnit(rawCur, px);
+      return { price: u.price, currency: u.currency };
+    }
     var q = r.indicators && r.indicators.quote && r.indicators.quote[0];
     var cl = (q && q.close) || [];
     for (var i = cl.length - 1; i >= 0; i--) {
       var c = Number(cl[i]);
-      if (isFinite(c) && c > 0) return { price: c, currency: cur };
+      if (isFinite(c) && c > 0) {
+        u = normalizeQuoteUnit(rawCur, c);
+        return { price: u.price, currency: u.currency };
+      }
     }
   } catch (e) { /* fall through */ }
   return null;
@@ -5315,7 +5356,8 @@ function parseCnbcQuotes(data) {
       var s = String(q.symbol || '').toUpperCase();
       var p = Number(q.last);
       if (!s || !isFinite(p) || p <= 0) return;
-      map[s] = { price: p, currency: String(q.currencyCode || 'USD').toUpperCase() };
+      var unit = normalizeQuoteUnit(q.currencyCode || 'USD', p);
+      map[s] = { price: unit.price, currency: unit.currency };
     });
   } catch (e) { /* fall through */ }
   return map;
@@ -8499,7 +8541,8 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
       return fetchFirstJson(yahooProxyUrls(yahoo, query), window.fetch.bind(window)).then(function (data) {
         var result = data && data.chart && data.chart.result && data.chart.result[0];
         if (!result) throw new Error('stock provider returned no prices');
-        var resultCurrency = String((result.meta && result.meta.currency) || 'USD').toUpperCase();
+        var stockUnit = normalizeQuoteUnit((result.meta && result.meta.currency) || 'USD', 1);
+        var resultCurrency = stockUnit.currency;
         var timestamps = result.timestamp || [];
         var quotes = result.indicators && result.indicators.quote && result.indicators.quote[0];
         var closes = quotes && quotes.close ? quotes.close : [];
@@ -8507,7 +8550,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
         for (var i = 0; i < timestamps.length; i++) {
           var price = Number(closes[i]);
           if (isFinite(price) && price > 0) {
-            points.push({ at: Number(timestamps[i]) * 1000, price: price, currency: resultCurrency });
+            points.push({ at: Number(timestamps[i]) * 1000, price: price / stockUnit.divisor, currency: resultCurrency });
           }
         }
         return { currency: resultCurrency, points: points };
@@ -10962,11 +11005,22 @@ function historyOK() {
 
 // Current account route, history path first (clean production URLs), hash
 // fallback (file://, tests, legacy links).
+// decodeURIComponent throws URIError on a malformed escape such as "%" or
+// "%E0%A4%A". Anyone can type or share such a link, and route() runs during
+// boot, so a throw here would leave the app blank. Malformed ids count as "no
+// account route".
+function safeDecodeRouteId(raw) {
+  try { return decodeURIComponent(raw); } catch (e) { return null; }
+}
+
 function currentRouteId() {
   try {
     var p = String((typeof location !== 'undefined' && location.pathname) || '');
     var m = /^\/account\/([^\/?#]+)/.exec(p);
-    if (m) return decodeURIComponent(m[1]);
+    if (m) {
+      var id = safeDecodeRouteId(m[1]);
+      if (id !== null) return id;
+    }
   } catch (e) { /* fall through to hash */ }
   return accountDetailIdHash();
 }
@@ -10974,7 +11028,7 @@ function currentRouteId() {
 function accountDetailIdHash() {
   var h = String((typeof location !== 'undefined' && location.hash) || '');
   var hm = /^#\/account\/([^\/?#]+)/.exec(h);
-  return hm ? decodeURIComponent(hm[1]) : null;
+  return hm ? safeDecodeRouteId(hm[1]) : null;
 }
 
 function accountDetailId() {
@@ -21330,8 +21384,40 @@ function syncHeroAllocHeight() {
   } catch (e) { /* ignore */ }
 }
 
+// Everything this app keeps in the browser besides the main state. The
+// cookie-consent choice is deliberately NOT listed: it holds no personal data
+// and keeping it stops the banner from reappearing after a wipe.
+var WIPE_LOCAL_KEYS = [
+  'inoculens.sync.v1', 'inoculens.price-data-sync.v1', 'inoculens.oauth.v1',
+  'inoculens.fxcache.v1', 'inoculens.histcache.v1', 'inoculens.tradepagesize.v1',
+  'plutus.networth-history.v1', 'plutus.networth-history-ranges.v1'
+];
+var WIPE_IDB_NAMES = ['inoculens.plutus.attachments', 'plutus.networth-history'];
+
+// Resolves (never rejects) once the database is gone, blocked or unavailable.
+// A blocked delete still completes when the page reloads and the last
+// connection closes, so waiting on it forever would only freeze the UI.
+function wipeIndexedDb(name) {
+  return new Promise(function (resolve) {
+    try {
+      if (typeof indexedDB === 'undefined') { resolve(false); return; }
+      var req = indexedDB.deleteDatabase(name);
+      req.onsuccess = function () { resolve(true); };
+      req.onerror = function () { resolve(false); };
+      req.onblocked = function () { resolve(false); };
+    } catch (e) { resolve(false); }
+  });
+}
+
+function wipeAllBrowserData() {
+  WIPE_LOCAL_KEYS.forEach(function (k) {
+    try { localStorage.removeItem(k); } catch (e) { /* ignore */ }
+  });
+  return Promise.all(WIPE_IDB_NAMES.map(wipeIndexedDb));
+}
+
 function clearAllData() {
-  confirmAction('Clear everything', 'Delete all accounts, trades, overrides and settings? This cannot be undone.', 'Delete everything', true).then(function (ok) {
+  confirmAction('Clear everything', 'Delete all accounts, trades, receipts and attachments, net-worth history, price caches, settings and saved sync sign-ins from this browser? Copies already stored in your own cloud storage are not touched. This cannot be undone.', 'Delete everything', true).then(function (ok) {
     if (!ok) return;
     livePrices = {};
     priceLoading = {};
@@ -21339,8 +21425,13 @@ function clearAllData() {
     if (!saveStateGuarded(defaultState(), { replaceDamaged: true })) return;
     clearRecoveryCopies();
     clearBanner();
-    render();
-    closeDialog('settings-dialog');
+    wipeAllBrowserData().then(function () {
+      // A reload drops every in-memory copy (sync timers and secrets, cached
+      // history, open dialogs) so nothing can write the wiped data back.
+      try { location.reload(); return; } catch (e) { /* fall through */ }
+      render();
+      closeDialog('settings-dialog');
+    });
   });
 }
 
@@ -22446,16 +22537,25 @@ function syncFetch(url, opts, label) {
 // tokens never travel in cleartext where anyone on the network can read them.
 function syncRequireHttpsUrl(url, label) {
   var s = String(url || '');
-  var m = s.match(/^(https?):\/\/([^\/]+)/i);
+  var m = s.match(/^(https?):\/\/([^\/?#]+)/i);
   if (!m) throw new Error('sync failed: enter the ' + label + ' URL starting with https://.');
   var hostport = m[2].toLowerCase();
+  // Credentials belong in the password fields, never in the URL: browsers
+  // refuse fetch() URLs that carry them, and "127.0.0.1@evil.com" must not be
+  // read as a loopback host.
+  if (hostport.indexOf('@') !== -1) {
+    throw new Error('sync failed: the ' + label + ' URL must not contain a username or password — enter them in the sign-in fields instead.');
+  }
   var host = hostport;
   if (host.charAt(0) === '[') {
     host = host.slice(1, host.indexOf(']'));
   } else {
     host = host.split(':')[0];
   }
-  var local = (host === 'localhost' || host === '::1' || host === '127.0.0.1' || host.indexOf('127.') === 0);
+  // Exact loopback names only: a prefix test would accept hosts such as
+  // "127.evil.com" and send the login over cleartext http.
+  var local = (host === 'localhost' || host === '::1' ||
+    /^127(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(host));
   if (m[1].toLowerCase() !== 'https' && !local) {
     throw new Error('sync failed: the ' + label + ' URL must use https:// (not http) so your login stays private.');
   }
@@ -26047,6 +26147,30 @@ function consentLoadGA() {
   } catch (e) { return false; }
 }
 
+// Google Analytics cookies set on this site (and, for the "auto" cookie
+// domain, on its parent domain). Expiring them is what makes a later Decline
+// actually stop the identifier, not just stop new events.
+function consentExpireGaCookies() {
+  try {
+    if (typeof document === 'undefined') return;
+    var names = [];
+    String(document.cookie || '').split(';').forEach(function (c) {
+      var n = c.split('=')[0].replace(/^\s+|\s+$/g, '');
+      if (n === '_ga' || n.indexOf('_ga_') === 0 || n === '_gid' || n.indexOf('_gat') === 0) names.push(n);
+    });
+    var host = String((typeof location !== 'undefined' && location.hostname) || '');
+    var parts = host.split('.');
+    var domains = [''];
+    if (host) domains.push(host);
+    for (var i = 1; i < parts.length - 1; i++) domains.push('.' + parts.slice(i).join('.'));
+    names.forEach(function (n) {
+      domains.forEach(function (d) {
+        document.cookie = n + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/' + (d ? '; domain=' + d : '');
+      });
+    });
+  } catch (e) { /* ignore */ }
+}
+
 function consentApply(choice) {
   consentWrite(choice);
   try {
@@ -26058,7 +26182,9 @@ function consentApply(choice) {
       ad_personalization: 'denied'
     });
   } catch (e) { /* ignore */ }
+  try { window['ga-disable-' + GA_MEASUREMENT_ID] = (choice !== 'accepted'); } catch (e) { /* ignore */ }
   if (choice === 'accepted') consentLoadGA();
+  else consentExpireGaCookies();
   try {
     var b = typeof document !== 'undefined' ? document.getElementById('cookie-banner') : null;
     if (b) b.hidden = true;
@@ -26066,25 +26192,44 @@ function consentApply(choice) {
   return choice;
 }
 
+function consentWireBanner() {
+  var acc = document.getElementById('cookie-accept');
+  var dec = document.getElementById('cookie-decline');
+  if (acc && !acc.getAttribute('data-wired')) {
+    acc.setAttribute('data-wired', '1');
+    acc.addEventListener('click', function () { consentApply('accepted'); });
+  }
+  if (dec && !dec.getAttribute('data-wired')) {
+    dec.setAttribute('data-wired', '1');
+    dec.addEventListener('click', function () { consentApply('declined'); });
+  }
+}
+
+// Footer "Cookie settings": withdrawing consent must be as easy as giving it.
+function consentReopen() {
+  try {
+    var banner = document.getElementById('cookie-banner');
+    if (!banner) return;
+    consentWireBanner();
+    banner.hidden = false;
+  } catch (e) { /* ignore */ }
+}
+
 function consentInitBanner() {
   try {
     if (typeof document === 'undefined') return;
     var banner = document.getElementById('cookie-banner');
     if (!banner) return;
+    var settings = document.getElementById('cookie-settings');
+    if (settings && !settings.getAttribute('data-wired')) {
+      settings.setAttribute('data-wired', '1');
+      settings.addEventListener('click', consentReopen);
+    }
     var choice = consentRead();
     if (choice === 'accepted') { banner.hidden = true; consentLoadGA(); return; }
     if (choice === 'declined') { banner.hidden = true; return; }
     banner.hidden = false;
-    var acc = document.getElementById('cookie-accept');
-    var dec = document.getElementById('cookie-decline');
-    if (acc && !acc.getAttribute('data-wired')) {
-      acc.setAttribute('data-wired', '1');
-      acc.addEventListener('click', function () { consentApply('accepted'); });
-    }
-    if (dec && !dec.getAttribute('data-wired')) {
-      dec.setAttribute('data-wired', '1');
-      dec.addEventListener('click', function () { consentApply('declined'); });
-    }
+    consentWireBanner();
   } catch (e) { /* banner never breaks boot */ }
 }
 

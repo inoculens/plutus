@@ -2205,7 +2205,7 @@ function pickRate(ratesByDate, date) {
     var d = fxShiftDate(date, -back);
     if (ratesByDate && Object.prototype.hasOwnProperty.call(ratesByDate, d)) {
       var rate = Number(ratesByDate[d]);
-      if (isFinite(rate)) {
+      if (isFinite(rate) && rate > 0) { // a zero or negative fixing is garbage, never a rate
         return { rate: rate, interpolated: back > 0, date: d, source: 'ECB-' + d };
       }
     }

@@ -1996,7 +1996,15 @@ function exportState(s) {
   return JSON.stringify(envelope);
 }
 
-function importState(json) {
+// Validate and normalize a backup WITHOUT touching stored state. Restore
+// flows that ask for confirmation use this, so nothing is written until the
+// user agrees (a tab closed or crashed at the prompt used to leave the remote
+// copy already persisted over local data).
+function parseImportedState(json) {
+  return importState(json, { dryRun: true });
+}
+
+function importState(json, opts) {
   var data;
   try {
     data = JSON.parse(json);
@@ -2010,7 +2018,7 @@ function importState(json) {
     throw new Error('import failed: unknown app');
   }
   if (data.version === 1) {
-    return importStateV1(data);
+    return importStateV1(data, opts);
   }
   if (data.version !== STORE_VERSION) {
     throw new Error('import failed: unsupported version');
@@ -2078,14 +2086,14 @@ function importState(json) {
     trades: mappedTrades,
     priceOverrides: priceOverrides
   };
-  saveState(next);
+  if (!(opts && opts.dryRun)) saveState(next);
   return next;
 }
 
 // Legacy v1 file import: group v1 trades (account-less) into auto-created
 // per-symbol accounts. No legacy runtime paths — v1 is never read from
 // localStorage, only accepted here.
-function importStateV1(data) {
+function importStateV1(data, opts) {
   if (!isValidSettings(data.settings)) {
     throw new Error('import failed: invalid settings');
   }
@@ -2138,7 +2146,7 @@ function importStateV1(data) {
     trades: trades,
     priceOverrides: priceOverrides
   };
-  saveState(next);
+  if (!(opts && opts.dryRun)) saveState(next);
   return next;
 }
 
@@ -22037,12 +22045,42 @@ function syncUtf8Decode(bytes) {
 
 // --- Envelope + pure helpers ---
 
+// Resource limits for downloaded sync files. A legitimate envelope holds the
+// JSON backup (a few MB) or one attachment (<= ATTACH_MAX_BYTES, base64 twice
+// over), so 64 MiB leaves wide headroom while refusing a hostile or runaway
+// remote file BEFORE it is parsed, base64-decoded or run through PBKDF2.
+var SYNC_MAX_ENVELOPE_CHARS = 64 * 1024 * 1024;
+var SYNC_MAX_PBKDF2_ITER = 2000000;
+// An OAuth authorization is single use and only honoured for a few minutes
+// after the popup opened; a late or replayed callback is ignored.
+var SYNC_OAUTH_TTL_MS = 10 * 60 * 1000;
+function syncOAuthExpired(startedAt, now) {
+  return !(typeof startedAt === 'number') || !((now === undefined ? Date.now() : now) - startedAt <= SYNC_OAUTH_TTL_MS);
+}
+
+// Read a response body as text, refusing oversized payloads up front: via
+// Content-Length when the server sends it, and again on the text length.
+function syncReadTextLimited(res) {
+  var len = NaN;
+  try { len = Number(res && res.headers && res.headers.get && res.headers.get('content-length')); } catch (e) { len = NaN; }
+  if (isFinite(len) && len > SYNC_MAX_ENVELOPE_CHARS) {
+    return Promise.reject(new Error('sync failed: the remote file is too large to be a valid backup.'));
+  }
+  return res.text().then(function (t) {
+    if (typeof t === 'string' && t.length > SYNC_MAX_ENVELOPE_CHARS) {
+      throw new Error('sync failed: the remote file is too large to be a valid backup.');
+    }
+    return t;
+  });
+}
+
 function syncEnvelopeWrap(ctB64, saltB64, ivB64, iter) {
   return JSON.stringify({ app: SYNC_APP, v: SYNC_VERSION, iter: iter, salt: saltB64, iv: ivB64, ciphertext: ctB64 });
 }
 
 function syncEnvelopeParse(text) {
   var data;
+  if (String(text).length > SYNC_MAX_ENVELOPE_CHARS) throw new Error('sync failed: file is too large to be a valid sync file.');
   try {
     data = JSON.parse(String(text));
   } catch (e) {
@@ -22052,7 +22090,7 @@ function syncEnvelopeParse(text) {
   if (data.app !== SYNC_APP && data.app !== SYNC_APP_LEGACY) throw new Error('sync failed: not an INOCULENS PLUTUS sync file.');
   if (data.v !== SYNC_VERSION) throw new Error('sync failed: unsupported sync version.');
   var iter = Number(data.iter);
-  if (!isFinite(iter) || Math.floor(iter) !== iter || iter < 1000 || iter > 5000000) {
+  if (!isFinite(iter) || Math.floor(iter) !== iter || iter < 1000 || iter > SYNC_MAX_PBKDF2_ITER) {
     throw new Error('sync failed: bad envelope parameters.');
   }
   if (typeof data.salt !== 'string' || typeof data.iv !== 'string' || typeof data.ciphertext !== 'string') {
@@ -22893,7 +22931,7 @@ function syncWebdavDownload(cfg) {
     method: 'GET',
     headers: { 'Authorization': auth }
   }, 'the WebDAV server').then(function (res) {
-    if (res.ok) return res.text();
+    if (res.ok) return syncReadTextLimited(res);
     if (res.status === 401 || res.status === 403) {
       throw new Error('sync failed: WebDAV login refused. Check the username and app password.');
     }
@@ -23002,7 +23040,7 @@ function syncDriveDownload(access, cfg) {
       return syncFetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media', {
         headers: { 'Authorization': 'Bearer ' + access }
       }, 'Google Drive').then(function (res) {
-        if (res.ok) return res.text();
+        if (res.ok) return syncReadTextLimited(res);
         throw new Error('sync failed: Drive download refused (HTTP ' + res.status + ').');
       });
     });
@@ -23039,7 +23077,7 @@ function syncDropboxDownload(access, cfg) {
       'Dropbox-API-Arg': arg
     }
   }, 'Dropbox').then(function (res) {
-    if (res.ok) return res.text();
+    if (res.ok) return syncReadTextLimited(res);
     // 409 means the API refused the call: only treat path/not_found as
     // "no backup yet" — anything else is a real refusal, not a first sync.
     if (res.status === 409) {
@@ -23277,7 +23315,7 @@ function syncS3Put(cfg, text) {
 function syncS3Get(cfg) {
   return syncS3Sign(cfg, 'GET', '').then(function (s) {
     return syncFetch(s.url, { method: 'GET', headers: s.headers }, 'the S3 endpoint').then(function (res) {
-      if (res.ok) return res.text();
+      if (res.ok) return syncReadTextLimited(res);
       if (res.status === 404 || res.status === 403) {
         return res.text().then(function (body) {
           throw syncS3ErrorBody(body, 'sync failed: no backup found on the server yet.') ||
@@ -24377,7 +24415,7 @@ function syncAutoPush() {
 function syncAdoptRemote(cfg, remotePlain) {
   var next;
   try {
-    next = importState(remotePlain);
+    next = parseImportedState(remotePlain);
   } catch (e) {
     if (isStorageWriteError(e)) throw e;
     throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
@@ -24693,8 +24731,8 @@ function syncPullFlow() {
   }
   syncPersistFormSecrets(cfg);
   syncSetBusy(true, 'Downloading from ' + syncProviderLabel(cfg.provider) + '…');
-  // Snapshot first: importState() persists immediately, so a cancelled
-  // restore must put the previous state back — the confirm is real.
+  // Snapshot for the stale-copy comparison only: the backup is validated with
+  // parseImportedState() and written after the user confirms, never before.
   var beforeJson = null;
   try {
     beforeJson = exportState(loadState());
@@ -24706,7 +24744,7 @@ function syncPullFlow() {
   }).then(function (plain) {
     var next;
     try {
-      next = importState(plain);
+      next = parseImportedState(plain);
     } catch (e) {
       if (isStorageWriteError(e)) throw e;
       throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
@@ -24729,11 +24767,7 @@ function syncPullFlow() {
       true
     ).then(function (ok) {
       if (!ok) {
-        if (beforeJson) {
-          try {
-            saveStateGuarded(JSON.parse(beforeJson));
-          } catch (e2) { /* banner already shown by the guard on storage failure */ }
-        }
+        // Nothing was written before this prompt, so a cancel changes nothing.
         // The drive still disagrees after a cancelled restore (unless the
         // drive copy is simply older): keep the stale icon + panel hint.
         try {
@@ -25233,16 +25267,10 @@ function syncRestoreEncryptedFile(file) {
   }
   var reader = new FileReader();
   reader.onload = function () {
-    var beforeJson = null;
-    try {
-      beforeJson = exportState(loadState());
-    } catch (e) {
-      beforeJson = null;
-    }
     syncDecryptEnvelope(String(reader.result), pass).then(function (plain) {
       var next;
       try {
-        next = importState(plain);
+        next = parseImportedState(plain);
       } catch (e) {
         if (isStorageWriteError(e)) {
           showBanner(e.message === 'storage-unreadable' ? 'Save blocked — stored data could not be checked.' : 'Storage unavailable — change was not saved.', 'error', {
@@ -25264,11 +25292,7 @@ function syncRestoreEncryptedFile(file) {
         true
       ).then(function (ok) {
         if (!ok) {
-          if (beforeJson) {
-            try {
-              saveStateGuarded(JSON.parse(beforeJson));
-            } catch (e2) { /* banner already shown by the guard on storage failure */ }
-          }
+          // Nothing was written before this prompt, so a cancel changes nothing.
           syncSetStatus('Restore cancelled.');
           return;
         }
@@ -25613,6 +25637,7 @@ function priceDataConnectOAuth(cfg) {
         window.removeEventListener('message', onMessage);
         reject(new Error('Dropbox sign-in was cancelled or timed out.'));
       }, 180000);
+      var startedAt = Date.now();
       function onMessage(event) {
         var data = event && event.data;
         if (!data || data.type !== 'plutus-oauth' || data.state !== state) return;
@@ -25620,6 +25645,10 @@ function priceDataConnectOAuth(cfg) {
         done = true;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
+        if (syncOAuthExpired(startedAt)) {
+          reject(new Error('Dropbox sign-in expired — try again.'));
+          return;
+        }
         if (data.error || !data.code) {
           reject(new Error(data.error || 'Dropbox sign-in returned no authorization code.'));
           return;
@@ -25792,7 +25821,7 @@ function syncStartOAuth() {
     var state = 'plutus-' + cfg.provider + '-' + syncB64UrlEncode(syncRandomBytes(12));
     try {
       if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(SYNC_OAUTH_KEY, JSON.stringify({ state: state, verifier: pair.verifier, provider: cfg.provider }));
+        sessionStorage.setItem(SYNC_OAUTH_KEY, JSON.stringify({ state: state, provider: cfg.provider, at: Date.now() }));
       }
     } catch (e) { /* ignore */ }
     var url = syncOAuthAuthUrl(cfg.provider, clientId, redirect, pair.challenge, state);
@@ -25812,6 +25841,7 @@ function syncStartOAuth() {
     }
     var done = false;
     var timer = null;
+    var startedAt = Date.now();
     function onMsg(e) {
       var d = e && e.data;
       if (!d || d.type !== 'plutus-oauth') return;
@@ -25822,6 +25852,13 @@ function syncStartOAuth() {
       if (done) return;
       done = true;
       syncClearOAuthAttempt();
+      if (syncOAuthExpired(startedAt)) {
+        try { window.removeEventListener('message', onMsg); } catch (e3) { /* ignore */ }
+        try { if (timer) clearInterval(timer); } catch (e4) { /* ignore */ }
+        syncSetBusy(false);
+        showBanner('Sign-in expired — try Connect again.', 'error', { title: 'Connect', lines: ['The authorization window stayed open too long.'] });
+        return;
+      }
       try { window.removeEventListener('message', onMsg); } catch (e3) { /* ignore */ }
       try { if (timer) clearInterval(timer); } catch (e4) { /* ignore */ }
       if (d.error) {

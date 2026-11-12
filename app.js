@@ -104,6 +104,22 @@ function isValidSettings(v) {
     (v.dateFormat === undefined || isValidDateFormat(v.dateFormat));
 }
 
+// Escape a value for use inside a double-quoted CSS attribute selector
+// ([data-x="..."]). Stripping quotes changed the id (wrong match) and a
+// backslash or newline could still break the selector.
+function cssAttrValue(v) {
+  return String(v).replace(/[\\"\n\r\f]/g, function (ch) {
+    return ch === '\\' || ch === '"' ? '\\' + ch : '\\' + ch.charCodeAt(0).toString(16) + ' ';
+  });
+}
+
+// Display-only cleanup for names that come from files, imports or sync:
+// drops bidirectional overrides/isolates and control characters so a name
+// cannot visually reorder itself (e.g. fake a file extension). Pure.
+function safeDisplayName(v) {
+  return String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '');
+}
+
 // Prototype-less dictionary for maps keyed by user-controlled identifiers
 // (account ids, trade ids, ledger codes). A plain {} resolves keys such as
 // "__proto__", "constructor" or "toString" through Object.prototype, which
@@ -6412,7 +6428,7 @@ function feeRateWhy(t, kind) {
 // would yank the scroll to the top via route()).
 function feeRateTitle(id, text) {
   try {
-    var el = document.querySelector('[data-trade="' + id + '"] [data-label="Fee in fiat rate"]');
+    var el = document.querySelector('[data-trade="' + cssAttrValue(id) + '"] [data-label="Fee in fiat rate"]');
     if (el) el.title = String(text);
   } catch (e) { /* ignore */ }
 }
@@ -9851,7 +9867,7 @@ function restoreAccountFilterFocus() {
   }
   try {
     var host = document.getElementById('accounts');
-    var el = host && host.querySelector ? host.querySelector('[data-ticker="' + accountFilterFocus + '"]') : null;
+    var el = host && host.querySelector ? host.querySelector('[data-ticker="' + cssAttrValue(accountFilterFocus) + '"]') : null;
     if (el && el.focus) el.focus();
   } catch (e) { /* ignore */ }
   accountFilterFocus = null;
@@ -11349,7 +11365,7 @@ function openAttachmentPreview(meta) {
   var viewEl = document.getElementById('attach-dialog-view');
   var msgEl = document.getElementById('attach-dialog-msg');
   var dlEl = document.getElementById('attach-dialog-dl');
-  if (nameEl) nameEl.textContent = meta.name;
+  if (nameEl) nameEl.textContent = safeDisplayName(meta.name);
   if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
   if (viewEl) viewEl.innerHTML = '';
   if (dlEl) { dlEl.hidden = true; dlEl.onclick = null; }
@@ -11358,7 +11374,7 @@ function openAttachmentPreview(meta) {
       var urls = window.URL || window.webkitURL;
       var url = urls.createObjectURL(blob);
       dlg.setAttribute('data-objurl', url);
-      var fname = (label && label.name) || meta.name;
+      var fname = safeDisplayName((label && label.name) || meta.name) || 'attachment';
       if (dlEl) {
         dlEl.hidden = false;
         dlEl.onclick = function () {
@@ -11374,7 +11390,7 @@ function openAttachmentPreview(meta) {
         var mime = (label && label.mime) || meta.mime;
         if (String(mime).indexOf('image/') === 0) {
           var img = document.createElement('img');
-          img.src = url; img.alt = meta.name;
+          img.src = url; img.alt = safeDisplayName(meta.name);
           img.style.cssText = 'max-width:100%;border-radius:10px;border:1px solid var(--border)';
           viewEl.appendChild(img);
         } else {
@@ -12599,8 +12615,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
       var atA = document.createElement('a');
       atA.className = 'tx-link';
       atA.href = '#';
-      atA.textContent = String(meta.name).length > 24 ? String(meta.name).slice(0, 23) + '…' : String(meta.name);
-      atA.title = String(meta.name) + ' (' + String(meta.mime) + ') — click to preview';
+      var atName = safeDisplayName(meta.name);
+      atA.textContent = atName.length > 24 ? atName.slice(0, 23) + '…' : atName;
+      atA.title = atName + ' (' + String(meta.mime) + ') — click to preview';
       atA.addEventListener('click', function (ev) {
         if (ev && ev.preventDefault) ev.preventDefault();
         try { openAttachmentPreview(meta); } catch (e) { showBanner('Could not open the file on this device.'); }
@@ -15851,7 +15868,7 @@ function restoreTradeTypeFilterFocus() {
   if (!anyOpen) { tradeTypeFilterFocus = null; return; }
   try {
     var host = document.getElementById('account-detail');
-    var el = host && host.querySelector ? host.querySelector('[data-ttype="' + tradeTypeFilterFocus + '"]') : null;
+    var el = host && host.querySelector ? host.querySelector('[data-ttype="' + cssAttrValue(tradeTypeFilterFocus) + '"]') : null;
     if (el && el.focus) el.focus();
   } catch (e) { /* ignore */ }
   tradeTypeFilterFocus = null;
@@ -15879,7 +15896,7 @@ function acctDragCardEl(id) {
   var host = document.getElementById('accounts');
   if (!host || !host.querySelector) return null;
   try {
-    return host.querySelector('[data-account="' + String(id).replace(/"/g, '') + '"]');
+    return host.querySelector('[data-account="' + cssAttrValue(id) + '"]');
   } catch (e) {
     return null;
   }
@@ -16172,7 +16189,7 @@ function subStartDrag(wrap, src) {
     if (typeof document !== 'undefined' && document.body && document.body.style) document.body.style.userSelect = 'none';
   } catch (e) {}
   try {
-    var cur = wrap && wrap.querySelector ? wrap.querySelector('[data-account="' + String(subDrag.id).replace(/"/g, '') + '"]') : null;
+    var cur = wrap && wrap.querySelector ? wrap.querySelector('[data-account="' + cssAttrValue(subDrag.id) + '"]') : null;
     if (cur) cur.classList.add('drag-src');
   } catch (e) {}
 }
@@ -16267,7 +16284,7 @@ function tradeDragCardEl(id) {
   var host = document.getElementById('account-detail');
   if (!host || !host.querySelector) return null;
   try {
-    return host.querySelector('[data-trade="' + String(id).replace(/"/g, '') + '"]');
+    return host.querySelector('[data-trade="' + cssAttrValue(id) + '"]');
   } catch (e) {
     return null;
   }
@@ -16570,7 +16587,7 @@ function wireGroupSubsDnD(wrap) {
     if (!subDrag.started) {
       if (dx * dx + dy * dy < 49) return;
       var src = null;
-      try { src = wrap.querySelector('[data-account="' + String(subDrag.id).replace(/"/g, '') + '"]'); } catch (e2) { src = null; }
+      try { src = wrap.querySelector('[data-account="' + cssAttrValue(subDrag.id) + '"]'); } catch (e2) { src = null; }
       if (!src) { subDragCleanup(wrap); return; }
       subStartDrag(wrap, src);
     }

@@ -843,6 +843,8 @@ function saveState(s, opts) {
   try { noteSymbolKinds(s && s.accounts, s && s.trades); } catch (e) { /* ignore */ }
   if (!(opts && opts.replaceDamaged)) guardStoredStateBeforeSave();
   var out;
+  var prevRaw = null;
+  try { prevRaw = localStorage.getItem(STORAGE_KEY); } catch (e) { prevRaw = null; }
   try {
     out = JSON.stringify(s);
     localStorage.setItem(STORAGE_KEY, out);
@@ -850,6 +852,10 @@ function saveState(s, opts) {
     throw new Error('storage-unavailable');
   }
   lastSeenRaw = out;
+  // The metadata change is saved: only now release blobs nothing references.
+  try {
+    attReleasedHashes(prevRaw, s).forEach(function (h) { attDelete(h); });
+  } catch (e) { /* best-effort: a leftover blob is harmless, a lost one is not */ }
   // Any persisted change may make the drive copy stale: let auto-sync
   // (opt-in, Sync tab) schedule an encrypted push. Never breaks saving.
   try { syncScheduleAuto(); } catch (e) { /* ignore */ }
@@ -978,6 +984,29 @@ function attDelete(hash) {
       } catch (e) { try { db.close(); } catch (e2) { /* ignore */ } resolve(false); }
     });
   });
+}
+// Attachment blobs are content-addressed: two records that attach the same
+// file share one blob. A blob may therefore only go once NO stored record
+// references its hash, and only after the metadata change is really saved.
+function attHashesOfState(state) {
+  var out = dict();
+  var list = state && Array.isArray(state.trades) ? state.trades : [];
+  for (var i = 0; i < list.length; i++) {
+    var a = list[i] && list[i].attachment;
+    if (a && typeof a.hash === 'string' && /^[0-9a-f]{8,64}$/.test(a.hash)) out[a.hash] = true;
+  }
+  return out;
+}
+function attHashesOfRaw(raw) {
+  try { return attHashesOfState(JSON.parse(raw)); } catch (e) { return null; }
+}
+// Hashes the previous stored state referenced that the new state does not.
+function attReleasedHashes(prevRaw, nextState) {
+  if (typeof prevRaw !== 'string' || prevRaw.indexOf('"attachment"') === -1) return [];
+  var before = attHashesOfRaw(prevRaw);
+  if (!before) return []; // unreadable previous state: never delete on a guess
+  var after = attHashesOfState(nextState);
+  return Object.keys(before).filter(function (h) { return !after[h]; });
 }
 function attHashBytes(buf) {
   function hex(bytes) {
@@ -1972,28 +2001,55 @@ function isValidPriceOverrides(v) {
   return true;
 }
 
-function exportState(s) {
+// Shared by exportState and the strict variant: the normalized envelope parts
+// plus a count of stored records that cannot be exported (invalid accounts,
+// trades that fail import validation, unusable price overrides).
+function exportPrepare(s) {
   var st = s || {};
-  var rawAccounts = Array.isArray(st.accounts) ? st.accounts.filter(isValidAccount) : [];
+  var dropped = 0;
+  var srcAccounts = Array.isArray(st.accounts) ? st.accounts : [];
+  var rawAccounts = srcAccounts.filter(isValidAccount);
+  dropped += srcAccounts.length - rawAccounts.length;
   var accounts = rawAccounts.map(function (account) { return normalizeAccount(account, rawAccounts); });
   var accountIds = accounts.map(function (a) { return a.id; });
-  var trades = Array.isArray(st.trades)
-    ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
-    : [];
+  var srcTrades = Array.isArray(st.trades) ? st.trades : [];
+  var okTrades = srcTrades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); });
+  dropped += srcTrades.length - okTrades.length;
   var priceOverrides = {};
-  if (st.priceOverrides && typeof st.priceOverrides === 'object' && !Array.isArray(st.priceOverrides) && isValidPriceOverrides(st.priceOverrides)) {
-    priceOverrides = st.priceOverrides;
+  if (st.priceOverrides && typeof st.priceOverrides === 'object' && !Array.isArray(st.priceOverrides)) {
+    if (isValidPriceOverrides(st.priceOverrides)) priceOverrides = st.priceOverrides;
+    else dropped += 1;
   }
-  var envelope = {
-    app: APP_ID,
-    version: STORE_VERSION,
-    exportedAt: new Date().toISOString(),
-    settings: normalizeSettings(st.settings, defaultState().settings),
-    accounts: accounts,
-    trades: trades,
-    priceOverrides: priceOverrides
+  return {
+    dropped: dropped,
+    envelope: {
+      app: APP_ID,
+      version: STORE_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings: normalizeSettings(st.settings, defaultState().settings),
+      accounts: accounts,
+      trades: okTrades.map(normalizeTradeForStore),
+      priceOverrides: priceOverrides
+    }
   };
-  return JSON.stringify(envelope);
+}
+
+// Tolerant export, kept for internal comparisons (sync hashes): records that
+// fail validation are left out.
+function exportState(s) {
+  return JSON.stringify(exportPrepare(s).envelope);
+}
+
+// Export for anything the person keeps or uploads (backup download, encrypted
+// file, sync push). Refuses instead of writing an incomplete file that would
+// look like a successful backup.
+function exportStateStrict(s) {
+  var prepared = exportPrepare(s);
+  if (prepared.dropped > 0) {
+    throw new Error('export failed: ' + prepared.dropped + ' stored record' + (prepared.dropped === 1 ? ' is' : 's are') +
+      ' invalid and would be missing from the file. Nothing was exported.');
+  }
+  return JSON.stringify(prepared.envelope);
 }
 
 // Validate and normalize a backup WITHOUT touching stored state. Restore
@@ -18455,7 +18511,8 @@ function attResolveForSave(cb) {
     return;
   }
   if (pendingAttachRemove && currentAttachMeta) {
-    (function (h) { try { attDelete(h); } catch (e) { /* best-effort */ } })(currentAttachMeta.hash);
+    // The blob is released by saveState() once the record is saved without it
+    // (and only if no other record still uses the same file).
     cb(null, null);
     return;
   }
@@ -21048,7 +21105,16 @@ function backupStamp() {
 }
 
 function downloadBackup() {
-  var json = exportState(loadState());
+  var json;
+  try {
+    json = exportStateStrict(loadState());
+  } catch (e) {
+    showBanner('Export failed — no file was created.', 'error', {
+      title: 'Export error',
+      lines: [String((e && e.message) || e)]
+    });
+    return;
+  }
   var blob = new Blob([json], { type: 'application/json' });
   var name = 'plutus.inoculens.com-' + backupStamp() + '.json';
   var urls = window.URL || window.webkitURL;
@@ -24476,8 +24542,22 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     return;
   }
   syncPersistFormSecrets(cfg);
+  var plain;
+  try {
+    plain = exportStateStrict(st);
+  } catch (e) {
+    // Auto-sync stays quiet (status line only) so a persistent problem never
+    // spams banners; a manual push explains it.
+    try { syncSetStatus('Sync paused — some stored records are invalid. Nothing was uploaded.'); } catch (e2) { /* ignore */ }
+    if (!auto) {
+      showBanner('Sync stopped — nothing was uploaded.', 'error', {
+        title: 'Sync',
+        lines: [String((e && e.message) || e)]
+      });
+    }
+    return;
+  }
   syncSetBusy(true, 'Encrypting…');
-  var plain = exportState(st);
   var localAt = syncLocalExportedAt(plain);
   var curHash = syncHashOfExport(plain);
   var baseHash = cfg.lastSyncedHash || '';
@@ -25241,7 +25321,9 @@ function syncDownloadEncrypted() {
     return;
   }
   syncSetBusy(true, 'Encrypting…');
-  syncEncryptEnvelope(exportState(loadState()), pass).then(function (env) {
+  Promise.resolve().then(function () {
+    return syncEncryptEnvelope(exportStateStrict(loadState()), pass);
+  }).then(function (env) {
     syncSetBusy(false);
     downloadTextFile('plutus.inoculens.com-' + backupStamp() + '.enc.json', env, 'application/json');
     clearBanner();

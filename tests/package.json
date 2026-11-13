@@ -1,0 +1,8 @@
+{
+  "name": "plutus-browser-tests",
+  "private": true,
+  "description": "Test-only dependencies for the real-browser tests. Lives in tests/ so the static site root (and its Netlify build) has no package.json.",
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

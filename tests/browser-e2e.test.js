@@ -6,16 +6,15 @@
 // accounts -> verify independently hand-calculated totals -> export -> wipe
 // (unrelated site storage must survive) -> import the backup -> totals match
 // -> encrypted WebDAV sync (in-memory fake server) -> wipe -> pull and verify
-// -> a failed sync must not touch local data. Skips visibly when Playwright
-// or Chromium is unavailable; it never reports a pass it did not run.
+// -> a failed sync must not touch local data. Fails in CI-required mode, and
+// prints an unmistakable SKIP locally, when Playwright or Chromium is
+// unavailable (see browser-env.js); it never reports a pass it did not run.
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-let chromium;
-try { chromium = require('playwright').chromium; } catch (e) {
-  console.log('browser-e2e: SKIPPED (playwright not installed)'); process.exit(0);
-}
+const { loadChromium, launchChromium } = require('./browser-env');
+const chromium = loadChromium('browser-e2e');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.txt': 'text/plain' };
 const server = http.createServer((req, res) => {
@@ -82,7 +81,7 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
-  const browser = await chromium.launch();
+  const browser = await launchChromium(chromium, 'browser-e2e');
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   const problems = [];

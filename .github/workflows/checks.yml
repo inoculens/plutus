@@ -15,7 +15,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out the source
         uses: actions/checkout@v5
@@ -24,6 +24,21 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install browser-test dependencies (locked) and Chromium
+        # Done once per job. The browser tests run in CI-required mode: a
+        # missing Playwright/Chromium is a failure there, never a skip.
+        run: |
+          set -euo pipefail
+          npm ci --prefix tests
+          npx --prefix tests playwright install --with-deps chromium
 
       - name: Install CCXT
         run: python -m pip install --disable-pip-version-check "ccxt>=4.4,<5"
@@ -39,12 +54,22 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*.py'
 
       - name: JavaScript tests
+        env:
+          REQUIRE_BROWSER_TESTS: "1"
         run: |
           set -euo pipefail
+          : > js-tests.log
           for test in tests/*.test.js; do
-            echo "== $test"
-            node "$test"
+            echo "== $test" | tee -a js-tests.log
+            node "$test" 2>&1 | tee -a js-tests.log
           done
+          # Evidence that the browser tests really ran on a launched Chromium
+          # and that nothing was skipped.
+          for name in browser-xss browser-e2e; do
+            grep -Eq "^$name: Chromium [0-9.]+ launched" js-tests.log || { echo "$name did not launch Chromium" >&2; exit 1; }
+            grep -Eq "^$name: OK" js-tests.log || { echo "$name did not report OK" >&2; exit 1; }
+          done
+          if grep -E "^SKIP:" js-tests.log; then echo "a test was skipped in CI" >&2; exit 1; fi
 
       - name: Netlify build script stays executable
         run: |

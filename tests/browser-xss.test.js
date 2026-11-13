@@ -4,16 +4,14 @@
 // text field, boots the actual page from a static server under its real CSP,
 // walks home -> account -> trade views, and fails if any payload executes,
 // any hostile element/attribute appears, or the CSP reports a violation.
-// Skips (exit 0, clearly labelled) when Playwright/Chromium is unavailable
-// so it never claims a pass it did not run.
+// When Playwright/Chromium is unavailable it FAILS in CI-required mode and
+// prints an unmistakable SKIP locally (see browser-env.js); never a silent pass.
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-let chromium;
-try { chromium = require('playwright').chromium; } catch (e) {
-  console.log('browser-xss: SKIPPED (playwright not installed)'); process.exit(0);
-}
+const { loadChromium, launchChromium } = require('./browser-env');
+const chromium = loadChromium('browser-xss');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.txt': 'text/plain' };
 const server = http.createServer((req, res) => {
@@ -51,7 +49,7 @@ const state = {
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
-  const browser = await chromium.launch();
+  const browser = await launchChromium(chromium, 'browser-xss');
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   const problems = [];

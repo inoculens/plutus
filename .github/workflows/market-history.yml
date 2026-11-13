@@ -47,7 +47,12 @@ jobs:
           python -m py_compile scripts/collect-market-history.py
           python -m unittest discover -s tests -p 'test_market_history_collector.py'
           node --check app.js
-          for test in tests/*.test.js; do node "$test"; done
+          # The real-browser tests need Playwright + Chromium, which this job does not install
+          # (they are mandatory in the Checks workflow). Every other JS test runs here.
+          for test in tests/*.test.js; do
+            case "$test" in tests/browser-*) echo "== skip $test (runs in Checks)"; continue;; esac
+            node "$test"
+          done
 
       - name: Restore prior archive for incremental collection
         run: |

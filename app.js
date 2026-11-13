@@ -11663,8 +11663,9 @@ function fitTradeFactsRows(strip) {
   // whole — a CSS tail cut would fake hidden characters after the last
   // block. Pin the cell to the short hash plus the copy glyph, so the
   // strip takes the room from Note and the amounts instead.
-  var txRow = strip.querySelector('.stat-row[data-label="Tx"]');
-  if (txRow) {
+  var txRowsFit = strip.querySelectorAll('.stat-row.tx-row');
+  for (var txi = 0; txi < txRowsFit.length; txi++) {
+    var txRow = txRowsFit[txi];
     var txTxt = txRow.querySelector('.stat-val > :first-child');
     var txW = textRunWidth(txTxt);
     if (txW > 0) {
@@ -12500,21 +12501,40 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     if (t.ledgerLabel && String(t.ledgerLabel).trim() !== '') ledTxt += ' · ' + String(t.ledgerLabel).trim();
     box.appendChild(statRow('Ledger', ledTxt, null, false));
   }
-  if (t.txid && isValidTxid(t.txid)) {
-    var txFull = String(t.txid).trim();
+  // Transaction IDs. A swap is one record with one hash per side: the sent
+  // leg's and the received leg's. Both show on either account's card, each
+  // with its own asset's rules. Older swaps mirrored a single hash on both
+  // legs: that shows once as a plain Tx. Everything else shows its own hash.
+  var txEntries = [];
+  (function () {
+    function validId(v) { return !!(v && isValidTxid(v) && String(v).trim() !== ''); }
+    if (isSwap && swap && swap.sell && swap.buy) {
+      var sId = validId(swap.sell.txid) ? String(swap.sell.txid).trim() : '';
+      var rId = validId(swap.buy.txid) ? String(swap.buy.txid).trim() : '';
+      if (sId !== '' && sId === rId) txEntries.push({ label: 'Tx', id: sId, sym: t.symbol });
+      else {
+        if (sId !== '') txEntries.push({ label: 'Sent Tx', id: sId, sym: swap.sell.symbol });
+        if (rId !== '') txEntries.push({ label: 'Received Tx', id: rId, sym: swap.buy.symbol });
+      }
+    } else if (validId(t.txid)) {
+      txEntries.push({ label: 'Tx', id: String(t.txid).trim(), sym: t.symbol });
+    }
+  })();
+  txEntries.forEach(function (te) {
+    var txFull = te.id;
     var txRow = document.createElement('div');
-    txRow.className = 'stat-row';
-    txRow.setAttribute('data-label', 'Tx');
+    txRow.className = 'stat-row tx-row';
+    txRow.setAttribute('data-label', te.label);
     var txL = document.createElement('span');
     txL.className = 'stat-label';
-    txL.textContent = 'Tx';
+    txL.textContent = te.label;
     var txV = document.createElement('span');
     txV.className = 'stat-val num';
     // mempool.space only resolves Bitcoin hashes: other assets would get a
     // dead link, so they show the same shortened id as plain text. BTC keeps
     // the explorer link; every asset gets a copy button carrying the raw
     // hash (not the browser URL).
-    if (String(t.symbol || '').trim().toUpperCase() === 'BTC') {
+    if (String(te.sym || '').trim().toUpperCase() === 'BTC') {
       var txA = document.createElement('a');
       txA.className = 'tx-link';
       txA.href = txExplorerUrl(txFull);
@@ -12533,7 +12553,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     txRow.appendChild(txL);
     txRow.appendChild(txV);
     box.appendChild(txRow);
-  }
+  });
   if (t.attachment && isValidAttachment(t.attachment)) {
     (function (meta) {
       var atRow = document.createElement('div');
@@ -16743,8 +16763,10 @@ function buildTradeForm() {
     '</div>' +
     '<label for="t-note">Note (optional)</label>' +
     '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
-    '<label for="t-txid">Transaction ID (optional)' + infoPill('Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.') + '</label>' +
-    '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash">' +
+    '<div id="t-txid-row"><label for="t-txid" id="t-txid-label">Transaction ID (optional)' + infoPill('Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.', 't-txid-hint') + '</label>' +
+    '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash"></div>' +
+    '<div id="t-txid-to-row" hidden><label for="t-txid-to" id="t-txid-to-label">Received TX ID</label>' +
+    '<input id="t-txid-to" autocomplete="off" spellcheck="false" placeholder="Optional — paste the tx hash"></div>' +
     '<div id="t-attach-row"><label for="t-attach">Attach invoice / receipt (optional)' + infoPill('Optional — PDF, PNG or JPG up to 10 MB. Stored on this device, synced encrypted when sync is on.', 't-attach-hint') + '</label>' +
     '<input id="t-attach" type="file" accept="application/pdf,image/png,image/jpeg">' +
     '<p class="fld-hint" id="t-attach-cur" hidden></p>' +
@@ -17427,6 +17449,50 @@ function splitFeeEvenlyUI() {
     syncTransferFeePreview();
   } catch (e) { /* ignore */ }
 }
+// Swap records carry one transaction ID per side: the sent leg's hash and the
+// received leg's hash. Other types keep the single Transaction ID box. Each
+// label keeps its info pill and gets a small ticker tag so it is obvious
+// which asset the hash belongs to.
+function syncSwapTxUI(isSwap, fromTicker, toTicker) {
+  function relabel(labelId, text, ticker) {
+    var lab = document.getElementById(labelId);
+    if (!lab) return;
+    var node = null;
+    for (var i = 0; i < lab.childNodes.length; i++) {
+      if (lab.childNodes[i].nodeType === 3) { node = lab.childNodes[i]; break; }
+    }
+    if (!node) { node = document.createTextNode(''); lab.insertBefore(node, lab.firstChild); }
+    node.data = text;
+    var old = lab.querySelector('.txid-tag');
+    if (old) lab.removeChild(old);
+    if (ticker) {
+      var tag = document.createElement('span');
+      tag.className = 'txid-tag';
+      tag.textContent = ticker;
+      if (node.nextSibling) lab.insertBefore(tag, node.nextSibling); else lab.appendChild(tag);
+    }
+  }
+  var toRow = document.getElementById('t-txid-to-row');
+  if (toRow) toRow.hidden = !isSwap;
+  var fromIn = document.getElementById('t-txid');
+  if (isSwap) {
+    relabel('t-txid-label', 'Sent TX ID', fromTicker);
+    relabel('t-txid-to-label', 'Received TX ID', toTicker);
+    if (fromIn) fromIn.placeholder = 'Optional — paste the tx hash';
+  } else {
+    relabel('t-txid-label', 'Transaction ID (optional)', '');
+    if (fromIn) fromIn.placeholder = 'e.g. paste the tx hash';
+  }
+  var pill = document.getElementById('t-txid-hint');
+  if (pill) {
+    var tip = isSwap
+      ? 'Optional — one hash for each side of the swap. Bitcoin hashes link to mempool.space; other assets show the hash as text. Every hash has a copy button.'
+      : 'Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.';
+    pill.setAttribute('data-info', tip);
+    pill.setAttribute('aria-label', tip);
+  }
+}
+
 function syncTradeTypeUI() {
   var sideEl = document.getElementById('t-side');
   var type = sideEl ? sideEl.value : 'buy';
@@ -17665,6 +17731,10 @@ function syncTradeTypeUI() {
       else if (toSel.options.length) toSel.selectedIndex = 0;
       if (hint) hint.textContent = 'Both legs belong to one swap — the pair is edited and deleted together.';
     }
+    try {
+      var toAccTx = (toSel && isSwap) ? accountById(st, toSel.value) : null;
+      syncSwapTxUI(isSwap, fromAcc ? String(fromAcc.ticker || '').toUpperCase() : '', toAccTx ? String(toAccTx.ticker || '').toUpperCase() : '');
+    } catch (e) { /* labels fall back to the plain text */ }
     if (isTransfer) {
       try { refreshRecipientAccounts(); } catch (e) { /* ignore */ }
       if (isCash) setLabel('t-qty-label', 'You send (total, in ' + cashTicker + ')');
@@ -18417,7 +18487,7 @@ function resetTradeForm() {
   if (clab) clab.hidden = true;
   uiSetVal('t-fee', '');
   uiSetVal('t-note', '');
-  uiSetVal('t-txid', '');
+  uiSetVal('t-txid', ''); uiSetVal('t-txid-to', '');
   uiSetVal('t-networkfee', '');
   uiSetVal('t-ledger', '');
   uiSetVal('t-ledger-label', '');
@@ -18543,7 +18613,18 @@ function openEditTrade(tradeId) {
   uiSetVal('t-note', swapPair ? swapNoteClean(srcTr.note || (dstTr && dstTr.note)) : (tr.note || ''));
   uiSetVal('t-ledger', (srcTr.ledger === undefined || srcTr.ledger === null) ? '' : String(srcTr.ledger));
   uiSetVal('t-ledger-label', (srcTr.ledgerLabel === undefined || srcTr.ledgerLabel === null) ? '' : String(srcTr.ledgerLabel));
-  uiSetVal('t-txid', srcTr.txid !== undefined && srcTr.txid !== null ? String(srcTr.txid) : (dstTr && dstTr.txid !== undefined && dstTr.txid !== null ? String(dstTr.txid) : ''));
+  var srcTxText = srcTr.txid !== undefined && srcTr.txid !== null ? String(srcTr.txid) : '';
+  var dstTxText = (dstTr && dstTr.txid !== undefined && dstTr.txid !== null) ? String(dstTr.txid) : '';
+  if (swapPair) {
+    // Older swaps mirrored one hash on both legs: show it once, on the sent side.
+    if (srcTxText === '' && dstTxText !== '') { srcTxText = dstTxText; dstTxText = ''; }
+    else if (dstTxText === srcTxText) dstTxText = '';
+    uiSetVal('t-txid', srcTxText);
+    uiSetVal('t-txid-to', dstTxText);
+  } else {
+    uiSetVal('t-txid', srcTxText);
+    uiSetVal('t-txid-to', '');
+  }
   uiSetVal('t-networkfee', srcTr.networkFee !== undefined && srcTr.networkFee !== null ? qtyUiText(srcTr.networkFee, String(srcTr.symbol || '').toUpperCase()) : '');
   if (tr.type === 'transfer') {
     // Recipients replace the old single-destination inputs: stored outputs
@@ -18953,7 +19034,10 @@ function onTradeSubmit(ev) {
   if (isFutureDateStr(date)) { tradeFormError('date cannot be in the future'); return; }
   var note = uiVal('t-note', '').trim();
   var txid = uiVal('t-txid', '').trim();
-  if (txid !== '' && !isValidTxid(txid)) { tradeFormError('Transaction ID looks invalid — paste the full tx hash.'); return; }
+  if (txid !== '' && !isValidTxid(txid)) { tradeFormError((side === 'swap' ? 'Sent transaction ID' : 'Transaction ID') + ' looks invalid — paste the full tx hash.'); return; }
+  // Swaps hold a second hash: the received side's transaction.
+  var txidTo = (side === 'swap') ? uiVal('t-txid-to', '').trim() : '';
+  if (txidTo !== '' && !isValidTxid(txidTo)) { tradeFormError('Received transaction ID looks invalid — paste the full tx hash.'); return; }
   var manualRateRaw = uiVal('t-manual-rate', '').trim();
   var manualPriceRaw = uiVal('t-manual-price', '').trim();
   var manualRate = (manualRateRaw === '') ? null : Number(manualRateRaw);
@@ -19046,15 +19130,14 @@ function onTradeSubmit(ev) {
       var cleanNote = swapNoteClean(note);
       var sellLeg = { id: uid(), type: 'sell', symbol: fromSym, qty: fromQty, total: swapTotal, currency: swapCcy, date: date, fee: feeS, feeCurrency: feeCcyS, note: cleanNote, fxLock: lock, accountId: accountId, swapId: swapId, createdAt: createdAt };
       var buyLeg = { id: uid(), type: 'buy', symbol: toSym, qty: toQty, total: swapTotal, currency: swapCcy, date: date, fee: 0, feeCurrency: swapCcy, note: cleanNote, fxLock: lock, accountId: toAccSwap.id, swapId: swapId, createdAt: createdAt };
-      // One swap record: the receipt and txid ride both linked legs.
+      // One swap record: the receipt rides both linked legs; each leg has its own txid.
       if (attMeta && attMeta !== 'keep') {
         sellLeg.attachment = attMeta;
         buyLeg.attachment = attMeta;
       }
-      if (txid !== '') {
-        sellLeg.txid = txid;
-        buyLeg.txid = txid;
-      }
+      // Each leg keeps its own hash: sent on the sell leg, received on the buy leg.
+      if (txid !== '') sellLeg.txid = txid;
+      if (txidTo !== '') buyLeg.txid = txidTo;
       if (manualPrice !== null) {
         // Manual quote is for the received asset, denominated in the trade's
         // own Currency (like total and fee) — never the header display fiat.
@@ -19079,7 +19162,7 @@ function onTradeSubmit(ev) {
       // Freeze reference exec quotes in the background (saving never waits).
       try { freezeExecLock(sellLeg.id, fromSym, date, String(main).toUpperCase(), (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }
       try { freezeExecLock(buyLeg.id, toSym, date, String(main).toUpperCase(), (toAccSwap && toAccSwap.kind) || undefined); } catch (e) { /* ignore */ }
-      uiSetVal('t-qty', ''); uiSetVal('t-toqty', ''); uiSetVal('t-total', ''); uiSetVal('t-note', ''); uiSetVal('t-txid', ''); uiSetVal('t-manual-rate', ''); uiSetVal('t-manual-price', '');
+      uiSetVal('t-qty', ''); uiSetVal('t-toqty', ''); uiSetVal('t-total', ''); uiSetVal('t-note', ''); uiSetVal('t-txid', ''); uiSetVal('t-txid-to', ''); uiSetVal('t-manual-rate', ''); uiSetVal('t-manual-price', '');
       var dd = document.getElementById('t-date'); if (dd) dd.value = todayDmy();
       attReset(attMeta && attMeta !== 'keep' ? attMeta : null);
       tradeFormError(null);
@@ -19286,10 +19369,8 @@ function onTradeSubmit(ev) {
       }
       applyAttachment(sellNew, sellPrev);
       applyAttachment(buyNew, buyPrev);
-      if (txid !== '') {
-        sellNew.txid = txid;
-        buyNew.txid = txid;
-      }
+      if (txid !== '') sellNew.txid = txid;
+      if (txidTo !== '') buyNew.txid = txidTo;
       var errSellE = validateTrade(sellNew, 1e18);
       if (errSellE) { tradeFormError(errSellE); lockSubmit(false, 'Save changes'); return; }
       var errBuyE = validateTrade(buyNew, 1e18);
@@ -19835,7 +19916,7 @@ function onTradeSubmit(ev) {
     uiSetVal('t-toqty', '');
     uiSetVal('t-total', '');
     uiSetVal('t-note', '');
-    uiSetVal('t-txid', '');
+    uiSetVal('t-txid', ''); uiSetVal('t-txid-to', '');
     uiSetVal('t-networkfee', '');
     uiSetVal('t-manual-rate', '');
     uiSetVal('t-manual-price', '');

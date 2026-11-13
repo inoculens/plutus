@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 'use strict';
-// Account-id safety. Ids such as "__proto__", "constructor" and "toString"
-// used to collide with Object.prototype inside plain-object maps: accounts
-// vanished from the portfolio, assignGroup reported success while doing
-// nothing, and computePortfolio wrote ticker state into the GLOBAL prototype.
-// These tests drive the full import -> store -> portfolio workflow, not just
-// the validator. All figures are invented. Loads app.js in a stubbed vm context.
+// Differential accounting test. An independent reference model (written from
+// the accounting rules, not from the engine) is run against computePortfolio
+// over seeded random sequences of buys, sells (with fees), income, expenses,
+// transfers and swaps, in both cost methods. All figures are invented.
+// Loads app.js in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -33,10 +32,16 @@ vm.runInContext(src, C, { filename: 'app.js' });
 // basis are tracked per account and compared with computePortfolio.
 const EPS = 1e-9;
 function reference(trades, method) {
-  const book = {}; // acct -> sym -> { lots: [...], realized }
-  const get = (a, s) => ((book[a] = book[a] || {})[s] = book[a][s] || { lots: [], realized: 0 });
+  // Fee rule (app semantics): a buy/sell `total` is ALL-IN. The fee is already
+  // inside it, so it never changes cost basis, proceeds or realized P&L; it is
+  // only tallied (display-only) per account/symbol. A buy/income with a valid
+  // qty always tallies its fee; a sell tallies it only when inventory exists to
+  // sell (a sell with nothing held is ignored entirely, fee included).
+  const book = {}; // acct -> sym -> { lots: [...], realized, fees }
+  const get = (a, s) => ((book[a] = book[a] || {})[s] = book[a][s] || { lots: [], realized: 0, fees: 0, feeDust: 0 });
   const held = b => b.lots.reduce((s, l) => s + l.qty, 0);
   const costOf = b => b.lots.reduce((s, l) => s + l.cost, 0);
+  const drain = b => { b.drained = true; }; // book has held inventory at some point
   const clean = b => { b.lots = b.lots.filter(l => l.qty > EPS); };
   // Take `want` quantity out of a book: FIFO = oldest lots first; average =
   // proportional slice of every lot (pooled average). Returns removed pieces.
@@ -56,9 +61,11 @@ function reference(trades, method) {
       b.lots.forEach(l => { l.qty -= l.qty * f; l.cost -= l.cost * f; });
       clean(b); if (held(b) <= EPS) b.lots = [];
     }
+    drain(b);
     return out;
   }
   const put = (b, piece) => {
+    drain(b);
     if (method === 'fifo') { b.lots.push(piece); b.lots.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0)); }
     else if (b.lots.length) { b.lots[0].qty += piece.qty; b.lots[0].cost += piece.cost; }
     else b.lots.push({ qty: piece.qty, cost: piece.cost, date: '' });
@@ -66,10 +73,21 @@ function reference(trades, method) {
   const sorted = trades.map((t, i) => [t, i]).sort((a, b) => (a[0].date < b[0].date ? -1 : a[0].date > b[0].date ? 1 : a[1] - b[1])).map(x => x[0]);
   for (const t of sorted) {
     const b = get(t.accountId, t.symbol), total = Number(t.total || 0);
+    const fee = Number(t.fee || 0);
     if (t.type === 'buy' || t.type === 'income') {
+      if (!(t.qty > 0)) continue;
+      b.fees += fee;
       put(b, { qty: t.qty, cost: total, date: t.date });
     } else if (t.type === 'sell') {
-      const h = held(b); if (h <= EPS) continue;
+      const h = held(b);
+      // Float dust (0 < held <= EPS, e.g. 5e-17 left after clamping an oversell) is not
+      // inventory, but 18-decimal symbols use an engine epsilon of 0 and so still tally
+      // the (display-only) fee of a sell against it. Record that as a tolerated band.
+      // The reference book is exact, so it cannot see that dust: any position that has ever
+      // held inventory (bought, received or taken from) may carry some in the engine.
+      if (h <= EPS && b.drained) b.feeDust += fee;
+      if (h <= EPS) continue;
+      b.fees += fee;
       const q = Math.min(t.qty, h), proceeds = total * (q / t.qty);
       const cost = take(b, q).reduce((s, p) => s + p.cost, 0);
       b.realized += proceeds - cost;
@@ -80,7 +98,9 @@ function reference(trades, method) {
       const dest = get(t.toAccountId, t.symbol), fee = Number(t.networkFee || 0);
       if (fee >= t.qty) continue; // invalid transfer is ignored entirely
       b.realized -= total; // fiat fee is always lost, even from an empty source
-      const h = held(b); if (h <= EPS) continue;
+      const h = held(b);
+      if (h <= EPS && b.drained) drain(dest); // the engine may forward float dust, so the destination may hold some
+      if (h <= EPS) continue;
       const moved = Math.min(t.qty, h), feeQ = fee * (moved / t.qty), keep = (moved - feeQ) / moved;
       const pieces = take(b, moved);
       const movedCost = pieces.reduce((s, p) => s + p.cost, 0);
@@ -103,6 +123,12 @@ function genSequence(r, n) {
     const date = '2026-' + String(1 + Math.floor((day - 1) / 28) % 12).padStart(2, '0') + '-' + String(1 + (day - 1) % 28).padStart(2, '0');
     const symbol = r() < 0.7 ? 'BTC' : 'ETH', accountId = pick(accts[symbol]);
     const x = r(), t = { id: 'g' + i, accountId, symbol, date };
+    if (x > 0.93) { // swap: a sell leg and a buy leg of another symbol, same account and date, shared swapId
+      const other = symbol === 'BTC' ? 'ETH' : 'BTC', sid = 'sw' + i;
+      out.push({ id: 'g' + i + 's', accountId, symbol, date, type: 'sell', qty: q2(0.05, 3), total: q2(10, 3000), fee: q2(0, 5), swapId: sid });
+      out.push({ id: 'g' + i + 'b', accountId, symbol: other, date, type: 'buy', qty: q2(0.05, 3), total: q2(10, 3000), swapId: sid });
+      continue;
+    }
     if (x < 0.30) Object.assign(t, { type: 'buy', qty: q2(0.05, 3), total: q2(10, 3000), fee: q2(0, 5) });
     else if (x < 0.50) Object.assign(t, { type: 'sell', qty: q2(0.05, 4), total: q2(10, 4000), fee: q2(0, 5) });
     else if (x < 0.58) Object.assign(t, { type: 'income', qty: q2(0.01, 1), total: q2(1, 300) });
@@ -124,7 +150,7 @@ function genSequence(r, n) {
 }
 
 const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1e-6 + 1e-9 * Math.max(Math.abs(a), Math.abs(b)), what + ': engine ' + a + ' vs reference ' + b);
-let checked = 0, withTransfers = 0, withOversell = 0;
+let checked = 0, withTransfers = 0, withSwaps = 0, withFees = 0;
 ['fifo', 'average'].forEach((method, mi) => {
   const r = rng(20260512 + mi * 7919);
   for (let seq = 0; seq < 300; seq++) {
@@ -133,7 +159,9 @@ let checked = 0, withTransfers = 0, withOversell = 0;
     const pf = C.computePortfolio(trades, {}, method);
     const label = method + ' seq ' + seq;
     if (trades.some(t => t.type === 'transfer')) withTransfers++;
-    let sumRealized = 0, bad = false;
+    if (trades.some(t => t.swapId)) withSwaps++;
+    if (trades.some(t => t.fee > 0)) withFees++;
+    let sumRealized = 0, sumFees = 0, sumFeeRef = 0, sumFeeBand = 0;
     const accIds = new Set([...Object.keys(ref), ...Object.keys(pf.byAccount)]);
     for (const a of accIds) {
       const syms = new Set([...Object.keys(ref[a] || {}), ...Array.from((pf.byAccount[a] || new Map()).keys())]);
@@ -144,11 +172,24 @@ let checked = 0, withTransfers = 0, withOversell = 0;
         near(e.qtyHeld, q, label + ' ' + a + '/' + s + ' qty');
         near(e.qtyHeld * e.avgEntry, c, label + ' ' + a + '/' + s + ' remaining cost basis');
         near(e.realized, b.realized, label + ' ' + a + '/' + s + ' realized');
+        const ef = e.fees || 0;
+        assert.ok(ef >= b.fees - 1e-6 && ef <= b.fees + b.feeDust + 1e-6, label + ' ' + a + '/' + s + ' fees tally: engine ' + ef + ' vs reference ' + b.fees + ' (+dust band ' + b.feeDust + ')');
+        sumFees += ef; sumFeeBand += b.feeDust || 0; sumFeeRef += b.fees || 0;
         assert.ok(e.qtyHeld >= 0, label + ' no negative inventory in ' + a + '/' + s);
         sumRealized += e.realized;
       }
     }
     near(pf.totals.realized, sumRealized, label + ' grand total = sum of per-account totals');
+    assert.ok(pf.totals.feesFiat >= sumFeeRef - 1e-6 && pf.totals.feesFiat <= sumFeeRef + sumFeeBand + 1e-6, label + ' total fees within reference band');
+    near(pf.totals.feesFiat, sumFees, label + ' total fees = sum of per-position fees');
+    // Metamorphic: fees are inside the all-in total, so removing every fee must
+    // not change quantity, cost basis or realized P&L anywhere.
+    const nofee = C.computePortfolio(trades.map(t => { const c = Object.assign({}, t); delete c.fee; return c; }), {}, method);
+    near(nofee.totals.realized, pf.totals.realized, label + ' realized is fee-independent');
+    for (const a of Object.keys(pf.byAccount)) pf.byAccount[a].forEach((e, sym) => {
+      const z = nofee.byAccount[a].get(sym);
+      near(z.qtyHeld, e.qtyHeld, label + ' qty fee-independent'); near(z.qtyHeld * z.avgEntry, e.qtyHeld * e.avgEntry, label + ' basis fee-independent');
+    });
     // Engine-independent conservation: quantity can only leave through sells,
     // expenses and network fees, never appear from nowhere.
     ['BTC', 'ETH'].forEach(s => {
@@ -161,6 +202,8 @@ let checked = 0, withTransfers = 0, withOversell = 0;
 });
 // The generator must really exercise the hard paths, not just buys and sells.
 assert.ok(withTransfers > 400, 'transfers exercised: ' + withTransfers);
+assert.ok(withSwaps > 400, 'swaps exercised: ' + withSwaps);
+assert.ok(withFees > 500, 'fees exercised: ' + withFees);
 
 // ---- Pinned hand-calculated cases (guards the reference itself) -------------
 const T = (o) => Object.assign({ symbol: 'BTC', date: '2026-01-01' }, o);
@@ -185,6 +228,28 @@ const run = (tr, m) => C.computePortfolio(tr, { BTC: 200 }, m);
   near(r2.byAccount.y.get('BTC').qtyHeld, 0.9, 'destination qty'); near(r2.byAccount.y.get('BTC').qtyHeld * r2.byAccount.y.get('BTC').avgEntry, 90, 'destination basis keeps cost, no duplication');
   near(r2.totals.realized, -10, 'grand total');
 }
+{ // Fees are all-in: buy 1 @ total 100 (fee 5) keeps basis 100; sell 1 for 150 (fee 3) realizes 50; fees tally 8, never reduce proceeds.
+  ['fifo', 'average'].forEach(m => {
+    const r3 = run([T({ id: 'a', type: 'buy', accountId: 'x', qty: 1, total: 100, fee: 5 }), T({ id: 'b', type: 'sell', accountId: 'x', qty: 1, total: 150, fee: 3, date: '2026-01-02' })], m);
+    const p = r3.byAccount.x.get('BTC');
+    near(p.realized, 50, m + ' fee pinned realized (fee not deducted twice)'); near(p.fees, 8, m + ' fee pinned tally'); near(r3.totals.feesFiat, 8, m + ' fee pinned total');
+    const q = run([T({ id: 'a', type: 'buy', accountId: 'x', qty: 1, total: 100, fee: 5 })], m).byAccount.x.get('BTC');
+    near(q.avgEntry, 100, m + ' fee pinned basis stays at the all-in total');
+  });
+  // A sell with nothing held is ignored entirely, fee included.
+  const none = run([T({ id: 's', type: 'sell', accountId: 'x', qty: 1, total: 150, fee: 3 })], 'fifo');
+  near(none.totals.feesFiat, 0, 'ignored sell contributes no fee'); near(none.totals.realized, 0, 'ignored sell realizes nothing');
+}
+{ // Swap: sell 1 BTC (cost 100) for 300 + buy 3 ETH for 300 (shared swapId). BTC realizes 200 (fee 2 is inside), ETH basis 300.
+  ['fifo', 'average'].forEach(m => {
+    const r4 = C.computePortfolio([T({ id: 'a', type: 'buy', accountId: 'x', qty: 1, total: 100 }),
+      T({ id: 'sw1s', type: 'sell', accountId: 'x', qty: 1, total: 300, fee: 2, swapId: 'sw1', date: '2026-01-02' }),
+      T({ id: 'sw1b', type: 'buy', accountId: 'x', symbol: 'ETH', qty: 3, total: 300, swapId: 'sw1', date: '2026-01-02' })], {}, m);
+    near(r4.byAccount.x.get('BTC').realized, 200, m + ' swap realized'); near(r4.byAccount.x.get('BTC').qtyHeld, 0, m + ' swap sold leg qty');
+    const eth = r4.byAccount.x.get('ETH'); near(eth.qtyHeld, 3, m + ' swap bought qty'); near(eth.qtyHeld * eth.avgEntry, 300, m + ' swap bought basis');
+    near(r4.totals.realized, 200, m + ' swap grand total');
+  });
+}
 { // Unknown price stays null, never zero.
   const p = C.computePortfolio([T({ id: 'a', type: 'buy', accountId: 'x', qty: 1, total: 100 })], {}, 'fifo').byAccount.x.get('BTC');
   assert.equal(p.livePrice, null); assert.equal(p.marketValue, null); assert.equal(p.unrealized, null);
@@ -197,4 +262,4 @@ const run = (tr, m) => C.computePortfolio(tr, { BTC: 200 }, m);
   assert.ok(ok && ok.rate === 1.25 && ok.interpolated === true, 'walks back past a bad fixing to the previous real one');
   assert.equal(C.ledgerFxRate(null), 1); assert.equal(C.ledgerFxRate({ rate: 0 }), 1); assert.equal(C.ledgerFxRate({ rate: -3 }), 1);
 }
-console.log('accounting-differential: OK (' + checked + ' random sequences, ' + withTransfers + ' with transfers)');
+console.log('accounting-differential: OK (' + checked + ' random sequences, ' + withTransfers + ' with transfers, ' + withSwaps + ' with swaps, ' + withFees + ' with fees)');

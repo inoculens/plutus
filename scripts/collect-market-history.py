@@ -44,6 +44,10 @@ MAX_OHLCV_PAGES = 100
 # had EVERY market fetch fail is a partial run: it must fail loudly instead of
 # publishing an archive that looks like a complete daily update.
 MAX_FAILED_SYMBOL_RATIO = 0.25
+# An asset whose newest stored point is at most this many days old was trading
+# recently, so every venue suddenly returning NO candles (without raising) is an
+# incomplete collection, not "this asset has no history".
+EXPECTED_LIVE_DAYS = 7
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plutus-market-history")
@@ -191,11 +195,35 @@ def count_missing_days(points: list) -> int:
     return (days[-1] - days[0] + 1 - len(days)) if days else 0
 
 
-def check_run_health(attempted: int, failed: int) -> None:
-    """Refuse to publish when too many assets lost every market fetch."""
-    if attempted and failed / attempted > MAX_FAILED_SYMBOL_RATIO:
+def classify_asset_fetch(market_count: int, market_failures: int, usable_rows: int,
+                         expected_live: bool) -> str:
+    """Classify one asset's collection outcome.
+
+    "ok":         at least one venue returned usable candles.
+    "failed":     every venue raised.
+    "no_data":    no usable candles although some venue raised, or although the
+                  asset is expected to be live (recent history or an active
+                  market). Venues answered with nothing, which is not a fetch
+                  error but is just as incomplete.
+    "no_history": every venue answered cleanly with nothing and nothing says
+                  this asset should have data (new, delisted or inactive).
+    """
+    if usable_rows > 0:
+        return "ok"
+    if market_count and market_failures >= market_count:
+        return "failed"
+    if market_failures > 0 or expected_live:
+        return "no_data"
+    return "no_history"
+
+
+def check_run_health(attempted: int, failed: int, empty: int = 0) -> None:
+    """Refuse to publish when too many assets lost every market fetch or came back empty."""
+    unhealthy = failed + empty
+    if attempted and unhealthy / attempted > MAX_FAILED_SYMBOL_RATIO:
         raise RuntimeError(
-            f"{failed} of {attempted} assets had every market fetch fail; "
+            f"{unhealthy} of {attempted} assets had no usable market data "
+            f"({failed} with every fetch failing, {empty} with only empty responses); "
             "refusing to publish a partial update over the last good archive"
         )
 
@@ -237,6 +265,17 @@ def main() -> int:
     symbols = symbols_from_app()
     old_assets, old_coverage, previous_version = load_previous()
     rebuild_archive = previous_version < COLLECTOR_VERSION
+    # Recency of each asset's stored history, kept even when a rebuild discards
+    # the points, so an asset that was trading is still expected to have data.
+    today_day = datetime.now(timezone.utc).date().toordinal()
+    recent_assets = set()
+    for sym, entry in old_assets.items():
+        pts = entry.get("points", []) if isinstance(entry, dict) else []
+        days = [int(r[0]) // DAY_MS for r in pts if isinstance(r, list) and r]
+        if days:
+            last_ordinal = datetime.fromtimestamp(max(days) * DAY_MS / 1000, timezone.utc).date().toordinal()
+            if today_day - last_ordinal <= EXPECTED_LIVE_DAYS:
+                recent_assets.add(sym)
     if rebuild_archive:
         log.info("Collector version changed; rebuilding all historical observations with the current validation policy")
         old_assets, old_coverage = {}, {}
@@ -285,6 +324,7 @@ def main() -> int:
 
     attempted_symbols = 0
     failed_symbols = 0
+    empty_symbols = 0
     try:
         for symbol in symbols:
             old_rows = old_assets.get(symbol, {}).get("points", [])
@@ -316,17 +356,29 @@ def main() -> int:
             by_day: dict[int, list[tuple[float, float, str]]] = defaultdict(list)
             attempted_symbols += 1
             market_failures = 0
+            usable_rows = 0
             for exchange_id, market, client in chosen:
                 try:
                     rows = candle_rows(client, market, since_ms)
+                    usable_rows += len(rows)
                     log.info("%s %s: %d daily candles", symbol, exchange_id, len(rows))
                     for stamp, close, quote_volume in rows:
                         by_day[int(stamp) // DAY_MS].append((float(close), float(quote_volume), exchange_id))
                 except Exception as exc:
                     market_failures += 1
                     log.warning("%s %s %s: %s", symbol, exchange_id, market, exc)
-            if market_failures == len(chosen):
+            expected_live = symbol in recent_assets or any(
+                (getattr(client, "markets", {}).get(market) or {}).get("active") is True
+                for _, market, client in chosen)
+            outcome = classify_asset_fetch(len(chosen), market_failures, usable_rows, expected_live)
+            if outcome == "failed":
                 failed_symbols += 1
+            elif outcome == "no_data":
+                empty_symbols += 1
+                log.warning("%s: %d usable candles from %d venues (%d raised); counted as an incomplete collection",
+                            symbol, usable_rows, len(chosen), market_failures)
+            elif outcome == "no_history":
+                log.info("%s: every venue returned no candles and nothing says it should have any; treated as no history", symbol)
 
             sources = set()
             for day, observations in sorted(by_day.items()):
@@ -373,7 +425,7 @@ def main() -> int:
 
     if not archive["assets"]:
         raise RuntimeError("Collector produced an empty archive; refusing to overwrite last good data")
-    check_run_health(attempted_symbols, failed_symbols)
+    check_run_health(attempted_symbols, failed_symbols, empty_symbols)
     validate_archive(archive)
     for symbol, meta in archive["coverage"].items():
         if meta.get("missingDays"):

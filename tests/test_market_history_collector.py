@@ -215,6 +215,9 @@ class CollectorRunHealthTests(unittest.TestCase):
         app = root / "app.js"
         app.write_text("var SYMBOL_MAP = {\n" + "".join(f"  {sym}: 'x',\n" for sym in self.SYMBOLS) + "};\n", encoding="utf-8")
         self.failing = set()
+        self.empty = set()      # venues answer cleanly with an empty candle list
+        self.empty_on = None    # restrict `empty` to one exchange id (None = all venues)
+        self.active_flag = None  # value of the markets' `active` field
         outer = self
 
         def make(exchange_id):
@@ -224,7 +227,7 @@ class CollectorRunHealthTests(unittest.TestCase):
 
                 def __init__(self, *_args, **_kwargs):
                     self.markets = {
-                        f"{sym}/USD": {"spot": True, "base": sym, "baseId": sym, "quote": "USD", "symbol": f"{sym}/USD"}
+                        f"{sym}/USD": {"spot": True, "base": sym, "baseId": sym, "quote": "USD", "symbol": f"{sym}/USD", "active": outer.active_flag}
                         for sym in outer.SYMBOLS
                     }
 
@@ -235,6 +238,8 @@ class CollectorRunHealthTests(unittest.TestCase):
                     base = market.split("/")[0]
                     if base in outer.failing:
                         raise RuntimeError("simulated exchange outage")
+                    if base in outer.empty and outer.empty_on in (None, self.id):
+                        return []
                     end = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
                     rows, stamp = [], since - (since % COLLECTOR.DAY_MS)
                     while stamp < end and len(rows) < limit:
@@ -336,6 +341,83 @@ class CollectorRunHealthTests(unittest.TestCase):
         COLLECTOR.check_run_health(4, 1)  # exactly 25%: allowed
         with self.assertRaises(RuntimeError):
             COLLECTOR.check_run_health(4, 2)
+
+    def test_silent_empty_responses_for_assets_that_were_trading_fail_the_run(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.empty = {"BTC", "ETH"}  # every venue answers [] without raising: 2 of 5 assets
+        with self.assertRaisesRegex(RuntimeError, "2 of 5 assets had no usable market data"):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_single_silent_empty_asset_keeps_history_and_publishes(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        before = self.archive()["assets"]["ADA"]["points"]
+        self.empty = {"ADA"}  # 1 of 5 = 20%, under the gate
+        self.assertEqual(COLLECTOR.main(), 0)
+        after = self.archive()
+        self.assertEqual(after["assets"]["ADA"]["points"], before)
+        self.assertEqual(sorted(after["assets"]), sorted(self.SYMBOLS))
+
+    def test_total_silent_outage_is_not_published(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.empty = set(self.SYMBOLS)
+        with self.assertRaises(RuntimeError):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_empty_everywhere_for_a_never_seen_inactive_asset_is_legitimate_no_history(self):
+        # No archive yet and no market claims to be active: nothing says these should have data.
+        self.empty = {"BTC", "ETH", "LTC"}
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.assertEqual(sorted(self.archive()["assets"]), ["ADA", "XRP"])
+
+    def test_empty_everywhere_for_active_markets_is_unexpected_even_on_the_first_run(self):
+        self.active_flag = True
+        self.empty = {"BTC", "ETH", "LTC"}
+        with self.assertRaisesRegex(RuntimeError, "3 of 5 assets had no usable market data"):
+            COLLECTOR.main()
+        self.assertFalse(self.output.exists())
+
+    def test_one_venue_raising_and_the_other_empty_counts_as_incomplete(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        # kraken raises for BTC/ETH, bitfinex answers empty for them
+        self.failing = set()
+        orig = COLLECTOR.ccxt.kraken
+        def raising(*a, **k):
+            client = orig(*a, **k)
+            real = client.fetch_ohlcv
+            def fetch(market, **kw):
+                if market.split("/")[0] in ("BTC", "ETH"):
+                    raise RuntimeError("simulated exchange outage")
+                return real(market, **kw)
+            client.fetch_ohlcv = fetch
+            return client
+        self.empty, self.empty_on = {"BTC", "ETH"}, "bitfinex"
+        with patch.object(COLLECTOR.ccxt, "kraken", raising):
+            with self.assertRaisesRegex(RuntimeError, "2 of 5 assets had no usable market data"):
+                COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_one_empty_venue_with_another_returning_data_is_not_an_incomplete_asset(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.empty, self.empty_on = set(self.SYMBOLS), "bitfinex"
+        # Every asset still has usable candles from kraken, so the health gate does not trip.
+        self.assertEqual(COLLECTOR.main(), 0)
+
+    def test_asset_classification_matrix(self):
+        c = COLLECTOR.classify_asset_fetch
+        self.assertEqual(c(2, 0, 10, False), "ok")
+        self.assertEqual(c(2, 1, 10, True), "ok")
+        self.assertEqual(c(2, 2, 0, False), "failed")
+        self.assertEqual(c(2, 0, 0, True), "no_data")
+        self.assertEqual(c(2, 1, 0, False), "no_data")
+        self.assertEqual(c(2, 0, 0, False), "no_history")
+        COLLECTOR.check_run_health(4, 0, 1)  # 25% exactly: allowed
+        with self.assertRaises(RuntimeError):
+            COLLECTOR.check_run_health(4, 1, 1)
 
 
 if __name__ == "__main__":

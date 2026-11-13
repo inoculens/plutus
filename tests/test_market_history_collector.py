@@ -199,5 +199,144 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         self.assertEqual(len(symbols), len(set(symbols)))
 
 
+class CollectorRunHealthTests(unittest.TestCase):
+    """End-to-end runs of main() against fake exchanges (no network)."""
+
+    SYMBOLS = ["BTC", "ETH", "LTC", "XRP", "ADA"]
+
+    def setUp(self):
+        import json
+        import tempfile
+        from types import SimpleNamespace
+        self.json = json
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.output = root / "market-history" / "daily.json"
+        app = root / "app.js"
+        app.write_text("var SYMBOL_MAP = {\n" + "".join(f"  {sym}: 'x',\n" for sym in self.SYMBOLS) + "};\n", encoding="utf-8")
+        self.failing = set()
+        outer = self
+
+        def make(exchange_id):
+            class Fake:
+                id = exchange_id
+                options = {}
+
+                def __init__(self, *_args, **_kwargs):
+                    self.markets = {
+                        f"{sym}/USD": {"spot": True, "base": sym, "baseId": sym, "quote": "USD", "symbol": f"{sym}/USD"}
+                        for sym in outer.SYMBOLS
+                    }
+
+                def load_markets(self):
+                    return self.markets
+
+                def fetch_ohlcv(self, market, timeframe="1d", since=0, limit=1000):
+                    base = market.split("/")[0]
+                    if base in outer.failing:
+                        raise RuntimeError("simulated exchange outage")
+                    end = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+                    rows, stamp = [], since - (since % COLLECTOR.DAY_MS)
+                    while stamp < end and len(rows) < limit:
+                        price = 100.0 + (stamp // COLLECTOR.DAY_MS) % 7
+                        rows.append([stamp, price, price, price, price, 1000.0])
+                        stamp += COLLECTOR.DAY_MS
+                    return rows
+
+                def close(self):
+                    pass
+            return Fake
+
+        self.patches = [
+            patch.object(COLLECTOR, "OUTPUT", self.output),
+            patch.object(COLLECTOR, "APP_JS", app),
+            patch.object(COLLECTOR, "EXCHANGES", ("kraken", "bitfinex")),
+            patch.object(COLLECTOR, "TRUSTED_EXCHANGES", {"kraken", "bitfinex"}),
+            patch.object(COLLECTOR, "INITIAL_DAYS", 12),
+            patch.object(COLLECTOR, "ccxt", SimpleNamespace(kraken=make("kraken"), bitfinex=make("bitfinex"))),
+        ]
+        for item in self.patches:
+            item.start()
+
+    def tearDown(self):
+        for item in self.patches:
+            item.stop()
+        self.tmp.cleanup()
+
+    def archive(self):
+        return self.json.loads(self.output.read_text(encoding="utf-8"))
+
+    def test_healthy_run_publishes_every_asset_without_gaps_or_duplicates(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        archive = self.archive()
+        self.assertEqual(sorted(archive["assets"]), sorted(self.SYMBOLS))
+        for symbol, asset in archive["assets"].items():
+            days = [row[0] // COLLECTOR.DAY_MS for row in asset["points"]]
+            self.assertEqual(days, sorted(set(days)), f"{symbol}: duplicate or unordered days")
+            self.assertEqual(days[-1] - days[0] + 1, len(days), f"{symbol}: silent gap")
+            self.assertEqual(archive["coverage"][symbol]["missingDays"], 0)
+            self.assertTrue(all(row[2] == 2 and sorted(row[3]) == ["bitfinex", "kraken"] for row in asset["points"]))
+        self.assertFalse(self.output.with_suffix(".json.tmp").exists())
+
+    def test_total_outage_fails_and_leaves_the_last_good_archive_untouched(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.failing = set(self.SYMBOLS)
+        with self.assertRaisesRegex(RuntimeError, "partial update"):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+        self.assertFalse(self.output.with_suffix(".json.tmp").exists())
+
+    def test_majority_failure_is_not_published_as_success(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.failing = {"BTC", "ETH"}  # 2 of 5 assets lose every market
+        with self.assertRaisesRegex(RuntimeError, "2 of 5"):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_single_isolated_failure_keeps_previous_points_and_still_publishes(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        before = self.archive()["assets"]["ADA"]["points"]
+        self.failing = {"ADA"}  # 1 of 5 = 20%, under the gate
+        self.assertEqual(COLLECTOR.main(), 0)
+        after = self.archive()
+        self.assertEqual(after["assets"]["ADA"]["points"], before, "previous history is preserved, never dropped")
+        self.assertEqual(sorted(after["assets"]), sorted(self.SYMBOLS))
+
+    def test_empty_collection_never_overwrites_last_good_data(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        with patch.object(COLLECTOR, "symbols_from_app", return_value=[]):
+            with self.assertRaises(RuntimeError):
+                COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_interrupted_write_leaves_previous_archive_and_no_temp_file(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        with patch.object(COLLECTOR.os, "fsync", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                COLLECTOR.write_archive_atomically({"schema": 1}, self.output)
+        self.assertEqual(self.output.read_bytes(), good)
+        self.assertFalse(self.output.with_suffix(".json.tmp").exists())
+
+    def test_corrupt_previous_archive_is_replaced_by_a_full_clean_collection(self):
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        self.output.write_text("{not json", encoding="utf-8")
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.assertEqual(sorted(self.archive()["assets"]), sorted(self.SYMBOLS))
+
+    def test_missing_day_counter_and_health_gate_boundaries(self):
+        day = COLLECTOR.DAY_MS
+        points = [[day * 10 + day - 1], [day * 11 + day - 1], [day * 14 + day - 1]]
+        self.assertEqual(COLLECTOR.count_missing_days(points), 2)
+        self.assertEqual(COLLECTOR.count_missing_days([]), 0)
+        COLLECTOR.check_run_health(0, 0)
+        COLLECTOR.check_run_health(4, 1)  # exactly 25%: allowed
+        with self.assertRaises(RuntimeError):
+            COLLECTOR.check_run_health(4, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

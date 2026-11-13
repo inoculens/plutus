@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import sys
 from collections import defaultdict
@@ -39,6 +40,10 @@ PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720}
 # assets listed after `since`. The pager must step to the next window instead.
 WINDOWED_EXCHANGES = frozenset({"kucoin", "okx", "coinbase"})
 MAX_OHLCV_PAGES = 100
+# A run where more than this share of assets (that have candidate markets)
+# had EVERY market fetch fail is a partial run: it must fail loudly instead of
+# publishing an archive that looks like a complete daily update.
+MAX_FAILED_SYMBOL_RATIO = 0.25
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plutus-market-history")
@@ -180,6 +185,43 @@ def validate_archive(archive: dict, today: datetime | None = None) -> None:
                 raise ValueError(f'{symbol}: future-dated observation')
             previous_day = day
 
+def count_missing_days(points: list) -> int:
+    """Calendar days absent between the first and last stored point."""
+    days = sorted({int(row[0]) // DAY_MS for row in points if isinstance(row, list) and row})
+    return (days[-1] - days[0] + 1 - len(days)) if days else 0
+
+
+def check_run_health(attempted: int, failed: int) -> None:
+    """Refuse to publish when too many assets lost every market fetch."""
+    if attempted and failed / attempted > MAX_FAILED_SYMBOL_RATIO:
+        raise RuntimeError(
+            f"{failed} of {attempted} assets had every market fetch fail; "
+            "refusing to publish a partial update over the last good archive"
+        )
+
+
+def write_archive_atomically(archive: dict, output: Path) -> None:
+    """Write beside the target, flush to disk, then rename over it.
+
+    A crash or error at any point leaves the previous archive untouched and
+    removes the temporary file, so a half-written archive is never published.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp = output.with_suffix(".json.tmp")
+    try:
+        with open(temp, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(archive, separators=(",", ":"), sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp.replace(output)
+    except BaseException:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def load_previous() -> tuple[dict, dict, int]:
     if not OUTPUT.exists():
         return {}, {}, 0
@@ -241,6 +283,8 @@ def main() -> int:
         "rangeStart": initial_start.isoformat(), "assets": {}, "coverage": {},
     }
 
+    attempted_symbols = 0
+    failed_symbols = 0
     try:
         for symbol in symbols:
             old_rows = old_assets.get(symbol, {}).get("points", [])
@@ -270,6 +314,8 @@ def main() -> int:
                 continue
 
             by_day: dict[int, list[tuple[float, float, str]]] = defaultdict(list)
+            attempted_symbols += 1
+            market_failures = 0
             for exchange_id, market, client in chosen:
                 try:
                     rows = candle_rows(client, market, since_ms)
@@ -277,7 +323,10 @@ def main() -> int:
                     for stamp, close, quote_volume in rows:
                         by_day[int(stamp) // DAY_MS].append((float(close), float(quote_volume), exchange_id))
                 except Exception as exc:
+                    market_failures += 1
                     log.warning("%s %s %s: %s", symbol, exchange_id, market, exc)
+            if market_failures == len(chosen):
+                failed_symbols += 1
 
             sources = set()
             for day, observations in sorted(by_day.items()):
@@ -308,6 +357,7 @@ def main() -> int:
                 old_meta = old_coverage.get(symbol, {})
                 archive["coverage"][symbol] = {
                     "days": len(merged),
+                    "missingDays": count_missing_days(merged),
                     "first": datetime.fromtimestamp(merged[0][0] / 1000, timezone.utc).date().isoformat(),
                     "last": datetime.fromtimestamp(merged[-1][0] / 1000, timezone.utc).date().isoformat(),
                     "exchanges": sorted(set(old_meta.get("exchanges", [])) | sources),
@@ -323,11 +373,12 @@ def main() -> int:
 
     if not archive["assets"]:
         raise RuntimeError("Collector produced an empty archive; refusing to overwrite last good data")
+    check_run_health(attempted_symbols, failed_symbols)
     validate_archive(archive)
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    temp = OUTPUT.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(archive, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
-    temp.replace(OUTPUT)
+    for symbol, meta in archive["coverage"].items():
+        if meta.get("missingDays"):
+            log.warning("%s: %d calendar days are missing inside the stored range", symbol, meta["missingDays"])
+    write_archive_atomically(archive, OUTPUT)
     log.info("Wrote %s (%d assets)", OUTPUT, len(archive["assets"]))
     return 0
 

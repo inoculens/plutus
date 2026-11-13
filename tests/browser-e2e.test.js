@@ -14,21 +14,32 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { loadChromium, launchChromium } = require('./browser-env');
+const { Diagnostics, PROBE_PATH, PROBE_EVAL_MARKER, PROBE_INLINE_MARKER } = require('./browser-diagnostics');
+// Test-only switches that prove the CSP checks can fail (used by browser-e2e-guard.test.js):
+//   E2E_CSP_ONLY=1        stop after the CSP stage
+//   E2E_CSP_MUTANT=...    serve a weakened policy (inline | eval)
+//   E2E_INJECT=...        add an unrelated violation (script | exception | asset)
+const CSP_ONLY = process.env.E2E_CSP_ONLY === '1';
 const chromium = loadChromium('browser-e2e');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.txt': 'text/plain' };
 const server = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split('?')[0]);
-  if (p === '/__csp_probe.js') { // loaded as a normal page script so the CSP is really enforced on it
+  if (p === PROBE_PATH) { // loaded as a normal page script so the CSP is really enforced on it
     res.writeHead(200, { 'content-type': 'text/javascript' });
-    res.end("try { (0, eval)('1+1'); window.__evalRan = 1; } catch (e) { window.__evalBlocked = 1; }");
+    res.end("try { (0, eval)('window.__evalRan = 1; //" + PROBE_EVAL_MARKER + "'); } catch (e) { window.__evalBlocked = 1; }");
     return;
   }
   if (p === '/' || p.indexOf('/account') === 0) p = '/index.html';
   const f = path.join(root, p);
   if (!f.startsWith(root) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': types[path.extname(f)] || 'application/octet-stream' });
-  res.end(fs.readFileSync(f));
+  let body = fs.readFileSync(f);
+  if (p === '/index.html' && process.env.E2E_CSP_MUTANT) { // weakened copy, only ever served to prove the checks can fail
+    const add = process.env.E2E_CSP_MUTANT === 'inline' ? "'unsafe-inline'" : "'unsafe-eval'";
+    body = Buffer.from(body.toString().replace("script-src 'self'", "script-src 'self' " + add));
+  }
+  res.end(body);
 });
 
 const acc = (id, name, ticker, kind, extra) => Object.assign({ id, name, ticker, kind, createdAt: '2025-01-01T00:00:00.000Z' }, extra || {});
@@ -81,13 +92,17 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
+  const origin0 = base;
   const browser = await launchChromium(chromium, 'browser-e2e');
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  const problems = [];
+  const diag = new Diagnostics();
   let remote = null, failDav = false, davHits = 0;
-  page.on('pageerror', e => problems.push('pageerror: ' + e.message));
-  page.on('console', m => { if (/Content Security Policy|Refused to (execute|load|connect)/i.test(m.text()) && !/googletagmanager|google-analytics|accounts\.google|dav\.test/i.test(m.text())) problems.push('csp: ' + m.text()); });
+  const origin = origin0;
+  page.on('pageerror', e => diag.exception(e.message));
+  page.on('requestfailed', r => diag.requestFailed(r.url(), origin, (r.failure() || {}).errorText || '', r.resourceType()));
+  page.on('response', r => diag.response(r.url(), origin, r.status()));
+  await page.exposeFunction('__reportCsp', v => diag.csp(v));
   await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, async route => {
     const req = route.request(), url = req.url();
     if (url.startsWith('https://dav.test/')) {
@@ -107,6 +122,10 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
     return route.abort();
   });
   await page.addInitScript(() => {
+    // Stable CSP evidence (event properties), recorded from document start.
+    document.addEventListener('securitypolicyviolation', e => window.__reportCsp({
+      effectiveDirective: e.effectiveDirective, violatedDirective: e.violatedDirective, blockedURI: e.blockedURI,
+      sourceFile: e.sourceFile, disposition: e.disposition }));
     try { localStorage.setItem('inoculens.consent.v1', 'declined'); } catch (e) {}
     // Same sequence as clearAllData() minus the confirm dialog and reload.
     window.wipeEverything = () => { saveStateGuarded(defaultState(), { replaceDamaged: true }); clearRecoveryCopies(); return wipeAllBrowserData(); };
@@ -116,19 +135,29 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
   // 1. Fresh install + CSP verification
   await page.goto(base + '/', { waitUntil: 'load' });
   await page.waitForTimeout(1200);
-  const csp = await page.evaluate(() => {
+  const csp = await page.evaluate(({ inlineMarker, probePath, inject }) => {
     const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
     const policy = meta ? meta.content : '';
-    window.__inline = 0; const s = document.createElement('script'); s.textContent = 'window.__inline=1'; document.head.appendChild(s);
-    const p = document.createElement('script'); p.src = '/__csp_probe.js'; document.head.appendChild(p);
+    window.__inline = 0; const s = document.createElement('script'); s.textContent = 'window.__inline=1; //' + inlineMarker; document.head.appendChild(s);
+    const p = document.createElement('script'); p.src = probePath; document.head.appendChild(p);
+    // Deliberately UNRELATED faults, only to prove the diagnostics fail on them.
+    if (inject === 'script') { const x = document.createElement('script'); x.src = 'https://unrelated-origin.test/x.js'; document.head.appendChild(x); }
+    if (inject === 'exception') setTimeout(() => { throw new Error('unrelated page exception'); }, 0);
+    if (inject === 'asset') { const x = document.createElement('script'); x.src = '/js/no-such-asset.js'; document.head.appendChild(x); }
     return { policy, inlineRan: window.__inline === 1, fresh: localStorage.getItem('inoculens.v2') };
-  });
+  }, { inlineMarker: PROBE_INLINE_MARKER, probePath: PROBE_PATH, inject: process.env.E2E_INJECT || '' });
   await page.waitForTimeout(500);
   csp.evalBlocked = await page.evaluate(() => window.__evalBlocked === 1 && window.__evalRan !== 1);
+  csp.evalRan = await page.evaluate(() => window.__evalRan === 1);
   const scriptSrc = (csp.policy.match(/script-src[^;]*/) || [''])[0];
   assert.ok(scriptSrc && !/unsafe-inline|unsafe-eval/.test(scriptSrc), 'script-src has no unsafe-inline/unsafe-eval: ' + scriptSrc);
+  assert.equal(csp.evalRan, false, 'eval probe did not execute');
   assert.equal(csp.evalBlocked, true, 'eval is blocked by the CSP');
   assert.equal(csp.inlineRan, false, 'injected inline script is blocked by the CSP');
+  // Expected blocks are classified by event properties, exactly once each; anything else is a failure.
+  assert.deepEqual(diag.probeProblems(), [], 'CSP probe evidence');
+  assert.deepEqual(diag.problems(['/', '/app.js', '/styles.css', '/js/net-worth-history.js']), [], 'unexpected diagnostics after load');
+  if (CSP_ONLY) { await browser.close(); server.close(); console.log('browser-e2e: OK (csp only)'); return; }
   assert.ok(!csp.fresh || JSON.parse(csp.fresh).trades.length === 0, 'fresh install starts empty');
 
   // 2. Build the workflow through the app's own import path
@@ -232,6 +261,7 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
   assert.equal(await page.evaluate(() => loadState().trades.length), 11, 'wrong passphrase left local data untouched');
 
   await browser.close(); server.close();
-  assert.deepEqual(problems, [], problems.join('\n'));
+  assert.deepEqual(diag.probeProblems(), [], 'CSP probe evidence');
+  assert.deepEqual(diag.problems(['/', '/app.js', '/styles.css', '/js/net-worth-history.js']), [], 'unexpected browser diagnostics');
   console.log('browser-e2e: OK');
 })().catch(e => { console.error(e); try { server.close(); } catch (_) {} process.exit(1); });

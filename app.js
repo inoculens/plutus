@@ -842,6 +842,29 @@ function numGte0(v, allowEmpty) {
   return n;
 }
 
+// Swap fiat value, auto-calculated: the sent quantity at the historical
+// price of the sent asset on the swap date (the received side is the
+// fallback), in the swap currency. Resolves to a positive number, or null
+// when no historical price is known — callers then ask for a manual value;
+// a guessed or zero value is never stored.
+function swapAutoFiatValue(fromSym, fromQty, fromKind, toSym, toQty, toKind, date, ccy) {
+  function side(sym, qty, kind) {
+    return fetchHistoricalPrice(sym, date, ccy, kind).then(function (r) {
+      var price = (r && typeof r === 'object') ? r.price : r;
+      var v = Number(qty) * Number(price);
+      return (isFinite(v) && v > 0) ? v : null;
+    }, function () { return null; });
+  }
+  return side(fromSym, fromQty, fromKind).then(function (v) {
+    if (v !== null) return v;
+    return side(toSym, toQty, toKind);
+  }).then(function (v) {
+    if (v === null) return null;
+    var r2 = Math.round(v * 100) / 100;
+    return r2 > 0 ? r2 : Number(v.toPrecision(4));
+  });
+}
+
 // Optional on-chain transaction hash, stored on the trade and linked to
 // mempool.space in the record view. Blank/missing means absent (valid);
 // when present it must look like a real hash: optional 0x prefix, then
@@ -17502,9 +17525,9 @@ function syncTradeTypeUI() {
   } else if (isSwap) {
     setLabel('t-qty-label', 'From quantity (you send)');
     setLabel('t-toqty-label', 'Received quantity');
-    setLabel('t-total-label', 'Fiat value of swap (for tax, e.g. 50000)');
+    setLabel('t-total-label', 'Fiat value (optional)');
     setLabel('t-qty-hint', 'Amount leaving the source account.');
-    setLabel('t-total-hint', 'Value carried by both swap legs, fee included.');
+    setLabel('t-total-hint', 'Leave empty to calculate it from the historical rates on the date. Enter your own figure to override — it is carried by both swap legs.');
     setLabel('t-toqty-hint', 'Amount arriving in the destination account.');
     setLabel('t-toaccount-label', 'To account');
   } else if (isIncome) {
@@ -17535,6 +17558,10 @@ function syncTradeTypeUI() {
     setLabel('t-total-hint', 'Full amount paid, including the fee below.');
     setLabel('t-toqty-hint', '');
   }
+  try {
+    var totalPh = document.getElementById('t-total');
+    if (totalPh) totalPh.placeholder = isSwap ? 'Auto — from historical rates' : 'e.g. 50000';
+  } catch (e) { /* ignore */ }
   // Cash income/expense amounts live in the account fiat alone: the total
   // and currency rows hide (submit derives total=qty, currency=ticker).
   var cashSimple = isCash && (isIncome || isExpense);
@@ -18962,7 +18989,8 @@ function onTradeSubmit(ev) {
     if (fromSym === toSym) { tradeFormError('Same asset — use Transfer instead of Swap.'); return; }
     var fromQty = exactQtyValue(uiVal('t-qty', ''), fromSym);
     var toQty = exactQtyValue(uiVal('t-toqty', ''), toSym);
-    var swapTotal = Number(uiVal('t-total', ''));
+    var swapTotalRaw = String(uiVal('t-total', '')).trim();
+    var swapTotal = (swapTotalRaw === '') ? null : Number(swapTotalRaw);
     var ccySelS = uiVal('t-currency', 'EUR');
     var swapCcy = (ccySelS === 'CUSTOM' ? uiVal('t-custom-ccy', '').trim().toUpperCase() : String(ccySelS).toUpperCase());
     var feeRawS = uiVal('t-fee', '').trim();
@@ -18970,7 +18998,7 @@ function onTradeSubmit(ev) {
     var feeCcyS = swapCcy; // one fiat per trade: fee follows the trade currency
     if (!isFinite(fromQty) || fromQty <= 0) { tradeFormError('From quantity must be > 0.'); return; }
     if (!isFinite(toQty) || toQty <= 0) { tradeFormError('Received quantity must be > 0.'); return; }
-    if (!isFinite(swapTotal) || swapTotal <= 0) { tradeFormError('Fiat value must be > 0 (for tax).'); return; }
+    if (swapTotal !== null && (!isFinite(swapTotal) || swapTotal <= 0)) { tradeFormError('Fiat value must be > 0 — or leave it empty to calculate it automatically.'); return; }
     if (!isValidCurrencyCode(swapCcy)) { tradeFormError('Currency code invalid.'); return; }
     if (!isFinite(feeS) || feeS < 0) { tradeFormError('Fee must be >= 0.'); return; }
     var swapDraftSell = { type: 'sell', symbol: fromSym, qty: fromQty, accountId: accountId, date: date };
@@ -18982,16 +19010,33 @@ function onTradeSubmit(ev) {
     }
     lockSubmit(true, 'Saving…');
     function proceedSwapCreateWithAttachment(lock) {
-      deferTradeSubmitWork(function () {
-        try {
-          attResolveForSave(function (err, meta) {
-            if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
-            proceedSwapCreate(lock, meta);
-          });
-        } catch (e) {
-          tradeFormError('Could not save the attachment — record was not saved.');
+      function go() {
+        deferTradeSubmitWork(function () {
+          try {
+            attResolveForSave(function (err, meta) {
+              if (err) { tradeFormError(err); lockSubmit(false, 'Add record'); return; }
+              proceedSwapCreate(lock, meta);
+            });
+          } catch (e) {
+            tradeFormError('Could not save the attachment — record was not saved.');
+            lockSubmit(false, 'Add record');
+          }
+        });
+      }
+      if (swapTotal !== null) { go(); return; }
+      // Blank fiat value: derive it from the historical rates on the date.
+      lockSubmit(true, 'Calculating value…');
+      swapAutoFiatValue(fromSym, fromQty, (acc && acc.kind) || undefined, toSym, toQty, (toAccSwap && toAccSwap.kind) || undefined, date, swapCcy).then(function (v) {
+        if (v === null) {
+          tradeFormError('Could not calculate the fiat value for this date — enter it in Fiat value (optional) and save again.');
           lockSubmit(false, 'Add record');
+          return;
         }
+        swapTotal = v;
+        go();
+      }, function () {
+        tradeFormError('Could not calculate the fiat value for this date — enter it in Fiat value (optional) and save again.');
+        lockSubmit(false, 'Add record');
       });
     }
     function proceedSwapCreate(lock, attMeta) {
@@ -19101,14 +19146,15 @@ function onTradeSubmit(ev) {
     if (fromSymE === toSymE) { tradeFormError('Same asset — use Transfer instead of Swap.'); return; }
     var fromQtyE = exactQtyValue(uiVal('t-qty', ''), fromSymE);
     var toQtyE = exactQtyValue(uiVal('t-toqty', ''), toSymE);
-    var totalE = Number(uiVal('t-total', ''));
+    var totalERaw = String(uiVal('t-total', '')).trim();
+    var totalE = (totalERaw === '') ? null : Number(totalERaw);
     var ccySelE = uiVal('t-currency', 'EUR');
     var swapCcyE = (ccySelE === 'CUSTOM' ? uiVal('t-custom-ccy', '').trim().toUpperCase() : String(ccySelE).toUpperCase());
     var feeRawE = uiVal('t-fee', '').trim();
     var feeE = (feeRawE === '') ? 0 : Number(feeRawE);
     if (!isFinite(fromQtyE) || fromQtyE <= 0) { tradeFormError('From quantity must be > 0.'); return; }
     if (!isFinite(toQtyE) || toQtyE <= 0) { tradeFormError('Received quantity must be > 0.'); return; }
-    if (!isFinite(totalE) || totalE <= 0) { tradeFormError('Fiat value must be > 0 (for tax).'); return; }
+    if (totalE !== null && (!isFinite(totalE) || totalE <= 0)) { tradeFormError('Fiat value must be > 0 — or leave it empty to calculate it automatically.'); return; }
     if (!isValidCurrencyCode(swapCcyE)) { tradeFormError('Currency code invalid.'); return; }
     if (!isFinite(feeE) || feeE < 0) { tradeFormError('Fee must be >= 0.'); return; }
     var sellDraftE = { id: pairE.sell.id, type: 'sell', symbol: fromSymE, qty: fromQtyE, accountId: fromAccE.id, date: date };
@@ -19120,17 +19166,34 @@ function onTradeSubmit(ev) {
       if (cBuyE) { tradeFormError(heldConflictMessage(cBuyE, [buyDraftE], st0)); return; }
     } catch (e) { /* validation continues; engine clamps anyway */ }
     function proceedSwapEditWithAttachment(lock) {
-      lockSubmit(true, 'Saving…');
-      deferTradeSubmitWork(function () {
-        try {
-          attResolveForSave(function (err, meta) {
-            if (err) { tradeFormError(err); lockSubmit(false, 'Save changes'); return; }
-            proceedSwapEdit(lock, meta);
-          });
-        } catch (e) {
-          tradeFormError('Could not save the attachment — record was not saved.');
+      function go() {
+        lockSubmit(true, 'Saving…');
+        deferTradeSubmitWork(function () {
+          try {
+            attResolveForSave(function (err, meta) {
+              if (err) { tradeFormError(err); lockSubmit(false, 'Save changes'); return; }
+              proceedSwapEdit(lock, meta);
+            });
+          } catch (e) {
+            tradeFormError('Could not save the attachment — record was not saved.');
+            lockSubmit(false, 'Save changes');
+          }
+        });
+      }
+      if (totalE !== null) { go(); return; }
+      // Blank fiat value: derive it from the historical rates on the date.
+      lockSubmit(true, 'Calculating value…');
+      swapAutoFiatValue(fromSymE, fromQtyE, fromAccE.kind || undefined, toSymE, toQtyE, toAccE.kind || undefined, date, swapCcyE).then(function (v) {
+        if (v === null) {
+          tradeFormError('Could not calculate the fiat value for this date — enter it in Fiat value (optional) and save again.');
           lockSubmit(false, 'Save changes');
+          return;
         }
+        totalE = v;
+        go();
+      }, function () {
+        tradeFormError('Could not calculate the fiat value for this date — enter it in Fiat value (optional) and save again.');
+        lockSubmit(false, 'Save changes');
       });
     }
     function proceedSwapEdit(lock, attMeta) {

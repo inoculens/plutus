@@ -7150,7 +7150,7 @@ function paintLoading(el, on, label) {
     }
   } catch (e) { /* decorative only */ }
 }
-var moneyFmtCache = {};
+var moneyFmtCache = dict();
 
 function todayStr() {
   // Local calendar date (user-facing default + date max), matching the
@@ -8202,6 +8202,19 @@ var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
 var NET_WORTH_LOADING_BANNER = 'Loading historical chart prices — the graph may be incomplete.';
 var netWorthHistoryLoadingBannerShown = false;
 var netWorthHistorySeriesCache = {};
+// In-memory ceiling: a tab left open while ranges and symbols change would
+// otherwise keep every series ever fetched. The oldest entries go first; they
+// are re-derivable from the shared archive or the providers.
+var NETWORTH_SERIES_CACHE_MAX = 200;
+function netWorthSeriesCachePrune() {
+  var keys = Object.keys(netWorthHistorySeriesCache);
+  if (keys.length <= NETWORTH_SERIES_CACHE_MAX) return;
+  keys.sort(function (a, b) {
+    return (Number(netWorthHistorySeriesCache[a] && netWorthHistorySeriesCache[a].at) || 0) -
+      (Number(netWorthHistorySeriesCache[b] && netWorthHistorySeriesCache[b].at) || 0);
+  });
+  keys.slice(0, keys.length - NETWORTH_SERIES_CACHE_MAX).forEach(function (k) { delete netWorthHistorySeriesCache[k]; });
+}
 var netWorthHistoryRateFetches = {};
 var priceDataStartupPromise = Promise.resolve();
 
@@ -8688,6 +8701,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
     series.kind = kind;
     if (series.points.length) {
       netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
+      netWorthSeriesCachePrune();
       priceDataCacheRevision++;
       try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break rendering */ }
     }
@@ -9257,6 +9271,7 @@ function netWorthHistorySaveRate(day, from, to, rate) {
     series: { currency: to, kind: 'commodity', points: points },
     shared: !!(cached && cached.shared)
   };
+  netWorthSeriesCachePrune();
   priceDataCacheRevision++;
   try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break valuation */ }
 }

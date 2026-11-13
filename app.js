@@ -22141,17 +22141,78 @@ function syncOAuthExpired(startedAt, now) {
 
 // Read a response body as text, refusing oversized payloads up front: via
 // Content-Length when the server sends it, and again on the text length.
-function syncReadTextLimited(res) {
+// Remote bodies are read as a byte stream with the limit enforced on the bytes
+// that actually arrive. Content-Length is untrusted (missing or understated) and
+// is only used to reject early. Nothing is decoded until the limit is satisfied,
+// the reader is cancelled and released on every exit, and a client without
+// streaming support is refused rather than falling back to an unbounded read.
+var SYNC_MAX_META_BYTES = 4 * 1024 * 1024; // listings, token replies, API error bodies
+
+function syncReadBodyLimited(res, maxBytes, tooBigMessage) {
   var len = NaN;
   try { len = Number(res && res.headers && res.headers.get && res.headers.get('content-length')); } catch (e) { len = NaN; }
-  if (isFinite(len) && len > SYNC_MAX_ENVELOPE_CHARS) {
-    return Promise.reject(new Error('sync failed: the remote file is too large to be a valid backup.'));
+  if (isFinite(len) && len > maxBytes) return Promise.reject(new Error(tooBigMessage));
+  var body = res && res.body;
+  if (body === null) return Promise.resolve(''); // no content (204, HEAD)
+  if (!body || typeof body.getReader !== 'function' || typeof TextDecoder === 'undefined') {
+    return Promise.reject(new Error('sync failed: this browser cannot read the server response safely.'));
   }
-  return res.text().then(function (t) {
-    if (typeof t === 'string' && t.length > SYNC_MAX_ENVELOPE_CHARS) {
-      throw new Error('sync failed: the remote file is too large to be a valid backup.');
-    }
-    return t;
+  var reader = body.getReader();
+  var chunks = [];
+  var total = 0;
+  var release = function () {
+    try { reader.releaseLock(); } catch (e) { /* already released */ }
+    try { if (res.syncStop) res.syncStop(); } catch (e) { /* ignore */ }
+  };
+  return new Promise(function (resolve, reject) {
+    var fail = function (err) {
+      try { var c = reader.cancel(); if (c && c.catch) c.catch(function () {}); } catch (e) { /* ignore */ }
+      release();
+      reject(err);
+    };
+    var step = function () {
+      var p;
+      try { p = reader.read(); } catch (e) { fail(new Error('sync failed: the connection dropped while downloading.')); return; }
+      p.then(function (r) {
+        if (r.done) {
+          var buf = new Uint8Array(total), at = 0;
+          for (var i = 0; i < chunks.length; i++) { buf.set(chunks[i], at); at += chunks[i].length; }
+          var text;
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) {
+            release();
+            reject(new Error('sync failed: the server response is not valid UTF-8 text.'));
+            return;
+          }
+          release();
+          resolve(text);
+          return;
+        }
+        var v = r.value;
+        if (!v || typeof v.length !== 'number') { fail(new Error('sync failed: unreadable server response.')); return; }
+        total += v.length;
+        if (total > maxBytes) { fail(new Error(tooBigMessage)); return; }
+        chunks.push(v);
+        step();
+      }, function (err) {
+        if (err && err.name === 'AbortError' && res.syncTimedOut) fail(res.syncTimedOut());
+        else fail(new Error('sync failed: the connection dropped while downloading.'));
+      });
+    };
+    step();
+  });
+}
+
+function syncReadTextLimited(res) {
+  return syncReadBodyLimited(res, SYNC_MAX_ENVELOPE_CHARS, 'sync failed: the remote file is too large to be a valid backup.');
+}
+
+function syncReadMetaText(res) {
+  return syncReadBodyLimited(res, SYNC_MAX_META_BYTES, 'sync failed: the server response is unexpectedly large.');
+}
+
+function syncReadMetaJson(res) {
+  return syncReadMetaText(res).then(function (t) {
+    try { return JSON.parse(t); } catch (e) { throw new Error('sync failed: the server returned an unreadable response.'); }
   });
 }
 
@@ -22679,6 +22740,7 @@ function syncFetch(url, opts, label) {
             };
           } catch (e) { /* read-only response object: timer still bounds it */ }
         });
+        try { res.syncStop = stop; res.syncTimedOut = timedOut; } catch (e) { /* read-only response */ }
         return res;
       }, function (err) {
         stop();
@@ -22725,7 +22787,7 @@ function syncPostForm(url, body) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body
   }, 'the sign-in server').then(function (res) {
-    return res.json().then(function (data) {
+    return syncReadMetaJson(res).then(function (data) {
       if (!res.ok) {
         var msg = (data && (data.error_description || data.error)) || ('HTTP ' + res.status);
         throw new Error('sync failed: sign-in refused (' + String(msg).slice(0, 160) + ').');
@@ -23025,7 +23087,7 @@ function syncDriveList(access, q) {
   var url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
     '&fields=' + encodeURIComponent('files(id,name,modifiedTime)') + '&spaces=drive';
   return syncFetch(url, { headers: { 'Authorization': 'Bearer ' + access } }, 'Google Drive').then(function (res) {
-    return res.json().then(function (data) {
+    return syncReadMetaJson(res).then(function (data) {
       if (!res.ok) throw new Error('sync failed: Drive lookup refused (HTTP ' + res.status + ').');
       return (data && data.files) || [];
     }, function () {
@@ -23066,7 +23128,7 @@ function syncDriveFolderStep(access, name, parentId, create) {
       headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: clean, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
     }, 'Google Drive').then(function (res) {
-      return res.json().then(function (data) {
+      return syncReadMetaJson(res).then(function (data) {
         if (!res.ok || !data || !data.id) {
           throw new Error('sync failed: Drive could not create the folder (HTTP ' + res.status + ').');
         }
@@ -23099,7 +23161,7 @@ function syncDriveUpload(access, cfg, text) {
         headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: cfg.filename, mimeType: 'application/json', parents: [fid] })
       }, 'Google Drive').then(function (res) {
-        return res.json().then(function (data) {
+        return syncReadMetaJson(res).then(function (data) {
           if (!res.ok || !data || !data.id) {
             throw new Error('sync failed: Drive could not create the file (HTTP ' + res.status + ').');
           }
@@ -23162,7 +23224,7 @@ function syncDropboxDownload(access, cfg) {
     // 409 means the API refused the call: only treat path/not_found as
     // "no backup yet" — anything else is a real refusal, not a first sync.
     if (res.status === 409) {
-      return res.text().then(function (body) {
+      return syncReadMetaText(res).then(function (body) {
         if (body && body.indexOf('not_found') !== -1) {
           throw new Error('sync failed: no backup found on the server yet.');
         }
@@ -23186,7 +23248,7 @@ function syncDropboxExists(access, cfg) {
   }, 'Dropbox').then(function (res) {
     if (res.ok) return true;
     if (res.status === 409) {
-      return res.text().then(function (body) {
+      return syncReadMetaText(res).then(function (body) {
         if (body && body.indexOf('not_found') !== -1) return false;
         throw new Error('sync failed: Dropbox refused the request (HTTP 409).');
       }, function () {
@@ -23381,7 +23443,7 @@ function syncS3Put(cfg, text) {
     return syncFetch(s.url, { method: 'PUT', headers: s.headers, body: text }, 'the S3 endpoint').then(function (res) {
       if (res.ok) return true;
       if (res.status === 403 || res.status === 404) {
-        return res.text().then(function (body) {
+        return syncReadMetaText(res).then(function (body) {
           throw syncS3ErrorBody(body, 'sync failed: S3 bucket not found. Check the endpoint and bucket name.') ||
             new Error('sync failed: S3 keys refused. Check the access key, secret, region and bucket policy.');
         }, function () {
@@ -23398,7 +23460,7 @@ function syncS3Get(cfg) {
     return syncFetch(s.url, { method: 'GET', headers: s.headers }, 'the S3 endpoint').then(function (res) {
       if (res.ok) return syncReadTextLimited(res);
       if (res.status === 404 || res.status === 403) {
-        return res.text().then(function (body) {
+        return syncReadMetaText(res).then(function (body) {
           throw syncS3ErrorBody(body, 'sync failed: no backup found on the server yet.') ||
             new Error('sync failed: S3 keys refused. Check the access key, secret, region and bucket policy.');
         }, function () {
@@ -23506,7 +23568,7 @@ function syncRemoteStamp(cfg) {
       }, 'Dropbox').then(function (res) {
         if (res.status === 409) return 'missing';
         if (!res.ok) return '';
-        return res.json().then(function (d) {
+        return syncReadMetaJson(res).then(function (d) {
           var mark = (d && (d.rev || d.server_modified || d.content_hash)) || '';
           return mark ? 'dropbox|' + mark : '';
         }, function () { return ''; });
@@ -24108,7 +24170,7 @@ function syncDropboxListBlobs(access, cfg) {
       body = JSON.stringify({ cursor: cursor });
     }
     return syncFetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' }, body: body }, 'Dropbox').then(function (res) {
-      return res.json().then(function (data) {
+      return syncReadMetaJson(res).then(function (data) {
         if (!res.ok) throw new Error('sync failed: Dropbox listing refused (HTTP ' + res.status + ').');
         ((data && data.entries) || []).forEach(function (e) {
           if (e && e['.tag'] === 'file' && typeof e.name === 'string') {
@@ -24134,7 +24196,7 @@ function syncS3ListBlobs(cfg) {
     if (token) qs = 'continuation-token=' + escQ(token) + '&' + qs;
     return syncS3SignQuery(cfg, 'GET', qs).then(function (s) {
       return syncFetch(s.url, { headers: s.headers }, 'the S3 endpoint').then(function (res) {
-        return res.text().then(function (body) {
+        return syncReadMetaText(res).then(function (body) {
           if (!res.ok) throw new Error('sync failed: S3 listing refused (HTTP ' + res.status + ').');
           var keys = [];
           try {
@@ -24168,7 +24230,7 @@ function syncWebdavListBlobs(cfg) {
     headers: { 'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml' },
     body: '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><propname/></propfind>'
   }, 'the WebDAV server').then(function (res) {
-    return res.text().then(function (body) {
+    return syncReadMetaText(res).then(function (body) {
       if (!res.ok && res.status !== 207) throw new Error('sync failed: WebDAV listing refused (HTTP ' + res.status + ').');
       var names = [];
       try {

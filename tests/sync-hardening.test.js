@@ -15,7 +15,7 @@ const noop = () => {};
 let fetchImpl = () => Promise.reject(new Error('unset'));
 const C = {
   console, setTimeout, clearTimeout, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date, AbortController,
-  Uint8Array, ArrayBuffer, TextEncoder, TextDecoder, atob, btoa,
+  Uint8Array, ArrayBuffer, TextEncoder, TextDecoder, atob, btoa, ReadableStream,
   localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
   document: { getElementById: () => null, addEventListener: noop, querySelector: () => null, querySelectorAll: () => [], createElement: () => ({}), body: {}, documentElement: {}, readyState: 'loading' },
   navigator: { userAgent: 'node' }, location: { hash: '', href: '', pathname: '/' }, addEventListener: noop,
@@ -71,16 +71,111 @@ async function main() {
   const mid = JSON.stringify({ blob: 'a'.repeat(3 * 1024 * 1024) });
   assert.equal(await C.syncDecryptEnvelope(await C.syncEncryptEnvelope(mid, 'pw'), 'pw'), mid);
 
-  // Bounded download reads.
-  let textCalled = false;
-  await assert.rejects(() => C.syncReadTextLimited({ headers: { get: () => String(C.SYNC_MAX_ENVELOPE_CHARS + 1) }, text: () => { textCalled = true; return Promise.resolve(''); } }), /too large/);
-  assert.equal(textCalled, false, 'body not read when Content-Length already exceeds the cap');
-  assert.equal(await C.syncReadTextLimited({ headers: { get: () => null }, text: () => Promise.resolve('ok') }), 'ok');
-  await assert.rejects(() => C.syncReadTextLimited({ headers: { get: () => null }, text: () => Promise.resolve(big) }), /too large/);
+  // ---- Bounded, streamed download reads (every provider goes through one reader).
+  const enc = new TextEncoder();
+  const setCap = n => vm.runInContext('SYNC_MAX_ENVELOPE_CHARS = ' + n, C);
+  const REAL_CAP = C.SYNC_MAX_ENVELOPE_CHARS;
+  // A stream the test can observe: how many chunks were pulled, whether it was cancelled/locked.
+  const mkStream = (chunks, o) => {
+    o = o || {};
+    const st = { pulled: 0, cancelled: false, getReaderCalled: false };
+    let i = 0;
+    const rs = new ReadableStream({
+      pull(ctl) {
+        if (o.errorAt !== undefined && i === o.errorAt) { ctl.error(new Error('socket reset')); return; }
+        if (i >= chunks.length) { ctl.close(); return; }
+        st.pulled++; ctl.enqueue(chunks[i++]);
+      },
+      cancel() { st.cancelled = true; }
+    });
+    const origGet = rs.getReader.bind(rs);
+    rs.getReader = () => { st.getReaderCalled = true; return origGet(); };
+    st.stream = rs;
+    st.res = (cl) => ({ ok: true, status: 200, headers: { get: n => (/content-length/i.test(n) && cl !== undefined) ? String(cl) : null }, body: rs });
+    return st;
+  };
+  const bytes = n => new Uint8Array(n).fill(97);
+  const reader = (res) => C.syncReadTextLimited(res);
+
+  setCap(1000);
+  // Oversized body, NO Content-Length: rejected while streaming, stream cancelled, lock released, rest never pulled.
+  let st = mkStream(Array.from({ length: 50 }, () => bytes(100)));
+  await assert.rejects(() => reader(st.res()), /too large/);
+  assert.equal(st.cancelled, true, 'stream cancelled on overflow');
+  assert.ok(st.pulled <= 11, 'stopped reading right after the limit (pulled ' + st.pulled + ' of 50)');
+  assert.equal(st.stream.locked, false, 'reader lock released');
+  // Understated Content-Length: the real byte count decides.
+  st = mkStream(Array.from({ length: 50 }, () => bytes(100)));
+  await assert.rejects(() => reader(st.res(10)), /too large/);
+  assert.equal(st.cancelled, true);
+  // Overstated Content-Length: rejected before the body is touched.
+  st = mkStream([bytes(5)]);
+  await assert.rejects(() => reader(st.res(1001)), /too large/);
+  assert.equal(st.getReaderCalled, false, 'body never opened');
+  // Exactly at the limit is accepted; one byte over is rejected (single and multi chunk).
+  assert.equal((await reader(mkStream([bytes(1000)]).res())).length, 1000);
+  assert.equal((await reader(mkStream(Array.from({ length: 10 }, () => bytes(100))).res(1000))).length, 1000);
+  await assert.rejects(() => reader(mkStream([bytes(1001)]).res()), /too large/);
+  await assert.rejects(() => reader(mkStream([bytes(1000), bytes(1)]).res()), /too large/);
+  // Multibyte UTF-8 split across chunk boundaries decodes correctly (euro sign = E2 82 AC).
+  const euro = enc.encode('a\u20ac\u20acb');
+  assert.equal(await reader(mkStream([euro.slice(0, 2), euro.slice(2, 4), euro.slice(4)]).res()), 'a\u20ac\u20acb');
+  assert.equal(await reader(mkStream([]).res()), '', 'empty body');
+  assert.equal(await C.syncReadMetaJson(mkStream([enc.encode('{"a":1}')]).res()).then(v => v.a), 1);
+  // Invalid UTF-8 and truncated sequences are rejected, not replaced with U+FFFD.
+  await assert.rejects(() => reader(mkStream([new Uint8Array([0x61, 0xff, 0x62])]).res()), /not valid UTF-8/);
+  await assert.rejects(() => reader(mkStream([new Uint8Array([0xe2, 0x82])]).res()), /not valid UTF-8/);
+  // Stream read error: safe failure, nothing leaked, reader released.
+  st = mkStream([bytes(10), bytes(10), bytes(10)], { errorAt: 1 });
+  await assert.rejects(() => reader(st.res()), e => /connection dropped/.test(e.message) && !/socket reset/.test(e.message));
+  assert.equal(st.stream.locked, false);
+  // No response stream available: refuse rather than fall back to an unbounded read.
+  let unboundedCalled = false;
+  const unbounded = { text: () => { unboundedCalled = true; return Promise.resolve('x'); }, arrayBuffer: () => { unboundedCalled = true; return Promise.resolve(new ArrayBuffer(1)); } };
+  await assert.rejects(() => reader(Object.assign({ ok: true, headers: { get: () => null }, body: {} }, unbounded)), /cannot read the server response safely/);
+  await assert.rejects(() => reader(Object.assign({ ok: true, headers: { get: () => null } }, unbounded)), /cannot read the server response safely/);
+  assert.equal(unboundedCalled, false, 'text()/arrayBuffer() are never used as a fallback');
+  assert.equal(await reader({ ok: true, status: 204, headers: { get: () => null }, body: null }), '', 'null body = no content');
+
+  // Every provider's download path is bounded: oversized streams are rejected and cancelled through each.
   const cfg = { provider: 'webdav', url: 'https://dav.example.test/remote.php/', username: 'u', password: 'p', filename: 'f.json' };
-  fetchImpl = () => Promise.resolve({ ok: true, status: 200, body: {}, headers: { get: () => String(C.SYNC_MAX_ENVELOPE_CHARS + 5) }, text: () => Promise.resolve('x') });
-  await assert.rejects(() => C.syncWebdavDownload(cfg), /too large/);
-  fetchImpl = () => Promise.resolve({ ok: true, status: 200, body: {}, headers: { get: () => null }, text: () => Promise.resolve('ciphertext') });
+  const oversized = () => mkStream(Array.from({ length: 30 }, () => bytes(100)));
+  let s1 = oversized(); fetchImpl = () => Promise.resolve(s1.res());
+  await assert.rejects(() => C.syncWebdavDownload(cfg), /too large/); assert.equal(s1.cancelled, true, 'webdav');
+  s1 = oversized(); fetchImpl = () => Promise.resolve(s1.res());
+  await assert.rejects(() => C.syncDropboxDownload('tok', { filename: 'f.json', folder: '' }), /too large/); assert.equal(s1.cancelled, true, 'dropbox');
+  s1 = oversized();
+  fetchImpl = (u) => /alt=media/.test(u) ? Promise.resolve(s1.res()) : Promise.resolve(mkStream([enc.encode('{"files":[{"id":"f1","name":"f.json"}]}')]).res());
+  await assert.rejects(() => C.syncDriveDownload('tok', { filename: 'f.json', folder: '' }), /too large/); assert.equal(s1.cancelled, true, 'drive');
+  s1 = oversized(); fetchImpl = () => Promise.resolve(s1.res());
+  await assert.rejects(() => C.syncS3Get({ provider: 's3', endpoint: 'https://s3.example.test', bucket: 'b', accessKey: 'AK', secretKey: 'SK', secret: 'SK', region: 'us-east-1', filename: 'f.json' }), /too large/); assert.equal(s1.cancelled, true, 's3');
+  // Small metadata replies (listings, token replies, error bodies) have their own, smaller cap.
+  const metaCap = C.SYNC_MAX_META_BYTES;
+  await assert.rejects(() => C.syncReadMetaText(mkStream([bytes(metaCap + 1)]).res()), /unexpectedly large/);
+  await assert.rejects(() => C.syncReadMetaJson(mkStream([enc.encode('<html>nope')]).res()), /unreadable response/);
+  // Source audit: after the shared reader, no sync code reads a response body unbounded.
+  const syncPart = src.slice(src.indexOf('function syncFetch('));
+  assert.equal(/\.(text|json|arrayBuffer|blob|formData)\(\)/.test(syncPart.replace(/\/\/.*$/gm, '')), false, 'no unbounded body read remains in the sync providers');
+  assert.ok((src.match(/syncReadTextLimited\(res\)/g) || []).length >= 4, 'webdav, drive, dropbox and s3 downloads use the bounded reader');
+
+  // Timeout/abort while streaming: terminates promptly with the timeout message.
+  vm.runInContext('SYNC_TIMEOUT_MS = 60', C);
+  fetchImpl = (u, o) => Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, body: new ReadableStream({
+    start(ctl) { o.signal.addEventListener('abort', () => ctl.error(Object.assign(new Error('aborted'), { name: 'AbortError' }))); }
+  }) });
+  const tStart = Date.now();
+  await assert.rejects(() => C.syncWebdavDownload(cfg), /timed out/);
+  assert.ok(Date.now() - tStart < 1500, 'a stalled download is cut off by the timeout');
+  vm.runInContext('SYNC_TIMEOUT_MS = 30000', C);
+
+  // The real cap still admits legitimate backups: a body of exactly the real limit is accepted.
+  setCap(REAL_CAP);
+  const realChunks = Array.from({ length: 64 }, () => bytes(1024 * 1024));
+  assert.equal((await reader(mkStream(realChunks).res())).length, REAL_CAP, 'a body of exactly the real limit is accepted');
+  const overReal = mkStream(Array.from({ length: 65 }, () => bytes(1024 * 1024)));
+  await assert.rejects(() => reader(overReal.res()), /too large/);
+  assert.ok(overReal.pulled <= 65 && overReal.cancelled, 'real-size oversize cancelled mid-stream');
+  fetchImpl = () => Promise.resolve(mkStream([enc.encode('ciphertext')]).res());
   assert.equal(await C.syncWebdavDownload(cfg), 'ciphertext');
   fetchImpl = () => Promise.reject(new TypeError('network down'));
   await assert.rejects(() => C.syncWebdavDownload(cfg), /cannot reach/);

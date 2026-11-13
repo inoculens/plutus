@@ -97,7 +97,7 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   const diag = new Diagnostics();
-  let remote = null, failDav = false, davHits = 0;
+  let remote = null, failDav = false, davHits = 0, serveOverride = null;
   const origin = origin0;
   page.on('pageerror', e => diag.exception(e.message));
   page.on('requestfailed', r => diag.requestFailed(r.url(), origin, (r.failure() || {}).errorText || '', r.resourceType()));
@@ -115,6 +115,7 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
       if (!isRecords && m === 'GET') return route.fulfill({ status: 404, headers: cors, body: '' });
       if (!isRecords && m === 'PUT') return route.fulfill({ status: 201, headers: cors, body: '' });
       if (m === 'PUT') { remote = req.postData(); return route.fulfill({ status: 201, headers: Object.assign({ etag: '"v' + davHits + '"' }, cors), body: '' }); }
+      if (m === 'GET' && serveOverride !== null) return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: serveOverride });
       if (m === 'GET') return remote === null ? route.fulfill({ status: 404, headers: cors, body: '' }) : route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'application/json' }, cors), body: remote });
       if (m === 'MKCOL') return route.fulfill({ status: 405, headers: cors, body: '' });
       return route.fulfill({ status: 207, headers: cors, body: '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"/>' });
@@ -259,6 +260,21 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
   await page.waitForTimeout(2500);
   await page.waitForFunction(() => !syncBusy, null, { timeout: 30000 });
   assert.equal(await page.evaluate(() => loadState().trades.length), 11, 'wrong passphrase left local data untouched');
+
+  // 4e. Oversized / non-UTF-8 remote bodies are refused by the real streaming reader and never touch local data
+  const before = await page.evaluate(() => JSON.stringify(loadState()));
+  await page.evaluate(() => { SYNC_MAX_ENVELOPE_CHARS = 500; });
+  await fillSyncForm('correct horse battery');
+  serveOverride = 'x'.repeat(2000);
+  await page.evaluate(() => syncPullFlow());
+  await page.waitForFunction(() => !syncBusy, null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => JSON.stringify(loadState())), before, 'oversized remote body left local data untouched');
+  await page.evaluate(() => { SYNC_MAX_ENVELOPE_CHARS = 64 * 1024 * 1024; });
+  serveOverride = '{"app":"x","bad":"\ufffd"}'; // valid UTF-8 text but not a sync file
+  await page.evaluate(() => syncPullFlow());
+  await page.waitForFunction(() => !syncBusy, null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => JSON.stringify(loadState())), before, 'non-sync remote body left local data untouched');
+  serveOverride = null;
 
   await browser.close(); server.close();
   assert.deepEqual(diag.probeProblems(), [], 'CSP probe evidence');

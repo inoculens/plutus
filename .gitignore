@@ -1,3 +1,6 @@
 # Local screenshots / reference images — never commit
 /Screenshot*.png
 /Image *.png
+
+# Test-only npm dependencies (see tests/package.json)
+/tests/node_modules/

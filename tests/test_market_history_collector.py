@@ -199,5 +199,391 @@ class MarketHistoryCollectorTests(unittest.TestCase):
         self.assertEqual(len(symbols), len(set(symbols)))
 
 
+class CollectorRunHealthTests(unittest.TestCase):
+    """End-to-end runs of main() against fake exchanges (no network)."""
+
+    SYMBOLS = ["BTC", "ETH", "LTC", "XRP", "ADA"]
+
+    def setUp(self):
+        import json
+        import tempfile
+        from types import SimpleNamespace
+        self.json = json
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.output = root / "market-history" / "daily.json"
+        app = root / "app.js"
+        app.write_text("var SYMBOL_MAP = {\n" + "".join(f"  {sym}: 'x',\n" for sym in self.SYMBOLS) + "};\n", encoding="utf-8")
+        self.failing = set()
+        self.empty = set()      # venues answer cleanly with an empty candle list
+        self.empty_on = None    # restrict `empty` to one exchange id (None = all venues)
+        self.active_flag = None  # value of the markets' `active` field
+        # Per (venue, base) behaviour: throw, mult (price multiplier), skip (days-ago with no
+        # candle), listed (candles only for the newest N days), dup (duplicate rows), base_id.
+        self.venue = {}
+        outer = self
+
+        def make(exchange_id):
+            class Fake:
+                id = exchange_id
+                options = {}
+
+                def __init__(self, *_args, **_kwargs):
+                    self.markets = {
+                        f"{sym}/USD": {"spot": True, "base": sym, "baseId": outer.venue.get((exchange_id, sym), {}).get("base_id", sym), "quote": "USD", "symbol": f"{sym}/USD", "active": outer.active_flag}
+                        for sym in outer.SYMBOLS
+                    }
+
+                def load_markets(self):
+                    return self.markets
+
+                def fetch_ohlcv(self, market, timeframe="1d", since=0, limit=1000):
+                    base = market.split("/")[0]
+                    if base in outer.failing:
+                        raise RuntimeError("simulated exchange outage")
+                    if base in outer.empty and outer.empty_on in (None, self.id):
+                        return []
+                    cfg = outer.venue.get((self.id, base), {})
+                    if cfg.get("throw"):
+                        raise RuntimeError("simulated venue outage")
+                    end = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+                    rows, stamp = [], since - (since % COLLECTOR.DAY_MS)
+                    while stamp < end and len(rows) < limit:
+                        price = (100.0 + (stamp // COLLECTOR.DAY_MS) % 7) * cfg.get("mult", 1.0)
+                        ago = (end - stamp) // COLLECTOR.DAY_MS
+                        if ago not in cfg.get("skip", ()) and ago <= cfg.get("listed", 10**6):
+                            row = [stamp, price, price, price, price, 1000.0]
+                            rows.append(row)
+                            if cfg.get("dup"):
+                                rows.append(list(row))
+                        stamp += COLLECTOR.DAY_MS
+                    return rows
+
+                def close(self):
+                    pass
+            return Fake
+
+        self.patches = [
+            patch.object(COLLECTOR, "OUTPUT", self.output),
+            patch.object(COLLECTOR, "APP_JS", app),
+            patch.object(COLLECTOR, "EXCHANGES", ("kraken", "bitfinex")),
+            patch.object(COLLECTOR, "TRUSTED_EXCHANGES", {"kraken", "bitfinex"}),
+            patch.object(COLLECTOR, "INITIAL_DAYS", 12),
+            patch.object(COLLECTOR, "ccxt", SimpleNamespace(kraken=make("kraken"), bitfinex=make("bitfinex"))),
+        ]
+        for item in self.patches:
+            item.start()
+
+    def tearDown(self):
+        for item in self.patches:
+            item.stop()
+        self.tmp.cleanup()
+
+    def archive(self):
+        return self.json.loads(self.output.read_text(encoding="utf-8"))
+
+    def test_healthy_run_publishes_every_asset_without_gaps_or_duplicates(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        archive = self.archive()
+        self.assertEqual(sorted(archive["assets"]), sorted(self.SYMBOLS))
+        for symbol, asset in archive["assets"].items():
+            days = [row[0] // COLLECTOR.DAY_MS for row in asset["points"]]
+            self.assertEqual(days, sorted(set(days)), f"{symbol}: duplicate or unordered days")
+            self.assertEqual(days[-1] - days[0] + 1, len(days), f"{symbol}: silent gap")
+            self.assertEqual(archive["coverage"][symbol]["missingDays"], 0)
+            self.assertTrue(all(row[2] == 2 and sorted(row[3]) == ["bitfinex", "kraken"] for row in asset["points"]))
+        self.assertFalse(self.output.with_suffix(".json.tmp").exists())
+
+    def test_total_outage_fails_and_leaves_the_last_good_archive_untouched(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.failing = set(self.SYMBOLS)
+        with self.assertRaisesRegex(RuntimeError, "partial update"):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+        self.assertFalse(self.output.with_suffix(".json.tmp").exists())
+
+    def test_majority_failure_is_not_published_as_success(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.failing = {"BTC", "ETH"}  # 2 of 5 assets lose every market
+        with self.assertRaisesRegex(RuntimeError, "2 of 5"):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_single_isolated_failure_keeps_previous_points_and_still_publishes(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        before = self.archive()["assets"]["ADA"]["points"]
+        self.failing = {"ADA"}  # 1 of 5 = 20%, under the gate
+        self.assertEqual(COLLECTOR.main(), 0)
+        after = self.archive()
+        self.assertEqual(after["assets"]["ADA"]["points"], before, "previous history is preserved, never dropped")
+        self.assertEqual(sorted(after["assets"]), sorted(self.SYMBOLS))
+
+    def test_empty_collection_never_overwrites_last_good_data(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        with patch.object(COLLECTOR, "symbols_from_app", return_value=[]):
+            with self.assertRaises(RuntimeError):
+                COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_interrupted_write_leaves_previous_archive_and_no_temp_file(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        with patch.object(COLLECTOR.os, "fsync", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                COLLECTOR.write_archive_atomically({"schema": 1}, self.output)
+        self.assertEqual(self.output.read_bytes(), good)
+        self.assertFalse(self.output.with_suffix(".json.tmp").exists())
+
+    def test_corrupt_previous_archive_is_replaced_by_a_full_clean_collection(self):
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        self.output.write_text("{not json", encoding="utf-8")
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.assertEqual(sorted(self.archive()["assets"]), sorted(self.SYMBOLS))
+
+    def test_missing_day_counter_and_health_gate_boundaries(self):
+        day = COLLECTOR.DAY_MS
+        points = [[day * 10 + day - 1], [day * 11 + day - 1], [day * 14 + day - 1]]
+        self.assertEqual(COLLECTOR.count_missing_days(points), 2)
+        self.assertEqual(COLLECTOR.count_missing_days([]), 0)
+        COLLECTOR.check_run_health(0, 0)
+        COLLECTOR.check_run_health(4, 1)  # exactly 25%: allowed
+        with self.assertRaises(RuntimeError):
+            COLLECTOR.check_run_health(4, 2)
+
+    def test_silent_empty_responses_for_assets_that_were_trading_fail_the_run(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.empty = {"BTC", "ETH"}  # every venue answers [] without raising: 2 of 5 assets
+        with self.assertRaisesRegex(RuntimeError, "2 of 5 assets had no usable market data"):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_single_silent_empty_asset_keeps_history_and_publishes(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        before = self.archive()["assets"]["ADA"]["points"]
+        self.empty = {"ADA"}  # 1 of 5 = 20%, under the gate
+        self.assertEqual(COLLECTOR.main(), 0)
+        after = self.archive()
+        self.assertEqual(after["assets"]["ADA"]["points"], before)
+        self.assertEqual(sorted(after["assets"]), sorted(self.SYMBOLS))
+
+    def test_total_silent_outage_is_not_published(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        self.empty = set(self.SYMBOLS)
+        with self.assertRaises(RuntimeError):
+            COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    def test_empty_everywhere_for_a_never_seen_inactive_asset_is_legitimate_no_history(self):
+        # No archive yet and no market claims to be active: nothing says these should have data.
+        self.empty = {"BTC", "ETH", "LTC"}
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.assertEqual(sorted(self.archive()["assets"]), ["ADA", "XRP"])
+
+    def test_empty_everywhere_for_active_markets_is_unexpected_even_on_the_first_run(self):
+        self.active_flag = True
+        self.empty = {"BTC", "ETH", "LTC"}
+        with self.assertRaisesRegex(RuntimeError, "3 of 5 assets had no usable market data"):
+            COLLECTOR.main()
+        self.assertFalse(self.output.exists())
+
+    def test_one_venue_raising_and_the_other_empty_counts_as_incomplete(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        good = self.output.read_bytes()
+        # kraken raises for BTC/ETH, bitfinex answers empty for them
+        self.failing = set()
+        orig = COLLECTOR.ccxt.kraken
+        def raising(*a, **k):
+            client = orig(*a, **k)
+            real = client.fetch_ohlcv
+            def fetch(market, **kw):
+                if market.split("/")[0] in ("BTC", "ETH"):
+                    raise RuntimeError("simulated exchange outage")
+                return real(market, **kw)
+            client.fetch_ohlcv = fetch
+            return client
+        self.empty, self.empty_on = {"BTC", "ETH"}, "bitfinex"
+        with patch.object(COLLECTOR.ccxt, "kraken", raising):
+            with self.assertRaisesRegex(RuntimeError, "2 of 5 assets had no usable market data"):
+                COLLECTOR.main()
+        self.assertEqual(self.output.read_bytes(), good)
+
+    # ---- Health policy: an asset is healthy only if its days are PUBLISHABLE, i.e. at least
+    # two distinct trusted venues remain per day after identity and outlier screening.
+    # Raw candles, HTTP success or a non-empty list never prove health on their own.
+
+    def both(self, base, **cfg):
+        for venue in ("kraken", "bitfinex"):
+            self.venue[(venue, base)] = dict(cfg)
+
+    def run_expect_refusal(self, regex="had no usable market data"):
+        good = self.output.read_bytes() if self.output.exists() else None
+        with self.assertRaisesRegex(RuntimeError, regex):
+            COLLECTOR.main()
+        if good is not None:
+            self.assertEqual(self.output.read_bytes(), good, "previous valid archive must stay byte-for-byte unchanged")
+        else:
+            self.assertFalse(self.output.exists())
+
+    def age_archive(self, days):
+        """Pretend the stored archive was written `days` ago so the next run has new days to collect."""
+        data = self.archive()
+        cutoff = (int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()) * 1000
+                  - days * COLLECTOR.DAY_MS)
+        for entry in data["assets"].values():
+            entry["points"] = [row for row in entry["points"] if row[0] < cutoff]
+        self.output.write_text(self.json.dumps(data), encoding="utf-8")
+
+    def test_two_trusted_venues_with_valid_observations_are_publishable_and_healthy(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        for sym in self.SYMBOLS:
+            row = self.archive()["assets"][sym]["points"][-1]
+            self.assertEqual(row[2], 2)
+            self.assertEqual(row[3], ["bitfinex", "kraken"])
+
+    def test_one_venue_with_data_and_another_empty_is_not_corroborated(self):
+        self.empty, self.empty_on = set(self.SYMBOLS), "bitfinex"
+        self.run_expect_refusal("5 of 5 assets had no usable market data .*5 without enough corroborated days")
+
+    def test_one_venue_with_data_and_another_throwing_is_not_corroborated(self):
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"throw": True}
+        self.run_expect_refusal("5 of 5 assets")
+
+    def test_a_single_asset_lacking_corroboration_stays_under_the_gate_and_is_not_published(self):
+        self.venue[("bitfinex", "ADA")] = {"throw": True}
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.assertNotIn("ADA", self.archive()["assets"], "a single-venue price is never published")
+        self.assertEqual(sorted(self.archive()["assets"]), ["BTC", "ETH", "LTC", "XRP"])
+
+    def test_duplicate_records_from_one_exchange_count_as_one_venue(self):
+        for sym in self.SYMBOLS:
+            self.venue[("kraken", sym)] = {"dup": True}
+            self.venue[("bitfinex", sym)] = {"throw": True}
+        self.run_expect_refusal()
+        rows = [(100.0, 1.0, "kraken"), (100.0, 1.0, "kraken")]
+        self.assertEqual(COLLECTOR.publishable_venues(rows, "BTC"), set(), "the same exchange twice is still one venue")
+
+    def test_a_venue_with_an_invalid_asset_identity_does_not_corroborate(self):
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"base_id": "OTHER" + sym}  # same ticker, different exchange asset id
+        self.run_expect_refusal()
+
+    def test_a_venue_rejected_as_an_outlier_leaves_insufficient_corroboration(self):
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"mult": 1.5}  # two trusted venues, 50% apart: neither survives the screen
+        self.run_expect_refusal()
+        # A third trusted venue can outvote one outlier (pure rule check).
+        rows = [(100.0, 1.0, "kraken"), (100.5, 1.0, "bitfinex"), (150.0, 1.0, "okx")]
+        with patch.object(COLLECTOR, "TRUSTED_EXCHANGES", {"kraken", "bitfinex", "okx"}):
+            self.assertEqual(COLLECTOR.publishable_venues(rows, "BTC"), {"kraken", "bitfinex"})
+
+    def test_all_venues_empty_where_data_is_expected_is_incomplete(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.empty = set(self.SYMBOLS)
+        self.run_expect_refusal()
+
+    def test_all_venues_throwing_is_a_failure(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.failing = set(self.SYMBOLS)
+        self.run_expect_refusal()
+
+    def test_days_before_a_documented_listing_date_are_legitimate_no_history(self):
+        # Both venues list the asset only 5 days ago, inside a 12-day window.
+        for sym in self.SYMBOLS:
+            self.both(sym, listed=5)
+        self.assertEqual(COLLECTOR.main(), 0)
+        data = self.archive()
+        for sym in self.SYMBOLS:
+            self.assertEqual(len(data["assets"][sym]["points"]), 5)
+            self.assertEqual(data["coverage"][sym]["missingDays"], 0)
+
+    def test_leading_single_venue_history_is_not_a_failure_but_is_not_published(self):
+        # bitfinex lists 5 days ago, kraken has the whole window: only the corroborated 5 days publish.
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"listed": 5}
+        self.assertEqual(COLLECTOR.main(), 0)
+        for sym in self.SYMBOLS:
+            self.assertEqual(len(self.archive()["assets"][sym]["points"]), 5)
+
+    def test_an_interior_day_that_cannot_be_corroborated_makes_the_asset_incomplete(self):
+        # bitfinex lacks one middle day: that day has one venue only.
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"skip": {6}}
+        self.run_expect_refusal("5 of 5 assets")
+        # Only one asset affected: under the gate, but its gap is never published as complete.
+        self.venue = {("bitfinex", "ADA"): {"skip": {6}}}
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.assertEqual(self.archive()["coverage"]["ADA"]["missingDays"], 1)
+        self.assertEqual(self.archive()["coverage"]["ADA"]["uncorroboratedDays"], 1)
+
+    def test_a_venue_outage_across_new_days_is_incomplete_even_though_older_days_are_held(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.age_archive(4)  # four newest days must be collected again
+        self.empty, self.empty_on = set(self.SYMBOLS), "bitfinex"
+        self.run_expect_refusal("5 of 5 assets")
+
+    def test_one_day_of_venue_lag_on_the_newest_day_is_tolerated(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.age_archive(3)
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"skip": {1}}  # bitfinex has not published yesterday's candle yet
+        self.assertEqual(COLLECTOR.main(), 0)
+
+    def test_failed_candidate_build_leaves_the_existing_archive_byte_for_byte_unchanged(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        self.age_archive(4)  # new days must be collected, so a venue outage really bites
+        before = self.output.read_bytes()
+        for sym in self.SYMBOLS:
+            self.venue[("bitfinex", sym)] = {"throw": True}
+        self.run_expect_refusal()
+        self.assertEqual(self.output.read_bytes(), before)
+        self.assertEqual(sorted(p.name for p in self.output.parent.iterdir()), ["daily.json"], "no temp files left behind")
+
+    def test_rerunning_a_successful_collection_is_idempotent(self):
+        self.assertEqual(COLLECTOR.main(), 0)
+        first = self.archive()
+        self.assertEqual(COLLECTOR.main(), 0)
+        second = self.archive()
+        for doc in (first, second):
+            doc.pop("generatedAt")
+        self.assertEqual(first, second)
+
+    def test_the_same_venue_cannot_satisfy_the_two_venue_minimum_by_returning_many_markets(self):
+        # filter_observations/publishable_venues key on exchange identity only.
+        rows = [(100.0 + i * 0.01, 5.0, "kraken") for i in range(10)]
+        self.assertEqual(COLLECTOR.publishable_venues(rows, "BTC"), set())
+
+    def test_health_assessment_reports_each_condition_separately(self):
+        a = COLLECTOR.assess_publishable_days
+        day = lambda n: n * 1  # noqa: E731
+        two = [(100.0, 1.0, "kraken"), (100.0, 1.0, "bitfinex")]
+        one = [(100.0, 1.0, "kraken")]
+        self.assertEqual(a({}, "BTC", set())["status"], "no_observations")
+        self.assertEqual(a({1: one, 2: one}, "BTC", set())["status"], "uncorroborated")
+        self.assertEqual(a({1: one, 2: two, 3: two}, "BTC", set())["status"], "complete")  # leading single-venue era
+        self.assertEqual(a({1: two, 2: one, 3: two}, "BTC", set())["missingDays"], [2])
+        self.assertEqual(a({1: two, 3: two}, "BTC", set())["missingDays"], [2], "a day no venue returned is a gap too")
+        self.assertEqual(a({1: two, 2: one}, "BTC", set())["status"], "complete", "one day of tail lag is tolerated")
+        self.assertEqual(a({1: two, 2: one, 3: one}, "BTC", set())["status"], "incomplete")
+        self.assertEqual(a({3: one}, "BTC", {1, 2, 3})["status"], "complete", "days already published stay published")
+
+    def test_asset_classification_matrix(self):
+        c = COLLECTOR.classify_asset_fetch
+        self.assertEqual(c(2, 0, 10, False), "ok")
+        self.assertEqual(c(2, 1, 10, True), "ok")
+        self.assertEqual(c(2, 2, 0, False), "failed")
+        self.assertEqual(c(2, 0, 0, True), "no_data")
+        self.assertEqual(c(2, 1, 0, False), "no_data")
+        self.assertEqual(c(2, 0, 0, False), "no_history")
+        COLLECTOR.check_run_health(4, 0, 1)  # 25% exactly: allowed
+        with self.assertRaises(RuntimeError):
+            COLLECTOR.check_run_health(4, 1, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

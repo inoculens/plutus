@@ -81,6 +81,22 @@ function isFutureDateStr(d) {
   return d.slice(0, 10) > today;
 }
 
+// Persisted records are stored with the calendar date of the device that
+// created them. A device in a timezone behind that one sees the same date as
+// "tomorrow", so the strict local check above must never gate stored,
+// imported, exported or synced data. A date is rejected there only when it is
+// later than today in UTC+14, the furthest-ahead timezone on Earth (the
+// latest calendar date that exists anywhere right now). The strict
+// isFutureDateStr stays in use for dates typed into the record form.
+function maxCalendarDateAnywhere() {
+  return new Date(Date.now() + 14 * 3600000).toISOString().slice(0, 10);
+}
+
+function isFutureEverywhereDateStr(d) {
+  if (!isValidDateStr(d)) return false;
+  return d.slice(0, 10) > maxCalendarDateAnywhere();
+}
+
 function isValidSettings(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v) &&
     typeof v.mainCurrency === 'string' && MAIN_CURRENCIES.indexOf(v.mainCurrency.toUpperCase()) !== -1 &&
@@ -88,9 +104,46 @@ function isValidSettings(v) {
     (v.dateFormat === undefined || isValidDateFormat(v.dateFormat));
 }
 
+// Escape a value for use inside a double-quoted CSS attribute selector
+// ([data-x="..."]). Stripping quotes changed the id (wrong match) and a
+// backslash or newline could still break the selector.
+function cssAttrValue(v) {
+  return String(v).replace(/[\\"\n\r\f]/g, function (ch) {
+    return ch === '\\' || ch === '"' ? '\\' + ch : '\\' + ch.charCodeAt(0).toString(16) + ' ';
+  });
+}
+
+// Display-only cleanup for names that come from files, imports or sync:
+// drops bidirectional overrides/isolates and control characters so a name
+// cannot visually reorder itself (e.g. fake a file extension). Pure.
+function safeDisplayName(v) {
+  return String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '');
+}
+
+// Prototype-less dictionary for maps keyed by user-controlled identifiers
+// (account ids, trade ids, ledger codes). A plain {} resolves keys such as
+// "__proto__", "constructor" or "toString" through Object.prototype, which
+// silently drops entries and can write into the global prototype.
+function dict() {
+  return Object.create(null);
+}
+
+var ACCOUNT_ID_MAX_LENGTH = 128;
+
+// Account ids: 1-128 chars of [A-Za-z0-9._:-] (uid() emits 't' + base36),
+// never a name that already exists on Object.prototype ("__proto__",
+// "constructor", "toString", "hasOwnProperty", ...). Pure.
+function isValidAccountId(id) {
+  if (typeof id !== 'string') return false;
+  if (id.length === 0 || id.length > ACCOUNT_ID_MAX_LENGTH) return false;
+  if (!/^[A-Za-z0-9._:-]+$/.test(id)) return false;
+  if (id === '__proto__' || id === 'prototype' || (id in Object.prototype)) return false;
+  return true;
+}
+
 function isValidAccount(a) {
   if (!a || typeof a !== 'object' || Array.isArray(a)) return false;
-  if (typeof a.id !== 'string' || a.id.length === 0) return false;
+  if (!isValidAccountId(a.id)) return false;
   if (typeof a.name !== 'string' || a.name.trim().length === 0) return false;
   if (typeof a.ticker !== 'string') return false;
   var tk = a.ticker.trim().toUpperCase();
@@ -367,7 +420,7 @@ function debtAccountDeleteBlock(st, ids) {
 // stay (they match no main and render standalone).
 function sanitizeGroups(accounts) {
   var list = accounts || [];
-  var byId = {};
+  var byId = dict();
   list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
   list.filter(function (a) {
     if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
@@ -387,7 +440,7 @@ function sanitizeGroups(accounts) {
 // instead of silent. Dangling links (no such main) stay, by design.
 function nestedGroupLinkCount(accounts) {
   var list = accounts || [];
-  var byId = {};
+  var byId = dict();
   list.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
   return list.filter(function (a) {
     if (!a || typeof a.groupId !== 'string' || a.groupId === '') return false;
@@ -460,7 +513,7 @@ var QTY_NON_CRYPTO = {};
 // one asset kind, in which case every price for it is keyed KIND:SYM
 // (e.g. STOCK:W, CRYPTO:W) so the two can never share or overwrite a price.
 // Rebuilt whenever accounts load/save (noteSymbolKinds).
-var PRICE_KIND_BY_ACCOUNT = {}; // accountId -> normalized kind
+var PRICE_KIND_BY_ACCOUNT = dict(); // accountId -> normalized kind
 var PRICE_KINDS_BY_SYMBOL = {}; // SYM -> { kind: true } for every held kind
 var PRICE_COLLISIONS = {};      // SYM -> true when held under 2+ kinds
 var PRICE_KIND_NAMES = ['CRYPTO', 'STOCK', 'COMMODITY', 'CASH', 'CUSTOM'];
@@ -790,6 +843,8 @@ function saveState(s, opts) {
   try { noteSymbolKinds(s && s.accounts, s && s.trades); } catch (e) { /* ignore */ }
   if (!(opts && opts.replaceDamaged)) guardStoredStateBeforeSave();
   var out;
+  var prevRaw = null;
+  try { prevRaw = localStorage.getItem(STORAGE_KEY); } catch (e) { prevRaw = null; }
   try {
     out = JSON.stringify(s);
     localStorage.setItem(STORAGE_KEY, out);
@@ -797,6 +852,10 @@ function saveState(s, opts) {
     throw new Error('storage-unavailable');
   }
   lastSeenRaw = out;
+  // The metadata change is saved: only now release blobs nothing references.
+  try {
+    attReleasedHashes(prevRaw, s).forEach(function (h) { attDelete(h); });
+  } catch (e) { /* best-effort: a leftover blob is harmless, a lost one is not */ }
   // Any persisted change may make the drive copy stale: let auto-sync
   // (opt-in, Sync tab) schedule an encrypted push. Never breaks saving.
   try { syncScheduleAuto(); } catch (e) { /* ignore */ }
@@ -948,6 +1007,29 @@ function attDelete(hash) {
       } catch (e) { try { db.close(); } catch (e2) { /* ignore */ } resolve(false); }
     });
   });
+}
+// Attachment blobs are content-addressed: two records that attach the same
+// file share one blob. A blob may therefore only go once NO stored record
+// references its hash, and only after the metadata change is really saved.
+function attHashesOfState(state) {
+  var out = dict();
+  var list = state && Array.isArray(state.trades) ? state.trades : [];
+  for (var i = 0; i < list.length; i++) {
+    var a = list[i] && list[i].attachment;
+    if (a && typeof a.hash === 'string' && /^[0-9a-f]{8,64}$/.test(a.hash)) out[a.hash] = true;
+  }
+  return out;
+}
+function attHashesOfRaw(raw) {
+  try { return attHashesOfState(JSON.parse(raw)); } catch (e) { return null; }
+}
+// Hashes the previous stored state referenced that the new state does not.
+function attReleasedHashes(prevRaw, nextState) {
+  if (typeof prevRaw !== 'string' || prevRaw.indexOf('"attachment"') === -1) return [];
+  var before = attHashesOfRaw(prevRaw);
+  if (!before) return []; // unreadable previous state: never delete on a guess
+  var after = attHashesOfState(nextState);
+  return Object.keys(before).filter(function (h) { return !after[h]; });
 }
 function attHashBytes(buf) {
   function hex(bytes) {
@@ -1101,7 +1183,7 @@ function assignGroup(st, memberIds, mainId) {
   var main = accountById(st, mainId);
   if (!main) return 'Main account not found.';
   if (groupMainOf(st, mainId)) return '"' + main.name + '" is already grouped — ungroup it first or pick another main.';
-  var seen = {};
+  var seen = dict();
   var ids = [];
   (memberIds || []).forEach(function (id) {
     if (typeof id !== 'string' || id === '' || id === mainId || seen[id]) return;
@@ -1133,7 +1215,7 @@ function ungroupAll(st, mainId) {
 // Delete scope: ids plus the members of any main among them, so removing
 // a main removes its whole group (records included). Pure.
 function expandDeleteIds(st, ids) {
-  var set = {};
+  var set = dict();
   (ids || []).forEach(function (id) {
     if (typeof id === 'string' && id !== '' && accountById(st, id)) set[id] = true;
   });
@@ -1163,7 +1245,7 @@ function assetLedgersOn(st) {
 }
 
 function cashAccountIds(st) {
-  var out = {};
+  var out = dict();
   ((st && st.accounts) || []).forEach(function (a) {
     if (a && a.id && isCashKind(a.kind)) out[a.id] = true;
   });
@@ -1573,7 +1655,7 @@ function transferOutputsOf(t) {
 }
 
 function transferDestIds(t) {
-  var seen = {};
+  var seen = dict();
   var out = [];
   function add(id) {
     var s = String(id === undefined || id === null ? '' : id).trim();
@@ -1678,7 +1760,7 @@ function isValidImportTrade(t, accountIds, accounts) {
   if (TRADE_TYPES.indexOf(t.type) === -1) return false;
   if (!isValidSymbolCode(t.symbol)) return false;
   if (!isValidDateStr(t.date)) return false;
-  if (isFutureDateStr(t.date)) return false;
+  if (isFutureEverywhereDateStr(t.date)) return false;
   // fee (fiat) is always optional >= 0 when present
   var feeChk = numGte0(t.fee, true);
   if (feeChk === false) return false;
@@ -1942,31 +2024,66 @@ function isValidPriceOverrides(v) {
   return true;
 }
 
-function exportState(s) {
+// Shared by exportState and the strict variant: the normalized envelope parts
+// plus a count of stored records that cannot be exported (invalid accounts,
+// trades that fail import validation, unusable price overrides).
+function exportPrepare(s) {
   var st = s || {};
-  var rawAccounts = Array.isArray(st.accounts) ? st.accounts.filter(isValidAccount) : [];
+  var dropped = 0;
+  var srcAccounts = Array.isArray(st.accounts) ? st.accounts : [];
+  var rawAccounts = srcAccounts.filter(isValidAccount);
+  dropped += srcAccounts.length - rawAccounts.length;
   var accounts = rawAccounts.map(function (account) { return normalizeAccount(account, rawAccounts); });
   var accountIds = accounts.map(function (a) { return a.id; });
-  var trades = Array.isArray(st.trades)
-    ? st.trades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); }).map(normalizeTradeForStore)
-    : [];
+  var srcTrades = Array.isArray(st.trades) ? st.trades : [];
+  var okTrades = srcTrades.filter(function (t) { return isValidImportTrade(t, accountIds, accounts); });
+  dropped += srcTrades.length - okTrades.length;
   var priceOverrides = {};
-  if (st.priceOverrides && typeof st.priceOverrides === 'object' && !Array.isArray(st.priceOverrides) && isValidPriceOverrides(st.priceOverrides)) {
-    priceOverrides = st.priceOverrides;
+  if (st.priceOverrides && typeof st.priceOverrides === 'object' && !Array.isArray(st.priceOverrides)) {
+    if (isValidPriceOverrides(st.priceOverrides)) priceOverrides = st.priceOverrides;
+    else dropped += 1;
   }
-  var envelope = {
-    app: APP_ID,
-    version: STORE_VERSION,
-    exportedAt: new Date().toISOString(),
-    settings: normalizeSettings(st.settings, defaultState().settings),
-    accounts: accounts,
-    trades: trades,
-    priceOverrides: priceOverrides
+  return {
+    dropped: dropped,
+    envelope: {
+      app: APP_ID,
+      version: STORE_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings: normalizeSettings(st.settings, defaultState().settings),
+      accounts: accounts,
+      trades: okTrades.map(normalizeTradeForStore),
+      priceOverrides: priceOverrides
+    }
   };
-  return JSON.stringify(envelope);
 }
 
-function importState(json) {
+// Tolerant export, kept for internal comparisons (sync hashes): records that
+// fail validation are left out.
+function exportState(s) {
+  return JSON.stringify(exportPrepare(s).envelope);
+}
+
+// Export for anything the person keeps or uploads (backup download, encrypted
+// file, sync push). Refuses instead of writing an incomplete file that would
+// look like a successful backup.
+function exportStateStrict(s) {
+  var prepared = exportPrepare(s);
+  if (prepared.dropped > 0) {
+    throw new Error('export failed: ' + prepared.dropped + ' stored record' + (prepared.dropped === 1 ? ' is' : 's are') +
+      ' invalid and would be missing from the file. Nothing was exported.');
+  }
+  return JSON.stringify(prepared.envelope);
+}
+
+// Validate and normalize a backup WITHOUT touching stored state. Restore
+// flows that ask for confirmation use this, so nothing is written until the
+// user agrees (a tab closed or crashed at the prompt used to leave the remote
+// copy already persisted over local data).
+function parseImportedState(json) {
+  return importState(json, { dryRun: true });
+}
+
+function importState(json, opts) {
   var data;
   try {
     data = JSON.parse(json);
@@ -1980,7 +2097,7 @@ function importState(json) {
     throw new Error('import failed: unknown app');
   }
   if (data.version === 1) {
-    return importStateV1(data);
+    return importStateV1(data, opts);
   }
   if (data.version !== STORE_VERSION) {
     throw new Error('import failed: unsupported version');
@@ -1997,7 +2114,7 @@ function importState(json) {
     }
   }
   var accountIds = data.accounts.map(function (a) { return a.id; });
-  var seenIds = {};
+  var seenIds = dict();
   for (var di = 0; di < accountIds.length; di++) {
     if (Object.prototype.hasOwnProperty.call(seenIds, accountIds[di])) {
       throw new Error('import failed: duplicate account id ' + accountIds[di]);
@@ -2017,7 +2134,7 @@ function importState(json) {
       throw new Error('import failed: invalid trade at index ' + ti);
     }
   }
-  var seenTradeIds = {};
+  var seenTradeIds = dict();
   for (var tdi = 0; tdi < data.trades.length; tdi++) {
     var tid = data.trades[tdi] && data.trades[tdi].id;
     if (typeof tid === 'string' && tid.length > 0) {
@@ -2048,14 +2165,14 @@ function importState(json) {
     trades: mappedTrades,
     priceOverrides: priceOverrides
   };
-  saveState(next);
+  if (!(opts && opts.dryRun)) saveState(next);
   return next;
 }
 
 // Legacy v1 file import: group v1 trades (account-less) into auto-created
 // per-symbol accounts. No legacy runtime paths — v1 is never read from
 // localStorage, only accepted here.
-function importStateV1(data) {
+function importStateV1(data, opts) {
   if (!isValidSettings(data.settings)) {
     throw new Error('import failed: invalid settings');
   }
@@ -2108,7 +2225,7 @@ function importStateV1(data) {
     trades: trades,
     priceOverrides: priceOverrides
   };
-  saveState(next);
+  if (!(opts && opts.dryRun)) saveState(next);
   return next;
 }
 
@@ -2167,7 +2284,7 @@ function pickRate(ratesByDate, date) {
     var d = fxShiftDate(date, -back);
     if (ratesByDate && Object.prototype.hasOwnProperty.call(ratesByDate, d)) {
       var rate = Number(ratesByDate[d]);
-      if (isFinite(rate)) {
+      if (isFinite(rate) && rate > 0) { // a zero or negative fixing is garbage, never a rate
         return { rate: rate, interpolated: back > 0, date: d, source: 'ECB-' + d };
       }
     }
@@ -3273,7 +3390,7 @@ function computePositions(trades, live, method) {
 function computePortfolio(allTrades, live, method) {
   var isFifo = method === 'fifo';
   var sorted = ledgerSortByDate(allTrades || []);
-  var acctState = {}; // accId -> sym -> {qty,cost,realized,income,fees,fiatFees,queue,lots}
+  var acctState = dict(); // accId -> sym -> {qty,cost,realized,income,fees,fiatFees,queue,lots}
   function stFor(accId, sym) {
     var a = acctState[accId];
     if (!a) { a = {}; acctState[accId] = a; }
@@ -3649,7 +3766,7 @@ function computePortfolio(allTrades, live, method) {
     }
   });
   // Build per-account position maps with live prices.
-  var byAccount = {};
+  var byAccount = dict();
   Object.keys(acctState).forEach(function (accId) {
     var m = new Map();
     var syms = acctState[accId];
@@ -4023,7 +4140,7 @@ function cashBalance(allTrades, accountId, main, floatIncome) {
 // trade label first, then the chart map, then the bare code.
 function ledgerParentOf(code, known) {
   var c = String(code);
-  var set = {};
+  var set = dict();
   (known || []).forEach(function (k) { set[String(k)] = true; });
   delete set[c];
   var best = null;
@@ -4059,7 +4176,7 @@ function ledgerDescendantsOf(target, allCodes) {
   var out = [];
   keys.forEach(function (c) {
     var cur = c;
-    var seen = {};
+    var seen = dict();
     while (cur && !seen[cur]) {
       seen[cur] = true;
       var p = ledgerParentOf(cur, full);
@@ -4108,7 +4225,7 @@ function groupFillFiats(st) {
 // Every ledger code known to an account: chart keys plus codes posted on
 // its records (posted-only codes nest like charted ones).
 function ledgerAccountCodes(st, accountId) {
-  var set = {};
+  var set = dict();
   try {
     var eff = ledgerChartFor(st, accountId);
     Object.keys(eff).forEach(function (k) { var ck = String(k).trim(); if (ck) set[ck] = true; });
@@ -4148,7 +4265,7 @@ function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode, scope
   if (!code) return null;
   var scope = (scopeIds && scopeIds.length) ? scopeIds : [accountId];
   var chartAcc = scope[0];
-  var set = {};
+  var set = dict();
   try {
     var eff = ledgerChartFor(st, chartAcc);
     Object.keys(eff).forEach(function (k) { var ck = String(k).trim(); if (ck) set[ck] = true; });
@@ -4171,7 +4288,7 @@ function ledgerRecordConflict(st, accountId, code, excludeId, excludeCode, scope
   if (kids.length) return { kind: 'parent', code: code, kids: kids.slice().sort() };
   var parents = [];
   var cur = code;
-  var seen = {};
+  var seen = dict();
   while (cur && !seen[cur]) {
     seen[cur] = true;
     var p = ledgerParentOf(cur, all);
@@ -4215,7 +4332,7 @@ function ledgerConflictMessage(conf) {
 // saves today). Positive totals are never touched. Idempotent.
 function repairCashTradeAmounts(trades, accounts) {
   try {
-    var kinds = {};
+    var kinds = dict();
     ((accounts) || []).forEach(function (a) {
       if (a && a.id) kinds[a.id] = (typeof a.kind === 'string') ? a.kind.trim().toLowerCase() : '';
     });
@@ -4302,7 +4419,7 @@ function ledgerTree(allTrades, accountId, main, labelMap) {
 // posts -sent on the source and +received on the arrival under one code.
 function ledgerTreeMulti(allTrades, ids, main, labelMap, kinds) {
   var labels = labelMap || {};
-  var inScope = {};
+  var inScope = dict();
   (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') inScope[id] = true; });
   function cashScope(id) {
     if (!kinds || typeof kinds[id] !== 'string') return true;
@@ -4817,14 +4934,16 @@ function fetchYahooHistory(yahooSym, wantDay, cur, fetchImpl) {
   return fetchFirstJson(yahooProxyUrls(yahooSym, 'period1=' + startSec + '&period2=' + endSec + '&interval=1d'), f).then(function (data) {
     var r = data && data.chart && data.chart.result && data.chart.result[0];
     if (!r) throw new Error('no-quotes');
-    var nat = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var unitInfo = normalizeQuoteUnit((r.meta && r.meta.currency) || 'USD', 1);
+    var nat = unitInfo.currency;
     var candles = parseYahooDaily(data).filter(function (c) { return c.day <= wantDay; });
     if (!candles.length) throw new Error('no-fixing');
     var pick = candles[candles.length - 1];
     var back = (pick.day !== wantDay);
-    if (nat === cur) return { price: pick.close, interpolated: back, day: pick.day };
+    var closeMain = pick.close / unitInfo.divisor;
+    if (nat === cur) return { price: closeMain, interpolated: back, day: pick.day };
     return fetchEcbRate(pick.day, nat, cur).then(function (fx) {
-      var v = pick.close * Number(fx.rate);
+      var v = closeMain * Number(fx.rate);
       if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
       return { price: v, interpolated: back || !!fx.interpolated, day: pick.day };
     });
@@ -5283,20 +5402,43 @@ function fetchFirstJson(urls, fetchImpl, timeoutMs) {
   return next(0);
 }
 
+// Quote currencies that providers report in a minor unit (1/100 of the main
+// unit): London pence ("GBp" / "GBX"), Johannesburg cents ("ZAc" / "ZAC") and
+// Israeli agorot ("ILA"). The lookup is case-sensitive on purpose: "GBp" is
+// pence while "GBP" is pounds, so upper-casing first would silently turn
+// pence into pounds (a 100x overstated price). Returns the price in the main
+// unit, the upper-case ISO currency and the divisor that was applied, so
+// callers with a series of prices can apply the same divisor to every point.
+var MINOR_UNIT_QUOTES = { GBp: 'GBP', GBX: 'GBP', ZAc: 'ZAR', ZAC: 'ZAR', ILA: 'ILS' };
+function normalizeQuoteUnit(rawCurrency, price) {
+  var raw = String(rawCurrency == null ? '' : rawCurrency).trim();
+  if (Object.prototype.hasOwnProperty.call(MINOR_UNIT_QUOTES, raw)) {
+    return { price: Number(price) / 100, currency: MINOR_UNIT_QUOTES[raw], divisor: 100 };
+  }
+  return { price: Number(price), currency: (raw || 'USD').toUpperCase(), divisor: 1 };
+}
+
 // Latest quote from a Yahoo chart payload: regularMarketPrice first, else
 // the newest non-null daily close. Returns {price, currency} or null.
 function parseYahooQuote(data) {
   try {
     var r = data && data.chart && data.chart.result && data.chart.result[0];
     if (!r) return null;
-    var cur = String((r.meta && r.meta.currency) || 'USD').toUpperCase();
+    var rawCur = (r.meta && r.meta.currency) || 'USD';
     var px = r.meta ? Number(r.meta.regularMarketPrice) : NaN;
-    if (isFinite(px) && px > 0) return { price: px, currency: cur };
+    var u;
+    if (isFinite(px) && px > 0) {
+      u = normalizeQuoteUnit(rawCur, px);
+      return { price: u.price, currency: u.currency };
+    }
     var q = r.indicators && r.indicators.quote && r.indicators.quote[0];
     var cl = (q && q.close) || [];
     for (var i = cl.length - 1; i >= 0; i--) {
       var c = Number(cl[i]);
-      if (isFinite(c) && c > 0) return { price: c, currency: cur };
+      if (isFinite(c) && c > 0) {
+        u = normalizeQuoteUnit(rawCur, c);
+        return { price: u.price, currency: u.currency };
+      }
     }
   } catch (e) { /* fall through */ }
   return null;
@@ -5338,7 +5480,8 @@ function parseCnbcQuotes(data) {
       var s = String(q.symbol || '').toUpperCase();
       var p = Number(q.last);
       if (!s || !isFinite(p) || p <= 0) return;
-      map[s] = { price: p, currency: String(q.currencyCode || 'USD').toUpperCase() };
+      var unit = normalizeQuoteUnit(q.currencyCode || 'USD', p);
+      map[s] = { price: unit.price, currency: unit.currency };
     });
   } catch (e) { /* fall through */ }
   return map;
@@ -5653,7 +5796,7 @@ function fetchBatchPrices(syms, vs) {
   var cur = String(vs || '').toUpperCase();
   var curLow = cur.toLowerCase();
   var ids = syms.map(function (s) { return SYMBOL_MAP[String(s).toUpperCase()]; });
-  var seenIds = {};
+  var seenIds = dict();
   var uniqIds = [];
   ids.forEach(function (id) { if (id && !seenIds[id]) { seenIds[id] = true; uniqIds.push(id); } });
   var needUsd = curLow !== 'usd'; // bridge for mains CoinGecko doesn't quote (e.g. RON)
@@ -6372,7 +6515,7 @@ function feeRateWhy(t, kind) {
 // would yank the scroll to the top via route()).
 function feeRateTitle(id, text) {
   try {
-    var el = document.querySelector('[data-trade="' + id + '"] [data-label="Fee in fiat rate"]');
+    var el = document.querySelector('[data-trade="' + cssAttrValue(id) + '"] [data-label="Fee in fiat rate"]');
     if (el) el.title = String(text);
   } catch (e) { /* ignore */ }
 }
@@ -7030,7 +7173,7 @@ function paintLoading(el, on, label) {
     }
   } catch (e) { /* decorative only */ }
 }
-var moneyFmtCache = {};
+var moneyFmtCache = dict();
 
 function todayStr() {
   // Local calendar date (user-facing default + date max), matching the
@@ -8005,7 +8148,7 @@ function netWorthHistoryKinds(st) {
 
 function netWorthHistoryIncludedAccounts(st) {
   var filter = selectedTickers(st);
-  var included = {};
+  var included = dict();
   (st.accounts || []).forEach(function (account) {
     if (!account || (filter !== null && filter.indexOf(String(account.ticker || '').toUpperCase()) === -1)) return;
     included[account.id] = true;
@@ -8082,6 +8225,19 @@ var netWorthHistoryFetchBudget = { signature: '', remaining: 0 };
 var NET_WORTH_LOADING_BANNER = 'Loading historical chart prices — the graph may be incomplete.';
 var netWorthHistoryLoadingBannerShown = false;
 var netWorthHistorySeriesCache = {};
+// In-memory ceiling: a tab left open while ranges and symbols change would
+// otherwise keep every series ever fetched. The oldest entries go first; they
+// are re-derivable from the shared archive or the providers.
+var NETWORTH_SERIES_CACHE_MAX = 200;
+function netWorthSeriesCachePrune() {
+  var keys = Object.keys(netWorthHistorySeriesCache);
+  if (keys.length <= NETWORTH_SERIES_CACHE_MAX) return;
+  keys.sort(function (a, b) {
+    return (Number(netWorthHistorySeriesCache[a] && netWorthHistorySeriesCache[a].at) || 0) -
+      (Number(netWorthHistorySeriesCache[b] && netWorthHistorySeriesCache[b].at) || 0);
+  });
+  keys.slice(0, keys.length - NETWORTH_SERIES_CACHE_MAX).forEach(function (k) { delete netWorthHistorySeriesCache[k]; });
+}
 var netWorthHistoryRateFetches = {};
 var priceDataStartupPromise = Promise.resolve();
 
@@ -8522,7 +8678,8 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
       return fetchFirstJson(yahooProxyUrls(yahoo, query), window.fetch.bind(window)).then(function (data) {
         var result = data && data.chart && data.chart.result && data.chart.result[0];
         if (!result) throw new Error('stock provider returned no prices');
-        var resultCurrency = String((result.meta && result.meta.currency) || 'USD').toUpperCase();
+        var stockUnit = normalizeQuoteUnit((result.meta && result.meta.currency) || 'USD', 1);
+        var resultCurrency = stockUnit.currency;
         var timestamps = result.timestamp || [];
         var quotes = result.indicators && result.indicators.quote && result.indicators.quote[0];
         var closes = quotes && quotes.close ? quotes.close : [];
@@ -8530,7 +8687,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
         for (var i = 0; i < timestamps.length; i++) {
           var price = Number(closes[i]);
           if (isFinite(price) && price > 0) {
-            points.push({ at: Number(timestamps[i]) * 1000, price: price, currency: resultCurrency });
+            points.push({ at: Number(timestamps[i]) * 1000, price: price / stockUnit.divisor, currency: resultCurrency });
           }
         }
         return { currency: resultCurrency, points: points };
@@ -8567,6 +8724,7 @@ function fetchNetWorthHistorySeries(symbol, kind, main, start, end, onProgress) 
     series.kind = kind;
     if (series.points.length) {
       netWorthHistorySeriesCache[cacheKey] = { at: Date.now(), series: series };
+      netWorthSeriesCachePrune();
       priceDataCacheRevision++;
       try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break rendering */ }
     }
@@ -9136,6 +9294,7 @@ function netWorthHistorySaveRate(day, from, to, rate) {
     series: { currency: to, kind: 'commodity', points: points },
     shared: !!(cached && cached.shared)
   };
+  netWorthSeriesCachePrune();
   priceDataCacheRevision++;
   try { priceDataScheduleUpload(); } catch (e) { /* chart cache must not break valuation */ }
 }
@@ -9161,7 +9320,7 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
   var complete = true;
   var missing = {};
   var cashTotal = 0;
-  var seenAccount = {};
+  var seenAccount = dict();
   var cashIds = cashAccountIds(st);
 
   function addAccountPositions(accountId) {
@@ -9382,7 +9541,7 @@ function updateNetWorthHistory(st, value, main) {
 
 function summaryLifetimeCost(st, rows, dtrades, visibleAccounts) {
   var cashIds = cashAccountIds(st);
-  var included = {};
+  var included = dict();
   (visibleAccounts || []).forEach(function (account) {
     if (!account || !account.id) return;
     included[account.id] = true;
@@ -9505,7 +9664,7 @@ function currentAccountGrossValue(accounts, rows, trades, main) {
 
 function debtAccountsForScope(st, baseAccounts) {
   var list = [];
-  var seen = {};
+  var seen = dict();
   (baseAccounts || []).forEach(function (account) {
     if (!account || !account.id) return;
     var scope = [account].concat(groupMembers(st, account.id) || []);
@@ -9810,7 +9969,7 @@ function restoreAccountFilterFocus() {
   }
   try {
     var host = document.getElementById('accounts');
-    var el = host && host.querySelector ? host.querySelector('[data-ticker="' + accountFilterFocus + '"]') : null;
+    var el = host && host.querySelector ? host.querySelector('[data-ticker="' + cssAttrValue(accountFilterFocus) + '"]') : null;
     if (el && el.focus) el.focus();
   } catch (e) { /* ignore */ }
   accountFilterFocus = null;
@@ -10985,11 +11144,22 @@ function historyOK() {
 
 // Current account route, history path first (clean production URLs), hash
 // fallback (file://, tests, legacy links).
+// decodeURIComponent throws URIError on a malformed escape such as "%" or
+// "%E0%A4%A". Anyone can type or share such a link, and route() runs during
+// boot, so a throw here would leave the app blank. Malformed ids count as "no
+// account route".
+function safeDecodeRouteId(raw) {
+  try { return decodeURIComponent(raw); } catch (e) { return null; }
+}
+
 function currentRouteId() {
   try {
     var p = String((typeof location !== 'undefined' && location.pathname) || '');
     var m = /^\/account\/([^\/?#]+)/.exec(p);
-    if (m) return decodeURIComponent(m[1]);
+    if (m) {
+      var id = safeDecodeRouteId(m[1]);
+      if (id !== null) return id;
+    }
   } catch (e) { /* fall through to hash */ }
   return accountDetailIdHash();
 }
@@ -10997,7 +11167,7 @@ function currentRouteId() {
 function accountDetailIdHash() {
   var h = String((typeof location !== 'undefined' && location.hash) || '');
   var hm = /^#\/account\/([^\/?#]+)/.exec(h);
-  return hm ? decodeURIComponent(hm[1]) : null;
+  return hm ? safeDecodeRouteId(hm[1]) : null;
 }
 
 function accountDetailId() {
@@ -11297,7 +11467,7 @@ function openAttachmentPreview(meta) {
   var viewEl = document.getElementById('attach-dialog-view');
   var msgEl = document.getElementById('attach-dialog-msg');
   var dlEl = document.getElementById('attach-dialog-dl');
-  if (nameEl) nameEl.textContent = meta.name;
+  if (nameEl) nameEl.textContent = safeDisplayName(meta.name);
   if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
   if (viewEl) viewEl.innerHTML = '';
   if (dlEl) { dlEl.hidden = true; dlEl.onclick = null; }
@@ -11306,7 +11476,7 @@ function openAttachmentPreview(meta) {
       var urls = window.URL || window.webkitURL;
       var url = urls.createObjectURL(blob);
       dlg.setAttribute('data-objurl', url);
-      var fname = (label && label.name) || meta.name;
+      var fname = safeDisplayName((label && label.name) || meta.name) || 'attachment';
       if (dlEl) {
         dlEl.hidden = false;
         dlEl.onclick = function () {
@@ -11322,7 +11492,7 @@ function openAttachmentPreview(meta) {
         var mime = (label && label.mime) || meta.mime;
         if (String(mime).indexOf('image/') === 0) {
           var img = document.createElement('img');
-          img.src = url; img.alt = meta.name;
+          img.src = url; img.alt = safeDisplayName(meta.name);
           img.style.cssText = 'max-width:100%;border-radius:10px;border:1px solid var(--border)';
           viewEl.appendChild(img);
         } else {
@@ -12567,8 +12737,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
       var atA = document.createElement('a');
       atA.className = 'tx-link';
       atA.href = '#';
-      atA.textContent = String(meta.name).length > 24 ? String(meta.name).slice(0, 23) + '…' : String(meta.name);
-      atA.title = String(meta.name) + ' (' + String(meta.mime) + ') — click to preview';
+      var atName = safeDisplayName(meta.name);
+      atA.textContent = atName.length > 24 ? atName.slice(0, 23) + '…' : atName;
+      atA.title = atName + ' (' + String(meta.mime) + ') — click to preview';
       atA.addEventListener('click', function (ev) {
         if (ev && ev.preventDefault) ev.preventDefault();
         try { openAttachmentPreview(meta); } catch (e) { showBanner('Could not open the file on this device.'); }
@@ -12993,7 +13164,7 @@ function groupLedgerCurrency(st, mainAcc) {
 // code (income/expense/buy/sell plus labeled transfers, which also post
 // tree rows). Unlabeled buckets alone never open the panel.
 function groupHasLabels(allTrades, ids) {
-  var set = {};
+  var set = dict();
   (ids || []).forEach(function (id) { if (typeof id === 'string' && id !== '') set[id] = true; });
   return (allTrades || []).some(function (t) {
     if (!t || !set[t.accountId]) return false;
@@ -13055,7 +13226,7 @@ function buildGroupLedgers(st, mainAcc, members, host, dtrades, headerMain) {
     return;
   }
   var gdtrades = (gCcy === headerMain) ? dtrades : convertTrades(st.trades, gCcy);
-  var kinds = {};
+  var kinds = dict();
   ids.forEach(function (id) {
     var a = accountById(st, id);
     kinds[id] = (a && typeof a.kind === 'string') ? a.kind : '';
@@ -13175,7 +13346,7 @@ function buildGroupSubs(st, members, host, dtrades, main, method) {
 // + Ledger bootstrap instead).
 function buildAssetLedgers(st, acc, dtrades, main, host) {
   var ids = [acc.id];
-  var kinds = {};
+  var kinds = dict();
   kinds[acc.id] = (acc && typeof acc.kind === 'string') ? acc.kind : '';
   var tree = ledgerTreeMulti(dtrades, ids, main, ledgerChartFor(st, acc.id), kinds);
   if (!tree.roots.length) return false;
@@ -13403,7 +13574,7 @@ function renameAccountLedger(st, accountId, oldCode, newCode, newLabel, scopeIds
     return false;
   }
   function violationsUnion(s) {
-    var set = {};
+    var set = dict();
     scope.forEach(function (sid) {
       var v = [];
       try { v = ledgerViolations(s, sid); } catch (e) { v = []; }
@@ -15691,11 +15862,11 @@ function filterTradesByDateRange(trades, filter) {
 }
 
 function dateRangeOutflowIssue(scopeTrades, scopeIds, st, allTrades) {
-  var inScope = {};
+  var inScope = dict();
   (scopeIds || []).forEach(function (id) {
     if (typeof id === 'string' && id !== '') inScope[id] = true;
   });
-  var transferSources = {};
+  var transferSources = dict();
   (scopeTrades || []).forEach(function (t) {
     if (!t || t.type !== 'transfer') return;
     var linked = (scopeIds || []).some(function (id) { return transferInvolvesAccount(t, id); });
@@ -15819,7 +15990,7 @@ function restoreTradeTypeFilterFocus() {
   if (!anyOpen) { tradeTypeFilterFocus = null; return; }
   try {
     var host = document.getElementById('account-detail');
-    var el = host && host.querySelector ? host.querySelector('[data-ttype="' + tradeTypeFilterFocus + '"]') : null;
+    var el = host && host.querySelector ? host.querySelector('[data-ttype="' + cssAttrValue(tradeTypeFilterFocus) + '"]') : null;
     if (el && el.focus) el.focus();
   } catch (e) { /* ignore */ }
   tradeTypeFilterFocus = null;
@@ -15847,7 +16018,7 @@ function acctDragCardEl(id) {
   var host = document.getElementById('accounts');
   if (!host || !host.querySelector) return null;
   try {
-    return host.querySelector('[data-account="' + String(id).replace(/"/g, '') + '"]');
+    return host.querySelector('[data-account="' + cssAttrValue(id) + '"]');
   } catch (e) {
     return null;
   }
@@ -16140,7 +16311,7 @@ function subStartDrag(wrap, src) {
     if (typeof document !== 'undefined' && document.body && document.body.style) document.body.style.userSelect = 'none';
   } catch (e) {}
   try {
-    var cur = wrap && wrap.querySelector ? wrap.querySelector('[data-account="' + String(subDrag.id).replace(/"/g, '') + '"]') : null;
+    var cur = wrap && wrap.querySelector ? wrap.querySelector('[data-account="' + cssAttrValue(subDrag.id) + '"]') : null;
     if (cur) cur.classList.add('drag-src');
   } catch (e) {}
 }
@@ -16235,7 +16406,7 @@ function tradeDragCardEl(id) {
   var host = document.getElementById('account-detail');
   if (!host || !host.querySelector) return null;
   try {
-    return host.querySelector('[data-trade="' + String(id).replace(/"/g, '') + '"]');
+    return host.querySelector('[data-trade="' + cssAttrValue(id) + '"]');
   } catch (e) {
     return null;
   }
@@ -16538,7 +16709,7 @@ function wireGroupSubsDnD(wrap) {
     if (!subDrag.started) {
       if (dx * dx + dy * dy < 49) return;
       var src = null;
-      try { src = wrap.querySelector('[data-account="' + String(subDrag.id).replace(/"/g, '') + '"]'); } catch (e2) { src = null; }
+      try { src = wrap.querySelector('[data-account="' + cssAttrValue(subDrag.id) + '"]'); } catch (e2) { src = null; }
       if (!src) { subDragCleanup(wrap); return; }
       subStartDrag(wrap, src);
     }
@@ -17206,7 +17377,7 @@ function transferHasAdditionalSources(rows){return Array.isArray(rows)&&rows.len
 
 function buildTransferSources(rows, symbol) {
   var sources = [];
-  var seen = {};
+  var seen = dict();
   var symDec = qtyDecimals(symbol);
   var currentState = loadState();
   var primaryAccount = accountById(currentState, uiVal('t-account', ''));
@@ -17771,7 +17942,7 @@ function qtyDecimals(symbol) {
 function noteSymbolKinds(accounts, trades) {
   var next = {};
   var crypto = {};
-  var kindByAccount = {};
+  var kindByAccount = dict();
   var kindsBySym = {};
   function noteKind(sym, kind) {
     var up = String(sym === undefined || sym === null ? '' : sym).trim().toUpperCase();
@@ -18452,7 +18623,8 @@ function attResolveForSave(cb) {
     return;
   }
   if (pendingAttachRemove && currentAttachMeta) {
-    (function (h) { try { attDelete(h); } catch (e) { /* best-effort */ } })(currentAttachMeta.hash);
+    // The blob is released by saveState() once the record is saved without it
+    // (and only if no other record still uses the same file).
     cb(null, null);
     return;
   }
@@ -18932,7 +19104,7 @@ function findLedgerLabel(st, accountId, code, scopeIds) {
   } catch (e) { /* ignore */ }
   var found = '';
   try {
-    var inScope = {};
+    var inScope = dict();
     scope.forEach(function (sid) { if (typeof sid === 'string' && sid !== '') inScope[sid] = true; });
     (st.trades || []).forEach(function (t) {
       if (found || !t) return;
@@ -21092,7 +21264,16 @@ function backupStamp() {
 }
 
 function downloadBackup() {
-  var json = exportState(loadState());
+  var json;
+  try {
+    json = exportStateStrict(loadState());
+  } catch (e) {
+    showBanner('Export failed — no file was created.', 'error', {
+      title: 'Export error',
+      lines: [String((e && e.message) || e)]
+    });
+    return;
+  }
   var blob = new Blob([json], { type: 'application/json' });
   var name = 'plutus.inoculens.com-' + backupStamp() + '.json';
   var urls = window.URL || window.webkitURL;
@@ -21474,8 +21655,40 @@ function syncHeroAllocHeight() {
   } catch (e) { /* ignore */ }
 }
 
+// Everything this app keeps in the browser besides the main state. The
+// cookie-consent choice is deliberately NOT listed: it holds no personal data
+// and keeping it stops the banner from reappearing after a wipe.
+var WIPE_LOCAL_KEYS = [
+  'inoculens.sync.v1', 'inoculens.price-data-sync.v1', 'inoculens.oauth.v1',
+  'inoculens.fxcache.v1', 'inoculens.histcache.v1', 'inoculens.tradepagesize.v1',
+  'plutus.networth-history.v1', 'plutus.networth-history-ranges.v1'
+];
+var WIPE_IDB_NAMES = ['inoculens.plutus.attachments', 'plutus.networth-history'];
+
+// Resolves (never rejects) once the database is gone, blocked or unavailable.
+// A blocked delete still completes when the page reloads and the last
+// connection closes, so waiting on it forever would only freeze the UI.
+function wipeIndexedDb(name) {
+  return new Promise(function (resolve) {
+    try {
+      if (typeof indexedDB === 'undefined') { resolve(false); return; }
+      var req = indexedDB.deleteDatabase(name);
+      req.onsuccess = function () { resolve(true); };
+      req.onerror = function () { resolve(false); };
+      req.onblocked = function () { resolve(false); };
+    } catch (e) { resolve(false); }
+  });
+}
+
+function wipeAllBrowserData() {
+  WIPE_LOCAL_KEYS.forEach(function (k) {
+    try { localStorage.removeItem(k); } catch (e) { /* ignore */ }
+  });
+  return Promise.all(WIPE_IDB_NAMES.map(wipeIndexedDb));
+}
+
 function clearAllData() {
-  confirmAction('Clear everything', 'Delete all accounts, trades, overrides and settings? This cannot be undone.', 'Delete everything', true).then(function (ok) {
+  confirmAction('Clear everything', 'Delete all accounts, trades, receipts and attachments, net-worth history, price caches, settings and saved sync sign-ins from this browser? Copies already stored in your own cloud storage are not touched. This cannot be undone.', 'Delete everything', true).then(function (ok) {
     if (!ok) return;
     livePrices = {};
     priceLoading = {};
@@ -21483,8 +21696,13 @@ function clearAllData() {
     if (!saveStateGuarded(defaultState(), { replaceDamaged: true })) return;
     clearRecoveryCopies();
     clearBanner();
-    render();
-    closeDialog('settings-dialog');
+    wipeAllBrowserData().then(function () {
+      // A reload drops every in-memory copy (sync timers and secrets, cached
+      // history, open dialogs) so nothing can write the wiped data back.
+      try { location.reload(); return; } catch (e) { /* fall through */ }
+      render();
+      closeDialog('settings-dialog');
+    });
   });
 }
 
@@ -22052,12 +22270,103 @@ function syncUtf8Decode(bytes) {
 
 // --- Envelope + pure helpers ---
 
+// Resource limits for downloaded sync files. A legitimate envelope holds the
+// JSON backup (a few MB) or one attachment (<= ATTACH_MAX_BYTES, base64 twice
+// over), so 64 MiB leaves wide headroom while refusing a hostile or runaway
+// remote file BEFORE it is parsed, base64-decoded or run through PBKDF2.
+var SYNC_MAX_ENVELOPE_CHARS = 64 * 1024 * 1024;
+var SYNC_MAX_PBKDF2_ITER = 2000000;
+// An OAuth authorization is single use and only honoured for a few minutes
+// after the popup opened; a late or replayed callback is ignored.
+var SYNC_OAUTH_TTL_MS = 10 * 60 * 1000;
+function syncOAuthExpired(startedAt, now) {
+  return !(typeof startedAt === 'number') || !((now === undefined ? Date.now() : now) - startedAt <= SYNC_OAUTH_TTL_MS);
+}
+
+// Read a response body as text, refusing oversized payloads up front: via
+// Content-Length when the server sends it, and again on the text length.
+// Remote bodies are read as a byte stream with the limit enforced on the bytes
+// that actually arrive. Content-Length is untrusted (missing or understated) and
+// is only used to reject early. Nothing is decoded until the limit is satisfied,
+// the reader is cancelled and released on every exit, and a client without
+// streaming support is refused rather than falling back to an unbounded read.
+var SYNC_MAX_META_BYTES = 4 * 1024 * 1024; // listings, token replies, API error bodies
+
+function syncReadBodyLimited(res, maxBytes, tooBigMessage) {
+  var len = NaN;
+  try { len = Number(res && res.headers && res.headers.get && res.headers.get('content-length')); } catch (e) { len = NaN; }
+  if (isFinite(len) && len > maxBytes) return Promise.reject(new Error(tooBigMessage));
+  var body = res && res.body;
+  if (body === null) return Promise.resolve(''); // no content (204, HEAD)
+  if (!body || typeof body.getReader !== 'function' || typeof TextDecoder === 'undefined') {
+    return Promise.reject(new Error('sync failed: this browser cannot read the server response safely.'));
+  }
+  var reader = body.getReader();
+  var chunks = [];
+  var total = 0;
+  var release = function () {
+    try { reader.releaseLock(); } catch (e) { /* already released */ }
+    try { if (res.syncStop) res.syncStop(); } catch (e) { /* ignore */ }
+  };
+  return new Promise(function (resolve, reject) {
+    var fail = function (err) {
+      try { var c = reader.cancel(); if (c && c.catch) c.catch(function () {}); } catch (e) { /* ignore */ }
+      release();
+      reject(err);
+    };
+    var step = function () {
+      var p;
+      try { p = reader.read(); } catch (e) { fail(new Error('sync failed: the connection dropped while downloading.')); return; }
+      p.then(function (r) {
+        if (r.done) {
+          var buf = new Uint8Array(total), at = 0;
+          for (var i = 0; i < chunks.length; i++) { buf.set(chunks[i], at); at += chunks[i].length; }
+          var text;
+          try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) {
+            release();
+            reject(new Error('sync failed: the server response is not valid UTF-8 text.'));
+            return;
+          }
+          release();
+          resolve(text);
+          return;
+        }
+        var v = r.value;
+        if (!v || typeof v.length !== 'number') { fail(new Error('sync failed: unreadable server response.')); return; }
+        total += v.length;
+        if (total > maxBytes) { fail(new Error(tooBigMessage)); return; }
+        chunks.push(v);
+        step();
+      }, function (err) {
+        if (err && err.name === 'AbortError' && res.syncTimedOut) fail(res.syncTimedOut());
+        else fail(new Error('sync failed: the connection dropped while downloading.'));
+      });
+    };
+    step();
+  });
+}
+
+function syncReadTextLimited(res) {
+  return syncReadBodyLimited(res, SYNC_MAX_ENVELOPE_CHARS, 'sync failed: the remote file is too large to be a valid backup.');
+}
+
+function syncReadMetaText(res) {
+  return syncReadBodyLimited(res, SYNC_MAX_META_BYTES, 'sync failed: the server response is unexpectedly large.');
+}
+
+function syncReadMetaJson(res) {
+  return syncReadMetaText(res).then(function (t) {
+    try { return JSON.parse(t); } catch (e) { throw new Error('sync failed: the server returned an unreadable response.'); }
+  });
+}
+
 function syncEnvelopeWrap(ctB64, saltB64, ivB64, iter) {
   return JSON.stringify({ app: SYNC_APP, v: SYNC_VERSION, iter: iter, salt: saltB64, iv: ivB64, ciphertext: ctB64 });
 }
 
 function syncEnvelopeParse(text) {
   var data;
+  if (String(text).length > SYNC_MAX_ENVELOPE_CHARS) throw new Error('sync failed: file is too large to be a valid sync file.');
   try {
     data = JSON.parse(String(text));
   } catch (e) {
@@ -22067,7 +22376,7 @@ function syncEnvelopeParse(text) {
   if (data.app !== SYNC_APP && data.app !== SYNC_APP_LEGACY) throw new Error('sync failed: not an INOCULENS PLUTUS sync file.');
   if (data.v !== SYNC_VERSION) throw new Error('sync failed: unsupported sync version.');
   var iter = Number(data.iter);
-  if (!isFinite(iter) || Math.floor(iter) !== iter || iter < 1000 || iter > 5000000) {
+  if (!isFinite(iter) || Math.floor(iter) !== iter || iter < 1000 || iter > SYNC_MAX_PBKDF2_ITER) {
     throw new Error('sync failed: bad envelope parameters.');
   }
   if (typeof data.salt !== 'string' || typeof data.iv !== 'string' || typeof data.ciphertext !== 'string') {
@@ -22575,6 +22884,7 @@ function syncFetch(url, opts, label) {
             };
           } catch (e) { /* read-only response object: timer still bounds it */ }
         });
+        try { res.syncStop = stop; res.syncTimedOut = timedOut; } catch (e) { /* read-only response */ }
         return res;
       }, function (err) {
         stop();
@@ -22590,16 +22900,25 @@ function syncFetch(url, opts, label) {
 // tokens never travel in cleartext where anyone on the network can read them.
 function syncRequireHttpsUrl(url, label) {
   var s = String(url || '');
-  var m = s.match(/^(https?):\/\/([^\/]+)/i);
+  var m = s.match(/^(https?):\/\/([^\/?#]+)/i);
   if (!m) throw new Error('sync failed: enter the ' + label + ' URL starting with https://.');
   var hostport = m[2].toLowerCase();
+  // Credentials belong in the password fields, never in the URL: browsers
+  // refuse fetch() URLs that carry them, and "127.0.0.1@evil.com" must not be
+  // read as a loopback host.
+  if (hostport.indexOf('@') !== -1) {
+    throw new Error('sync failed: the ' + label + ' URL must not contain a username or password — enter them in the sign-in fields instead.');
+  }
   var host = hostport;
   if (host.charAt(0) === '[') {
     host = host.slice(1, host.indexOf(']'));
   } else {
     host = host.split(':')[0];
   }
-  var local = (host === 'localhost' || host === '::1' || host === '127.0.0.1' || host.indexOf('127.') === 0);
+  // Exact loopback names only: a prefix test would accept hosts such as
+  // "127.evil.com" and send the login over cleartext http.
+  var local = (host === 'localhost' || host === '::1' ||
+    /^127(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(host));
   if (m[1].toLowerCase() !== 'https' && !local) {
     throw new Error('sync failed: the ' + label + ' URL must use https:// (not http) so your login stays private.');
   }
@@ -22612,7 +22931,7 @@ function syncPostForm(url, body) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body
   }, 'the sign-in server').then(function (res) {
-    return res.json().then(function (data) {
+    return syncReadMetaJson(res).then(function (data) {
       if (!res.ok) {
         var msg = (data && (data.error_description || data.error)) || ('HTTP ' + res.status);
         throw new Error('sync failed: sign-in refused (' + String(msg).slice(0, 160) + ').');
@@ -22899,7 +23218,7 @@ function syncWebdavDownload(cfg) {
     method: 'GET',
     headers: { 'Authorization': auth }
   }, 'the WebDAV server').then(function (res) {
-    if (res.ok) return res.text();
+    if (res.ok) return syncReadTextLimited(res);
     if (res.status === 401 || res.status === 403) {
       throw new Error('sync failed: WebDAV login refused. Check the username and app password.');
     }
@@ -22912,7 +23231,7 @@ function syncDriveList(access, q) {
   var url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) +
     '&fields=' + encodeURIComponent('files(id,name,modifiedTime)') + '&spaces=drive';
   return syncFetch(url, { headers: { 'Authorization': 'Bearer ' + access } }, 'Google Drive').then(function (res) {
-    return res.json().then(function (data) {
+    return syncReadMetaJson(res).then(function (data) {
       if (!res.ok) throw new Error('sync failed: Drive lookup refused (HTTP ' + res.status + ').');
       return (data && data.files) || [];
     }, function () {
@@ -22953,7 +23272,7 @@ function syncDriveFolderStep(access, name, parentId, create) {
       headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: clean, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
     }, 'Google Drive').then(function (res) {
-      return res.json().then(function (data) {
+      return syncReadMetaJson(res).then(function (data) {
         if (!res.ok || !data || !data.id) {
           throw new Error('sync failed: Drive could not create the folder (HTTP ' + res.status + ').');
         }
@@ -22986,7 +23305,7 @@ function syncDriveUpload(access, cfg, text) {
         headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: cfg.filename, mimeType: 'application/json', parents: [fid] })
       }, 'Google Drive').then(function (res) {
-        return res.json().then(function (data) {
+        return syncReadMetaJson(res).then(function (data) {
           if (!res.ok || !data || !data.id) {
             throw new Error('sync failed: Drive could not create the file (HTTP ' + res.status + ').');
           }
@@ -23008,7 +23327,7 @@ function syncDriveDownload(access, cfg) {
       return syncFetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?alt=media', {
         headers: { 'Authorization': 'Bearer ' + access }
       }, 'Google Drive').then(function (res) {
-        if (res.ok) return res.text();
+        if (res.ok) return syncReadTextLimited(res);
         throw new Error('sync failed: Drive download refused (HTTP ' + res.status + ').');
       });
     });
@@ -23045,11 +23364,11 @@ function syncDropboxDownload(access, cfg) {
       'Dropbox-API-Arg': arg
     }
   }, 'Dropbox').then(function (res) {
-    if (res.ok) return res.text();
+    if (res.ok) return syncReadTextLimited(res);
     // 409 means the API refused the call: only treat path/not_found as
     // "no backup yet" — anything else is a real refusal, not a first sync.
     if (res.status === 409) {
-      return res.text().then(function (body) {
+      return syncReadMetaText(res).then(function (body) {
         if (body && body.indexOf('not_found') !== -1) {
           throw new Error('sync failed: no backup found on the server yet.');
         }
@@ -23073,7 +23392,7 @@ function syncDropboxExists(access, cfg) {
   }, 'Dropbox').then(function (res) {
     if (res.ok) return true;
     if (res.status === 409) {
-      return res.text().then(function (body) {
+      return syncReadMetaText(res).then(function (body) {
         if (body && body.indexOf('not_found') !== -1) return false;
         throw new Error('sync failed: Dropbox refused the request (HTTP 409).');
       }, function () {
@@ -23268,7 +23587,7 @@ function syncS3Put(cfg, text) {
     return syncFetch(s.url, { method: 'PUT', headers: s.headers, body: text }, 'the S3 endpoint').then(function (res) {
       if (res.ok) return true;
       if (res.status === 403 || res.status === 404) {
-        return res.text().then(function (body) {
+        return syncReadMetaText(res).then(function (body) {
           throw syncS3ErrorBody(body, 'sync failed: S3 bucket not found. Check the endpoint and bucket name.') ||
             new Error('sync failed: S3 keys refused. Check the access key, secret, region and bucket policy.');
         }, function () {
@@ -23283,9 +23602,9 @@ function syncS3Put(cfg, text) {
 function syncS3Get(cfg) {
   return syncS3Sign(cfg, 'GET', '').then(function (s) {
     return syncFetch(s.url, { method: 'GET', headers: s.headers }, 'the S3 endpoint').then(function (res) {
-      if (res.ok) return res.text();
+      if (res.ok) return syncReadTextLimited(res);
       if (res.status === 404 || res.status === 403) {
-        return res.text().then(function (body) {
+        return syncReadMetaText(res).then(function (body) {
           throw syncS3ErrorBody(body, 'sync failed: no backup found on the server yet.') ||
             new Error('sync failed: S3 keys refused. Check the access key, secret, region and bucket policy.');
         }, function () {
@@ -23393,7 +23712,7 @@ function syncRemoteStamp(cfg) {
       }, 'Dropbox').then(function (res) {
         if (res.status === 409) return 'missing';
         if (!res.ok) return '';
-        return res.json().then(function (d) {
+        return syncReadMetaJson(res).then(function (d) {
           var mark = (d && (d.rev || d.server_modified || d.content_hash)) || '';
           return mark ? 'dropbox|' + mark : '';
         }, function () { return ''; });
@@ -23995,7 +24314,7 @@ function syncDropboxListBlobs(access, cfg) {
       body = JSON.stringify({ cursor: cursor });
     }
     return syncFetch(url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + access, 'Content-Type': 'application/json' }, body: body }, 'Dropbox').then(function (res) {
-      return res.json().then(function (data) {
+      return syncReadMetaJson(res).then(function (data) {
         if (!res.ok) throw new Error('sync failed: Dropbox listing refused (HTTP ' + res.status + ').');
         ((data && data.entries) || []).forEach(function (e) {
           if (e && e['.tag'] === 'file' && typeof e.name === 'string') {
@@ -24021,7 +24340,7 @@ function syncS3ListBlobs(cfg) {
     if (token) qs = 'continuation-token=' + escQ(token) + '&' + qs;
     return syncS3SignQuery(cfg, 'GET', qs).then(function (s) {
       return syncFetch(s.url, { headers: s.headers }, 'the S3 endpoint').then(function (res) {
-        return res.text().then(function (body) {
+        return syncReadMetaText(res).then(function (body) {
           if (!res.ok) throw new Error('sync failed: S3 listing refused (HTTP ' + res.status + ').');
           var keys = [];
           try {
@@ -24055,7 +24374,7 @@ function syncWebdavListBlobs(cfg) {
     headers: { 'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml' },
     body: '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><propname/></propfind>'
   }, 'the WebDAV server').then(function (res) {
-    return res.text().then(function (body) {
+    return syncReadMetaText(res).then(function (body) {
       if (!res.ok && res.status !== 207) throw new Error('sync failed: WebDAV listing refused (HTTP ' + res.status + ').');
       var names = [];
       try {
@@ -24383,7 +24702,7 @@ function syncAutoPush() {
 function syncAdoptRemote(cfg, remotePlain) {
   var next;
   try {
-    next = importState(remotePlain);
+    next = parseImportedState(remotePlain);
   } catch (e) {
     if (isStorageWriteError(e)) throw e;
     throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
@@ -24444,8 +24763,22 @@ function syncPushFlow(opts) {  if (syncBusy) return;
     return;
   }
   syncPersistFormSecrets(cfg);
+  var plain;
+  try {
+    plain = exportStateStrict(st);
+  } catch (e) {
+    // Auto-sync stays quiet (status line only) so a persistent problem never
+    // spams banners; a manual push explains it.
+    try { syncSetStatus('Sync paused — some stored records are invalid. Nothing was uploaded.'); } catch (e2) { /* ignore */ }
+    if (!auto) {
+      showBanner('Sync stopped — nothing was uploaded.', 'error', {
+        title: 'Sync',
+        lines: [String((e && e.message) || e)]
+      });
+    }
+    return;
+  }
   syncSetBusy(true, 'Encrypting…');
-  var plain = exportState(st);
   var localAt = syncLocalExportedAt(plain);
   var curHash = syncHashOfExport(plain);
   var baseHash = cfg.lastSyncedHash || '';
@@ -24699,8 +25032,8 @@ function syncPullFlow() {
   }
   syncPersistFormSecrets(cfg);
   syncSetBusy(true, 'Downloading from ' + syncProviderLabel(cfg.provider) + '…');
-  // Snapshot first: importState() persists immediately, so a cancelled
-  // restore must put the previous state back — the confirm is real.
+  // Snapshot for the stale-copy comparison only: the backup is validated with
+  // parseImportedState() and written after the user confirms, never before.
   var beforeJson = null;
   try {
     beforeJson = exportState(loadState());
@@ -24712,7 +25045,7 @@ function syncPullFlow() {
   }).then(function (plain) {
     var next;
     try {
-      next = importState(plain);
+      next = parseImportedState(plain);
     } catch (e) {
       if (isStorageWriteError(e)) throw e;
       throw new Error('sync failed: the drive backup is invalid (' + String((e && e.message) || e).slice(0, 160) + ').');
@@ -24735,11 +25068,7 @@ function syncPullFlow() {
       true
     ).then(function (ok) {
       if (!ok) {
-        if (beforeJson) {
-          try {
-            saveStateGuarded(JSON.parse(beforeJson));
-          } catch (e2) { /* banner already shown by the guard on storage failure */ }
-        }
+        // Nothing was written before this prompt, so a cancel changes nothing.
         // The drive still disagrees after a cancelled restore (unless the
         // drive copy is simply older): keep the stale icon + panel hint.
         try {
@@ -25213,7 +25542,9 @@ function syncDownloadEncrypted() {
     return;
   }
   syncSetBusy(true, 'Encrypting…');
-  syncEncryptEnvelope(exportState(loadState()), pass).then(function (env) {
+  Promise.resolve().then(function () {
+    return syncEncryptEnvelope(exportStateStrict(loadState()), pass);
+  }).then(function (env) {
     syncSetBusy(false);
     downloadTextFile('plutus.inoculens.com-' + backupStamp() + '.enc.json', env, 'application/json');
     clearBanner();
@@ -25239,16 +25570,10 @@ function syncRestoreEncryptedFile(file) {
   }
   var reader = new FileReader();
   reader.onload = function () {
-    var beforeJson = null;
-    try {
-      beforeJson = exportState(loadState());
-    } catch (e) {
-      beforeJson = null;
-    }
     syncDecryptEnvelope(String(reader.result), pass).then(function (plain) {
       var next;
       try {
-        next = importState(plain);
+        next = parseImportedState(plain);
       } catch (e) {
         if (isStorageWriteError(e)) {
           showBanner(e.message === 'storage-unreadable' ? 'Save blocked — stored data could not be checked.' : 'Storage unavailable — change was not saved.', 'error', {
@@ -25270,11 +25595,7 @@ function syncRestoreEncryptedFile(file) {
         true
       ).then(function (ok) {
         if (!ok) {
-          if (beforeJson) {
-            try {
-              saveStateGuarded(JSON.parse(beforeJson));
-            } catch (e2) { /* banner already shown by the guard on storage failure */ }
-          }
+          // Nothing was written before this prompt, so a cancel changes nothing.
           syncSetStatus('Restore cancelled.');
           return;
         }
@@ -25619,6 +25940,7 @@ function priceDataConnectOAuth(cfg) {
         window.removeEventListener('message', onMessage);
         reject(new Error('Dropbox sign-in was cancelled or timed out.'));
       }, 180000);
+      var startedAt = Date.now();
       function onMessage(event) {
         var data = event && event.data;
         if (!data || data.type !== 'plutus-oauth' || data.state !== state) return;
@@ -25626,6 +25948,10 @@ function priceDataConnectOAuth(cfg) {
         done = true;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
+        if (syncOAuthExpired(startedAt)) {
+          reject(new Error('Dropbox sign-in expired — try again.'));
+          return;
+        }
         if (data.error || !data.code) {
           reject(new Error(data.error || 'Dropbox sign-in returned no authorization code.'));
           return;
@@ -25798,7 +26124,7 @@ function syncStartOAuth() {
     var state = 'plutus-' + cfg.provider + '-' + syncB64UrlEncode(syncRandomBytes(12));
     try {
       if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(SYNC_OAUTH_KEY, JSON.stringify({ state: state, verifier: pair.verifier, provider: cfg.provider }));
+        sessionStorage.setItem(SYNC_OAUTH_KEY, JSON.stringify({ state: state, provider: cfg.provider, at: Date.now() }));
       }
     } catch (e) { /* ignore */ }
     var url = syncOAuthAuthUrl(cfg.provider, clientId, redirect, pair.challenge, state);
@@ -25818,6 +26144,7 @@ function syncStartOAuth() {
     }
     var done = false;
     var timer = null;
+    var startedAt = Date.now();
     function onMsg(e) {
       var d = e && e.data;
       if (!d || d.type !== 'plutus-oauth') return;
@@ -25828,6 +26155,13 @@ function syncStartOAuth() {
       if (done) return;
       done = true;
       syncClearOAuthAttempt();
+      if (syncOAuthExpired(startedAt)) {
+        try { window.removeEventListener('message', onMsg); } catch (e3) { /* ignore */ }
+        try { if (timer) clearInterval(timer); } catch (e4) { /* ignore */ }
+        syncSetBusy(false);
+        showBanner('Sign-in expired — try Connect again.', 'error', { title: 'Connect', lines: ['The authorization window stayed open too long.'] });
+        return;
+      }
       try { window.removeEventListener('message', onMsg); } catch (e3) { /* ignore */ }
       try { if (timer) clearInterval(timer); } catch (e4) { /* ignore */ }
       if (d.error) {
@@ -26191,6 +26525,30 @@ function consentLoadGA() {
   } catch (e) { return false; }
 }
 
+// Google Analytics cookies set on this site (and, for the "auto" cookie
+// domain, on its parent domain). Expiring them is what makes a later Decline
+// actually stop the identifier, not just stop new events.
+function consentExpireGaCookies() {
+  try {
+    if (typeof document === 'undefined') return;
+    var names = [];
+    String(document.cookie || '').split(';').forEach(function (c) {
+      var n = c.split('=')[0].replace(/^\s+|\s+$/g, '');
+      if (n === '_ga' || n.indexOf('_ga_') === 0 || n === '_gid' || n.indexOf('_gat') === 0) names.push(n);
+    });
+    var host = String((typeof location !== 'undefined' && location.hostname) || '');
+    var parts = host.split('.');
+    var domains = [''];
+    if (host) domains.push(host);
+    for (var i = 1; i < parts.length - 1; i++) domains.push('.' + parts.slice(i).join('.'));
+    names.forEach(function (n) {
+      domains.forEach(function (d) {
+        document.cookie = n + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/' + (d ? '; domain=' + d : '');
+      });
+    });
+  } catch (e) { /* ignore */ }
+}
+
 function consentApply(choice) {
   consentWrite(choice);
   try {
@@ -26202,7 +26560,9 @@ function consentApply(choice) {
       ad_personalization: 'denied'
     });
   } catch (e) { /* ignore */ }
+  try { window['ga-disable-' + GA_MEASUREMENT_ID] = (choice !== 'accepted'); } catch (e) { /* ignore */ }
   if (choice === 'accepted') consentLoadGA();
+  else consentExpireGaCookies();
   try {
     var b = typeof document !== 'undefined' ? document.getElementById('cookie-banner') : null;
     if (b) b.hidden = true;
@@ -26210,25 +26570,44 @@ function consentApply(choice) {
   return choice;
 }
 
+function consentWireBanner() {
+  var acc = document.getElementById('cookie-accept');
+  var dec = document.getElementById('cookie-decline');
+  if (acc && !acc.getAttribute('data-wired')) {
+    acc.setAttribute('data-wired', '1');
+    acc.addEventListener('click', function () { consentApply('accepted'); });
+  }
+  if (dec && !dec.getAttribute('data-wired')) {
+    dec.setAttribute('data-wired', '1');
+    dec.addEventListener('click', function () { consentApply('declined'); });
+  }
+}
+
+// Footer "Cookie settings": withdrawing consent must be as easy as giving it.
+function consentReopen() {
+  try {
+    var banner = document.getElementById('cookie-banner');
+    if (!banner) return;
+    consentWireBanner();
+    banner.hidden = false;
+  } catch (e) { /* ignore */ }
+}
+
 function consentInitBanner() {
   try {
     if (typeof document === 'undefined') return;
     var banner = document.getElementById('cookie-banner');
     if (!banner) return;
+    var settings = document.getElementById('cookie-settings');
+    if (settings && !settings.getAttribute('data-wired')) {
+      settings.setAttribute('data-wired', '1');
+      settings.addEventListener('click', consentReopen);
+    }
     var choice = consentRead();
     if (choice === 'accepted') { banner.hidden = true; consentLoadGA(); return; }
     if (choice === 'declined') { banner.hidden = true; return; }
     banner.hidden = false;
-    var acc = document.getElementById('cookie-accept');
-    var dec = document.getElementById('cookie-decline');
-    if (acc && !acc.getAttribute('data-wired')) {
-      acc.setAttribute('data-wired', '1');
-      acc.addEventListener('click', function () { consentApply('accepted'); });
-    }
-    if (dec && !dec.getAttribute('data-wired')) {
-      dec.setAttribute('data-wired', '1');
-      dec.addEventListener('click', function () { consentApply('declined'); });
-    }
+    consentWireBanner();
   } catch (e) { /* banner never breaks boot */ }
 }
 

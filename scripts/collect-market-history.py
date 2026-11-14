@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import sys
 from collections import defaultdict
@@ -39,6 +40,20 @@ PAGE_LIMITS = {"okx": 100, "coinbase": 300, "kraken": 720}
 # assets listed after `since`. The pager must step to the next window instead.
 WINDOWED_EXCHANGES = frozenset({"kucoin", "okx", "coinbase"})
 MAX_OHLCV_PAGES = 100
+# A run where more than this share of assets (that have candidate markets)
+# had EVERY market fetch fail is a partial run: it must fail loudly instead of
+# publishing an archive that looks like a complete daily update.
+MAX_FAILED_SYMBOL_RATIO = 0.25
+# An asset whose newest stored point is at most this many days old was trading
+# recently, so every venue suddenly returning NO candles (without raising) is an
+# incomplete collection, not "this asset has no history".
+EXPECTED_LIVE_DAYS = 7
+# Health is judged on days that are actually publishable (corroborated by at
+# least MIN_INDEPENDENT_EXCHANGES trusted venues after identity and outlier
+# screening), never on raw candle counts. The newest observed days may be
+# uncorroborated for up to this many days (one venue publishing its latest daily
+# candle later than another) without the asset counting as incomplete.
+TAIL_LAG_DAYS = 1
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("plutus-market-history")
@@ -105,6 +120,55 @@ def weighted_median(rows: list[tuple[float, float]]) -> float | None:
         if running >= total / 2:
             return price
     return valid[-1][0]
+
+
+def publishable_venues(observations: list[tuple[float, float, str]], symbol: str) -> set[str]:
+    """Venues behind a publishable daily price, or an empty set when the day cannot be published.
+
+    This is THE publish rule (used by the aggregation loop and by health): trusted
+    venues only, outliers removed against the trusted median, and at least
+    MIN_INDEPENDENT_EXCHANGES distinct venues must remain. One venue can never
+    count twice, however many symbols, pages or duplicate records it returned."""
+    venues = {row[2] for row in filter_observations(observations, symbol)}
+    return venues if len(venues) >= MIN_INDEPENDENT_EXCHANGES else set()
+
+
+def assess_publishable_days(by_day: dict, symbol: str, held_days: set) -> dict:
+    """Judge one asset's fetch window on publishable days.
+
+    by_day:    day -> raw observations (close, volume, exchange_id) from this run.
+    held_days: days inside the window that the archive already publishes.
+
+    History is only expected from the first publishable day on: earlier days are
+    pre-listing / pre-corroboration (legitimate no-history, not failures). After
+    that, every day up to the last publishable day must be published (interior
+    gap = incomplete), and only TAIL_LAG_DAYS of newest observed days may lack
+    corroboration. Statuses:
+      "complete"            every required day is published
+      "no_observations"     no venue returned any valid candle (see classify_asset_fetch)
+      "uncorroborated"      candles exist but no day reaches the venue minimum
+      "incomplete"          some required day is missing or uncorroborated
+    """
+    observed = sorted(by_day)
+    published_now = {d for d, obs in by_day.items() if publishable_venues(obs, symbol)}
+    published = published_now | set(held_days)
+    result = {
+        "observedDays": len(observed), "corroboratedDays": len(published_now),
+        "uncorroboratedDays": len(observed) - len(published_now & set(observed)),
+        "missingDays": [], "tailUncorroborated": 0, "status": "complete",
+    }
+    if not observed:
+        result["status"] = "no_observations"
+        return result
+    if not published:
+        result["status"] = "uncorroborated"
+        return result
+    first, last = min(published), max(published)
+    result["missingDays"] = [d for d in range(first, last + 1) if d not in published]
+    result["tailUncorroborated"] = sum(1 for d in observed if d > last and d not in published)
+    if result["missingDays"] or result["tailUncorroborated"] > TAIL_LAG_DAYS:
+        result["status"] = "incomplete"
+    return result
 
 
 def candle_rows(exchange, market: str, since_ms: int) -> list[list[float]]:
@@ -180,6 +244,68 @@ def validate_archive(archive: dict, today: datetime | None = None) -> None:
                 raise ValueError(f'{symbol}: future-dated observation')
             previous_day = day
 
+def count_missing_days(points: list) -> int:
+    """Calendar days absent between the first and last stored point."""
+    days = sorted({int(row[0]) // DAY_MS for row in points if isinstance(row, list) and row})
+    return (days[-1] - days[0] + 1 - len(days)) if days else 0
+
+
+def classify_asset_fetch(market_count: int, market_failures: int, usable_rows: int,
+                         expected_live: bool) -> str:
+    """Classify one asset's collection outcome.
+
+    "ok":         at least one venue returned usable candles.
+    "failed":     every venue raised.
+    "no_data":    no usable candles although some venue raised, or although the
+                  asset is expected to be live (recent history or an active
+                  market). Venues answered with nothing, which is not a fetch
+                  error but is just as incomplete.
+    "no_history": every venue answered cleanly with nothing and nothing says
+                  this asset should have data (new, delisted or inactive).
+    """
+    if usable_rows > 0:
+        return "ok"
+    if market_count and market_failures >= market_count:
+        return "failed"
+    if market_failures > 0 or expected_live:
+        return "no_data"
+    return "no_history"
+
+
+def check_run_health(attempted: int, failed: int, empty: int = 0, uncorroborated: int = 0) -> None:
+    """Refuse to publish when too many assets lack publishable, corroborated data."""
+    unhealthy = failed + empty + uncorroborated
+    if attempted and unhealthy / attempted > MAX_FAILED_SYMBOL_RATIO:
+        raise RuntimeError(
+            f"{unhealthy} of {attempted} assets had no usable market data "
+            f"({failed} with every fetch failing, {empty} with only empty responses, "
+            f"{uncorroborated} without enough corroborated days); "
+            "refusing to publish a partial update over the last good archive"
+        )
+
+
+def write_archive_atomically(archive: dict, output: Path) -> None:
+    """Write beside the target, flush to disk, then rename over it.
+
+    A crash or error at any point leaves the previous archive untouched and
+    removes the temporary file, so a half-written archive is never published.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp = output.with_suffix(".json.tmp")
+    try:
+        with open(temp, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(archive, separators=(",", ":"), sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp.replace(output)
+    except BaseException:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def load_previous() -> tuple[dict, dict, int]:
     if not OUTPUT.exists():
         return {}, {}, 0
@@ -195,6 +321,17 @@ def main() -> int:
     symbols = symbols_from_app()
     old_assets, old_coverage, previous_version = load_previous()
     rebuild_archive = previous_version < COLLECTOR_VERSION
+    # Recency of each asset's stored history, kept even when a rebuild discards
+    # the points, so an asset that was trading is still expected to have data.
+    today_day = datetime.now(timezone.utc).date().toordinal()
+    recent_assets = set()
+    for sym, entry in old_assets.items():
+        pts = entry.get("points", []) if isinstance(entry, dict) else []
+        days = [int(r[0]) // DAY_MS for r in pts if isinstance(r, list) and r]
+        if days:
+            last_ordinal = datetime.fromtimestamp(max(days) * DAY_MS / 1000, timezone.utc).date().toordinal()
+            if today_day - last_ordinal <= EXPECTED_LIVE_DAYS:
+                recent_assets.add(sym)
     if rebuild_archive:
         log.info("Collector version changed; rebuilding all historical observations with the current validation policy")
         old_assets, old_coverage = {}, {}
@@ -241,6 +378,10 @@ def main() -> int:
         "rangeStart": initial_start.isoformat(), "assets": {}, "coverage": {},
     }
 
+    attempted_symbols = 0
+    failed_symbols = 0
+    empty_symbols = 0
+    uncorroborated_symbols = 0
     try:
         for symbol in symbols:
             old_rows = old_assets.get(symbol, {}).get("points", [])
@@ -270,14 +411,47 @@ def main() -> int:
                 continue
 
             by_day: dict[int, list[tuple[float, float, str]]] = defaultdict(list)
+            attempted_symbols += 1
+            market_failures = 0
+            usable_rows = 0
+            responded, valid_venues = set(), set()
             for exchange_id, market, client in chosen:
                 try:
                     rows = candle_rows(client, market, since_ms)
+                    responded.add(exchange_id)
+                    if rows:
+                        valid_venues.add(exchange_id)
+                    usable_rows += len(rows)
                     log.info("%s %s: %d daily candles", symbol, exchange_id, len(rows))
                     for stamp, close, quote_volume in rows:
                         by_day[int(stamp) // DAY_MS].append((float(close), float(quote_volume), exchange_id))
                 except Exception as exc:
+                    market_failures += 1
                     log.warning("%s %s %s: %s", symbol, exchange_id, market, exc)
+            expected_live = symbol in recent_assets or any(
+                (getattr(client, "markets", {}).get(market) or {}).get("active") is True
+                for _, market, client in chosen)
+            outcome = classify_asset_fetch(len(chosen), market_failures, usable_rows, expected_live)
+            if outcome == "failed":
+                failed_symbols += 1
+            elif outcome == "no_data":
+                empty_symbols += 1
+                log.warning("%s: %d usable candles from %d venues (%d raised); counted as an incomplete collection",
+                            symbol, usable_rows, len(chosen), market_failures)
+            elif outcome == "no_history":
+                log.info("%s: every venue returned no candles and nothing says it should have any; treated as no history", symbol)
+
+            # Health is decided on publishable (corroborated) days, not raw candles.
+            since_day = since_ms // DAY_MS
+            held_in_window = {d for d in old_by_day if d >= since_day}
+            health = assess_publishable_days(by_day, symbol, held_in_window)
+            log.info("%s: venues selected=%d responded=%d with-candles=%d; days observed=%d corroborated=%d status=%s",
+                     symbol, len(chosen), len(responded), len(valid_venues), health["observedDays"],
+                     health["corroboratedDays"], health["status"])
+            if outcome == "ok" and health["status"] in ("uncorroborated", "incomplete"):
+                uncorroborated_symbols += 1
+                log.warning("%s: %s - %d observed days uncorroborated, %d interior days missing, %d newest uncorroborated; counted as incomplete",
+                            symbol, health["status"], health["uncorroboratedDays"], len(health["missingDays"]), health["tailUncorroborated"])
 
             sources = set()
             for day, observations in sorted(by_day.items()):
@@ -286,7 +460,7 @@ def main() -> int:
                 # reference even when they report fabricated trading volume.
                 accepted = filter_observations(observations, symbol)
                 venues = {row[2] for row in accepted}
-                if len(venues) < MIN_INDEPENDENT_EXCHANGES:
+                if not publishable_venues(observations, symbol):
                     continue
                 typical_volume = median([row[1] for row in accepted]) or 1.0
                 weighted = [(price, min(max(volume, 1e-12), typical_volume * MAX_WEIGHT_MULTIPLE))
@@ -308,6 +482,8 @@ def main() -> int:
                 old_meta = old_coverage.get(symbol, {})
                 archive["coverage"][symbol] = {
                     "days": len(merged),
+                    "missingDays": count_missing_days(merged),
+                    "uncorroboratedDays": health["uncorroboratedDays"],
                     "first": datetime.fromtimestamp(merged[0][0] / 1000, timezone.utc).date().isoformat(),
                     "last": datetime.fromtimestamp(merged[-1][0] / 1000, timezone.utc).date().isoformat(),
                     "exchanges": sorted(set(old_meta.get("exchanges", [])) | sources),
@@ -321,13 +497,15 @@ def main() -> int:
             except Exception:
                 pass
 
+    # Health first: it names WHY nothing is publishable. The empty-archive guard stays as a backstop.
+    check_run_health(attempted_symbols, failed_symbols, empty_symbols, uncorroborated_symbols)
     if not archive["assets"]:
         raise RuntimeError("Collector produced an empty archive; refusing to overwrite last good data")
     validate_archive(archive)
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    temp = OUTPUT.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(archive, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
-    temp.replace(OUTPUT)
+    for symbol, meta in archive["coverage"].items():
+        if meta.get("missingDays"):
+            log.warning("%s: %d calendar days are missing inside the stored range", symbol, meta["missingDays"])
+    write_archive_atomically(archive, OUTPUT)
     log.info("Wrote %s (%d assets)", OUTPUT, len(archive["assets"]))
     return 0
 

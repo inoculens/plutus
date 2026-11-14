@@ -3237,6 +3237,8 @@ footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); f
 .foot-tag { margin: 0; color: var(--muted); font-size: 0.8rem; }
 .foot-link { color: var(--muted); font-size: 0.8rem; text-decoration: none; }
 .foot-link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+/* "Cookie settings" is a button (it opens the banner) styled like the links. */
+button.foot-btn { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-size: 0.8rem; line-height: inherit; cursor: pointer; }
 /* Version number doubles as the repo link: same quiet look, brightens on
    hover like the other footer links, never underlined. */
 #app-ver { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }

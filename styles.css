@@ -2656,9 +2656,26 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
    the line box above it, sinking the hash lower under its label than every
    other value. As a flex row the text keeps its exact line metrics and the
    glyph centers beside it. */
-.trade-block .stat-row[data-label="Tx"] .stat-val { display: flex; align-items: center; }
-.trade-block .stat-row[data-label="Tx"] .stat-val > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.trade-block .stat-row[data-label="Tx"] .tx-copy { flex: none; }
+.trade-block .stat-row.tx-row .stat-val { display: flex; align-items: center; }
+.trade-block .stat-row.tx-row .stat-val > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.trade-block .stat-row.tx-row .tx-copy { flex: none; }
+/* Swap records hold two hashes (sent / received). In the form each label
+   carries a small ticker tag so the asset is obvious; the pair sits closer
+   together than unrelated fields so it reads as one group. */
+#trade-form .txid-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+}
+#trade-form #t-txid-to-row > label { margin-top: 0.7rem; }
 #note-dialog-text {
   margin: 0.4rem 0 0;
   line-height: 1.65;

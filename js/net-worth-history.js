@@ -1458,6 +1458,9 @@
   }
 
   function onPlotDown(event) {
+    // Mouse/pen clicks do nothing: the dot keeps following the cursor.
+    // Only touch "holds" the dot while the finger is down (cleared on lift).
+    if (event.pointerType !== 'touch') return;
     var point = nearestPoint(event);
     if (!point) return;
     pinned = true;

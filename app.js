@@ -924,14 +924,13 @@ function swapAutoFiatValue(fromSym, fromQty, fromKind, toSym, toQty, toKind, dat
   });
 }
 
-// Optional on-chain transaction hash, stored on the trade and linked to
-// mempool.space in the record view. Blank/missing means absent (valid);
-// when present it must look like a real hash: optional 0x prefix, then
-// 8–128 alphanumerics (covers 64-hex BTC, 0x EVM and base58-style ids).
+// Transaction IDs are user-provided reference metadata, not validated hashes.
+// Accept any string (including short IDs, punctuation, spaces and exchange
+// references). BTC records may offer a mempool.space link; other assets only
+// expose the copy action. Missing values remain valid.
 function isValidTxid(v) {
-  if (v === undefined || v === null || String(v).trim() === '') return true;
-  if (typeof v !== 'string' && typeof v !== 'number') return false;
-  return /^(0x)?[A-Za-z0-9]{8,128}$/.test(String(v).trim());
+  if (v === undefined || v === null) return true;
+  return typeof v === 'string' || typeof v === 'number';
 }
 
 // --- Record attachments (invoices / receipts) ---
@@ -1767,7 +1766,7 @@ function isValidImportTrade(t, accountIds, accounts) {
   if (t.feeCurrency !== undefined && t.feeCurrency !== null && String(t.feeCurrency).trim() !== '') {
     if (!isValidCurrencyCode(t.feeCurrency)) return false;
   }
-  // txid is optional metadata; when present it must look like a tx hash
+  // txid is optional reference metadata; any string/number is accepted.
   if (!isValidTxid(t.txid)) return false;
   // attachment (invoice/receipt) is optional metadata; plain trades without
   // it must keep validating — when present it must be well-formed
@@ -19206,10 +19205,10 @@ function onTradeSubmit(ev) {
   if (isFutureDateStr(date)) { tradeFormError('date cannot be in the future'); return; }
   var note = uiVal('t-note', '').trim();
   var txid = uiVal('t-txid', '').trim();
-  if (txid !== '' && !isValidTxid(txid)) { tradeFormError((side === 'swap' ? 'Sent transaction ID' : 'Transaction ID') + ' looks invalid — paste the full tx hash.'); return; }
+  // Transaction IDs are free-form optional metadata; do not block saving based on their format.
   // Swaps hold a second hash: the received side's transaction.
   var txidTo = (side === 'swap') ? uiVal('t-txid-to', '').trim() : '';
-  if (txidTo !== '' && !isValidTxid(txidTo)) { tradeFormError('Received transaction ID looks invalid — paste the full tx hash.'); return; }
+
   var manualRateRaw = uiVal('t-manual-rate', '').trim();
   var manualPriceRaw = uiVal('t-manual-price', '').trim();
   var manualRate = (manualRateRaw === '') ? null : Number(manualRateRaw);

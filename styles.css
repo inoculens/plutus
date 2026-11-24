@@ -5166,10 +5166,13 @@ label.sync-check {
   border-radius: 999px;
 }
 
-/* The record form's expanded Details card needs the same safe inset below its
-   last field as it has around the fields, so the control no longer sits on
-   the card's bottom border. */
+/* Keep the collapsed Details row vertically balanced: its top and bottom
+   insets match. The larger safe inset belongs only to the expanded form, so
+   it never shifts the summary's resting position. */
 #trade-form details.adv {
+  padding-bottom: 0.4rem;
+}
+#trade-form details.adv[open] {
   padding-bottom: 0.9rem;
 }
 

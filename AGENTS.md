@@ -1,7 +1,7 @@
 # PLUTUS — instructions for AI agents (and humans)
 
 Local-first portfolio tracker. Static site: `index.html`, `app.js` (boot),
-the feature scripts under `js/`, `styles.css`, `netlify.toml`, and
+the feature scripts under `js/`, the stylesheets under `css/`, `netlify.toml`, and
 `stamp-version.sh`.
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
@@ -23,8 +23,15 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   `tests/script-order.test.js` loads every file on its own, in order, and
   fails on load-order mistakes, orphan files and a global name declared in
   two files.
-- Tests load the app with `require('./app-source').appSource()`, never by
-  reading one file.
+- Tests load the app with `require('./app-source').appSource()` (and the
+  styles with `cssSource()`), never by reading one file.
+- Styles live in `css/`, one area per file, linked by `index.html` in
+  cascade order: later files override earlier ones, so a rule's file
+  position matters. `responsive.css` holds the phone redesign; the files
+  after it are later refinements that intentionally win over it. Add a
+  rule to the file of its area; if it must beat a later file, put it after
+  that file's rules (or raise specificity), never reorder the links
+  casually.
 - State reads: `loadState()` returns a private copy (safe to mutate, then
   `saveState`); `peekState()` returns the shared validated copy for
   read-only hot paths. Both are cached on the exact stored text: never
@@ -70,7 +77,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Cache-busters: every local script and stylesheet tag in `index.html` has a
   `?v=` cache-buster. The same build step stamps the commit id into all of
   them, so each deploy ships fresh URLs (and Netlify caches `/js/*`,
-  `/app.js`, `/styles.css` as immutable). Never hand-bump them; keep the
+  `/app.js`, `/css/*` as immutable). Never hand-bump them; keep the
   checked-in fallback values as they are. New tags must carry `?v=` too.
 - The footer renders the version automatically (`#app-ver`); users only ever
   see that string, never these notes.

@@ -1,0 +1,135 @@
+/* Popovers: filter panel and account menu. */
+
+.filter-wrap { position: relative; }
+
+.filter-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  z-index: 40;
+  min-width: 13rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 0.6rem 0.8rem 0.8rem;
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .filter-panel, .menu-box { animation: pop-in 0.18s var(--ease) both; }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+.filter-panel-date {
+  width: 18rem;
+  max-width: calc(100vw - 1.8rem);
+}
+.filter-panel-date .filter-title,
+.filter-date-actions button { white-space: nowrap; }
+
+.filter-section-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.1rem 0 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-section-btn {
+  flex: 1 1 0;
+  min-height: 2rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.filter-section-btn.is-active {
+  color: var(--accent-ink);
+  border-color: transparent;
+  background: var(--accent);
+}
+
+.filter-title {
+  margin: 0.25rem 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.filter-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.45rem 0.1rem;
+  font-size: 0.9rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.filter-opt input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.filter-date-fields { display: grid; gap: 0.55rem; }
+.filter-date-field {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.filter-date-field input { width: 100%; }
+.filter-date-help, .filter-date-error {
+  margin: 0.55rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.filter-date-help { color: var(--muted); }
+.filter-date-error { color: var(--red); }
+.filter-date-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+.filter-date-actions button { flex: 1 1 0; padding: 0.35rem 0.45rem; }
+
+.date-range-warning {
+  margin: 1rem 0 0.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--amber-line);
+  border-radius: var(--radius);
+  background: var(--amber-bg);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.empty-trades {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 2.5rem 1rem;
+  text-align: center;
+}
+
+.empty-trades .muted { margin: 0; }

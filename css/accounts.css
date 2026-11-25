@@ -1,0 +1,200 @@
+/* Account list: grid, section headers, group mains, recolored cards and the
+   color dialog. */
+
+/* One implicit track. minmax(0, 1fr) is the grid-blowout backstop: a long
+   nowrap account name must never size the track wider than the phone, or
+   every card on the page starts at the right place and runs off the right. */
+#accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; padding: 0; }
+
+#accounts > h2, .section-title {
+  margin: 1.2rem 0 0.2rem;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  margin: 0.8rem 0 0.35rem;
+}
+
+.section-head .section-title { margin: 0; }
+
+/* Keep Select at its original position; the filter and following
+   add controls remain packed against the right edge. */
+#account-detail .section-head .filter-wrap { margin-left: auto; }
+/* Keep Filter / + Ledger / + Record spacing compact in both selection modes. */
+#account-detail .section-head.trades-head .filter-wrap + button,
+#account-detail .section-head.trades-head .filter-wrap + button + .t-add {
+  margin-left: -0.35rem;
+}
+/* Group Ledgers header (title + currency select + Ledger button): the
+   select hugs the button at the right edge, like the trades filter. */
+#account-detail .section-head select { margin-left: auto; }
+/* Ledgers headers never wrap: title left, currency + button packed right on
+   one line at every width (the title truncates instead of dropping). */
+#account-detail .section-head.ledgers-head { flex-wrap: nowrap; }
+#account-detail .section-head.ledgers-head .section-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#account-detail .section-head.ledgers-head select, #account-detail .section-head.ledgers-head button { flex: 0 0 auto; }
+/* Form fields default to width:100% — the header dropdown must size to content. */
+#account-detail .section-head.ledgers-head select { width: auto; }
+
+.section-actions { display: flex; align-items: center; gap: 0.45rem; }
+
+/* Section actions are compact pills, not full buttons */
+.section-actions > button,
+.section-head > button,
+.filter-wrap > button {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* Group mains: sub-accounts stack exactly like the home list. */
+.group-subs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; padding: 0; }
+
+.ghost.select-on {
+  color: var(--accent-ink);
+  border-color: transparent;
+  background: var(--accent);
+}
+
+.select-count { font-size: 0.82rem; white-space: nowrap; }
+
+.account-card.selected {
+  border-color: var(--accent-line);
+  background: var(--surface-2);
+}
+
+.card-check {
+  width: 1.3rem;
+  height: 1.3rem;
+  min-height: 0;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.action-del {
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  min-height: 2.6rem;
+  border-radius: 9px;
+  color: var(--loss);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.action-del:hover { background: var(--red-bg); color: var(--red); }
+
+.action-opt {
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  min-height: 2.6rem;
+  border-radius: 9px;
+  white-space: nowrap;
+}
+
+.action-opt:hover { background: var(--accent-soft); }
+
+/* ————— Recolored cards: a tint the owner picked, kept quiet ————— */
+.account-card[data-colored="1"] {
+  border-color: color-mix(in srgb, var(--acct-color) 38%, transparent);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--acct-color) 13%, transparent), transparent 55%),
+    var(--surface);
+}
+
+.account-card[data-colored="1"]:hover {
+  border-color: color-mix(in srgb, var(--acct-color) 55%, transparent);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--acct-color) 19%, transparent), transparent 60%),
+    var(--surface-2);
+}
+
+.account-card[data-colored="1"] .acct-avatar {
+  background: var(--acct-color);
+  border: none;
+}
+
+/* ————— Color dialog ————— */
+.swatch-title {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.swatch-title:first-of-type { margin-top: 0.25rem; }
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.swatches button {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.6rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.84rem;
+}
+
+.swatches .sw {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.color-custom {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.color-custom label { margin: 0; }
+
+input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 3px; }
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
+
+#c-hex { flex: 1; min-width: 0; }
+#c-apply { flex-shrink: 0; }

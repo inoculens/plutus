@@ -1,0 +1,301 @@
+/* App shell: top bar (phones + tablets), sidebar rail (>= 1024px) and the
+   floating dock. */
+
+/*
+   One header, one dock, restyled by width. Dock = Home · Add record
+   (accounts only, JS-toggled) · Settings. */
+header.brand {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  background: rgba(9, 9, 10, 0.82);
+  backdrop-filter: saturate(1.4) blur(18px);
+  -webkit-backdrop-filter: saturate(1.4) blur(18px);
+  padding-top: env(safe-area-inset-top);
+}
+
+.brand-inner {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 0.6rem 1rem;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-id {
+  display: flex;
+  align-items: center;
+  margin-right: auto;
+  min-width: 0;
+}
+
+.brand-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius);
+}
+
+.brand-mark {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: #0b0b0c;
+  overflow: hidden;
+}
+
+/* The logo keeps its original gold: it is the one brand-colored element in
+   an otherwise monochrome shell. */
+.brand-mark.brand-logo {
+  background: url('/icons/android-chrome-192x192.png') center / cover no-repeat #0b0b0c;
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.brand h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.brand h1 span {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.tb-field {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tb-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.tb-field select {
+  width: auto;
+  min-width: 4.6rem;
+  min-height: 2.25rem;
+  padding: 0.3rem 1.9rem 0.3rem 0.8rem;
+  border-radius: 999px;
+  background-color: var(--surface);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background-position: right 0.7rem center;
+}
+
+/* Segmented control with a sliding thumb (pure CSS via :has) */
+.segmented {
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.segmented::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 2);
+  border-radius: 999px;
+  background: var(--surface-4);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  transition: transform 0.3s var(--ease);
+}
+
+.segmented:has(button:nth-child(2)[aria-pressed="true"])::before { transform: translateX(100%); }
+
+.segmented button {
+  min-height: 2rem;
+  padding: 0.3rem 0.95rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.segmented button:hover { background: transparent; color: var(--text); }
+.segmented button:active { transform: none; }
+.segmented button[aria-pressed="true"] { color: var(--text); }
+
+/* Phones: the logo mark alone keeps the control row on one line */
+@media (max-width: 520px) {
+  .brand h1 { display: none; }
+  .brand-mark { width: 2.25rem; height: 2.25rem; }
+  .topbar-controls { flex: 1 1 auto; justify-content: flex-end; }
+  .segmented { flex: 1 1 auto; max-width: 13rem; }
+}
+
+/* Dock: floating pill on phones/tablets */
+#dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* --dock-lift (set from app.js) keeps the pill above the footer once the
+     footer scrolls into view. */
+  bottom: calc(0.8rem + env(safe-area-inset-bottom) + var(--dock-lift, 0px));
+  z-index: 25;
+  width: max-content;
+  max-width: calc(100vw - 1.5rem);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: rgba(22, 22, 23, 0.82);
+  backdrop-filter: saturate(1.4) blur(22px);
+  -webkit-backdrop-filter: saturate(1.4) blur(22px);
+  box-shadow: var(--shadow-pop);
+}
+
+#dock .dock-item,
+#dock #fab-trade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.9rem;
+  padding: 0 1rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease), transform 0.12s var(--ease);
+}
+
+#dock .dock-item:hover { color: var(--text); background: var(--accent-soft); border-color: transparent; }
+#dock .dock-item:active, #dock #fab-trade:active { transform: scale(0.95); }
+#dock svg { flex-shrink: 0; }
+#dock .dock-label { display: none; }
+
+/* Current page: Home is current whenever the account view is closed */
+body:has(#view-home:not([hidden])) #nav-home { color: var(--text); background: var(--surface-4); }
+
+#dock #fab-trade {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  padding: 0 1.15rem;
+  min-height: 2.9rem;
+}
+#dock #fab-trade:hover { background: #ececee; }
+#dock #fab-trade .dock-label { display: inline; }
+
+/* A modal owns the screen */
+body.modal-open #dock { display: none; }
+
+@media (min-width: 1024px) {
+  body { padding-left: var(--rail); }
+
+  header.brand {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: var(--rail);
+    z-index: 20;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+    background: rgba(9, 9, 10, 0.55);
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    padding-top: 0;
+  }
+  .brand-inner { max-width: none; margin: 0; padding: 1.5rem 1rem 1.25rem; height: 100%; }
+  .topbar { flex-direction: column; align-items: stretch; gap: 0; height: 100%; }
+  .brand-id { margin: 0; }
+  .brand-mark { width: 2.25rem; height: 2.25rem; border-radius: 10px; }
+  .brand h1 { font-size: 0.78rem; line-height: 1.15; }
+  .brand h1 span { display: block; font-size: 0.95rem; letter-spacing: 0.24em; }
+  .topbar-controls {
+    margin: auto 0 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.7rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .topbar-controls .tb-field select { width: 100%; }
+  .topbar-controls .segmented { display: grid; }
+  #tb-sync { order: -1; align-self: flex-start; }
+
+  #dock {
+    left: 0;
+    right: auto;
+    top: 6.25rem;
+    bottom: auto;
+    width: var(--rail);
+    max-width: none;
+    margin: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.2rem;
+    padding: 0 0.75rem;
+    border: none;
+    border-radius: 0;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+  }
+  #dock .dock-item, #dock #fab-trade {
+    justify-content: flex-start;
+    min-height: 2.6rem;
+    padding: 0 0.85rem;
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+  }
+  #dock .dock-label { display: inline; }
+  body.modal-open #dock { display: flex; }
+}
+
+/* One entry point per width: the Trades header carries "+ Record" above 720px,
+   so the dock's Add record only exists where that button is hidden. */
+@media (min-width: 721px) {
+  #fab-trade { display: none !important; }
+}

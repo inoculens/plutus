@@ -1,0 +1,69 @@
+/* Buttons. */
+
+button {
+  min-height: 2.6rem;
+  padding: 0.55rem 1.05rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  transition: transform 0.12s var(--ease), background 0.16s ease, border-color 0.16s ease, color 0.16s ease, opacity 0.16s ease;
+}
+
+button:hover { border-color: rgba(255, 255, 255, 0.24); background: var(--surface-3); }
+button:active { transform: scale(0.975); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:disabled:active { transform: none; }
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-ink);
+  font-weight: 650;
+}
+
+button.primary:hover { background: #ececee; border-color: transparent; }
+
+button.ghost { background: transparent; }
+button.ghost:hover { background: var(--accent-soft); }
+
+button.quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+  padding: 0.55rem 0.75rem;
+}
+
+button.quiet:hover { color: var(--text); border-color: var(--border); background: var(--accent-soft); }
+
+/* Destructive confirm: deep red, so it never reads as a routine "OK". */
+button.primary.danger-btn {
+  background: var(--red-solid);
+  border-color: transparent;
+  color: #fff;
+}
+button.primary.danger-btn:hover { background: #cc4540; }
+
+button.quiet.danger:hover { color: var(--red); border-color: var(--red-line); background: var(--red-bg); }
+
+.icon-btn {
+  padding: 0;
+  width: 2.25rem;
+  min-height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

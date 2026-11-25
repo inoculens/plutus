@@ -20,8 +20,9 @@ const { Diagnostics, PROBE_PATH, PROBE_EVAL_MARKER, PROBE_INLINE_MARKER } = requ
 //   E2E_CSP_MUTANT=...    serve a weakened policy (inline | eval)
 //   E2E_INJECT=...        add an unrelated violation (script | exception | asset)
 const CSP_ONLY = process.env.E2E_CSP_ONLY === '1';
-// Every page asset must load: the document, each app script and the stylesheet.
-const REQUIRED_ASSETS = ['/', '/styles.css'].concat(require('./app-source').appScripts({ withChart: true }).map(f => '/' + f));
+// Every page asset must load: the document, each stylesheet and each app script.
+const { appScripts, styleSheets } = require('./app-source');
+const REQUIRED_ASSETS = ['/'].concat(styleSheets(), appScripts({ withChart: true })).map(f => f === '/' ? f : '/' + f);
 const chromium = loadChromium('browser-e2e');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.txt': 'text/plain' };

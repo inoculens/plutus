@@ -37,7 +37,7 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
   // Drag handle (dice-grip, like account cards): live on every record at all
   // times — no Select trip needed before reordering. It hangs on the CARD
   // itself as a rail along the left edge (dots ride in the rail's vertical
-  // middle; positioning lives in styles.css), and the drop target decides
+  // middle; positioning lives in css/records.css), and the drop target decides
   // which records may swap, not any selection. Every account a record
   // appears under shows the grip, including the accounts a multi-source
   // transfer only propagates to.

@@ -1,0 +1,47 @@
+/* Page layout: main column, section rhythm, view transitions. */
+
+main {
+  max-width: var(--max);
+  width: 100%;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 7rem;
+  display: grid;
+  gap: 1.5rem;
+  flex: 1 0 auto;
+}
+
+@media (min-width: 1024px) {
+  main { padding: 2.25rem 2.5rem 3.5rem; }
+}
+
+/* Sections stack inside view wrappers, so the gap must live there —
+   otherwise hero / summary / accounts glue together with zero space. */
+#view-home, #view-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  align-content: start;
+  min-width: 0;
+}
+
+/* Views fade in when navigation swaps them (display change restarts it).
+   Opacity only, and no fill-mode: a transform here would make the view the
+   containing block for the fixed mobile bottom-sheet menus (.filter-panel),
+   pinning them to the page instead of the screen. */
+@media (prefers-reduced-motion: no-preference) {
+  #view-home:not([hidden]), #view-account:not([hidden]) { animation: view-in 0.35s ease-out; }
+  @keyframes view-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+section, aside { background: transparent; border: none; padding: 0; min-width: 0; }
+section h2, aside h2 {
+  margin: 0 0 0.8rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.muted { color: var(--muted); }

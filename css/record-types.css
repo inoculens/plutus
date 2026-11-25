@@ -1,0 +1,75 @@
+/* Record type pills, computed fee field, info badges and the account detail
+   meta (label / note). */
+
+.side-transfer { color: var(--blue); background: var(--blue-bg); border-color: var(--blue-line); }
+/* Computed-only transfer fee: visibly non-editable. */
+#t-networkfee[readonly] { opacity: 0.55; cursor: not-allowed; background: var(--surface-2); }
+/* Tap-for-info affordance: ⓘ badge on labels whose value opens a popup. */
+.info-dot { opacity: 0.55; font-size: 0.82em; margin-left: 0.3rem; }
+/* Transfer-fees card value opens the plain-language explainer. */
+.trade-block .stat-row[data-label="Transfer fees"] .stat-val { cursor: pointer; }
+.side-income { color: var(--violet); background: var(--violet-bg); border-color: var(--violet-line); }
+.side-expense { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-line); }
+
+.fld-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.trade-edit { margin-left: auto; padding: 0.45rem 0.7rem; min-height: 2.5rem; font-size: 1rem; line-height: 1; }
+.trade-edit:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* ————— Account detail meta (label / note, inside the header box) ————— */
+.detail-meta-block {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.25rem;
+  min-width: 0;
+}
+.detail-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+.detail-meta-label {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.detail-meta-val {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Multi-line account labels: wrap fully, break long tokens. */
+.detail-meta-val.detail-meta-multiline {
+  white-space: pre-wrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+/* Label rows stack: caption above, text underneath. */
+.detail-meta-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+.label-edit-row {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+.label-edit-row button { min-width: 6rem; }

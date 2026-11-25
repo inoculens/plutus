@@ -1,0 +1,63 @@
+/* Footer, plus legacy table safety styles. */
+
+footer { border-top: 1px solid var(--border); background: rgba(7, 8, 11, 0.6); flex-shrink: 0; }
+.foot-inner {
+  position: relative;
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 1.4rem 1rem 2.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem 1.25rem;
+  flex-wrap: wrap;
+}
+.foot-inner::before { content: none; }
+.foot-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.foot-brand strong {
+  color: var(--text);
+  font-weight: 700;
+}
+.brand-mark.sm { width: 1.5rem; height: 1.5rem; border-radius: 7px; }
+.foot-tag { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.foot-link { color: var(--muted); font-size: 0.8rem; text-decoration: none; }
+.foot-link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+/* "Cookie settings" is a button (it opens the banner) styled like the links. */
+button.foot-btn { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-size: 0.8rem; line-height: inherit; cursor: pointer; }
+/* Version number doubles as the repo link: same quiet look, brightens on
+   hover like the other footer links, never underlined. */
+#app-ver { display: inline-flex; align-items: center; gap: 0.4rem; text-decoration: none; }
+#app-ver:hover { color: var(--text); text-decoration: none; }
+#app-ver img { width: 0.9rem; height: 0.9rem; display: block; }
+.foot-ver { margin: 0 0 0 auto; font-size: 0.79rem; color: var(--muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 720px) {
+  /* Brand, tagline and version each take a full row; Privacy + Credits
+     share one row side by side. */
+  .foot-inner { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.25rem; }
+  .foot-brand, .foot-tag { flex: 1 1 100%; }
+  .foot-ver { flex: 1 1 100%; margin-left: 0; }
+  /* Footer edges line up with the page content (main uses 0.9rem here). */
+  .foot-inner { padding-left: 0.9rem; padding-right: 0.9rem; }
+  /* First-run page: everything centred, in the order brand, Privacy +
+     Credits, tagline, then the GitHub version link. */
+  body.is-empty .foot-inner { justify-content: center; text-align: center; }
+  body.is-empty .foot-brand { order: 1; justify-content: center; }
+  body.is-empty .foot-link { order: 2; }
+  body.is-empty .foot-tag { order: 3; }
+  body.is-empty .foot-ver { order: 4; justify-content: center; }
+}
+
+/* Tables (legacy safety) */
+table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
+th, td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.07em; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-display); }

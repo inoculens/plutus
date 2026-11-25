@@ -1,0 +1,281 @@
+/* Responsive: phones are a full redesign below 720px; small and very small
+   phones refine it. Desktop rules in the files before this never change. */
+
+/* Single structural switch at 720px: everything below stacks and fills the
+   phone width. Components are fluid (wrap / auto-fit / minmax) so any
+   in-between width degrades gracefully — there is no half-desktop state. */
+@media (max-width: 720px) {
+  /* No sideways scroll from long money values; boxes keep their size. */
+  html, body { overflow-x: clip; }
+  body { font-size: 16px; }
+
+  /* — Page frame — */
+  main { padding: 1rem 0.9rem 7rem; gap: 1.1rem; }
+  #view-home, #view-account { gap: 1.1rem; }
+  #banner { font-size: 0.88rem; }
+
+  /* Mobile hero rules live after the desktop hero section near the end of
+     the file — same-specificity later rules win, so that placement is
+     load-bearing. Nothing hero-related may sit here. */
+
+  /* — Summary: fixed 2×2 grid, values always truncate inside their cell — */
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card { padding: 0.7rem 0.85rem 0.6rem; min-width: 0; }
+  .card:nth-child(3) { border-left: none; }
+  .card:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .card-value { font-size: 1.05rem; }
+
+  /* — Accounts: one row (grip + avatar + name + figures), figures stack
+       under the name only on very narrow cards; pager wraps, never scrolls. */
+  #accounts { gap: 0.55rem; }
+  .section-head { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  /* Trades header stays a title-left / actions-right row on phones too, so
+     the type filter sits right next to + Record instead of stacking left. */
+  #account-detail .section-head { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  #account-detail .section-head .section-title { flex: 1 1 auto; }
+  .section-actions { flex-wrap: wrap; }
+  .section-actions button { flex: 1 1 auto; min-height: 2.75rem; }
+  .account-card { flex-wrap: nowrap; align-items: center; gap: 0.7rem; padding: 0.7rem 0.8rem; min-height: 4.2rem; }
+  .acct-avatar { width: 2.6rem; height: 2.6rem; }
+  .acct-mid { gap: 0.05rem; }
+  .account-name { font-size: 0.95rem; }
+  .acct-figs { align-items: flex-end; text-align: right; flex-shrink: 0; max-width: 42%; }
+  .acct-value { font-size: 0.95rem; }
+  .acct-pl { font-size: 0.78rem; }
+  .pager { gap: 0.45rem; flex-wrap: wrap; justify-content: center; }
+  .page-btn { flex: 0 0 auto; min-width: 2.75rem; min-height: 2.75rem; }
+  .trade-bottom-bar { flex-wrap: wrap; }
+  .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: center; flex-wrap: wrap; }
+  .filter-panel { position: fixed; left: 0.9rem; right: 0.9rem; top: auto; bottom: calc(0.9rem + env(safe-area-inset-bottom)); max-height: 50vh; max-height: 50dvh; }
+  .account-create-row { flex-direction: column; align-items: stretch; }
+  .account-create-row .fld { min-width: 0; }
+
+  /* — Detail header (mobile): name row 1 left + menu pinned top-right — */
+  .detail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 1.1rem 1rem 0.95rem; gap: 0.55rem 0.75rem; }
+  .detail-name { grid-column: 1; grid-row: 1; font-size: 1.3rem; overflow-wrap: anywhere; min-width: 0; align-self: center; }
+  .detail-head .menu { grid-column: 2; grid-row: 1; margin-left: 0; align-self: start; }
+  .detail-head .detail-meta-block { grid-column: 1 / -1; }
+  /* Trades +Record duplicates the floating + on phones — FAB owns it. */
+  #account-detail .t-add { display: none; }
+  .menu summary { min-height: 2.75rem; }
+  .trade-block { display: flex; flex-wrap: wrap; column-gap: 1rem; row-gap: 0.15rem; padding: 0.5rem 0.9rem 0.4rem; padding-left: 3.2rem; }
+  .trade-facts { flex-wrap: wrap; overflow: visible; gap: 0 1rem; }
+  .trade-head {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+    column-gap: 0.6rem;
+    /* Containing block for the pinned action cluster. min-width: 0 lets the
+       head shrink to the card width when many nowrap pills would otherwise
+       force it wider and push the buttons off-screen. No right padding: the
+       ▾ ✎ 🗑 corner is reserved per-pill below, and ONLY on the pills that
+       share the first line with it — wrapped rows run the full width and go
+       under the buttons. */
+    position: relative;
+    min-width: 0;
+  }
+  /* Line-1 pills stop short of the pinned ▾ ✎ 🗑 corner: each caps itself at
+     head minus the corner, so a line-1 run of short pills can never slide
+     under the trio. A too-long pill wraps down instead, where the corner is
+     free. (now-worth trims via its global overflow rules.) */
+  .trade-head .trade-when { max-width: calc(100% - 7rem); }
+  .trade-head .side { max-width: calc(100% - 7rem); }
+  .trade-head .trade-now { max-width: calc(100% - 7rem); }
+  .trade-head .trade-pair {
+    max-width: calc(100% - 7rem);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Once measured (syncTradeHeadRows) on a line below the pinned corner, the
+     cap lifts: the pill runs the full width under the ▾ ✎ 🗑 buttons. */
+  .trade-head .trade-now.head-own-row,
+  .trade-head .trade-pair.head-own-row { max-width: none; }
+  /* Record head on phones: date + type + pair left, the ▾ ✎ 🗑 cluster
+     pinned top-right (line-1 pills self-cap short of it), and the long
+     pills — now-worth when it wraps, the swap/what route, the FIFO record #
+     — take whole rows below, running the FULL width under the buttons. */
+  .trade-head .trade-when { order: 1; }
+  .trade-head .side { order: 2; }
+  /* Pinned to the top-right corner, taken out of the wrap flow so pills can
+     never push the ▾ ✎ 🗑 cluster onto a line below. */
+  .trade-head .trade-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    margin: 0;
+    order: unset;
+  }
+  .trade-head .trade-edit, .trade-head .trade-del { order: 3; }
+  /* ▾ ✎ 🗑 are three equal little squares, and their box never hides: a quiet
+     button only paints its border on hover/press, which on a phone leaves a
+     squeezed sliver that seems to appear "after pressing". 2rem keeps the trio
+     square and touch-friendly; the actions cluster is pinned top-right so it
+     never drops a line, whatever the pill count. */
+  .trade-head .trade-more, .trade-head .trade-edit, .trade-head .trade-del {
+    display: inline-flex; align-items: center; justify-content: center; position: relative;
+    width: 2rem; height: 2rem; min-width: 2rem; min-height: 2rem; padding: 0;
+    border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+  }
+  /* The squares stay 2rem, the thumb still gets ~44px: an invisible overlay
+     grows each hit area out into the gaps without moving a pixel. */
+  .trade-head .trade-more::after, .trade-head .trade-edit::after, .trade-head .trade-del::after {
+    content: ''; position: absolute; inset: -0.35rem -0.25rem;
+  }
+  .trade-head .trade-edit { margin-left: 0; }
+  .trade-head .trade-more { margin-right: 0.25rem; }
+  .trade-head .trade-pair { order: 3; }
+  .trade-block.is-swap .trade-head .trade-actions { order: 4; }
+  .trade-block.is-swap .trade-head .trade-now { order: 5; }
+  .trade-block.is-swap .trade-head .trade-what { order: 6; }
+  .trade-block.is-swap .trade-head .trade-id { order: 7; }
+  .trade-head .trade-now { order: 4; }
+  .trade-head .trade-what { order: 5; }
+  .trade-head .trade-id { order: 6; flex-basis: 100%; max-width: fit-content; }
+  /* The route pill is a mini flex row: the text trims with an ellipsis and
+     the ⓘ badge sits right after it, in continuation of the text — never on a
+     line of its own. The text is the only part that may shrink, so the
+     badge keeps its size and the text gives up room instead. Basis 100% puts
+     it on its own row under the pinned corner, so a long route reads the
+     full card width instead of stopping where the buttons sit. */
+  .trade-what { display: flex; align-items: baseline; min-width: 0; }
+  .trade-head .trade-what { flex: 1 1 100%; }
+  .trade-what-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+  .trade-what .info-dot { flex: 0 0 auto; }
+  .trade-block .stat-row { display: flex; flex-direction: column; gap: 0.08rem; flex: 1 1 8rem; min-width: 0; border-bottom: none; padding: 0.15rem 0; }
+  .trade-block .stat-row[data-label="Note"] { flex-basis: 100%; max-width: none; }
+  .trade-block .stat-row.rate-line { flex-basis: 100%; max-width: none; }
+  /* Collapsed record cards: pills + the ▾ ✎ 🗑 cluster + the two key numbers;
+     a tap anywhere (or the ▾) drops every other fact down. Only this
+     breakpoint hides rows — desktop and the DOM keep every row as before. */
+  .trade-caret { display: block; font-size: 0.9rem; line-height: 1; transition: transform 0.15s ease; }
+  .trade-block.is-open .trade-caret { transform: rotate(180deg); }
+  .trade-block:not(.is-open) .trade-facts > .stat-row:not(.is-primary),
+  .trade-block:not(.is-open) .lot-links { display: none; }
+  .trade-foot { flex: 1 1 100%; padding-bottom: 0.3rem; }
+
+  /* — Dialogs: bottom sheets that survive the on-screen keyboard. —
+     dvh/svh track the shrunken viewport (with vh fallback); the sheet is
+     anchored to the bottom, scrolls internally, and reserves the safe area
+     so the last field + primary button clear the keyboard. */
+  dialog {
+    width: 100vw; max-width: 100vw;
+    margin: auto 0 0 0; margin-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom));
+    max-height: 92vh; max-height: 92svh; max-height: 92dvh;
+    overflow-y: auto; overscroll-behavior: contain;
+    scroll-padding-bottom: 3rem;
+  }
+  @supports (height: 1dvh) {
+    dialog { max-height: 92dvh; }
+  }
+  dialog[open] { display: flex; flex-direction: column; }
+  .dialog-head [data-close] { min-height: 2.75rem; min-width: 2.75rem; }
+  #trade-dialog[open], #account-dialog[open], #ledger-dialog[open], #group-dialog[open], #settings-dialog[open],
+  #confirm-dialog[open], #note-dialog[open], #error-dialog[open], #color-dialog[open] {
+    width: 100vw; max-width: 100vw;
+    margin: auto 0 0 0;
+    border-radius: 20px 20px 0 0;
+  }
+  #trade-dialog-body, #account-dialog-body, #ledger-dialog-body, #group-dialog-body { overflow-y: visible; min-height: 0; }
+  #settings-dialog { height: auto; min-height: 0; }
+  #error-dialog[open] { width: 100vw; height: auto; min-height: 0; }
+
+  /* — Forms: 48px targets, 16px type (no iOS zoom), sticky primary action — */
+  #trade-form, #account-dialog-body, #ledger-dialog-body, #group-dialog-body, #settings-dialog-body { gap: 0.2rem; }
+  label { margin-top: 1.1rem; font-size: 0.78rem; }
+  input, select, textarea { min-height: 3rem; padding: 0.65rem 0.8rem; font-size: 16px; }
+  select { padding-right: 2.4rem; }
+  #trade-form button.primary, #account-dialog-body button.primary, #ledger-dialog-body button.primary, #group-dialog-body button.primary {
+    position: sticky; bottom: 0;
+    min-height: 3.25rem; font-size: 1.02rem; z-index: 1;
+  }
+  /* The record form's button lives in .t-dock (sticky on every screen size);
+     phones just get the taller target + the safe-area inset. */
+  .t-dock { --t-btn-h: 3.25rem; --t-pad-b: calc(0.5rem + env(safe-area-inset-bottom, 0px)); --t-stick: calc(-1.25rem - env(safe-area-inset-bottom, 0px)); }
+  .t-dock button.primary,
+  #trade-form .t-dock button.primary,
+  #account-dialog-body .t-dock button.primary,
+  #ledger-dialog-body .t-dock button.primary,
+  #group-dialog-body .t-dock button.primary { font-size: 1.02rem; }
+  details.adv summary, details.opt summary { min-height: 2.75rem; line-height: 2.75rem; font-size: 0.92rem; }
+  /* — Ledger rows go two-line: name (+ arrow) on top, amount + actions below. — */
+  .ledger-row { flex-wrap: wrap; row-gap: 0.2rem; }
+  .ledger-row .ledger-label { flex: 1 1 60%; }
+  .ledger-row .ledger-side { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap; }
+  .ledger-row .ledger-amount { min-width: 0; }
+  .ledger-row .ledger-amount.ledger-box-inc, .ledger-row .ledger-amount.ledger-box-exp { left: 0; }
+  .ledger-row .ledger-side button.quiet { min-height: 2.75rem; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions button { flex: 1 1 8rem; min-height: 3rem; }
+  .swatches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .swatches button { min-height: 3rem; }
+  .color-custom { flex-wrap: wrap; }
+  #c-apply { flex: 1 1 auto; min-height: 3rem; }
+
+  /* — Landing / guide: single column, full-width actions — */
+  #landing { margin-top: 0.5rem; }
+  .guide-panel { padding: 1.6rem 1.25rem 1.3rem; }
+  .guide-ctas button { flex: 1 1 100%; }
+
+  table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  table, table tbody, table tr, table td { display: block; width: 100%; }
+  table tr { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: var(--surface); }
+  table td { border-bottom: none; padding: 0.3rem 0; }
+  table td::before { content: attr(data-label); display: block; color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; }
+  td.num, th.num { text-align: left; }
+}
+
+/* Small phones (≤560px): refinements only — no new layout, so the 561–720px
+   band renders identically to phones, just roomier. */
+@media (max-width: 560px) {
+  #settings-dialog { height: auto; min-height: 0; }
+  .set-layout { flex-direction: column; overflow: hidden; }
+  .set-tabs { flex-direction: row; flex: none; overflow-x: auto; overflow-y: hidden; padding-bottom: 0.4rem; scroll-snap-type: x proximity; }
+  .set-tabs button { scroll-snap-align: start; flex: 0 0 auto; min-height: 2.75rem; }
+  .set-panels { overflow-y: auto; min-height: 0; }
+  dialog { width: 100vw; max-width: 100vw; margin-bottom: 0; border-radius: 20px 20px 0 0; }
+  .acct-figs { max-width: 46%; }
+  .sync-btns button { flex: 1 1 100%; min-height: 3rem; }
+}
+
+/* Very small phones (≤380px): type + spacing tighten, structure unchanged. */
+@media (max-width: 380px) {
+  main { padding-left: 0.7rem; padding-right: 0.7rem; }
+  .landing-ticker { gap: 0.5rem; padding: 0.4rem 0.75rem; }
+  .tick { gap: 0.3rem; }
+  .tick-val { min-width: 0; }
+  .card-value { font-size: 0.98rem; }
+  .trade-block .stat-row { flex-basis: 100%; }
+  .swatches { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: dlg-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1); }
+  @keyframes dlg-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.99); }
+    to { opacity: 1; transform: none; }
+  }
+  .account-card, button { transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease; }
+  .landing-coins .coin-float-btc { animation: coin-float 7s ease-in-out -2s infinite; }
+  .landing-coins .coin-float-usd { animation: coin-float 5.4s ease-in-out -1s infinite; }
+  .landing-coins .coin-float-eur { animation: coin-float 6.2s ease-in-out -4s infinite; }
+  @keyframes coin-float {
+    0%, 100% { transform: translate3d(0, -10px, 0); }
+    50% { transform: translate3d(0, 10px, 0); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+@media print {
+  body { background: #fff; color: #000; }
+  body::before, body::after { display: none !important; }
+  header.brand, #fab-trade, .menu, dialog { display: none !important; }
+  .cards, .account-card, .trade-block, .ledger-list, #hero, #landing { border: 1px solid #ccc; background: none; box-shadow: none; }
+}

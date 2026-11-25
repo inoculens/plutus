@@ -4,9 +4,12 @@
   width: min(760px, 94vw);
   height: min(690px, 88vh);
   max-height: 90vh;
-  padding: 1.55rem 1.65rem 1.35rem;
+  /* Totals as designed; the dialog's transparent scrollbar inset
+     (dialogs.css) comes out of the padding, and the edge line is its ring. */
+  padding: calc(1.55rem - var(--dlg-gut-y)) calc(1.65rem - var(--dlg-gut-x)) calc(1.35rem - var(--dlg-gut-y));
   background: linear-gradient(155deg, rgba(30,30,32,0.98), rgba(16,16,17,0.99) 46%);
-  border-color: rgba(255,255,255,0.12);
+  background-origin: border-box;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12), var(--shadow-pop);
 }
 #settings-dialog .dialog-head {
   padding-bottom: 1rem;
@@ -181,7 +184,7 @@
     width: 100vw;
     height: min(90dvh, 820px);
     max-height: 92dvh;
-    padding: 1.2rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    padding: calc(1.2rem - var(--dlg-gut-y)) calc(1rem - var(--dlg-gut-x)) calc(1rem - var(--dlg-gut-y) + env(safe-area-inset-bottom, 0px));
     border-radius: 22px 22px 0 0;
   }
   #settings-dialog .dialog-head { padding-bottom: 0.8rem; }

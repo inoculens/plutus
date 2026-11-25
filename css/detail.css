@@ -67,10 +67,12 @@
   gap: 0.1rem;
   min-width: 13rem;
   background: var(--surface-3);
-  border: 1px solid var(--border-strong);
+  /* Scrollbar inset (same technique as dialog, see dialogs.css): the
+     transparent border keeps a scrollbar inside the rounded corners. */
+  border: 6px solid transparent;
   border-radius: var(--radius-lg);
-  padding: 0.35rem;
-  box-shadow: var(--shadow-pop);
+  padding: calc(0.35rem - 6px + 1px);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-pop);
   transform-origin: top right;
 }
 .menu-box button {

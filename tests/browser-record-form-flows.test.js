@@ -12,7 +12,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { loadChromium, launchChromium } = require('./browser-env');
 
-const chromium = loadChromium('record-form-flows');
+const chromium = loadChromium('browser-record-form-flows');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
@@ -35,7 +35,7 @@ const state = JSON.stringify({
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
-  const browser = await launchChromium(chromium, 'record-form-flows');
+  const browser = await launchChromium(chromium, 'browser-record-form-flows');
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -136,5 +136,5 @@ const state = JSON.stringify({
   if (process.env.DUMP) console.log(JSON.stringify(list, null, 1));
   await browser.close();
   server.close();
-  console.log('record-form-flows: OK');
+  console.log('browser-record-form-flows: OK');
 })().catch(e => { console.error(e); process.exit(1); });

@@ -11,7 +11,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { loadChromium, launchChromium } = require('./browser-env');
 
-const chromium = loadChromium('record-fx-error');
+const chromium = loadChromium('browser-record-fx-error');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
@@ -34,7 +34,7 @@ const state = JSON.stringify({
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
-  const browser = await launchChromium(chromium, 'record-fx-error');
+  const browser = await launchChromium(chromium, 'browser-record-fx-error');
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -73,5 +73,5 @@ const state = JSON.stringify({
   assert.deepEqual(errors, []);
   await browser.close();
   server.close();
-  console.log('record-fx-error: OK');
+  console.log('browser-record-fx-error: OK');
 })().catch(e => { console.error(e); process.exit(1); });

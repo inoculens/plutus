@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Real-browser checks for the startup loader (js/startup-loader.js):
+// Real-browser checks for the startup loader (js/boot/startup-loader.js):
 // - the intro animates only compositor-friendly properties (transform,
 //   opacity), so a busy boot cannot make it stutter or leave a coin blurred;
 // - with a heavy store (hundreds of records) the loader closes only after
@@ -15,7 +15,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const { loadChromium, launchChromium } = require('./browser-env');
 
-const chromium = loadChromium('startup-loader');
+const chromium = loadChromium('browser-startup-loader');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 let breakApp = false;
@@ -24,7 +24,7 @@ const server = http.createServer((req, res) => {
   if (p === '/' || p.indexOf('/account') === 0) p = '/index.html';
   const f = path.join(root, p);
   if (!f.startsWith(root) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); res.end(); return; }
-  if (breakApp && p === '/app.js') { // the app throws while booting
+  if (breakApp && p === '/js/app.js') { // the app throws while booting
     res.writeHead(200, { 'content-type': 'text/javascript' });
     res.end("document.addEventListener('DOMContentLoaded', function () { throw new Error('boot failed'); });");
     return;
@@ -68,7 +68,7 @@ async function openPage(browser, base, opts) {
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
-  const browser = await launchChromium(chromium, 'startup-loader');
+  const browser = await launchChromium(chromium, 'browser-startup-loader');
 
   // 1. Heavy store: the intro plays to the end, then the loader closes.
   {
@@ -119,5 +119,5 @@ async function openPage(browser, base, opts) {
 
   await browser.close();
   server.close();
-  console.log('startup-loader: OK');
+  console.log('browser-startup-loader: OK');
 })().catch(e => { console.error(e); process.exit(1); });

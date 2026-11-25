@@ -49,6 +49,7 @@ jobs:
           python -m py_compile scripts/collect-market-history.py
           node --check app.js
           node --check js/net-worth-history.js
+          node --check js/startup-loader.js
 
       - name: Python tests
         run: python -m unittest discover -s tests -p 'test_*.py'

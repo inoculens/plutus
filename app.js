@@ -14,15 +14,6 @@
 var STORAGE_KEY = 'inoculens.v2';
 var APP_ID = 'inoculens-plutus';
 var STORE_VERSION = 2;
-var startupScrollRestoration = null;
-var startupScrollRestorationChanged = false;
-
-if (typeof document !== 'undefined' && document.getElementById('app-loader') &&
-    typeof window !== 'undefined' && window.history && 'scrollRestoration' in window.history) {
-  startupScrollRestoration = window.history.scrollRestoration;
-  window.history.scrollRestoration = 'manual';
-  startupScrollRestorationChanged = true;
-}
 
 function defaultState() {
   return {
@@ -22063,66 +22054,14 @@ function init() {
   if (d && !d.value) d.value = todayDmy();
   uiBooted = true;
   render();
-  finishStartupLoader();
+  // js/startup-loader.js closes the intro once it has finished playing.
+  if (typeof window.finishStartupLoader === 'function') window.finishStartupLoader();
   try { announceStorageRecovery(); } catch (e) { /* the notice never breaks boot */ }
   refreshPrices();
   try { syncCheckOnLoad(); } catch (e) { /* the check never breaks boot */ }
   try {
     syncWatchStart();
   } catch (e) { /* the watch never breaks boot */ }
-}
-
-function finishStartupLoader() {
-  var loader = document.getElementById('app-loader');
-  if (!loader) return;
-  window.scrollTo(0, 0);
-  var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reducedMotion) {
-    releaseReducedMotionLoader(loader);
-    return;
-  }
-  loader.classList.add('is-running');
-  window.setTimeout(function () {
-    loader.setAttribute('aria-busy', 'false');
-    loader.classList.add('is-exiting');
-    loader.addEventListener('transitionend', function (event) {
-      if (event.target === loader && event.propertyName === 'opacity') {
-        loader.hidden = true;
-        releaseStartupScrollLock();
-      }
-    }, { once: true });
-  }, 2450);
-}
-
-function releaseStartupScrollLock() {
-  if (startupScrollRestorationChanged) window.history.scrollRestoration = startupScrollRestoration;
-  window.scrollTo(0, 0);
-  document.documentElement.classList.remove('is-app-loading');
-  document.body.classList.remove('is-app-loading');
-}
-
-function releaseReducedMotionLoader(loader) {
-  function pinTopBeforeReveal() {
-    if (startupScrollRestorationChanged) window.history.scrollRestoration = startupScrollRestoration;
-    var attempts = 0;
-    function resetScroll() {
-      window.scrollTo(0, 0);
-      attempts += 1;
-      if (attempts < 11) {
-        window.setTimeout(resetScroll, 50);
-        return;
-      }
-      loader.hidden = true;
-      document.documentElement.classList.remove('is-app-loading');
-      document.body.classList.remove('is-app-loading');
-    }
-    resetScroll();
-  }
-  if (document.readyState === 'complete') {
-    pinTopBeforeReveal();
-  } else {
-    window.addEventListener('load', pinTopBeforeReveal, { once: true });
-  }
 }
 
 // Runs the baked-quote repair once per page load (see dropBakedExecLocks).

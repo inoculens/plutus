@@ -261,6 +261,7 @@ function saveFxCache() {
 
 function clearFxCache() {
   fxCacheStore = {};
+  try { fxFillReset(); } catch (e) { /* display fills not loaded */ }
   try {
     if (typeof localStorage !== 'undefined') localStorage.removeItem(FXCACHE_KEY);
   } catch (e) { /* ignore */ }

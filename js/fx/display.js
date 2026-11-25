@@ -78,6 +78,41 @@ function fxFailedPairs() {
   return fxFailedList.slice();
 }
 
+// Background fills run on every paint. They share one request per pair while
+// it is in flight, and a pair that failed is retried only after a cooldown
+// (30 s, doubling per failure, at most 10 min) instead of on the next paint:
+// offline or with the rate service down, a large ledger would otherwise
+// re-request every missing pair on every repaint. Saving a record calls
+// fetchEcbRate directly and always tries the network.
+var FX_FILL_RETRY_MS = 30000;
+var FX_FILL_RETRY_MAX_MS = 10 * 60000;
+var fxFillInflight = {}; // "date|FROM|TO" -> pending promise
+var fxFillFailures = {}; // "date|FROM|TO" -> {fails, until}
+
+function fxFillRate(date, from, to) {
+  var key = date + '|' + from + '|' + to;
+  if (fxFillInflight[key]) return fxFillInflight[key];
+  var failed = fxFillFailures[key];
+  if (failed && Date.now() < failed.until) return Promise.reject(new Error('fx-unavailable'));
+  var pending = fetchEcbRate(date, from, to).then(function (rate) {
+    delete fxFillInflight[key];
+    delete fxFillFailures[key];
+    return rate;
+  }, function (err) {
+    delete fxFillInflight[key];
+    var fails = (failed ? failed.fails : 0) + 1;
+    fxFillFailures[key] = { fails: fails, until: Date.now() + Math.min(FX_FILL_RETRY_MAX_MS, FX_FILL_RETRY_MS * Math.pow(2, fails - 1)) };
+    throw err;
+  });
+  fxFillInflight[key] = pending;
+  return pending;
+}
+
+function fxFillReset() {
+  fxFillInflight = {};
+  fxFillFailures = {};
+}
+
 function ensureDebtDisplayRates(accounts, main) {
   var day = todayStr();
   var seen = {};
@@ -95,7 +130,7 @@ function ensureDebtDisplayRates(accounts, main) {
       var key = day + '|' + from + '|' + to;
       if (seen[key] || getCachedRate(day, from, to)) return;
       seen[key] = true;
-      jobs.push(fetchEcbRate(day, from, to).then(function (rate) {
+      jobs.push(fxFillRate(day, from, to).then(function (rate) {
         if (!rate || !isFinite(Number(rate.rate)) || Number(rate.rate) <= 0) return false;
         cacheRate(day, from, to, Number(rate.rate), rate.source || 'ECB');
         return true;
@@ -116,7 +151,7 @@ function ensureDisplayRates(trades, main, kinds) {
   var pairs = displayPairs(trades, m, kinds);
   if (!pairs.length) return Promise.resolve(false);
   return Promise.all(pairs.map(function (p) {
-    return fetchEcbRate(p.date, p.from, m).then(function (r) {
+    return fxFillRate(p.date, p.from, m).then(function (r) {
       cacheRate(p.date, p.from, m, r.rate, r.source);
       return true;
     }, function () {

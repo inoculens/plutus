@@ -26,8 +26,22 @@ function normalizeDateFormat(format) {
   return isValidDateFormat(format) ? format : DEFAULT_DATE_FORMAT;
 }
 
+// Pure and called for every record on every paint (ledger runs, holding
+// periods, price lookups), so answers are memoized (bounded).
+var validDateMemo = new Map();
+
 function isValidDateStr(d) {
-  if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  if (typeof d !== 'string') return false;
+  var known = validDateMemo.get(d);
+  if (known !== undefined) return known;
+  var ok = checkDateStr(d);
+  if (validDateMemo.size >= 4096) validDateMemo.clear();
+  validDateMemo.set(d, ok);
+  return ok;
+}
+
+function checkDateStr(d) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
   var p = d.slice(0, 10).split('-');
   var y = Number(p[0]);
   var m = Number(p[1]);

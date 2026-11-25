@@ -73,6 +73,11 @@ function displayPairs(trades, main, kinds) {
 var fxFailedList = [];
 var fxWarnedSession = false;
 
+// Snapshot of the pairs that failed since the last refreshDisplayRates().
+function fxFailedPairs() {
+  return fxFailedList.slice();
+}
+
 function ensureDebtDisplayRates(accounts, main) {
   var day = todayStr();
   var seen = {};

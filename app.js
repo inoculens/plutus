@@ -112,41 +112,34 @@ function repairBakedExecLocksOnce() {
   return true;
 }
 
-if (typeof window !== 'undefined') {
-  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    document.addEventListener('DOMContentLoaded', init);
-  }
-  // Surface unexpected errors visibly so users can report them with the version above.
-  if (typeof window.addEventListener === 'function') {
-    window.addEventListener('error', function (e) {
-      try {
-        showBanner('App error — please report this text plus your app version (bottom of page).', 'error', {
-          title: 'App error',
-          lines: [String((e && e.message) || 'unknown error'), 'Version ' + APP_VERSION]
-        });
-      } catch (err) { /* ignore */ }
-    });
-  }
+// --- Boot wiring (runs once, when this last script loads) ---
+// DOMContentLoaded handlers, in this order: the app, the OAuth redirect of
+// a sync sign-in, the cookie banner, the floating dock. The banner and the
+// dock also run at once when the document is already parsed (deferred
+// scripts run while readyState is 'interactive').
+function whenParsed(fn, alsoNow) {
+  document.addEventListener('DOMContentLoaded', fn);
+  if (!alsoNow) return;
+  try {
+    if (document.readyState === 'interactive' || document.readyState === 'complete') fn();
+  } catch (e) { /* the listener covers it */ }
 }
 
-if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-  document.addEventListener('DOMContentLoaded', syncHandleOAuthRedirect);
+if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  whenParsed(init);
+  whenParsed(syncHandleOAuthRedirect);
+  whenParsed(consentInitBanner, true);
+  whenParsed(dockFooterInit, true);
 }
 
-if (typeof window !== 'undefined') {
-  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    document.addEventListener('DOMContentLoaded', consentInitBanner);
+// Surface unexpected errors visibly so users can report them with the version above.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('error', function (e) {
     try {
-      if (document.readyState === 'interactive' || document.readyState === 'complete') consentInitBanner();
-    } catch (e) { /* listener covers it */ }
-  }
-}
-
-if (typeof window !== 'undefined') {
-  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    document.addEventListener('DOMContentLoaded', dockFooterInit);
-    try {
-      if (document.readyState === 'interactive' || document.readyState === 'complete') dockFooterInit();
-    } catch (e) { /* listener covers it */ }
-  }
+      showBanner('App error — please report this text plus your app version (bottom of page).', 'error', {
+        title: 'App error',
+        lines: [String((e && e.message) || 'unknown error'), 'Version ' + APP_VERSION]
+      });
+    } catch (err) { /* ignore */ }
+  });
 }

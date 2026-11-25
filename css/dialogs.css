@@ -1,16 +1,28 @@
 /* Dialogs and form controls. */
 
+/* Scrollbar inset: the dialog is its own scroller, and browsers draw its
+   scrollbar as a straight strip along the padding box — with a plain 1px
+   border it ran through the rounded corners. A transparent border (painted
+   by the background, origin border-box) moves the padding box inward so the
+   whole track sits inside the curve; the visible edge is a 1px shadow ring.
+   Padding gives back the inset, so content sits exactly where it did.
+   Rule: (radius - gut-x)^2 + (radius - gut-y)^2 < radius^2, with margin. */
 dialog {
+  --dlg-gut-x: 8px;
+  --dlg-gut-y: 12px;
   background: var(--surface-2);
+  background-origin: border-box;
   color: var(--text);
-  border: 1px solid var(--border-strong);
+  border-style: solid;
+  border-color: transparent;
+  border-width: var(--dlg-gut-y) var(--dlg-gut-x);
   border-radius: 24px;
-  padding: 1.5rem;
+  padding: calc(1.5rem - var(--dlg-gut-y)) calc(1.5rem - var(--dlg-gut-x));
   width: min(560px, 94vw);
   max-height: 88vh;
   overflow-y: auto;
   overscroll-behavior: contain;
-  box-shadow: var(--shadow-pop);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-pop);
 }
 dialog::backdrop { background: rgba(0, 0, 0, 0.66); backdrop-filter: blur(10px) saturate(0.6); -webkit-backdrop-filter: blur(10px) saturate(0.6); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }

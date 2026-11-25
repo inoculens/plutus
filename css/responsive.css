@@ -161,7 +161,9 @@
     width: 100vw; max-width: 100vw;
     margin: auto 0 0 0; margin-bottom: 0;
     border-radius: 20px 20px 0 0;
-    padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom));
+    /* Same totals as before; the dialog's scrollbar inset (dialogs.css)
+       comes out of the padding. */
+    padding: calc(1.25rem - var(--dlg-gut-y)) calc(1.1rem - var(--dlg-gut-x)) calc(1.25rem - var(--dlg-gut-y) + env(safe-area-inset-bottom));
     max-height: 92vh; max-height: 92svh; max-height: 92dvh;
     overflow-y: auto; overscroll-behavior: contain;
     scroll-padding-bottom: 3rem;
@@ -192,7 +194,7 @@
   }
   /* The record form's button lives in .t-dock (sticky on every screen size);
      phones just get the taller target + the safe-area inset. */
-  .t-dock { --t-btn-h: 3.25rem; --t-pad-b: calc(0.5rem + env(safe-area-inset-bottom, 0px)); --t-stick: calc(-1.25rem - env(safe-area-inset-bottom, 0px)); }
+  .t-dock { --t-btn-h: 3.25rem; --t-pad-b: calc(0.5rem + env(safe-area-inset-bottom, 0px)); --t-stick: calc(-1.25rem + var(--dlg-gut-y, 0px) - env(safe-area-inset-bottom, 0px)); }
   .t-dock button.primary,
   #trade-form .t-dock button.primary,
   #account-dialog-body .t-dock button.primary,

@@ -14,9 +14,10 @@
   --t-rise: calc(-1 * (var(--t-btn-h) + var(--t-gap)));
   position: sticky;
   /* Sticky offsets stop at the dialog's inner padding edge; pull the dock down
-     by exactly that padding so it sits flush with the dialog's bottom edge and
-     no scrolled field shows beneath it. */
-  bottom: var(--t-stick, -1.5rem);
+     by exactly that padding so it sits flush with the scrollport's bottom
+     edge (the dialog's transparent scrollbar inset sits below it, painted
+     in the same surface) and no scrolled field shows beneath it. */
+  bottom: var(--t-stick, calc(-1.5rem + var(--dlg-gut-y, 0px)));
   z-index: 2;
   margin-top: 1.1rem;
   padding: 0.6rem 0 var(--t-pad-b);

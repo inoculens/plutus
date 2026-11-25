@@ -15,11 +15,13 @@ let nowMs = Date.parse('2025-06-01T12:00:00Z');
 class ClockDate extends Date { static now() { return nowMs; } }
 let calls = 0;
 let online = false;
+const listeners = {};
 const C = {
   console, setTimeout: noop, clearTimeout: noop, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date: ClockDate,
   localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
   document: { getElementById: () => null, addEventListener: noop, querySelector: () => null, querySelectorAll: () => [], createElement: () => ({}), body: {}, documentElement: {}, readyState: 'loading' },
-  navigator: { userAgent: 'node' }, location: { hash: '', href: '', pathname: '/' }, addEventListener: noop,
+  navigator: { userAgent: 'node' }, location: { hash: '', href: '', pathname: '/' },
+  addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
   fetch: (url) => {
     calls++;
     if (!online) return Promise.reject(new TypeError('offline'));
@@ -82,5 +84,15 @@ const kinds = { c: 'cash' };
   C.clearFxCache();
   await C.ensureDisplayRates(trades, 'EUR', kinds);
   assert.ok(calls > 0, 'clearFxCache resets the cooldown');
+
+  // Coming back online retries on the next paint, whatever the cooldown.
+  await C.ensureDisplayRates(trades, 'EUR', kinds);
+  calls = 0;
+  await C.ensureDisplayRates(trades, 'EUR', kinds);
+  assert.equal(calls, 0, 'cooling down while offline');
+  online = true;
+  (listeners.online || []).forEach(fn => fn());
+  assert.equal(await C.ensureDisplayRates(trades, 'EUR', kinds), true, 'back online: fetched and cached at once');
+  assert.ok(calls > 0);
   console.log('fx fill cooldown checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

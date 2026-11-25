@@ -113,6 +113,12 @@ function fxFillReset() {
   fxFillFailures = {};
 }
 
+// Back online: retry on the next paint instead of waiting out the cooldowns
+// built up while the device was offline.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('online', function () { fxFillFailures = {}; });
+}
+
 function ensureDebtDisplayRates(accounts, main) {
   var day = todayStr();
   var seen = {};

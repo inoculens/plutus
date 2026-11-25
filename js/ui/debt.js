@@ -528,12 +528,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       line.appendChild(valueEl);
       netSummary.appendChild(line);
     }
-    var debtLoading = !financial.debt.complete && scope.some(function (owner) {
-      return accountDebtPositions(owner).some(function (p) {
-        var pt = String(p.assetTicker || '').trim().toUpperCase();
-        return pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
-      });
-    });
+    var debtLoading = !financial.debt.complete && scope.some(debtPricesLoading);
     summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, st.settings.mainCurrency) : '—');
     summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, st.settings.mainCurrency) : (debtLoading ? PRICE_LOADING_TEXT : '—'));
     summaryLine('Net value', financial.gross && financial.gross.complete && financial.debt.complete

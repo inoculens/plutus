@@ -109,6 +109,13 @@ function fetchYahooHistory(yahooSym, wantDay, cur, fetchImpl) {
 var PRICE_CACHE_TTL_MS = 60000;
 var priceCache = {}; // key "SYM:VS" (uppercased) -> {price, at}
 
+// The price held by a cache entry, or null when the entry is missing or
+// holds no usable (finite, positive) price.
+function cachedPriceOf(entry) {
+  var p = entry ? Number(entry.price) : NaN;
+  return isFinite(p) && p > 0 ? p : null;
+}
+
 function priceCacheKey(symbol, vs) {
   return String(symbol).toUpperCase() + ':' + String(vs).toUpperCase();
 }
@@ -488,8 +495,7 @@ function convertStockQuote(sym, price, native, cur) {
   var cached = null;
   try { cached = priceCache[key] || null; } catch (e) { cached = null; }
   function cachedOrNull() {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
+    return cachedPriceOf(cached);
   }
   var p = Number(price);
   var nat = String(native || 'USD').toUpperCase();
@@ -615,8 +621,7 @@ function fetchStockPrice(symbol, vs) {
   var now = Date.now();
   var cached = priceCache[key];
   function cachedOrNull() {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
+    return cachedPriceOf(cached);
   }
   if (cached && (now - cached.at) < PRICE_CACHE_TTL_MS && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
     return Promise.resolve(Number(cached.price));
@@ -650,12 +655,11 @@ function fetchCommodityPrice(symbol, vs) {
   }
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
+    if (cachedPriceOf(cached) !== null) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
   function cachedOrNull() {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
+    return cachedPriceOf(cached);
   }
   // Shared native->display-fiat bridge (same ECB source the stock path uses).
   function bridged(amount, native) {

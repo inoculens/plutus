@@ -68,3 +68,12 @@ function paintLoading(el, on, label) {
     }
   } catch (e) { /* decorative only */ }
 }
+
+// True while a live price one of the account's debt positions is valued in
+// is still loading.
+function debtPricesLoading(account) {
+  return accountDebtPositions(account).some(function (p) {
+    var pt = String(p.assetTicker || '').trim().toUpperCase();
+    return !!pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
+  });
+}

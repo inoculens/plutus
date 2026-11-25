@@ -414,19 +414,6 @@ function onTradeSubmit(ev) {
       var mainU = String(main).toUpperCase();
       var needTotalS = (swapCcy !== mainU);
       function lock11S(f) { return { pair: f + '/' + mainU, rate: 1, source: '1:1', interpolated: false }; }
-      function failSwap(pairs) {
-        lockSubmit(false, 'Add record');
-        showBanner('FX rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.', 'error', {
-          title: 'FX error',
-          lines: [
-            'Pair: ' + pairs.join(', '),
-            'Trade date: ' + fmtDateDmy(date),
-            'Cause: no ECB fixing cached and the rate request failed (weekend gap or network).',
-            'Tip: nothing was saved yet — enter the rate manually to proceed.'
-          ]
-        });
-        tradeFormError('ECB rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.');
-      }
       if (!needTotalS) {
         proceedSwapCreateWithAttachment(lock11S(swapCcy));
         return;
@@ -441,7 +428,7 @@ function onTradeSubmit(ev) {
         try { cacheRate(date, swapCcy, mainU, tRes.rate, tRes.source); saveFxCache(); } catch (e) { /* ignore */ }
         proceedSwapCreateWithAttachment(tl);
       }, function () {
-        failSwap([swapCcy + ' → ' + mainU]);
+        fxError([swapCcy + ' → ' + mainU]);
       });
     })();
     return;
@@ -639,19 +626,6 @@ function onTradeSubmit(ev) {
       var mainUE = String(main).toUpperCase();
       var needTotalE = (swapCcyE !== mainUE);
       function lock11E(f) { return { pair: f + '/' + mainUE, rate: 1, source: '1:1', interpolated: false }; }
-      function failSwapE(pairs) {
-        lockSubmit(false, 'Save changes');
-        showBanner('FX rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.', 'error', {
-          title: 'FX error',
-          lines: [
-            'Pair: ' + pairs.join(', '),
-            'Trade date: ' + fmtDateDmy(date),
-            'Cause: no ECB fixing cached and the rate request failed (weekend gap or network).',
-            'Tip: nothing was saved yet — enter the rate manually to proceed.'
-          ]
-        });
-        tradeFormError('ECB rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.');
-      }
       if (!needTotalE) {
         proceedSwapEditWithAttachment(lock11E(swapCcyE));
         return;
@@ -666,7 +640,7 @@ function onTradeSubmit(ev) {
         try { cacheRate(date, swapCcyE, mainUE, tRes.rate, tRes.source); saveFxCache(); } catch (e) { /* ignore */ }
         proceedSwapEditWithAttachment(tlE);
       }, function () {
-        failSwapE([swapCcyE + ' → ' + mainUE]);
+        fxError([swapCcyE + ' → ' + mainUE]);
       });
     })();
     return;
@@ -1185,8 +1159,10 @@ function onTradeSubmit(ev) {
   function lock11(pairFrom) {
     return { pair: pairFrom + '/' + mainU, rate: 1, source: '1:1', interpolated: false };
   }
+  // An FX rate could not be locked: nothing is saved, the user is asked for a
+  // manual rate. Shared by every record type (swaps included).
   function fxError(pairs) {
-    lockSubmit(false, 'Add record');
+    lockSubmit(false, isEditing ? 'Save changes' : 'Add record');
     showBanner('FX rate unavailable — open “Manual FX rate” below and enter a rate to save this trade.', 'error', {
       title: 'FX error',
       lines: [

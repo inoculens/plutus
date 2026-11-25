@@ -307,12 +307,18 @@ function fetchHistoricalStockStooq(sym, wantDay, cur) {
   if (!sq || !isValidDateStr(wantDay)) return Promise.resolve(null);
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) return Promise.resolve(null);
-  // Walk back up to 5 days for weekends/holidays (same window as FX).
+  return fetchStooqDailyClose(sq, wantDay, cur, capturedFetch);
+}
+
+// One Stooq daily close for `sq` on `wantDay`, in `cur` (USD bridged at the
+// ECB fixing of the close's day). Walks back up to 5 days for weekends and
+// holidays (same window as FX). Resolves {price, interpolated, day} or null.
+function fetchStooqDailyClose(sq, wantDay, cur, fetchFn) {
   function attempt(day, back) {
     var compact = toStooqDay(day);
     var url = 'https://stooq.com/q/d/l/?s=' + encodeURIComponent(sq) +
       '&d1=' + encodeURIComponent(compact) + '&d2=' + encodeURIComponent(compact) + '&i=d';
-    return capturedFetch(url).then(function (res) {
+    return fetchFn(url).then(function (res) {
       if (!res.ok) throw new Error('price-http-' + res.status);
       return res.text();
     }).then(function (csv) {
@@ -344,38 +350,13 @@ function fetchHistoricalCommodityPrice(symbol, dateStr, vs) {
   var sq = stooqCommoditySymbol(sym);
   function stooqFallback() {
     if (!sq) return Promise.resolve(null);
-    return attempt(wantDay, 0).then(function (r) { return r; }, function () { return null; });
+    return fetchStooqDailyClose(sq, wantDay, cur, capturedFetch);
   }
   // Energy futures share the Yahoo history window with stocks.
   if (Object.prototype.hasOwnProperty.call(YAHOO_COMMODITY_MAP, sym)) {
     return fetchYahooHistory(YAHOO_COMMODITY_MAP[sym], wantDay, cur, capturedFetch).then(function (r) { return r; }, function () { return stooqFallback(); });
   }
-  if (!sq) return Promise.resolve(null);
-  // Walk back up to 5 days for weekends/holidays (same window as stocks/FX).
-  function attempt(day, back) {
-    var compact = toStooqDay(day);
-    var url = 'https://stooq.com/q/d/l/?s=' + encodeURIComponent(sq) +
-      '&d1=' + encodeURIComponent(compact) + '&d2=' + encodeURIComponent(compact) + '&i=d';
-    return capturedFetch(url).then(function (res) {
-      if (!res.ok) throw new Error('price-http-' + res.status);
-      return res.text();
-    }).then(function (csv) {
-      var usd = parseStooqDaily(csv, compact);
-      if (isFinite(usd) && usd > 0) {
-        if (cur === 'USD') return { price: usd, interpolated: back > 0, day: day };
-        return fetchEcbRate(day, 'USD', cur).then(function (r) {
-          var v = usd * Number(r.rate);
-          if (!isFinite(v) || v <= 0) throw new Error('fx-bridge');
-          return { price: v, interpolated: back > 0 || !!r.interpolated, day: day };
-        });
-      }
-      if (back >= 5) throw new Error('no-fixing');
-      var prev = fxShiftDate(day, -1);
-      if (!prev) throw new Error('no-fixing');
-      return attempt(prev, back + 1);
-    });
-  }
-  return attempt(wantDay, 0).then(function (r) { return r; }, function () { return null; });
+  return stooqFallback();
 }
 
 function fetchHistoricalPrice(symbol, dateStr, vs, kind) {

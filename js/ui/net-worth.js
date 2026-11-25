@@ -1063,7 +1063,7 @@ function fetchNetWorthHistoryPrice(symbol, day, main, kind) {
   var cacheKind = histKindFor(kind);
   var key = histCacheKey(symbol, day, main, cacheKind);
   var cached = getHistCached(symbol, day, main, cacheKind);
-  if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) {
+  if (cachedPriceOf(cached) !== null) {
     return Promise.resolve(Number(cached.price));
   }
   if (netWorthHistoryFailures[key]) return Promise.resolve(null);

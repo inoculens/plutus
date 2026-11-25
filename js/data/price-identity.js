@@ -28,6 +28,21 @@ var PRICE_KINDS_BY_SYMBOL = {}; // SYM -> { kind: true } for every held kind
 var PRICE_COLLISIONS = {};      // SYM -> true when held under 2+ kinds
 var PRICE_KIND_NAMES = ['CRYPTO', 'STOCK', 'COMMODITY', 'CASH', 'CUSTOM'];
 
+// Asset kind of `sym` from a kinds lookup given by callers: a function, or a
+// {SYM: kind} map matched exactly first, then case-insensitively. Undefined
+// when unknown.
+function kindOfSymbol(kinds, sym) {
+  if (!kinds) return undefined;
+  if (typeof kinds === 'function') { try { return kinds(sym); } catch (e) { return undefined; } }
+  if (typeof kinds === 'object') {
+    if (Object.prototype.hasOwnProperty.call(kinds, sym)) return kinds[sym];
+    var up = String(sym).toUpperCase();
+    var ks = Object.keys(kinds);
+    for (var i = 0; i < ks.length; i++) if (String(ks[i]).toUpperCase() === up) return kinds[ks[i]];
+  }
+  return undefined;
+}
+
 function normPriceKind(kind) {
   var k = String(kind === undefined || kind === null ? '' : kind).trim().toLowerCase();
   return (k === 'stock' || k === 'commodity' || k === 'cash' || k === 'custom') ? k : 'crypto';

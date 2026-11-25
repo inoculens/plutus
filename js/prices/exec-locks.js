@@ -162,17 +162,7 @@ function getHistoricalExec(symbol, dateStr, vs, kind) {
 // rejects: unknown tickers resolve to null and keep the "—" placeholder.
 function ensureHistoricalExec(trades, main, kinds) {
   var m = String(main || priceDefaultVs()).toUpperCase();
-  function kindFor(sym) {
-    if (!kinds) return undefined;
-    if (typeof kinds === 'function') { try { return kinds(sym); } catch (e) { return undefined; } }
-    if (typeof kinds === 'object') {
-      if (Object.prototype.hasOwnProperty.call(kinds, sym)) return kinds[sym];
-      var up = String(sym).toUpperCase();
-      var ks = Object.keys(kinds);
-      for (var i = 0; i < ks.length; i++) if (String(ks[i]).toUpperCase() === up) return kinds[ks[i]];
-    }
-    return undefined;
-  }
+  function kindFor(sym) { return kindOfSymbol(kinds, sym); }
   var seen = {};
   var jobs = [];
   var idsByKey = {}; // quote key -> trade ids waiting on it (for failure tooltips)
@@ -181,7 +171,8 @@ function ensureHistoricalExec(trades, main, kinds) {
     var sym = String((t && t.symbol) || '').toUpperCase();
     var day = (t && typeof t.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t.date)) ? t.date.slice(0, 10) : '';
     if (!sym || !isValidDateStr(day) || isFutureDateStr(day)) return;
-    var kd = (typeof kindFor(sym) === 'string') ? kindFor(sym).trim().toLowerCase() : '';
+    var rawKind = kindFor(sym);
+    var kd = (typeof rawKind === 'string') ? rawKind.trim().toLowerCase() : '';
     if (kd === 'custom' || kd === 'cash') return;
     if (kd === 'commodity') { if (!hasCommoditySource(sym)) return; }
     else if (kd !== 'stock' && !SYMBOL_MAP[sym]) return;

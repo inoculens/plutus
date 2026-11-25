@@ -27,6 +27,19 @@ function pagerEllipsisEl() {
   return gap;
 }
 
+function pagerButton(label, attrs, disabled, onClick) {
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'ghost page-btn';
+  b.textContent = label;
+  for (var k in attrs) {
+    if (Object.prototype.hasOwnProperty.call(attrs, k)) b.setAttribute(k, attrs[k]);
+  }
+  if (disabled) b.disabled = true;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
 function buildAccountPager(pageCount, current) {
   var pager = document.createElement('div');
   pager.className = 'pager account-pager';
@@ -34,31 +47,19 @@ function buildAccountPager(pageCount, current) {
   pager.setAttribute('aria-label', 'Account pages');
   if (typeof current !== 'number' || !isFinite(current)) current = accountPage;
   current = Math.max(0, Math.min(pageCount - 1, current));
-  function pgBtn(label, attrs, disabled, fn) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'ghost page-btn';
-    b.textContent = label;
-    for (var k in attrs) {
-      if (Object.prototype.hasOwnProperty.call(attrs, k)) b.setAttribute(k, attrs[k]);
-    }
-    if (disabled) b.disabled = true;
-    b.addEventListener('click', fn);
-    return b;
-  }
-  pager.appendChild(pgBtn('‹ Prev', { 'data-page-prev': '1', 'aria-label': 'Previous account page' }, current <= 0, function () {
+  pager.appendChild(pagerButton('‹ Prev', { 'data-page-prev': '1', 'aria-label': 'Previous account page' }, current <= 0, function () {
     if (accountPage > 0) { accountPage--; render(); }
   }));
   // Compact shape: first, current and last, ellipses for the gaps.
   compactPagerItems(current, pageCount).forEach(function (p) {
     if (p === null) { pager.appendChild(pagerEllipsisEl()); return; }
-    var nb = pgBtn(String(p + 1), { 'data-page-goto': String(p), 'aria-label': 'Go to account page ' + (p + 1) }, false, function () {
+    var nb = pagerButton(String(p + 1), { 'data-page-goto': String(p), 'aria-label': 'Go to account page ' + (p + 1) }, false, function () {
       if (accountPage !== p) { accountPage = p; render(); }
     });
     if (p === current) nb.setAttribute('aria-current', 'page');
     pager.appendChild(nb);
   });
-  pager.appendChild(pgBtn('Next ›', { 'data-page-next': '1', 'aria-label': 'Next account page' }, current >= pageCount - 1, function () {
+  pager.appendChild(pagerButton('Next ›', { 'data-page-next': '1', 'aria-label': 'Next account page' }, current >= pageCount - 1, function () {
     if (accountPage < pageCount - 1) { accountPage++; render(); }
   }));
   return pager;
@@ -69,18 +70,6 @@ function buildTradePager(accountId, total, pageCount, page) {
   pager.className = 'pager trade-pager';
   pager.setAttribute('role', 'navigation');
   pager.setAttribute('aria-label', 'Trade pages');
-  function pgBtn(label, attrs, disabled, fn) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'ghost page-btn';
-    b.textContent = label;
-    for (var k in attrs) {
-      if (Object.prototype.hasOwnProperty.call(attrs, k)) b.setAttribute(k, attrs[k]);
-    }
-    if (disabled) b.disabled = true;
-    b.addEventListener('click', fn);
-    return b;
-  }
   function go(p) {
     tradePageSetFor(accountId, p, total);
     render();
@@ -89,7 +78,7 @@ function buildTradePager(accountId, total, pageCount, page) {
       if (bar && bar.scrollIntoView) bar.scrollIntoView({ block: 'nearest' });
     } catch (e) { /* ignore */ }
   }
-  pager.appendChild(pgBtn('‹ Prev', { 'data-tpage-prev': '1', 'aria-label': 'Previous trade page' }, page <= 0, function () {
+  pager.appendChild(pagerButton('‹ Prev', { 'data-tpage-prev': '1', 'aria-label': 'Previous trade page' }, page <= 0, function () {
     if (page > 0) go(page - 1);
   }));
   // Compact shape like the account pager: first, current and last, ellipses
@@ -97,13 +86,13 @@ function buildTradePager(accountId, total, pageCount, page) {
   var shown = Math.max(0, Math.min(pageCount - 1, page));
   compactPagerItems(shown, pageCount).forEach(function (p) {
     if (p === null) { pager.appendChild(pagerEllipsisEl()); return; }
-    var nb = pgBtn(String(p + 1), { 'data-tpage-goto': String(p), 'aria-label': 'Go to trade page ' + (p + 1) }, false, function () {
+    var nb = pagerButton(String(p + 1), { 'data-tpage-goto': String(p), 'aria-label': 'Go to trade page ' + (p + 1) }, false, function () {
       if (tradePageGet(accountId, total) !== p) go(p);
     });
     if (p === shown) nb.setAttribute('aria-current', 'page');
     pager.appendChild(nb);
   });
-  pager.appendChild(pgBtn('Next ›', { 'data-tpage-next': '1', 'aria-label': 'Next trade page' }, page >= pageCount - 1, function () {
+  pager.appendChild(pagerButton('Next ›', { 'data-tpage-next': '1', 'aria-label': 'Next trade page' }, page >= pageCount - 1, function () {
     if (page < pageCount - 1) go(page + 1);
   }));
   return pager;

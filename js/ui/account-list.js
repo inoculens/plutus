@@ -113,12 +113,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   valv.className = 'acct-value';
   var plv = document.createElement('span');
   var accTick = String(acc.ticker || '').toUpperCase();
-  var debtLoading = debtInfo.hasDebt && !debtInfo.complete && scopeAccounts.some(function (a) {
-    return accountDebtPositions(a).some(function (p) {
-      var pt = String(p.assetTicker || '').trim().toUpperCase();
-      return pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
-    });
-  });
+  var debtLoading = debtInfo.hasDebt && !debtInfo.complete && scopeAccounts.some(debtPricesLoading);
   var accLoading = (!valKnown) && (debtLoading || (!!scopeTrades && isPriceLoading(accTick, acc.id)));
   valv.textContent = valKnown ? fmtMoney(valNum, main) : (debtInfo.hasDebt || scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
   paintLoading(valv, accLoading, acc.name + ' value');

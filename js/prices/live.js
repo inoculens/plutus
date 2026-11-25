@@ -140,7 +140,7 @@ function fetchLivePrice(symbol, vs, kind) {
   // cannot clobber this operation's continuation.
   var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
   if (!capturedFetch) {
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Promise.resolve(Number(cached.price));
+    if (cachedPriceOf(cached) !== null) return Promise.resolve(Number(cached.price));
     return Promise.resolve(null);
   }
   var preferredExchangePrice = prefersExchangePrice(sym) ? fetchCryptoFallbackPrice(sym, cur, capturedFetch) : null;
@@ -175,34 +175,29 @@ function fetchLivePrice(symbol, vs, kind) {
       return fetchLivePrice(sym, 'USD').then(function (pu) {
         pu = Number(pu);
         if (!isFinite(pu) || pu <= 0) {
-          if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-          return null;
+          return cachedPriceOf(cached);
         }
         return fetchSpotFxRate(todayStr(), 'USD', cur).then(function (r) {
           var bridged = pu * Number(r.rate);
           if (!isFinite(bridged) || bridged <= 0) {
-            if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-            return null;
+            return cachedPriceOf(cached);
           }
           priceCache[key] = { price: bridged, at: Date.now() };
           return bridged;
         }, function () {
-          if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-          return null;
+          return cachedPriceOf(cached);
         });
       });
     }
     if (curLow === 'usd') throw new Error('price-missing');
-    if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-    return null;
+    return cachedPriceOf(cached);
   }).then(null, function () {
     // CoinGecko error / 429 / bad payload: independent exchange fallbacks,
     // then last cached or null. Never throws.
     return (preferredExchangePrice || fetchCryptoFallbackPrice(sym, cur, capturedFetch)).then(function (fallbackPrice) {
       fallbackPrice = Number(fallbackPrice);
       if (!isFinite(fallbackPrice) || fallbackPrice <= 0) {
-        if (cached && isFinite(Number(cached.price)) && Number(cached.price) > 0) return Number(cached.price);
-        return null;
+        return cachedPriceOf(cached);
       }
       priceCache[key] = { price: fallbackPrice, at: Date.now() };
       return fallbackPrice;
@@ -261,17 +256,7 @@ function refreshAllPricesCore(symbols, vs, kinds) {
     seen[sym] = true;
     uniq.push(sym);
   });
-  function kindFor(sym) {
-    if (!kinds) return undefined;
-    if (typeof kinds === 'function') { try { return kinds(sym); } catch (e) { return undefined; } }
-    if (typeof kinds === 'object') {
-      if (Object.prototype.hasOwnProperty.call(kinds, sym)) return kinds[sym];
-      var up = String(sym).toUpperCase();
-      var ks = Object.keys(kinds);
-      for (var i = 0; i < ks.length; i++) if (String(ks[i]).toUpperCase() === up) return kinds[ks[i]];
-    }
-    return undefined;
-  }
+  function kindFor(sym) { return kindOfSymbol(kinds, sym); }
   var out = {};
   var errors = {};
   var crypto = [];

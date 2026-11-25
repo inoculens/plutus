@@ -11,10 +11,14 @@
   max-height: 18rem;
   overflow-y: auto;
   background: var(--surface-3);
-  border: 1px solid var(--border-strong);
+  /* Scrollbar inset (same technique as dialog, see dialogs.css): a
+     transparent border keeps the scrollbar track inside the rounded corners;
+     the visible edge is a 1px ring and padding gives the inset back. */
+  border: solid transparent;
+  border-width: 8px 6px;
   border-radius: var(--radius-lg);
-  padding: 0.6rem 0.8rem 0.8rem;
-  box-shadow: var(--shadow-pop);
+  padding: calc(0.6rem - 8px) calc(0.8rem - 6px) calc(0.8rem - 8px);
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-pop);
   transform-origin: top right;
 }
 

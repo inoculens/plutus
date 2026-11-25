@@ -179,11 +179,14 @@
   gap: 0.55rem;
   width: min(20rem, calc(100vw - 2rem));
   margin: 0;
-  padding: 0.45rem 0.65rem 0.65rem;
+  /* Scrollbar inset (same technique as dialog, see dialogs.css): the
+     transparent border keeps a scrollbar inside the rounded corners. */
+  padding: calc(0.45rem - 5px) calc(0.65rem - 4px) calc(0.65rem - 5px);
   background: var(--surface-2);
-  border: 1px solid var(--border);
+  border: solid transparent;
+  border-width: 5px 4px;
   border-radius: var(--radius);
-  box-shadow: 0 12px 32px rgba(0,0,0,0.38);
+  box-shadow: 0 0 0 1px var(--border), 0 12px 32px rgba(0,0,0,0.38);
   overflow: auto;
 }
 .history-custom-picker.opens-up .history-custom { top: auto; bottom: calc(100% + 0.45rem); }

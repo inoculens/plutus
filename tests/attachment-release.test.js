@@ -5,12 +5,12 @@
 // vanished from the portfolio, assignGroup reported success while doing
 // nothing, and computePortfolio wrote ticker state into the GLOBAL prototype.
 // These tests drive the full import -> store -> portfolio workflow, not just
-// the validator. All figures are invented. Loads app.js in a stubbed vm context.
+// the validator. All figures are invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 const store = new Map();
 let quotaFull = false;
@@ -25,7 +25,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 const acc = (id, ticker) => ({ id, name: 'Acct ' + ticker, ticker, kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z' });
 const H1 = 'a1b2c3d4e5f60718', H2 = '0f0e0d0c0b0a0908', H3 = 'deadbeefcafebabe';

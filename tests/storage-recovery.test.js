@@ -5,12 +5,12 @@
 // a recovery copy before any later save replaces it. If the copy cannot be
 // kept (storage full) the save is refused instead. Only an explicit wipe
 // (replaceDamaged / Clear all data) drops recovery copies. All figures are
-// invented. Loads app.js in a stubbed vm context.
+// invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 
 function createApp(initial, opts) {
@@ -35,7 +35,7 @@ function createApp(initial, opts) {
   };
   C.window = C; C.self = C; C.globalThis = C;
   vm.createContext(C);
-  vm.runInContext(src, C, { filename: 'app.js' });
+  vm.runInContext(src, C, { filename: 'app-scripts.js' });
   return { C, store, ctl };
 }
 

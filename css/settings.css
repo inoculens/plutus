@@ -1,0 +1,103 @@
+/* Settings dialog (tabs + panels, alert mirror), header sync cloud, modal
+   freeze and progressive disclosure. */
+
+#settings-dialog[open] {
+  width: min(680px, 94vw);
+  height: min(620px, 90vh);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#settings-dialog .dialog-head { flex-shrink: 0; margin-bottom: 0.75rem; }
+.set-layout { display: flex; gap: 1.25rem; margin-top: 0.5rem; flex: 1 1 auto; min-height: 0; }
+.set-tabs { display: flex; flex-direction: column; gap: 0.5rem; flex: 0 0 11.5rem; min-height: 0; overflow-y: auto; padding: 0.3rem 0.3rem 0.5rem 0.1rem; }
+.set-tabs button { background: none; border: 1px solid transparent; text-align: left; min-height: 2.7rem; color: var(--muted); white-space: nowrap; font-weight: 500; flex-shrink: 0; border-radius: var(--radius); }
+.set-tabs button:hover { color: var(--text); }
+.set-tabs button[aria-selected="true"] { background: var(--surface-4); border-color: var(--border-strong); color: var(--text); font-weight: 600; }
+.set-panels { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0.25rem 0.35rem 0.75rem 0.3rem; }
+.set-panels section { display: flex; flex-direction: column; align-items: stretch; gap: 0.75rem; }
+.set-panels section label { margin: 0.25rem 0 0; }
+.set-panels section input, .set-panels section button { margin-top: 0; margin-bottom: 0; }
+.set-blurb { margin: 0 0 0.9rem; font-size: 0.9rem; line-height: 1.6; text-transform: none; letter-spacing: normal; font-weight: 400; }
+.set-panels label { text-transform: uppercase; }
+#o-list { list-style: none; margin: 0.85rem 0 0; padding: 0; max-height: min(280px, 35vh); overflow-y: auto; overflow-x: hidden; min-height: 0; }
+#o-list li > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#o-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; padding: 0.65rem 0; border-bottom: 1px solid var(--border); }
+#s-clear { border-color: var(--red-line); color: var(--red); }
+#s-clear:hover { background: var(--red-solid); border-color: transparent; color: #fff; }
+#s-clear:active { background: #9d312d; border-color: transparent; color: #fff; }
+#s-upload-label {
+  display: block;
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* Native restore box keeps its look, but only Browse is clickable. */
+#s-upload { pointer-events: none; cursor: default; }
+#s-upload::file-selector-button {
+  font: inherit; font-weight: 600; color: var(--text);
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
+  cursor: pointer; pointer-events: auto;
+}
+#s-upload::-webkit-file-upload-button {
+  font: inherit; font-weight: 600; color: var(--text);
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
+  cursor: pointer; pointer-events: auto;
+}
+
+/* ————— Settings dialog alerts (mirror of the page banner) ————— */
+.dlg-note {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 0.9rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.9rem;
+}
+.dlg-note[hidden] { display: none; }
+#settings-alert { flex-shrink: 0; }
+.dlg-note.error {
+  border-color: var(--red-line);
+  background: var(--red-bg);
+}
+.dlg-note.info {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+}
+.dlg-note > span { flex: 1; }
+.dlg-note button {
+  flex-shrink: 0;
+  min-height: 2rem;
+  padding: 0.25rem 0.8rem;
+  background: none;
+  border-color: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+#settings-alert-close { text-decoration: none; font-weight: 700; }
+/* ————— Header sync cloud (hidden until sync is configured) ————— */
+/* Black-glyph sync art sits on a lifted tile so the cloud reads on the dark bar. */
+#tb-sync.sync-img-btn { padding: 0; background: #d4d4d8; border-color: transparent; }
+#tb-sync.sync-img-btn:hover { background: #fafafa; }
+#tb-sync-img { display: block; width: 20px; height: 20px; }
+/* ————— Modal freeze: no background scroll or interaction ————— */
+/* Both roots: on phones html is itself an overflow box (overflow-x: clip),
+   so locking body alone does not stop the viewport from scrolling. */
+html.modal-open,
+body.modal-open { overflow: hidden; overscroll-behavior: none; }
+/* ————— Progressive disclosure: no irrelevant buttons ————— */
+/* Step 1 (no accounts): the landing CTA is the only path. Topbar chrome hides. */
+body.is-empty .topbar-controls { display: none; }
+
+/* Step 2 (accounts, no trades yet): currency + cost method can wait for data. */
+body.has-no-trades .tb-field,
+body.has-no-trades .segmented { display: none; }

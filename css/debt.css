@@ -1,0 +1,209 @@
+/* Debt positions. */
+
+.debt-positions-section {
+  margin: 1.1rem 0 0.25rem;
+  border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface-2); padding: 0.75rem 1rem 0.6rem;
+}
+.debt-positions-section > .debt-net-summary {
+  margin: -0.75rem -1rem 0.65rem; border: 0; border-bottom: 1px solid var(--border);
+  border-radius: 14px 14px 0 0; background: var(--surface-3);
+  padding: 0.75rem 1rem;
+}
+.debt-section-head { align-items: center; gap: 0.75rem; margin-top: 0; margin-bottom: 0.35rem; }
+.debt-positions-details { min-width: 0; flex: 1 1 auto; }
+.debt-positions-details .section-title { margin: 0; line-height: 1; }
+.debt-positions-details > summary {
+  position: relative;
+  display: flex; align-items: center; gap: 0.45rem; cursor: pointer;
+  list-style: none; min-height: 1.25rem; user-select: none;
+}
+.debt-positions-details > summary::-webkit-details-marker { display: none; }
+/* Disclosure chip: same ▾ in a 2rem square as the phone record cards, shown
+   at every width here, and it turns over when the panel opens. */
+.debt-positions-details > summary::after {
+  content: '';
+  display: inline-flex;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 2rem; height: 2rem;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+}
+/* The glyph turns over inside the still box; only this pseudo rotates. */
+.debt-positions-details > summary::before {
+  content: '▾';
+  position: absolute;
+  right: 0; top: 50%;
+  display: flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  width: 2rem; height: 2rem;
+  margin-top: -1rem;
+  color: var(--muted);
+  font-size: 0.9rem; line-height: 1;
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+.debt-positions-details[open] > summary::before { transform: rotate(180deg); }
+.debt-position-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 0.3rem;
+  background: var(--surface-4); border-radius: 999px; color: var(--muted);
+  font-size: 0.65rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+.debt-position-list { display: grid; gap: 0.7rem; padding-top: 0.5rem; }
+.debt-position-card {
+  padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-3); min-width: 0;
+}
+.debt-position-top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.debt-position-top strong { overflow-wrap: anywhere; }
+.debt-position-amount {
+  margin: 0.6rem 0 0.1rem; font-family: var(--font-display);
+  font-size: clamp(1.15rem, 3vw, 1.45rem); font-variant-numeric: tabular-nums;
+}
+.debt-position-reported, .debt-position-collateral, .debt-position-notes, .debt-owner-title {
+  margin: 0.35rem 0 0; color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere;
+}
+.debt-owner-title { margin-top: 0.7rem; font-weight: 650; }
+.debt-snapshot-history { margin-top: 0.8rem; border-top: 1px solid var(--border); padding-top: 0.55rem; }
+.debt-snapshot-history > summary { color: var(--muted); font-size: 0.82rem; cursor: pointer; }
+.debt-snapshot-history ol { margin: 0.45rem 0 0; padding-left: 1.25rem; }
+.debt-snapshot-history li { padding: 0.35rem 0; font-size: 0.8rem; }
+.debt-snapshot-history li strong, .debt-snapshot-history li span { display: block; }
+.debt-snapshot-history li span, .debt-snapshot-history li p { color: var(--muted); margin: 0.15rem 0 0; }
+.debt-position-update {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  white-space: nowrap;
+}
+.debt-position-update:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: var(--surface-4);
+  color: #fff;
+}
+.debt-snapshot-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  margin-top: 0;
+}
+.debt-snapshot-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.debt-snapshot-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.debt-snapshot-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.85rem;
+  min-width: 3.5rem;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.debt-snapshot-actions .debt-snapshot-edit:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: var(--surface-4);
+  color: #fff;
+}
+.debt-snapshot-actions .debt-snapshot-delete {
+  color: var(--muted);
+}
+.debt-snapshot-actions .debt-snapshot-delete:hover {
+  border-color: var(--red-line);
+  background: var(--red-bg);
+  color: var(--red);
+}
+.debt-position-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.65rem;
+  min-height: 2.15rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.debt-position-delete:hover {
+  border-color: var(--red-line);
+  background: var(--red-bg);
+  color: var(--red);
+}
+.debt-empty { margin: 0.6rem 0; font-size: 0.88rem; }
+.debt-collateral-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin-top: 1.25rem; }
+.debt-collateral-heading label { margin: 0; }
+#debt-add-collateral { flex-shrink: 0; white-space: nowrap; padding: 0.45rem 0.85rem; font-size: 0.85rem; }
+.debt-collateral-list { display: grid; gap: 0.55rem; margin-top: 0.35rem; }
+.debt-collateral-row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(10.5rem, 1fr) auto; gap: 0.45rem; align-items: center; }
+.debt-collateral-row input, .debt-collateral-row select { min-width: 0; }
+.debt-collateral-actions { display: flex; align-items: center; gap: 0.4rem; }
+.debt-collateral-actions button { min-height: 2.5rem; padding: 0.3rem 0.6rem; }
+.debt-collateral-actions .debt-remove-collateral { min-width: 2.5rem; padding: 0.3rem; }
+@media (max-width: 520px) {
+  .debt-collateral-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .debt-collateral-row select { grid-column: 1 / -1; }
+  .debt-collateral-actions { justify-self: end; }
+  .debt-position-top { align-items: flex-start; }
+  .debt-positions-section { padding: 0.6rem 0.75rem 0.5rem; }
+  .debt-positions-section > .debt-net-summary { margin: -0.6rem -0.75rem 0.55rem; padding: 0.65rem 0.75rem; }
+}
+@media (max-width: 360px) {
+  .debt-collateral-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+.acct-debt-indicator {
+  display: inline-flex; align-items: center; width: fit-content; margin-top: 0.25rem;
+  color: var(--muted); font-size: 0.68rem; line-height: 1.25;
+  border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.4rem;
+}
+.debt-net-summary {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
+  padding: 0.75rem 0.9rem; margin: 0 0 0.65rem;
+  border: 1px solid var(--border); border-radius: 14px;
+}
+.debt-net-line { display: grid; gap: 0.2rem; min-width: 0; }
+.debt-net-line span { color: var(--muted); font-size: 0.72rem; }
+.debt-net-line strong { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+@media (max-width: 520px) {
+  .debt-net-summary { gap: 0.3rem; padding: 0.65rem; }
+  .debt-net-line span { font-size: 0.66rem; }
+  .debt-net-line strong { font-size: 0.82rem; }
+}
+
+/* Debt denomination is independent of the owning account. */
+.debt-asset-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
+.debt-asset-fields select, .debt-asset-fields input { min-width: 0; width: 100%; }
+.debt-asset-fields :disabled { opacity: 0.72; cursor: not-allowed; }

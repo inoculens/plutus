@@ -3,13 +3,13 @@
 // The sync timeout must cover the whole exchange, not only the arrival of the
 // response headers: a body that stalls after headers must abort and reject
 // with the same timeout error, a completed or failed body read must stop the
-// timer, and a later retry must work. Loads app.js in a stubbed vm context
+// timer, and a later retry must work. Loads the app in a stubbed vm context
 // with a fetch mock that honors AbortSignal.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 let fetchImpl = () => Promise.reject(new Error('unset'));
 const C = {
@@ -23,7 +23,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 C.SYNC_TIMEOUT_MS = 80;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

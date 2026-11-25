@@ -1,0 +1,120 @@
+/* Page banner: floating notice capsule. */
+
+/*
+   Resting states are STATIC (transform set per state class) so the banner is
+   correct even where animations are disabled (prefers-reduced-motion kills
+   every animation below). Animations only decorate the move between states.
+   Durations come from JS custom properties (--banner-in/out/dwell/lead). */
+#banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  width: min(36rem, calc(100vw - 1.5rem));
+  margin: 0 auto;
+  padding: 0.85rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 0.88rem;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  transform: translateY(-160%);
+  will-change: transform;
+  pointer-events: none;}
+
+#banner[hidden] { display: none; }
+#banner.show { transform: translateY(0); pointer-events: auto; animation: bannerIn var(--banner-in, 600ms) both; }
+#banner.hide { transform: translateY(-160%); pointer-events: none; animation: bannerOut var(--banner-out, 550ms) both; }
+
+@keyframes bannerIn {
+  0%   { transform: translateY(-160%); animation-timing-function: ease-out; }
+  55%  { transform: translateY(8px);   animation-timing-function: ease-in-out; }
+  78%  { transform: translateY(-3px);  animation-timing-function: ease-in-out; }
+  100% { transform: translateY(0); }}
+
+@keyframes bannerOut {
+  0%   { transform: translateY(0);     animation-timing-function: ease-out; }
+  25%  { transform: translateY(8px);   animation-timing-function: ease-in; }
+  100% { transform: translateY(-160%); }}
+
+/* Errors invert: white card, black text. In a monochrome UI the highest
+   contrast on screen is the loudest signal. */
+#banner.error {
+  border-color: var(--red-line);
+  background: linear-gradient(var(--red-bg), var(--red-bg)), var(--surface-3);
+  color: var(--text);}
+#banner.error #banner-progress-bar { background: var(--red); opacity: 0.85; }
+
+#banner.info {
+  background: var(--surface-3);}
+
+.banner-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 0.85rem 0 1.1rem;}
+
+#banner-text { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
+
+.banner-actions { display: flex; align-items: center; gap: 0.25rem; flex-shrink: 0; }
+
+#banner-close {
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0.25rem 0.5rem;
+  background: none;
+  border-color: transparent;
+  color: inherit;
+  font-weight: 700;
+  border-radius: 999px;
+  flex-shrink: 0;}
+
+#banner-close:hover { background: rgba(127, 127, 127, 0.22); border-color: transparent; }
+
+#banner-details {
+  flex-shrink: 0;
+  min-height: 2rem;
+  padding: 0.25rem 0.75rem;
+  background: none;
+  border-color: transparent;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: 999px;}
+
+#banner-details:hover { background: rgba(127, 127, 127, 0.22); border-color: transparent; }
+
+/* Time-remaining bar: along the capsule's bottom edge, drains right-to-left
+   over --banner-dwell once the slide-in has finished. */
+.banner-progress { width: 100%; height: 2px; background: rgba(127, 127, 127, 0.2); }
+
+#banner-progress-bar {
+  height: 100%;
+  width: 100%;
+  background: currentColor;
+  opacity: 0.7;
+  transform: scaleX(1);
+  transform-origin: left;}
+
+#banner.run #banner-progress-bar {
+  animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both;}
+
+@keyframes bannerProgress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The global reduce rule (animation:none !important) would freeze the bar
+     at full width. It is a timer, not decoration: exempt it (ID specificity
+     beats the universal selector at equal !important). */
+  #banner.run #banner-progress-bar {
+    animation: bannerProgress var(--banner-dwell, 5000ms) linear var(--banner-lead, 0ms) both !important; }
+}
+
+.banner-error { color: var(--loss); font-weight: 600; }

@@ -6,13 +6,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const appSrc = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
-const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+const appSrc = require('./app-source').appSource();
+const cssSrc = require('./app-source').cssSource();
 
-// Verify styles.css extends is-busy and btn-spin to .t-dock button.primary.is-busy
+// Verify the stylesheets extend is-busy and btn-spin to .t-dock button.primary.is-busy
 assert.ok(
   cssSrc.includes('.t-dock button.primary.is-busy'),
-  'styles.css must style .t-dock button.primary.is-busy'
+  'the stylesheets must style .t-dock button.primary.is-busy'
 );
 
 // Verify dialog markup includes the save button IDs

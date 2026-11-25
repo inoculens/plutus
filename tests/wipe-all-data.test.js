@@ -2,12 +2,12 @@
 'use strict';
 // "Clear all data" must remove every browser-side store the app owns (sync
 // sign-ins, OAuth tokens, caches, net-worth history, receipts and attachments),
-// not just the main state. Loads app.js in a stubbed vm context.
+// not just the main state. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 const store = new Map();
 const deleted = [];
@@ -28,7 +28,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 // --- wipe
 for (const k of C.WIPE_LOCAL_KEYS) store.set(k, 'x');

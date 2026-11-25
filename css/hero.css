@@ -1,0 +1,160 @@
+/* Hero (net-worth masthead) and the key figures strip. */
+
+#hero {
+  position: relative;
+  overflow: hidden;
+  padding: 1.6rem 1.75rem 1.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+
+#hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+}
+
+.hero-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.hero-value {
+  margin: 0.45rem 0 0.55rem;
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 5.6vw, 3.9rem);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.02;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-pl { margin: 0.2rem 0 0.15rem; display: inline-block; min-height: 2rem; }
+
+.hero-invested,
+.hero-spent {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.hero-invested[hidden],
+.hero-spent[hidden] { display: none; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-strong);
+}
+
+.hero-pl.pill {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Gain = green wash, loss = deep red wash. Both also carry an arrow, so the
+   meaning never depends on color alone. */
+.pill.gain { color: var(--gain); background: var(--gain-bg); border-color: var(--gain-line); }
+.pill.gain::before { content: "▲"; margin-right: 0.5em; font-size: 0.62em; }
+.pill.loss { color: var(--loss); background: var(--loss-bg); border-color: var(--loss-line); }
+.pill.loss::before { content: "▼"; margin-right: 0.5em; font-size: 0.62em; }
+
+.hero-sub {
+  margin: 0.8rem 0 0;
+  color: var(--muted-2);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gain { color: var(--gain); }
+.loss { color: var(--loss); }
+.card-value.gain::before { content: "+"; }
+
+/* ————— Key figures strip ————— */
+#overview { padding: 0; }
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.card {
+  padding: 0.95rem 1.2rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+
+.card:first-child { border-left: none; }
+
+.card-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.card-value {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Live-price loading state: same box, same layout — a soft shimmer that
+   says "fetching, no error yet". Unknown-by-design values keep the plain '—'
+   and never pulse. */
+.card-value.is-loading, .acct-value.is-loading, .acct-pl.is-loading,
+#hero-value.is-loading, #hero-value-num.is-loading {
+  opacity: 0.85;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .is-loading { animation: price-pulse 1.4s ease-in-out infinite; }
+  @keyframes price-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+}
+
+#summary-cards > p {
+  grid-column: 1 / -1;
+  padding: 1.1rem 1.25rem;
+  margin: 0;
+}

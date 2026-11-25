@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 const KEY = 'inoculens.v2';
 const REC = KEY + '.recovery';
@@ -24,7 +24,7 @@ function createApp(initial) {
   };
   C.window = C; C.self = C; C.globalThis = C;
   vm.createContext(C);
-  vm.runInContext(src, C, { filename: 'app.js' });
+  vm.runInContext(src, C, { filename: 'app-scripts.js' });
   return { C, store };
 }
 const acc = (id, ticker, kind) => ({ id, name: id, ticker, kind, createdAt: '2026-01-01T00:00:00.000Z' });

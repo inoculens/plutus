@@ -1,0 +1,80 @@
+/* Settings: encrypted sync tab. */
+
+.sync-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.9rem;
+}
+.sync-btns button { flex: 1 1 10rem; }
+.sync-btns button:disabled { opacity: 0.45; cursor: not-allowed; }
+.sync-btns button:disabled:active { transform: none; }
+.sync-btns button:disabled:hover { background: var(--surface-2); border-color: var(--border); }
+label.sync-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.7rem 0 0;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+label.sync-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.mono-break {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  margin: 0;
+}
+#sy-status, #sy-fp { overflow-wrap: anywhere; }
+#sy-status.sync-live { color: var(--green); }
+#sy-status.sync-live::before { content: "● "; }
+#sy-enc-upload { pointer-events: none; cursor: default; }
+#sy-enc-upload::file-selector-button {
+  font: inherit; font-weight: 600; color: var(--text);
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
+  cursor: pointer; pointer-events: auto;
+}
+#sy-enc-upload::-webkit-file-upload-button {
+  font: inherit; font-weight: 600; color: var(--text);
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
+  cursor: pointer; pointer-events: auto;
+}
+#sy-enc-upload:disabled::file-selector-button,
+#sy-enc-upload:disabled::-webkit-file-upload-button { opacity: 0.45; cursor: not-allowed; }
+/* Record dialog attachment picker: same Browse-button look as Settings. */
+#t-attach { pointer-events: none; cursor: default; }
+#t-attach::file-selector-button {
+  font: inherit; font-weight: 600; color: var(--text);
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
+  cursor: pointer; pointer-events: auto;
+}
+#t-attach::-webkit-file-upload-button {
+  font: inherit; font-weight: 600; color: var(--text);
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 0.5rem 0.9rem; margin-right: 0.75rem;
+  cursor: pointer; pointer-events: auto;
+}
+#sy-enc-download:disabled { opacity: 0.45; cursor: not-allowed; }
+#s-enc-label {
+  display: block;
+  margin: 0.9rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

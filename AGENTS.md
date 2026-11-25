@@ -1,9 +1,55 @@
 # PLUTUS — instructions for AI agents (and humans)
 
-Local-first portfolio tracker. Static site: `index.html`, `app.js`,
-`js/net-worth-history.js`, `styles.css`, `netlify.toml`, and
+Local-first portfolio tracker. Static site: `index.html`, the scripts under
+`js/` (`js/app.js` boots the app), the stylesheets under `css/`, `netlify.toml`, and
 `stamp-version.sh`.
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
+
+## Code layout — how the scripts fit together
+- The app is a set of classic scripts sharing ONE global scope, listed in
+  `index.html` (deferred, executed in order) and grouped by folder:
+  `js/core` (generic helpers, dates), `js/data` (state model, validation,
+  storage, backup), `js/fx`, `js/ledger` (pure accounting engine),
+  `js/prices`, `js/ui` (views, dialogs, record form, render loop),
+  `js/sync`, `js/analytics`. `js/app.js` loads last: version + boot.
+  `js/boot/` holds the two scripts that run during parsing (consent default,
+  startup loader); they are not deferred.
+- Function declarations are only hoisted within their own file. Code that
+  runs at load time (top-level `var x = f()`, IIFEs, listener wiring) may
+  only use what its own file or an EARLIER file declares. Everything else
+  runs after boot, so files call each other freely.
+- One feature per file. A new file goes into the `index.html` script list
+  in its folder group; tests read that list, so nothing else needs to know.
+  `tests/script-order.test.js` loads every file on its own, in order, and
+  fails on load-order mistakes, orphan files and a global name declared in
+  two files.
+- Tests load the app with `require('./app-source').appSource()` (and the
+  styles with `cssSource()`), never by reading one file.
+- Styles live in `css/`, one area per file, linked by `index.html` in
+  cascade order: later files override earlier ones, so a rule's file
+  position matters. `responsive.css` holds the phone redesign; the files
+  after it are later refinements that intentionally win over it. Add a
+  rule to the file of its area; if it has to override a rule that sits in a
+  later file, change that rule there (or raise specificity). Never reorder
+  the links casually.
+- State reads: `loadState()` returns a private copy (safe to mutate, then
+  `saveState`); `peekState()` returns the shared validated copy for
+  read-only hot paths. Both are cached on the exact stored text: never
+  bypass them by parsing `localStorage` yourself.
+
+## Performance — keep large ledgers snappy
+- Owners keep hundreds to thousands of records. Anything that runs per
+  paint must stay linear in the record count: no `loadState()` (a full
+  copy) inside per-record loops or per-record helpers — use
+  `peekState()` or pass the state in.
+- Background fills that run on every paint (FX rates, historical prices)
+  must share in-flight requests and back off after a failure (see
+  `fxFillRate`, `histBlocked`); user actions such as saving a record may
+  always hit the network.
+- The startup intro animates only `transform` / `opacity` (compositor
+  only) and closes when both the app is ready and the intro has finished
+  (`js/boot/startup-loader.js`). Don't drive it with fixed timers or
+  animate `filter`.
 
 ## Branches — mandatory for every agent
 - Make ALL changes on the `developing` branch. Commit and push to `developing` only.
@@ -37,13 +83,17 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - A commit id only exists AFTER committing, so never hand-write it: the
   Netlify build runs `stamp-version.sh`, which stamps the exact id + count
   into `APP_VERSION` at deploy time.
-- DO NOT reformat the `var APP_VERSION = '...';` line in `app.js`
+- DO NOT reformat the `var APP_VERSION = '...';` line in `js/app.js`
   (single quotes, exact shape) — the stamp script's sed anchors on
   `^var APP_VERSION = '.*';$`. Reformatting it silently breaks stamping and
   the footer will show a stale version forever.
 - Keep a sane fallback value on that line for local/`file://` use.
-- Bump the `?v=` cache-busters on the stylesheet + script tags in
-  `index.html` on EVERY change, so deployed users load fresh assets.
+- Cache-busters: every local script and stylesheet tag in `index.html` has a
+  `?v=` cache-buster. The same build step stamps each one with a checksum of
+  that file's own content (git not needed), so a deploy changes exactly the
+  URLs of the files that changed, and Netlify caches `/js/*` and `/css/*` as
+  immutable. Never hand-bump them; keep the checked-in fallback values as
+  they are. New tags must carry `?v=` too (`tests/stamp-version.test.js`).
 - The footer renders the version automatically (`#app-ver`); users only ever
   see that string, never these notes.
 
@@ -62,8 +112,12 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   mode is what Netlify receives.
 
 ## Verify before every push
-- Syntax-check `app.js` with any available JS runtime
-  (`node --check app.js`, QuickJS, or equivalent).
+- Syntax-check every script with any available JS runtime
+  (`node --check` each file under `js/`, e.g.
+  `find js -name '*.js' -exec node --check {} \;`).
+- Run the tests: `for t in tests/*.test.js; do node "$t" || { echo "FAILED: $t"; exit 1; }; done`
+  (the `browser-*` tests need `npm ci --prefix tests` and Chromium; without
+  them they print `SKIP` locally, and CI never skips them).
 - Smoke-test the app in a browser when changing user-facing behavior.
 - Verify `stamp-version.sh` is committed as mode `100755` (see above).
 

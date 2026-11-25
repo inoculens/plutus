@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const app = fs.readFileSync(path.join(__dirname, '..', 'js', 'ui', 'net-worth.js'), 'utf8');
 const start = app.indexOf('var NET_WORTH_HELD_GAP_MS =');
 const end = app.indexOf('function buildNetWorthHistory(', start);
 assert(start >= 0 && end > start, 'held-period history implementation not found');

@@ -1,0 +1,426 @@
+/* Record cards and cash ledger rows: pills, facts strip, tx links, lot linkage. */
+
+.ledger-row { justify-content: flex-start; align-items: center; gap: 0.75rem; }
+.ledger-row .ledger-toggle { flex: 0 0 auto; min-width: 2.2rem; padding: 0.4rem 0.3rem; border: 1px solid var(--border); border-radius: 0.55rem; background: rgba(255,255,255,0.025); }
+.ledger-row .ledger-toggle-sp { flex: 0 0 auto; min-width: 2.2rem; }
+.ledger-row .ledger-label { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 0.3rem; overflow: hidden; }
+.ledger-row .ledger-label-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-row .ledger-side { flex: 0 0 auto; display: flex; align-items: center; gap: 0.5rem; }
+/* Trillions-proof: tabular figures never wrap mid-number; the slot fits
+   ~€999,999,999,999.99 with room to spare, so every row starts at one x. */
+.ledger-row .ledger-amount { flex: 0 0 auto; min-width: 13rem; text-align: left; white-space: nowrap; overflow-wrap: normal; }
+/* Parent overviews box their rolled total: pill colors, not a pill. The box
+   is nudged left by exactly its padding + border (relative: siblings stay
+   put) so its text starts on the same x as a plain amount — € aligns with
+   €, the box sits outside. */
+.ledger-row .ledger-amount.ledger-box-inc, .ledger-row .ledger-amount.ledger-box-exp { position: relative; left: calc(-0.6rem - 1px); }
+.ledger-row .ledger-amount.ledger-box-inc { border: 1px solid var(--green-line); background: var(--gain-bg); color: var(--gain); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
+.ledger-row .ledger-amount.ledger-box-exp { border: 1px solid var(--red-line); background: var(--loss-bg); color: var(--loss); border-radius: 0.6rem; padding: 0.25rem 0.6rem; }
+.ledger-row .ledger-side button.quiet { padding: 0.4rem 0.55rem; }
+.ledger-row .ledger-act-sp { visibility: hidden; pointer-events: none; }
+/* Zero-width but full-height: keeps the row tall without pushing the amount
+   off the row end (no gaps, no horizontal padding/border, no wrapping). */
+.ledger-row.is-unlabeled .ledger-side { gap: 0; }
+.ledger-row.is-unlabeled .ledger-side .ledger-act-sp { width: 0; padding-left: 0; padding-right: 0; border-left-width: 0; border-right-width: 0; overflow: hidden; white-space: nowrap; }
+/* Virtual Unlabeled rows carry no actions: the amount hugs the row end. */
+.ledger-row.is-unlabeled .ledger-side { margin-left: auto; }
+.ledger-row.is-unlabeled .ledger-amount { min-width: 0; }
+p.muted.ledger-warn { margin: 0.5rem 0 0; }
+
+.trade-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.4rem 1rem 0.3rem;
+  margin: 0.35rem 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
+}
+
+/* The record grip is a rail on the card's LEFT edge: the grab zone runs the
+   full card height, while the dots ride in its vertical middle. The card
+   reserves the column, so every record line shifts a bit right. Relative
+   (no z-index): the card holds the rail without becoming a stacking
+   context. Dots run two columns wide; the flank space left and right is
+   about half the rail width on either side. */
+.trade-block { position: relative; padding-left: 2.6rem; }
+.trade-block .drag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2.4rem;
+  height: auto;
+  align-self: auto;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  appearance: none;
+  padding: 0;
+}
+.trade-block .drag-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1.5rem;
+  height: 4.06rem;
+  transform: translate(-50%, -50%);
+  border-radius: 4px;
+  background-image: radial-gradient(circle, var(--muted-2) 1.2px, transparent 1.4px);
+  background-size: 0.5rem 0.58rem;
+  background-position: center;
+  background-repeat: repeat;
+}
+
+/* Selection checkbox for trade blocks (same chip as the account cards) */
+.trade-block .card-check {
+  width: 1.4rem;
+  height: 1.4rem;
+  min-height: 0;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Selected state for trade blocks */
+.trade-block.selected {
+  border-color: var(--accent-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent), var(--surface-2);
+}
+
+/* Recolored trade blocks — border tint + gradient fade (mirrors account cards) */
+.trade-block[data-colored="1"] {
+  border-color: color-mix(in srgb, var(--trade-color) 40%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--trade-color) 16%, transparent), transparent 60%),
+    linear-gradient(180deg, rgba(255,255,255,0.025), transparent),
+    var(--surface);
+}
+.trade-block[data-colored="1"]:hover {
+  border-color: color-mix(in srgb, var(--trade-color) 55%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--trade-color) 22%, transparent), transparent 65%),
+    linear-gradient(180deg, rgba(255,255,255,0.045), transparent),
+    var(--surface-2);
+}
+
+/* Drag states for trade blocks */
+.trade-block.drag-src { opacity: 0.35; }
+.trade-block.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.trade-block.drop-after { box-shadow: 0 2px 0 var(--accent); }
+
+/* Drag ghost for trade blocks */
+.trade-block.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  border-radius: var(--radius-lg);
+  transform: translateZ(0);
+}
+
+/* Ledgers read as one table: same bordered card as trade records. */
+.ledger-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.2rem 1rem 0.1rem;
+  margin: 0.35rem 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--surface);
+}
+.trade-block:last-child { margin-bottom: 0; }
+/* FIFO lot linkage: per-record Sold / Closed-from lines replacing the old
+   detached dump. Ellipsis keeps the fixed box shape; tap jumps to the card. */
+.lot-links {
+  flex: 1 1 100%;
+  margin-top: 0.35rem;
+  border-top: 1px dashed var(--border-strong);
+  padding-top: 0.4rem;
+  display: grid;
+  gap: 0.3rem;
+}
+.lot-links-head {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+/* Plain block scroller, capped so one record can never stretch the page.
+   Deliberately boring: whole-pixel spacing, own layer, stable scrollbar
+   gutter — exotic containers tore glyphs on some setups. */
+.lot-link-list {
+  display: block;
+  max-height: 190px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  isolation: isolate;
+}
+.lot-link {
+  display: block;
+  width: 100%;
+  margin: 5px 0 0;
+}
+.lot-link:first-child { margin-top: 0; }
+.lot-link[hidden] { display: none; }
+.lot-link {
+  min-width: 0;
+  min-height: 0;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: transparent;
+  overflow: hidden;
+}
+.lot-link-text {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lot-link:hover { border-color: var(--border-strong); background: rgba(255, 255, 255, 0.03); }
+.trade-block.flash { animation: trade-flash 1.6s ease; }
+@keyframes trade-flash {
+  0%, 100% { box-shadow: none; }
+  20%, 60% { box-shadow: 0 0 0 2px var(--accent-line); }
+}
+.trade-head { display: flex; align-items: center; gap: 0.8rem; padding-bottom: 0.2rem; }
+
+.side {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+.side-buy { color: var(--green); background: var(--green-bg); border-color: var(--green-line); }
+.side-sell { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
+.side-swap { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+
+/* Swap pair pill: BTC → ADA, sitting immediately after the Swap type pill.
+   Same pill geometry as the other head chips, deliberately neutral so the
+   type stays the loudest signal. */
+.trade-pair {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Route pill: the text and its ⓘ badge share one row, so the badge always
+   reads as a continuation of the text ("A → B… ⓘ"), never on a line of its
+   own. The text is the only part that may shrink — the badge keeps its size
+   and the text gives up room instead. */
+.trade-what { font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: baseline; }
+.trade-what-text { flex: 0 1 auto; }
+.trade-what .info-dot { flex: 0 0 auto; }
+/* Record id pill: same geometry as the action pills, deliberately quieter
+   (smaller, muted outline) so date + type stay primary. */
+.trade-id {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* Date pill speaks the same language as the other pills (Buy/Sell, fees,
+   spent): translucent tint wash + bright text + matching border, never a
+   solid fill. Neutral gray variant. */
+.trade-when {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #e8ecf1;
+  background: rgba(235, 239, 244, 0.18);
+  border: 1px solid rgba(235, 239, 244, 0.5);
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* "Now worth" fun-fact pill: same outline language as the date/type pills
+   (translucent tint wash + bright text + matching border, never a solid
+   fill). Gain green, loss red, flat muted. Sizes to its content — the
+   full text must always fit; ellipsis/overflow are only a last-resort guard
+   so pathological values can never break the box. */
+.trade-now {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trade-now-gain { color: var(--green); background: var(--green-bg); border-color: var(--green-line); }
+.trade-now-gain::before { content: "▲"; margin-right: 0.45em; font-size: 0.72em; }
+.trade-now-loss { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
+.trade-now-loss::before { content: "▼"; margin-right: 0.45em; font-size: 0.72em; }
+.trade-now-flat { color: var(--muted); background: rgba(255,255,255,0.02); border-color: var(--border-strong); }
+.trade-block .stat-label { flex: 0 0 7rem; }
+.trade-block .stat-val { flex: 1; }
+.trade-block .stat-row { padding: 0.5rem 0.1rem; }
+/* Trade facts share equal-width columns, so a long value never pushes its
+   neighbours around. Values trim in their own cells and open in a popup. */
+.trade-block { display: flex; flex-wrap: wrap; column-gap: 1.25rem; }
+.trade-head { flex: 1 1 100%; }
+.trade-block .stat-row {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.08rem;
+  border-bottom: none;
+  padding: 0.12rem 0 0.08rem;
+}
+/* Labels hold the strip's shared line: a squeezed caption cuts with its own
+   ellipsis instead of wrapping, because a two-line label (like 'Exec.
+   price') pushes its exact value — often the '—' dash — a whole line down,
+   out of line with every other row. The popup still carries the full text. */
+.trade-block .stat-label { flex: none; font-size: 0.8rem; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.trade-block .stat-val { flex: none; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trade-block .stat-row[data-label="Note"] {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Rate is formulaic and long: bound it like Note so a long quote never
+   hogs the strip — short values stay narrow, long ones trim with … and
+   the truncated-only popup opens the full text on click. */
+.trade-block .stat-row.rate-line {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.trade-block .rate-line .stat-val { max-width: 100%; }
+/* Rate rows read like every other value (same typeface/weight/size); the
+   muted gray stays as the "automatic" cue. */
+.trade-block .rate-line .stat-val { font-family: var(--font-display); font-size: inherit; font-weight: 550; }
+/* Multi-recipient transfers share one Received row: bound it like Note and
+   Rate so a long recipient list trims with … instead of pushing the strip
+   (and the card) off-screen. Tap/ⓘ opens the full list. */
+.trade-block .stat-row[data-label="Received"] {
+  flex: 1 1 0;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
+}
+.trade-block .stat-row[data-label="Note"] .stat-val {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Tx hash link keeps the transfer-pill blue in every state — visited links
+   must never fall back to the browser default purple. */
+.trade-block a.tx-link,
+.trade-block a.tx-link:link,
+.trade-block a.tx-link:visited,
+.trade-block a.tx-link:hover,
+.trade-block a.tx-link:active { color: var(--blue); }
+/* Copy button beside the tx id (plain text for non-BTC, after the mempool
+   link for BTC): dim inline glyph, brightens on hover, flashes blue on a
+   successful copy and red when the clipboard refused both attempts. */
+.trade-block .tx-copy {
+  margin-left: 6px;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.45;
+  cursor: pointer;
+  line-height: 0;
+  vertical-align: baseline;
+  font: inherit;
+  /* The global button rule sets a 44px touch-target min-height: inside the
+     value line it balloons the line box to 2 lines and sinks the hash under
+     its label. Kill it — this button carries a 13px glyph only. */
+  min-height: 0;
+  height: auto;
+}
+.trade-block .tx-copy:hover,
+.trade-block .tx-copy:focus-visible { opacity: 0.9; }
+.trade-block .tx-copy.copied { opacity: 1; color: var(--green); }
+.trade-block .tx-copy.copy-fail { opacity: 1; color: var(--red); }
+.trade-block .tx-copy svg { display: inline-block; }
+/* The Tx value is a flex row so the copy glyph stops participating in the
+   text baseline: an inline-block button mounts on the baseline and grows
+   the line box above it, sinking the hash lower under its label than every
+   other value. As a flex row the text keeps its exact line metrics and the
+   glyph centers beside it. */
+.trade-block .stat-row.tx-row .stat-val { display: flex; align-items: center; }
+.trade-block .stat-row.tx-row .stat-val > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.trade-block .stat-row.tx-row .tx-copy { flex: none; }
+/* Swap records hold two hashes (sent / received). In the form each label
+   carries a small ticker tag so the asset is obvious; the pair sits closer
+   together than unrelated fields so it reads as one group. */
+#trade-form .txid-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+}
+#trade-form #t-txid-to-row > label { margin-top: 0.7rem; }
+#note-dialog-text {
+  margin: 0.4rem 0 0;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* One true facts line on desktop: the strip never wraps, so every fact —
+   however long — shares the single row and trims instead of spilling below. */
+/* Keep the heading divider outside the clipped facts strip. It aligns with
+   the facts content, staying clear of the grip rail and card border. */
+.trade-divider {
+  flex: 1 1 100%;
+  height: 0;
+  margin: 0.22rem 0 0.42rem;
+  border-top: none;
+}
+.trade-facts { display: flex; flex-wrap: nowrap; justify-content: flex-start; align-items: stretch; gap: 0 1.25rem; min-width: 0; flex: 1 1 100%; max-width: 100%; overflow: hidden; }
+
+.trade-del { margin-left: 0.25rem; padding: 0.45rem 0.7rem; min-height: 2.5rem; font-size: 1.05rem; line-height: 1; }
+/* Phone action cluster (▾ ✎ 🗑): the wrapper only exists so the three wrap to
+   the next line together. Desktop keeps its head layout byte-for-byte — the
+   wrapper has no box there (display:contents) and the ▾ stays hidden. */
+.trade-actions { display: contents; }
+.trade-more { display: none; }

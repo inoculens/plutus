@@ -4,12 +4,12 @@
 // income that already exists on or before its date, never income dated later.
 // A cash income's display value is consumed*spendRate + remainder*todayRate,
 // so a wrongly matched expense shows up as its spend rate leaking into a later
-// income. All figures are invented. Loads app.js in a stubbed vm context.
+// income. All figures are invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 const C = {
   console, setTimeout: noop, clearTimeout: noop, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
@@ -22,7 +22,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 const fx = rate => ({ pair: 'USD/EUR', rate, source: 'test', interpolated: false });
 let n = 0;

@@ -1,0 +1,147 @@
+/* Account detail: header, figures, facts. */
+
+#acct-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.93rem;
+  font-weight: 500;
+  padding: 0.4rem 0.2rem;
+}
+#acct-back:hover { color: var(--text); }
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 1.25rem 1.4rem 1.1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+
+.detail-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.menu { position: relative; margin-left: auto; }
+.menu summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.4rem 0.85rem;
+  min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  user-select: none;
+  background: var(--surface-2);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary:hover { color: var(--text); background: var(--surface-3); }
+.menu[open] summary { color: var(--accent-ink); background: var(--accent); border-color: transparent; }
+.menu-box {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 13rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 0.35rem;
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+}
+.menu-box button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.7rem 0.85rem;
+  min-height: 2.75rem;
+  border-radius: 9px;
+  white-space: nowrap;
+}
+.menu-box button:hover { background: var(--accent-soft); }
+.menu-box {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.detail-stats { margin: 1rem 0 0.25rem; }
+.cards.detail-stats:not(.cards-duo) > .card:nth-child(4n + 1) { border-left: none; }
+.cards.detail-stats:not(.cards-duo) > .card:nth-child(n + 5) { border-top: 1px solid var(--border); }
+/* Two-card grids (cash Balance/Value): the box ends with the pair — two
+   tracks, capped and centered. Values truncate inside (see .card-value). */
+.cards.detail-stats.cards-duo { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 38rem; margin-left: auto; margin-right: auto; }
+.closed-flag { margin: 0.9rem 0 0; }
+.fees-line {
+  display: inline-block;
+  margin: 0.5rem 0.5rem 0 0;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--red-line);
+  background: var(--red-bg);
+  color: var(--red);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+/* Per-account spent: orange pill above the red fees pill. */
+.spent-line {
+  display: inline-block;
+  margin: 0.5rem 0.5rem 0 0;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+/* ————— Facts + trades ————— */
+.stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 0.7rem 0.15rem;
+  border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-label { color: var(--muted); font-size: 0.88rem; flex-shrink: 0; }
+.stat-val {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.rate-line .stat-val { font-family: var(--font-ui); font-size: 0.83rem; font-weight: 400; max-width: 70%; }
+
+/* Overflow-gated ⓘ dots start hidden; the sync pass shows them inline only
+   where text actually truncates (always-on dots keep the plain class). */
+.info-dot-gated { display: none; }

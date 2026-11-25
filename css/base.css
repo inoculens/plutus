@@ -1,0 +1,141 @@
+/* Design tokens (Onyx: matte black, white, gray), base element styles, the
+   matte grain and the ambient backdrop. */
+
+:root {
+  --bg: #09090a;
+  --bg-soft: #0d0d0e;
+  --surface: #111112;
+  --surface-2: #161617;
+  --surface-3: #1d1d1f;
+  --surface-4: #272729;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #f5f5f6;
+  --muted: #a0a0a5;
+  --muted-2: #6c6c71;
+  --accent: #fafafa;
+  --accent-ink: #09090a;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --accent-line: rgba(255, 255, 255, 0.28);
+  /* Meaning colors: deep, desaturated tones that sit on matte black without
+     glowing. Chrome stays black/white/gray; color appears only where it says
+     something (money direction, record type, warnings, destructive actions).
+     Each hue has text, wash and line variants so pills, banners and chart
+     strokes all share one family. */
+  --green: #4fc08d;  --green-bg: rgba(79, 192, 141, 0.12);  --green-line: rgba(79, 192, 141, 0.32);
+  --red: #e5645e;    --red-bg: rgba(214, 69, 65, 0.13);     --red-line: rgba(214, 69, 65, 0.36);   --red-solid: #b83a36;
+  --blue: #78aee0;   --blue-bg: rgba(86, 152, 214, 0.12);   --blue-line: rgba(86, 152, 214, 0.32);
+  --violet: #a995e8; --violet-bg: rgba(139, 112, 224, 0.13); --violet-line: rgba(139, 112, 224, 0.34);
+  --amber: #dba94e;  --amber-bg: rgba(219, 169, 78, 0.12);  --amber-line: rgba(219, 169, 78, 0.32);
+  --gain: var(--green); --gain-bg: var(--green-bg); --gain-line: var(--green-line);
+  --loss: var(--red);   --loss-bg: var(--red-bg);   --loss-line: var(--red-line);
+  --radius: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --max: 1160px;
+  --rail: 15.5rem;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --shadow-pop: 0 24px 64px -16px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+* { box-sizing: border-box; }
+
+html {
+  background: var(--bg);
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.is-app-loading,
+body.is-app-loading {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  background: transparent; /* html carries the canvas color so the ambient backdrop shows through */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01", "tnum" 0;
+}
+
+[hidden] { display: none !important; }
+
+::selection { background: rgba(255, 255, 255, 0.85); color: #09090a; }
+
+/* Matte grain: a faint static noise sits over the black so large flat
+   surfaces read as powder-coated metal instead of a screen. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .045 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ————— Ambient backdrop —————
+   Two fixed layers on the root, behind everything (z-index -1, above only the
+   canvas color): soft light pools that drift very slowly, and a set of huge
+   concentric rings fading off the top-right corner. Both stay faint enough
+   to finish the page without drawing the eye. */
+html::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(52vw 40vw at 88% 4%, rgba(255, 255, 255, 0.14), transparent 70%),
+    radial-gradient(46vw 36vw at 8% 100%, rgba(255, 255, 255, 0.10), transparent 72%),
+    radial-gradient(34vw 26vw at 22% 10%, rgba(219, 169, 78, 0.07), transparent 70%),
+    radial-gradient(40vw 30vw at 64% 62%, rgba(190, 195, 210, 0.05), transparent 72%);
+}
+
+html::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 800' fill='none' stroke='white' stroke-width='1'%3E%3Ccircle cx='400' cy='400' r='80' stroke-opacity='.22'/%3E%3Ccircle cx='400' cy='400' r='150' stroke-opacity='.18'/%3E%3Ccircle cx='400' cy='400' r='230' stroke-opacity='.14'/%3E%3Ccircle cx='400' cy='400' r='320' stroke-opacity='.11'/%3E%3Ccircle cx='400' cy='400' r='390' stroke-opacity='.08'/%3E%3C/svg%3E") no-repeat right -16vw top -22vw / min(78vw, 1000px);
+  -webkit-mask-image: radial-gradient(60% 60% at 82% 6%, #000 20%, transparent 78%);
+  mask-image: radial-gradient(60% 60% at 82% 6%, #000 20%, transparent 78%);
+  opacity: 0.9;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html::before { animation: ambient-drift 48s ease-in-out infinite alternate; }
+  @keyframes ambient-drift {
+    from { transform: translate3d(-1.5%, 1%, 0) scale(1); }
+    to { transform: translate3d(1.5%, -1%, 0) scale(1.06); }
+  }
+}
+
+@media (max-width: 720px) {
+  html::before {
+    background:
+      radial-gradient(70vw 50vw at 90% 4%, rgba(255, 255, 255, 0.14), transparent 70%),
+      radial-gradient(70vw 50vw at 4% 96%, rgba(255, 255, 255, 0.09), transparent 72%),
+      radial-gradient(60vw 40vw at 14% 12%, rgba(219, 169, 78, 0.07), transparent 70%);
+  }
+  html::after { background-size: 120vw; background-position: right -30vw top -34vw; }
+}
+
+@media print {
+  html::before, html::after { display: none; }
+}

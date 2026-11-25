@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const store = new Map();
 const noop = () => {};
 const el = () => new Proxy(function () {}, {
@@ -36,7 +36,7 @@ C.window = C;
 C.self = C;
 C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 const date = '2024-01-02';
 const lock = (pair, rate) => ({ pair, rate, source: 'entry', interpolated: false });

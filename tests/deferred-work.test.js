@@ -36,16 +36,16 @@ function load(file, startMarker, endMarker) {
 
 const targets = [
   {
-    name: 'app.js deferTradeSubmitWork',
-    code: load('app.js', 'function deferTradeSubmitWork(', 'function tradeFormError('),
+    name: 'record-submit.js deferTradeSubmitWork',
+    code: load('js/ui/record-submit.js', 'function deferTradeSubmitWork(', 'function tradeFormError('),
     call: function (context, work) { context.deferTradeSubmitWork(work); },
     install: function (clock) {
       return { setTimeout: clock.setTimeout, requestAnimationFrame: clock.requestAnimationFrame };
     }
   },
   {
-    name: 'net-worth-history.js runAfterPaint',
-    code: load('js/net-worth-history.js', 'function runAfterPaint(', 'function byId('),
+    name: 'net-worth-chart.js runAfterPaint',
+    code: load('js/ui/net-worth-chart.js', 'function runAfterPaint(', 'function byId('),
     call: function (context, work) { context.runAfterPaint(work); },
     install: function (clock) {
       return { root: { setTimeout: clock.setTimeout, requestAnimationFrame: clock.requestAnimationFrame } };

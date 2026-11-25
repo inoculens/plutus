@@ -1,0 +1,150 @@
+/* Startup loader (driven by js/boot/startup-loader.js). */
+
+#app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #070708;
+  opacity: 1;
+  transition: opacity 450ms ease;
+}
+
+#app-loader[hidden] { display: none; }
+
+#app-loader.is-exiting { opacity: 0; pointer-events: none; }
+
+.app-loader-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.6rem;
+}
+
+.app-loader-stage {
+  position: relative;
+  width: min(18rem, 76vw);
+  height: 5.5rem;
+}
+
+.app-loader-coin,
+.app-loader-logo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Each coin is two stacked copies of its icon: a blurred one and a sharp
+   one. The intro cross-fades them instead of animating filter: blur(),
+   because only transform and opacity animate off the main thread in every
+   browser — the intro stays smooth while the app boots. */
+.app-loader-coin {
+  width: 4.5rem;
+  height: 4.5rem;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.app-loader-coin img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: grayscale(1);
+}
+
+.app-loader-coin .app-loader-soft { filter: grayscale(1) blur(8px); }
+.app-loader-coin .app-loader-sharp { opacity: 0; will-change: opacity; }
+
+.app-loader-logo {
+  width: 5.5rem;
+  height: 5.5rem;
+  object-fit: contain;
+  opacity: 0;
+  border-radius: 22%;
+  will-change: opacity;
+}
+
+#app-loader.is-running .app-loader-usd { animation: loaderCoinPass 650ms ease-out both; }
+#app-loader.is-running .app-loader-eur { animation: loaderCoinPass 650ms ease-out 480ms both; }
+#app-loader.is-running .app-loader-btc { animation: loaderCoinPass 650ms ease-out 960ms both; }
+#app-loader.is-running .app-loader-usd .app-loader-soft { animation: loaderCoinSoft 650ms ease-out both; }
+#app-loader.is-running .app-loader-eur .app-loader-soft { animation: loaderCoinSoft 650ms ease-out 480ms both; }
+#app-loader.is-running .app-loader-btc .app-loader-soft { animation: loaderCoinSoft 650ms ease-out 960ms both; }
+#app-loader.is-running .app-loader-usd .app-loader-sharp { animation: loaderCoinSharp 650ms ease-out both; }
+#app-loader.is-running .app-loader-eur .app-loader-sharp { animation: loaderCoinSharp 650ms ease-out 480ms both; }
+#app-loader.is-running .app-loader-btc .app-loader-sharp { animation: loaderCoinSharp 650ms ease-out 960ms both; }
+#app-loader.is-running .app-loader-logo { animation: loaderLogoReveal 650ms ease 1.65s both; }
+
+/* Glide in from the right, settle in focus, drift on and fade out left. */
+@keyframes loaderCoinPass {
+  0% { opacity: 0; transform: translate(3.2rem, -50%); }
+  28% { opacity: 1; transform: translate(-50%, -50%); }
+  65% { opacity: 0.9; transform: translate(-55%, -50%); }
+  100% { opacity: 0; transform: translate(calc(-50% - 3.2rem), -50%); }
+}
+
+/* Focus pull: blurred -> sharp at 28% -> softening again on the way out. */
+@keyframes loaderCoinSoft {
+  0% { opacity: 1; }
+  28% { opacity: 0; }
+  65% { opacity: 0.15; }
+  100% { opacity: 1; }
+}
+
+@keyframes loaderCoinSharp {
+  0% { opacity: 0; }
+  28% { opacity: 1; }
+  65% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+@keyframes loaderLogoReveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.app-loader-progress {
+  width: min(10rem, 50vw);
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.app-loader-progress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #fafafa;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+#app-loader.is-running .app-loader-progress span {
+  animation: loaderProgress 2.3s ease-in-out both;
+}
+
+@keyframes loaderProgress {
+  to { transform: scaleX(1); }
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -3.5rem;
+  z-index: 100;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 0.65rem 1.1rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+.skip-link:focus { top: 0.6rem; }

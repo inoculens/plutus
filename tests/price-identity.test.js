@@ -3,13 +3,13 @@
 // A ticker is not a unique asset: the same symbol can be a coin in one account
 // and a stock in another. When a ticker is held under several asset kinds,
 // every price for it is keyed KIND:SYM so the two can never share or overwrite
-// a price. Unshared tickers keep their plain key. Loads app.js in a stubbed vm
+// a price. Unshared tickers keep their plain key. Loads the app in a stubbed vm
 // context; all figures are invented.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 function load() {
   const C = {
@@ -23,7 +23,7 @@ function load() {
   };
   C.window = C; C.self = C; C.globalThis = C;
   vm.createContext(C);
-  vm.runInContext(src, C, { filename: 'app.js' });
+  vm.runInContext(src, C, { filename: 'app-scripts.js' });
   return C;
 }
 const C = load();

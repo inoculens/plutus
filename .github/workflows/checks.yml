@@ -47,8 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m py_compile scripts/collect-market-history.py
-          node --check app.js
-          node --check js/net-worth-history.js
+          find js -name '*.js' -print0 | xargs -0 -n1 node --check
 
       - name: Python tests
         run: python -m unittest discover -s tests -p 'test_*.py'

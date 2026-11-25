@@ -1,0 +1,178 @@
+/* Consistent checkbox geometry and label rhythm. */
+
+/*
+   The generic form-control rule above is intended for text fields. Without
+   an explicit reset, checkboxes inherit its full-width, padded input box,
+   which makes them sit off-centre or stretch in different forms. */
+input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+input[type="checkbox"]:focus {
+  box-shadow: none;
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+/* Preserve the intentionally larger selection controls. */
+input[type="checkbox"].card-check {
+  flex: 0 0 1.3rem;
+  width: 1.3rem;
+  min-width: 1.3rem;
+  max-width: 1.3rem;
+  height: 1.3rem;
+  min-height: 0;
+}
+
+/* Checkboxes sit on the text's visual centreline, including multi-line
+   labels. The previous flex-start + top margin made them look too high. */
+label.sync-check,
+.set-panels label.sync-check {
+  align-items: center;
+}
+.set-panels label.sync-check input[type="checkbox"] {
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+}
+
+/* Help markers need a real visual gap from the words they explain. Keep
+   their hit-area fixed so the spacing survives wrapping at narrow widths. */
+.info-pill,
+.set-panels section .info-pill,
+.set-panels .set-heading .info-pill {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin-left: 0.5rem;
+}
+label.sync-check .info-pill {
+  margin-left: 0.15rem;
+}
+
+
+/* Global form-control alignment pass.
+   Keep checkbox controls on the label's text centreline in every form,
+   and give help markers a genuine gap after the label text. */
+label:has(> input[type="checkbox"]),
+label.sync-check,
+.set-panels label.sync-check {
+  display: flex;
+  align-items: center;
+  column-gap: 0.65rem;
+}
+label:has(> input[type="checkbox"]) > input[type="checkbox"],
+label.sync-check > input[type="checkbox"],
+.set-panels label.sync-check > input[type="checkbox"] {
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  align-self: center;
+}
+
+#settings-dialog .set-panels section > div label:not(.sync-check) {
+  margin: 0.9rem 0 0.3rem;
+}
+#settings-dialog .set-panels section > div > label:not(.sync-check):first-child {
+  margin-top: 0;
+}
+#settings-dialog .set-panels section > div {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+label.sync-check .info-pill,
+.set-panels label.sync-check .info-pill,
+.set-panels section > label .info-pill,
+.set-panels .set-heading .info-pill,
+label > .info-pill {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin-left: 0.7rem !important;
+  margin-right: 0.1rem;
+  align-self: center;
+}
+label.sync-check {
+  row-gap: 0.45rem;
+}
+
+/* Settings labels must reserve a real line of space for their help marker.
+   Some provider-specific fields live inside nested divs rather than directly
+   inside the section, so the old direct-child selector left those labels on
+   the generic form rhythm and let the marker crowd the input beneath it. */
+#settings-dialog .set-panels section label:not(.sync-check) {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 1.5rem;
+  margin: 0.35rem 0 0;
+  padding: 0.05rem 0.1rem;
+  line-height: 1.5;
+}
+#settings-dialog .set-panels section label:not(.sync-check) .info-pill {
+  display: inline-flex;
+  flex: 0 0 1.25rem;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  min-height: 1.25rem;
+  margin: 0;
+  vertical-align: middle;
+}
+#settings-dialog .set-panels section label:not(.sync-check) + input,
+#settings-dialog .set-panels section label:not(.sync-check) + select,
+#settings-dialog .set-panels section label:not(.sync-check) + textarea {
+  margin-top: 0;
+}
+#settings-dialog .set-panels label.sync-check {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  line-height: 1.45;
+}
+#settings-dialog .set-panels label.sync-check > input[type="checkbox"] {
+  flex: 0 0 1.05rem;
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  min-height: 1.05rem;
+  margin: 0;
+  align-self: center;
+}

@@ -20,6 +20,9 @@ const { Diagnostics, PROBE_PATH, PROBE_EVAL_MARKER, PROBE_INLINE_MARKER } = requ
 //   E2E_CSP_MUTANT=...    serve a weakened policy (inline | eval)
 //   E2E_INJECT=...        add an unrelated violation (script | exception | asset)
 const CSP_ONLY = process.env.E2E_CSP_ONLY === '1';
+// Every page asset must load: the document, each stylesheet and each app script.
+const { appScripts, styleSheets } = require('./app-source');
+const REQUIRED_ASSETS = ['/'].concat(styleSheets(), appScripts({ withChart: true })).map(f => f === '/' ? f : '/' + f);
 const chromium = loadChromium('browser-e2e');
 const root = path.join(__dirname, '..');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.svg': 'image/svg+xml', '.txt': 'text/plain' };
@@ -157,7 +160,7 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
   assert.equal(csp.inlineRan, false, 'injected inline script is blocked by the CSP');
   // Expected blocks are classified by event properties, exactly once each; anything else is a failure.
   assert.deepEqual(diag.probeProblems(), [], 'CSP probe evidence');
-  assert.deepEqual(diag.problems(['/', '/app.js', '/styles.css', '/js/net-worth-history.js']), [], 'unexpected diagnostics after load');
+  assert.deepEqual(diag.problems(REQUIRED_ASSETS), [], 'unexpected diagnostics after load');
   if (CSP_ONLY) { await browser.close(); server.close(); console.log('browser-e2e: OK (csp only)'); return; }
   assert.ok(!csp.fresh || JSON.parse(csp.fresh).trades.length === 0, 'fresh install starts empty');
 
@@ -278,6 +281,6 @@ const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, what + ': got ' +
 
   await browser.close(); server.close();
   assert.deepEqual(diag.probeProblems(), [], 'CSP probe evidence');
-  assert.deepEqual(diag.problems(['/', '/app.js', '/styles.css', '/js/net-worth-history.js']), [], 'unexpected browser diagnostics');
+  assert.deepEqual(diag.problems(REQUIRED_ASSETS), [], 'unexpected browser diagnostics');
   console.log('browser-e2e: OK');
 })().catch(e => { console.error(e); try { server.close(); } catch (_) {} process.exit(1); });

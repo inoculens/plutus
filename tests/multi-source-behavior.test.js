@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-// Behavioral checks for multi-source transfers: loads app.js in a stubbed
+// Behavioral checks for multi-source transfers: loads the app in a stubbed
 // vm context (no DOM, no network) and calls the pure helpers directly.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const store = new Map();
 const noop = () => {};
 const el = () => new Proxy(function () {}, {
@@ -24,7 +24,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 const fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
 let n = 0;

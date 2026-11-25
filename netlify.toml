@@ -1,6 +1,6 @@
-# Netlify: static publish, but the build stamps the exact commit id + count
-# into APP_VERSION and the commit id into every ?v= cache-buster first (see
-# stamp-version.sh + the version contract in js/app.js).
+# Netlify: static publish, but the build first stamps the exact commit id +
+# count into APP_VERSION and a content checksum into every ?v= cache-buster
+# (see stamp-version.sh + the version contract in js/app.js).
 # History-API (/account/<id>) falls back to index.html.
 [build]
   publish = "."
@@ -54,9 +54,9 @@
     X-Frame-Options = "DENY"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
-# Scripts and styles: every reference in index.html carries a ?v=<commit id>
-# cache-buster stamped at deploy (stamp-version.sh), so they never change in
-# place and can be cached forever.
+# Scripts and styles: every reference in index.html carries a ?v=<checksum>
+# cache-buster stamped at deploy (stamp-version.sh), so a URL never serves
+# changed content and can be cached forever.
 [[headers]]
   for = "/js/*"
   [headers.values]

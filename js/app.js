@@ -19,8 +19,9 @@
  * Version contract (full rules in AGENTS.md): the footer shows the commit id
  * + commit count, e.g. "c03f772 (#110)". The id only exists after
  * committing, so the deploy build (stamp-version.sh, wired in netlify.toml)
- * stamps it into APP_VERSION below and into every ?v= cache-buster in
- * index.html. Keep a sane fallback value here for local/file:// use.
+ * stamps it into APP_VERSION below (and a content checksum into every ?v=
+ * cache-buster in index.html). Keep a sane fallback value here for
+ * local/file:// use.
  */
 
 var APP_VERSION = '35056ef (#140)';
@@ -87,7 +88,7 @@ function init() {
   if (d && !d.value) d.value = todayDmy();
   uiBooted = true;
   render();
-  // js/startup-loader.js closes the intro once it has finished playing.
+  // js/boot/startup-loader.js closes the intro once it has finished playing.
   if (typeof window.finishStartupLoader === 'function') window.finishStartupLoader();
   try { announceStorageRecovery(); } catch (e) { /* the notice never breaks boot */ }
   refreshPrices();

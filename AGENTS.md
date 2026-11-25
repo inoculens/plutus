@@ -29,9 +29,9 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   cascade order: later files override earlier ones, so a rule's file
   position matters. `responsive.css` holds the phone redesign; the files
   after it are later refinements that intentionally win over it. Add a
-  rule to the file of its area; if it must beat a later file, put it after
-  that file's rules (or raise specificity), never reorder the links
-  casually.
+  rule to the file of its area; if it has to override a rule that sits in a
+  later file, change that rule there (or raise specificity). Never reorder
+  the links casually.
 - State reads: `loadState()` returns a private copy (safe to mutate, then
   `saveState`); `peekState()` returns the shared validated copy for
   read-only hot paths. Both are cached on the exact stored text: never
@@ -89,10 +89,11 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   the footer will show a stale version forever.
 - Keep a sane fallback value on that line for local/`file://` use.
 - Cache-busters: every local script and stylesheet tag in `index.html` has a
-  `?v=` cache-buster. The same build step stamps the commit id into all of
-  them, so each deploy ships fresh URLs (and Netlify caches `/js/*`,
-  `/css/*` as immutable). Never hand-bump them; keep the
-  checked-in fallback values as they are. New tags must carry `?v=` too.
+  `?v=` cache-buster. The same build step stamps each one with a checksum of
+  that file's own content (git not needed), so a deploy changes exactly the
+  URLs of the files that changed, and Netlify caches `/js/*` and `/css/*` as
+  immutable. Never hand-bump them; keep the checked-in fallback values as
+  they are. New tags must carry `?v=` too (`tests/stamp-version.test.js`).
 - The footer renders the version automatically (`#app-ver`); users only ever
   see that string, never these notes.
 
@@ -114,7 +115,9 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Syntax-check every script with any available JS runtime
   (`node --check` each file under `js/`, e.g.
   `find js -name '*.js' -exec node --check {} \;`).
-- Run the tests: `for t in tests/*.test.js; do node "$t" || break; done`.
+- Run the tests: `for t in tests/*.test.js; do node "$t" || { echo "FAILED: $t"; exit 1; }; done`
+  (the `browser-*` tests need `npm ci --prefix tests` and Chromium; without
+  them they print `SKIP` locally, and CI never skips them).
 - Smoke-test the app in a browser when changing user-facing behavior.
 - Verify `stamp-version.sh` is committed as mode `100755` (see above).
 

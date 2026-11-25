@@ -37,6 +37,20 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   read-only hot paths. Both are cached on the exact stored text: never
   bypass them by parsing `localStorage` yourself.
 
+## Performance — keep large ledgers snappy
+- Owners keep hundreds to thousands of records. Anything that runs per
+  paint must stay linear in the record count: no `loadState()` (a full
+  copy) inside per-record loops or per-record helpers — use
+  `peekState()` or pass the state in.
+- Background fills that run on every paint (FX rates, historical prices)
+  must share in-flight requests and back off after a failure (see
+  `fxFillRate`, `histBlocked`); user actions such as saving a record may
+  always hit the network.
+- The startup intro animates only `transform` / `opacity` (compositor
+  only) and closes when both the app is ready and the intro has finished
+  (`js/boot/startup-loader.js`). Don't drive it with fixed timers or
+  animate `filter`.
+
 ## Branches — mandatory for every agent
 - Make ALL changes on the `developing` branch. Commit and push to `developing` only.
 - The owner reviews and merges `developing` into `main`. Agents never do.

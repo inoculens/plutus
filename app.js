@@ -88,8 +88,16 @@ function isFutureDateStr(d) {
 // later than today in UTC+14, the furthest-ahead timezone on Earth (the
 // latest calendar date that exists anywhere right now). The strict
 // isFutureDateStr stays in use for dates typed into the record form.
+// Called once per record during validation, so the answer is memoized until
+// the exact instant it changes (the next UTC midnight in UTC+14).
+var maxDateAnywhereMemo = { value: '', until: 0 };
 function maxCalendarDateAnywhere() {
-  return new Date(Date.now() + 14 * 3600000).toISOString().slice(0, 10);
+  var shifted = Date.now() + 14 * 3600000;
+  if (shifted >= maxDateAnywhereMemo.until || shifted < maxDateAnywhereMemo.until - 86400000) {
+    maxDateAnywhereMemo.value = new Date(shifted).toISOString().slice(0, 10);
+    maxDateAnywhereMemo.until = (Math.floor(shifted / 86400000) + 1) * 86400000;
+  }
+  return maxDateAnywhereMemo.value;
 }
 
 function isFutureEverywhereDateStr(d) {
@@ -788,38 +796,87 @@ function readStoredState(raw) {
   return { parsed: parsed, accounts: accounts, trades: trades, overrides: overrides, damage: damage };
 }
 
-function loadState() {
+// Parsed-state cache. Validating every stored record is the most expensive
+// thing the app does, and the app reads its state from dozens of places per
+// paint (often once per record). The validated result is kept for as long
+// as the stored text is byte-identical AND the latest calendar date that
+// exists anywhere is unchanged (future-date validation depends on it), so a
+// read never re-parses unchanged data. loadState() hands out a private deep
+// copy, so callers may still mutate what they get; peekState() returns the
+// shared copy and is for read-only hot paths only.
+var stateCache = null; // {raw, day, state, damage}
+var symbolKindsSource = null; // stateCache entry the price-kind maps were last built from
+
+function cloneJson(v) {
+  if (v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) {
+    var a = new Array(v.length);
+    for (var i = 0; i < v.length; i++) a[i] = cloneJson(v[i]);
+    return a;
+  }
+  var o = {};
+  for (var k in v) {
+    if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = cloneJson(v[k]);
+  }
+  return o;
+}
+
+function readStateCached() {
   var fallback = defaultState();
-  activeDateFormat = fallback.settings.dateFormat;
   var raw = null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch (e) {
-    return fallback;
+    return { state: fallback, shared: false };
   }
-  if (raw === null || raw === undefined) return fallback;
-  var info = readStoredState(raw);
-  if (info.damage) {
-    noteStorageDamage(raw, info.damage);
+  if (raw === null || raw === undefined) return { state: fallback, shared: false };
+  var day = maxCalendarDateAnywhere();
+  var hit = stateCache && stateCache.raw === raw && stateCache.day === day ? stateCache : null;
+  if (!hit) {
+    var info = readStoredState(raw);
+    var state = null;
+    if (info.parsed) {
+      var accounts = info.accounts;
+      var trades = info.trades;
+      try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
+      // Legacy override migration reads the price-kind maps, so build them first.
+      try { noteSymbolKinds(accounts, trades); } catch (e) { /* never breaks load */ }
+      var priceOverrides = info.overrides;
+      try { priceOverrides = migrateLegacyOverrides(priceOverrides); } catch (e) { /* never breaks load */ }
+      state = {
+        settings: normalizeSettings(info.parsed.settings, fallback.settings),
+        accounts: accounts,
+        trades: trades,
+        priceOverrides: priceOverrides
+      };
+    }
+    hit = stateCache = { raw: raw, day: day, state: state, damage: info.damage };
+    if (state) symbolKindsSource = hit;
+  }
+  if (hit.damage) {
+    noteStorageDamage(raw, hit.damage);
   } else {
     lastSeenRaw = raw;
   }
-  if (!info.parsed) return fallback;
-  var parsed = info.parsed;
-  var accounts = info.accounts;
-  var trades = info.trades;
-  try { repairCashTradeAmounts(trades, accounts); } catch (e) { /* repair never breaks load */ }
-  var priceOverrides = info.overrides;
-  var settings = normalizeSettings(parsed.settings, fallback.settings);
-  activeDateFormat = settings.dateFormat;
-  try { noteSymbolKinds(accounts, trades); } catch (e) { /* never breaks load */ }
-  try { priceOverrides = migrateLegacyOverrides(priceOverrides); } catch (e) { /* never breaks load */ }
-  return {
-    settings: settings,
-    accounts: accounts,
-    trades: trades,
-    priceOverrides: priceOverrides
-  };
+  if (!hit.state) return { state: fallback, shared: false };
+  if (symbolKindsSource !== hit) {
+    try { noteSymbolKinds(hit.state.accounts, hit.state.trades); } catch (e) { /* never breaks load */ }
+    symbolKindsSource = hit;
+  }
+  return { state: hit.state, shared: true };
+}
+
+function loadState() {
+  var r = readStateCached();
+  activeDateFormat = r.state.settings.dateFormat;
+  return r.shared ? cloneJson(r.state) : r.state;
+}
+
+// Read-only view of the stored state (no copy). Never mutate the result.
+function peekState() {
+  var r = readStateCached();
+  activeDateFormat = r.state.settings.dateFormat;
+  return r.state;
 }
 
 // Before a save replaces the stored text, make sure that text is either
@@ -5116,7 +5173,7 @@ function priceOverrideFor(symbol, kind) {
 function priceOverrideEntry(symbol, kind) {
   var ov = null;
   try {
-    var st = loadState();
+    var st = peekState();
     ov = st ? st.priceOverrides : null;
   } catch (e) {
     ov = null;
@@ -5128,7 +5185,7 @@ function priceOverrideEntry(symbol, kind) {
 function priceDefaultVs(vs) {
   if (typeof vs === 'string' && vs.length > 0) return vs;
   try {
-    var st = loadState();
+    var st = peekState();
     if (st && st.settings && typeof st.settings.mainCurrency === 'string' && st.settings.mainCurrency.length > 0) {
       return st.settings.mainCurrency;
     }
@@ -11586,10 +11643,10 @@ function tradeLedgerAllowed(isCashAcc, side) {
   if (side === 'swap') return false;
   if (side === 'transfer') {
     if (isCashAcc) return true;
-    try { return assetLedgersOn(loadState()); } catch (e) { return true; }
+    try { return assetLedgersOn(peekState()); } catch (e) { return true; }
   }
   if (isCashAcc) return side === 'income' || side === 'expense';
-  try { return assetLedgersOn(loadState()); } catch (e) { return true; }
+  try { return assetLedgersOn(peekState()); } catch (e) { return true; }
 }
 
 // Plain-language fee economics for transfer cards: what the fee was worth
@@ -15216,7 +15273,7 @@ function route() {
 function syncTradeFab() {
   var st = null;
   try {
-    st = loadState();
+    st = peekState();
   } catch (e) {
     st = null;
   }
@@ -15563,7 +15620,7 @@ var landingTickGen = 0;
 var landingTickState = {}; // sym -> { at, ok, busy, shown } for the current fiat
 
 function landingTickFiat() {
-  try { return String(loadState().settings.mainCurrency || 'EUR').toUpperCase(); } catch (e) { return 'EUR'; }
+  try { return String(peekState().settings.mainCurrency || 'EUR').toUpperCase(); } catch (e) { return 'EUR'; }
 }
 
 function paintLandingTick(i, value, main) {
@@ -17681,7 +17738,7 @@ function syncTradeTypeUI() {
   // Cash accounts are bookkeeping ledgers: only money-movement types.
   // (Legacy buy/sell/swap records on cash stay editable, never creatable.)
   var cashAcc = null;
-  try { cashAcc = accountById(loadState(), uiVal('t-account', '')); } catch (e) { cashAcc = null; }
+  try { cashAcc = accountById(peekState(), uiVal('t-account', '')); } catch (e) { cashAcc = null; }
   var isCash = !!(cashAcc && isCashKind(cashAcc.kind));
   var cashTicker = isCash ? String(cashAcc.ticker || '').toUpperCase() : '';
   var legacyCashEdit = false;
@@ -17817,7 +17874,7 @@ function syncTradeTypeUI() {
   if (isExpense && !isCash) {
     var legacyFiatExp = false;
     try {
-      var edExp = editingTradeId ? (loadState().trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0] : null;
+      var edExp = editingTradeId ? (peekState().trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0] : null;
       legacyFiatExp = !!(edExp && edExp.type === 'expense' && !isCryptoQtyExpense(edExp) && Number(edExp.total) > 0);
     } catch (e) { legacyFiatExp = false; }
     if (!legacyFiatExp) {
@@ -17939,6 +17996,7 @@ function qtyDecimals(symbol) {
 }
 
 function noteSymbolKinds(accounts, trades) {
+  symbolKindsSource = null;
   var next = {};
   var crypto = {};
   var kindByAccount = dict();
@@ -18345,7 +18403,7 @@ function syncTransferFeePreview() {
   var symDec = 0;
   var sym = '', tick = '';
   try {
-    var acc = accountById(loadState(), uiVal('t-account', ''));
+    var acc = accountById(peekState(), uiVal('t-account', ''));
     if (acc) { tick = String(acc.ticker).trim().toUpperCase(); sym = ' ' + tick; symDec = qtyDecimals(tick); }
   } catch (e) { sym = ''; tick = ''; }
   if (!feeInput) return;
@@ -18549,7 +18607,7 @@ function syncLockedSymbol() {
   var sel = document.getElementById('t-account');
   var locked = document.getElementById('t-symbol-locked');
   if (!sel || !locked) return;
-  var acc = accountById(loadState(), sel.value);
+  var acc = accountById(peekState(), sel.value);
   locked.textContent = acc ? String(acc.ticker).toUpperCase() : '';
 }
 
@@ -20634,7 +20692,7 @@ function buildTopbar() {
     fab.setAttribute('data-wired', '1');
     fab.addEventListener('click', function () {
       var id = accountDetailId();
-      var account = id ? accountById(loadState(), id) : null;
+      var account = id ? accountById(peekState(), id) : null;
       if (account) openPrefillTrade(account.id, true);
       else openPrefillTrade(null);
     });
@@ -20663,7 +20721,7 @@ function showSettingsTab(name) {
   if (want === 'ledgers') {
     try {
       var abox = document.getElementById('set-assetledgers');
-      if (abox) abox.checked = assetLedgersOn(loadState());
+      if (abox) abox.checked = assetLedgersOn(peekState());
     } catch (e) { /* ignore */ }
   }
   // Callers select the tab before the dialog is opened, and a closed dialog
@@ -20698,7 +20756,7 @@ function refreshLedgerList() {
   var list = document.getElementById('l-list');
   if (!list) return;
   var map = {};
-  try { map = normalizeLedgerLabels((loadState().settings || {}).ledgerLabels); } catch (e) { map = {}; }
+  try { map = normalizeLedgerLabels((peekState().settings || {}).ledgerLabels); } catch (e) { map = {}; }
   list.innerHTML = '';
   Object.keys(map).sort().forEach(function (code) {
     var li = document.createElement('li');
@@ -21093,7 +21151,7 @@ function buildSettings() {
   try { refreshLedgerList(); } catch (e) { /* ignore */ }
   var assetBox = document.getElementById('set-assetledgers');
   if (assetBox) {
-    try { assetBox.checked = assetLedgersOn(loadState()); } catch (e) { /* ignore */ }
+    try { assetBox.checked = assetLedgersOn(peekState()); } catch (e) { /* ignore */ }
     if (!assetBox.getAttribute('data-wired')) {
       assetBox.setAttribute('data-wired', '1');
       assetBox.addEventListener('change', function () {
@@ -21786,7 +21844,7 @@ function refreshPrices() {
   var gen = ++priceReqGen;
   function isCurrent() {
     if (gen !== priceReqGen) return false; // superseded by a newer refresh
-    try { return loadState().settings.mainCurrency === mainNow; }
+    try { return peekState().settings.mainCurrency === mainNow; }
     catch (e) { return false; }
   }
   // Loading paint: actionable symbols with no known price yet show the
@@ -21994,7 +22052,7 @@ function init() {
       var main = null;
       try {
         var cur = accountDetailId();
-        if (cur) main = groupMainOf(loadState(), cur);
+        if (cur) main = groupMainOf(peekState(), cur);
       } catch (err) { main = null; }
       if (e && e.preventDefault) e.preventDefault();
       if (main) navTo(main.id);

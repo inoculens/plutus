@@ -20266,9 +20266,10 @@ function isMobileView() {
 }
 
 // Mobile-only keyboard avoidance: when the on-screen keyboard opens inside
-// an open bottom-sheet dialog, the focused field is scrolled to the visible
-// middle of the sheet. Purely additive — no dialog geometry, focus order or
-// ledger/price logic changes; every handler early-returns off-mobile.
+// an open bottom-sheet dialog, a focused field that ended up hidden is
+// scrolled just far enough to be visible (visible fields never move).
+// Purely additive — no dialog geometry, focus order or ledger/price logic
+// changes; every handler early-returns off-mobile.
 (function mobileKbAvoid() {
   try {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -20283,9 +20284,29 @@ function isMobileView() {
         setTimeout(function () {
           try {
             if (document.activeElement !== field) return;
+            // Only move when the field is actually hidden (behind the
+            // keyboard or scrolled out of the sheet). A field the user can
+            // already see stays put: re-centering it on every tap yanked the
+            // form around while scrolling through it.
+            var fr = null;
+            try { fr = field.getBoundingClientRect(); } catch (e7) { fr = null; }
+            if (fr) {
+              var visTop = 0;
+              var visBottom = window.innerHeight || 0;
+              try {
+                var vv = window.visualViewport;
+                if (vv && vv.height) { visTop = vv.offsetTop || 0; visBottom = visTop + vv.height; }
+              } catch (e8) { /* layout viewport bounds */ }
+              try {
+                var dr = scroller.getBoundingClientRect();
+                if (dr.top > visTop) visTop = dr.top;
+                if (dr.bottom < visBottom) visBottom = dr.bottom;
+              } catch (e9) { /* viewport bounds only */ }
+              if (fr.top >= visTop && fr.bottom <= visBottom) return;
+            }
             if (field.scrollIntoView) {
-              try { field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' }); } catch (e2) {
-                try { field.scrollIntoView(); } catch (e3) { /* ignore */ }
+              try { field.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' }); } catch (e2) {
+                try { field.scrollIntoView(false); } catch (e3) { /* ignore */ }
               }
             }
             // Keep the sheet itself settled: nudge its scroll so a tall

@@ -7,8 +7,7 @@ on:
   push:
     branches: [developing, main]
     paths:
-      - "js/prices/**"
-      - "js/fx/**"
+      - "js/**"
       - "scripts/collect-market-history.py"
       - "tests/test_market_history_collector.py"
       - "tests/live-price-fallback.test.js"

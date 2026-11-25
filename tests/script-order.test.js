@@ -55,6 +55,15 @@ assert.equal(typeof C.init, 'function', 'init is reachable once every script ran
 
 // No orphans: every app file under js/ is loaded by the page.
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+// Every script tag is either one of the two parse-time boot scripts or an app
+// script in the exact form the test helper reads (src first, then defer), so
+// no script can load in the browser yet be missing from the tests.
+const BOOT = ['js/boot/consent-default.js', 'js/boot/startup-loader.js'];
+for (const m of html.matchAll(/<script\b([^>]*)>/gi)) {
+  const src = /\bsrc="\/([^"?]+)/.exec(m[1]);
+  if (!src) continue; // JSON-LD data
+  assert.ok(BOOT.includes(src[1]) || scripts.includes(src[1]), '<script' + m[1] + '> is not in the app script list (write it as <script src="/js/...?v=N" defer></script>)');
+}
 function walk(dir) {
   return fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(d =>
     d.isDirectory() ? walk(dir + '/' + d.name) : (d.name.endsWith('.js') ? [dir + '/' + d.name] : []));

@@ -5,7 +5,7 @@
 // account. Seen from any other account it touches, the record now carries the
 // grip like every other card and can be moved among that account's same-date
 // records, with the unfunded-outflow failsafe still deciding. All figures are
-// invented. Loads app.js in a stubbed vm context with a minimal fake DOM.
+// invented. Loads the app in a stubbed vm context with a minimal fake DOM.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

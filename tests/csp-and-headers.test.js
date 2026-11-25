@@ -40,10 +40,10 @@ for (const f of ['consent-default.js', 'startup-loader.js']) {
   assert.ok(fs.existsSync(path.join(root, 'js', 'boot', f)), 'js/boot/' + f + ' exists');
   assert.ok(html.includes('/js/boot/' + f), 'index.html loads /js/boot/' + f);
 }
-// The consent default must run before app.js and stay synchronous (no defer/async).
+// The consent default must run before the app scripts and stay synchronous (no defer/async).
 const consentTag = /<script src="\/js\/boot\/consent-default\.js[^"]*"([^>]*)>/.exec(html);
 assert.ok(consentTag && !/defer|async/.test(consentTag[1]), 'consent default is a blocking script');
-assert.ok(html.indexOf('/js/boot/consent-default.js') < html.indexOf('/app.js'), 'consent default precedes app.js');
+assert.ok(html.indexOf('/js/boot/consent-default.js') < html.indexOf('/js/app.js'), 'consent default precedes the app scripts');
 // The startup loader starts the intro during parsing: synchronous, right after its markup.
 const loaderTag = /<script src="\/js\/boot\/startup-loader\.js[^"]*"([^>]*)>/.exec(html);
 assert.ok(loaderTag && !/defer|async/.test(loaderTag[1]), 'startup loader is a blocking script');

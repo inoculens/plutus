@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Behavioral checks for multi-source transfers: loads app.js in a stubbed
+// Behavioral checks for multi-source transfers: loads the app in a stubbed
 // vm context (no DOM, no network) and calls the pure helpers directly.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

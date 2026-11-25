@@ -5,7 +5,7 @@
 // SPENT AMOUNT line nor the per-account "Spent amount" pill may count sell
 // proceeds, while real spending (expenses) keeps counting. The sale shows up in
 // Realized instead, and Average entry stays the cost per unit still held.
-// All figures are invented. Loads app.js in a stubbed vm context with a minimal
+// All figures are invented. Loads the app in a stubbed vm context with a minimal
 // fake DOM.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

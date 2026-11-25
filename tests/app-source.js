@@ -19,7 +19,7 @@ const CHART = 'js/ui/net-worth-chart.js';
 function appScripts(opts) {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const list = [...html.matchAll(/<script src="\/([^"?]+\.js)(?:\?[^"]*)?" defer><\/script>/g)].map(m => m[1]);
-  if (!list.length || list[list.length - 1] !== 'app.js') throw new Error('index.html: app.js must be the last deferred script');
+  if (!list.length || list[list.length - 1] !== 'js/app.js') throw new Error('index.html: js/app.js must be the last deferred script');
   return opts && opts.withChart ? list : list.filter(f => f !== CHART);
 }
 

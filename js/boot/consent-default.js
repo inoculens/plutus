@@ -1,5 +1,5 @@
 // Consent Mode v2 default: analytics denied until the visitor presses
-// Accept in the cookie banner (app.js loads gtag.js only then — Basic mode).
+// Accept in the cookie banner (js/analytics/consent.js loads gtag.js only then — Basic mode).
 window.dataLayer = window.dataLayer || [];
 function gtag(){window.dataLayer.push(arguments);}
 window.gtag = window.gtag || gtag;

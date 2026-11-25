@@ -13,7 +13,8 @@ const { execFileSync } = require('node:child_process');
 const root = path.join(__dirname, '..');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plutus-stamp-'));
 try {
-  for (const f of ['index.html', 'app.js', 'stamp-version.sh']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
+  fs.mkdirSync(path.join(dir, 'js'));
+  for (const f of ['index.html', 'js/app.js', 'stamp-version.sh']) fs.copyFileSync(path.join(root, f), path.join(dir, f));
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git('init', '-q');
   git('-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'one');
@@ -23,7 +24,7 @@ try {
   const before = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
   execFileSync('sh', ['stamp-version.sh'], { cwd: dir, stdio: 'pipe' });
   const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
-  const app = fs.readFileSync(path.join(dir, 'app.js'), 'utf8');
+  const app = fs.readFileSync(path.join(dir, 'js', 'app.js'), 'utf8');
 
   assert.match(app, new RegExp("^var APP_VERSION = '" + hash + " \\(#2\\)';$", 'm'), 'APP_VERSION stamped');
   const assets = [...before.matchAll(/(?:src|href)="(\/[^"?]+\.(?:js|css))\?v=[^"]*"/g)].map(m => m[1]);

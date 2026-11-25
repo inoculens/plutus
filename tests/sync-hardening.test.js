@@ -4,7 +4,7 @@
 // WebCrypto (Node's webcrypto), not a mock: fresh salt/IV on every encrypt,
 // AES-GCM authentication on tampering, wrong-passphrase rejection, size and
 // iteration caps enforced before expensive work, bounded downloads, the OAuth
-// lifetime rule, and the HTTPS/credential guard. app.js runs in a stubbed vm.
+// lifetime rule, and the HTTPS/credential guard. the app runs in a stubbed vm.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

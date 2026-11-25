@@ -1,5 +1,5 @@
 'use strict';
-/* INOCULENS PLUTUS — boot.
+/* INOCULENS PLUTUS — js/app.js: boot.
  *
  * Vanilla JS, no framework, no build step. The app is a set of classic
  * scripts that share one global scope, loaded in order by index.html:

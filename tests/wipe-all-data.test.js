@@ -2,7 +2,7 @@
 'use strict';
 // "Clear all data" must remove every browser-side store the app owns (sync
 // sign-ins, OAuth tokens, caches, net-worth history, receipts and attachments),
-// not just the main state. Loads app.js in a stubbed vm context.
+// not just the main state. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

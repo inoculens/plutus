@@ -5,7 +5,7 @@
 // multiple positions sum; a debt-only account may go negative; collateral
 // links never touch holdings; and debt data survives the export/import round
 // trip that sync uses, while changing a snapshot or a collateral link changes
-// the sync hash. All figures are invented. Loads app.js in a stubbed vm
+// the sync hash. All figures are invented. Loads the app in a stubbed vm
 // context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

@@ -5,7 +5,7 @@
 // vanished from the portfolio, assignGroup reported success while doing
 // nothing, and computePortfolio wrote ticker state into the GLOBAL prototype.
 // These tests drive the full import -> store -> portfolio workflow, not just
-// the validator. All figures are invented. Loads app.js in a stubbed vm context.
+// the validator. All figures are invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

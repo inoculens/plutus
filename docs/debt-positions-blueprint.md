@@ -207,4 +207,4 @@ Push each completed and verified commit to developing immediately. Each commit b
 - fetchLivePrice and refreshAllPrices contracts are not reshaped.
 - APP_VERSION retains its exact single-quoted line shape; stamp-version.sh remains Git mode 100755.
 - Bump stylesheet and script cache-busters in index.html on every change.
-- Before every push, syntax-check app.js, run relevant tests, smoke-test UI when feasible, and verify stamp-version.sh executable mode.
+- Before every push, syntax-check every script under js/, run relevant tests, smoke-test UI when feasible, and verify stamp-version.sh executable mode.

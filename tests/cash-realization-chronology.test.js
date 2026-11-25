@@ -4,7 +4,7 @@
 // income that already exists on or before its date, never income dated later.
 // A cash income's display value is consumed*spendRate + remainder*todayRate,
 // so a wrongly matched expense shows up as its spend rate leaking into a later
-// income. All figures are invented. Loads app.js in a stubbed vm context.
+// income. All figures are invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

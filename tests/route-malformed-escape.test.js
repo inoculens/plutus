@@ -2,7 +2,7 @@
 'use strict';
 // A malformed percent-escape in the URL (for example /#/account/%) must never
 // throw out of the router: route() runs during boot, so a throw would leave
-// the app blank. Loads app.js in a stubbed vm context.
+// the app blank. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

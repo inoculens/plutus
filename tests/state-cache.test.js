@@ -4,7 +4,7 @@
 // stored text exactly, hands out a private copy that callers may mutate, and
 // re-validates when either the stored text or the latest calendar date that
 // exists anywhere changes (future-dated records become valid at that
-// instant). All figures are invented. Loads app.js in a stubbed vm context.
+// instant). All figures are invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

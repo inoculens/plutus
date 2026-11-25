@@ -3,7 +3,7 @@
 // Quotes reported in a minor currency unit (London pence "GBp"/"GBX", South
 // African cents "ZAc", Israeli agorot "ILA") must be converted to the main
 // unit. Upper-casing "GBp" to "GBP" used to make pence read as pounds, a
-// 100x overstated price. Loads app.js in a stubbed vm context. All figures
+// 100x overstated price. Loads the app in a stubbed vm context. All figures
 // are invented.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

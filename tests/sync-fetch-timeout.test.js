@@ -3,7 +3,7 @@
 // The sync timeout must cover the whole exchange, not only the arrival of the
 // response headers: a body that stalls after headers must abort and reject
 // with the same timeout error, a completed or failed body read must stop the
-// timer, and a later retry must work. Loads app.js in a stubbed vm context
+// timer, and a later retry must work. Loads the app in a stubbed vm context
 // with a fetch mock that honors AbortSignal.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

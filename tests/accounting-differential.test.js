@@ -4,7 +4,7 @@
 // the accounting rules, not from the engine) is run against computePortfolio
 // over seeded random sequences of buys, sells (with fees), income, expenses,
 // transfers and swaps, in both cost methods. All figures are invented.
-// Loads app.js in a stubbed vm context.
+// Loads the app in a stubbed vm context.
 //
 // FEE SEMANTICS (read from the application, implemented independently below):
 //  * buy/sell `total` is ALL-IN: the fee is inside it. `fee` never changes cost basis,

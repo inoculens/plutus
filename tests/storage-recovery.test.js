@@ -5,7 +5,7 @@
 // a recovery copy before any later save replaces it. If the copy cannot be
 // kept (storage full) the save is refused instead. Only an explicit wipe
 // (replaceDamaged / Clear all data) drops recovery copies. All figures are
-// invented. Loads app.js in a stubbed vm context.
+// invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

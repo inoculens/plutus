@@ -3,7 +3,7 @@
 // Account deletion must never orphan debt data. An account that owns debt
 // positions, or that an open position references as collateral, is blocked by
 // one shared guard used by the single and the bulk delete paths. All figures
-// are invented. Loads app.js in a stubbed vm context.
+// are invented. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

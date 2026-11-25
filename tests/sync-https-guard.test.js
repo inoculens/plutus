@@ -2,7 +2,7 @@
 'use strict';
 // User-configured sync hosts must be https. Only exact loopback hosts may use
 // http, and a URL must not smuggle a different host behind a loopback-looking
-// prefix or a "user@" part. Loads app.js in a stubbed vm context.
+// prefix or a "user@" part. Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

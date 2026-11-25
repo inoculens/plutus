@@ -50,7 +50,7 @@ for (const f of scripts) {
     assert.fail(f + ' failed at load (does it use something a later file declares?): ' + e.message);
   }
 }
-assert.equal(scripts[scripts.length - 1], 'app.js', 'app.js boots last');
+assert.equal(scripts[scripts.length - 1], 'js/app.js', 'js/app.js boots last');
 assert.equal(typeof C.init, 'function', 'init is reachable once every script ran');
 
 // No orphans: every app file under js/ is loaded by the page.

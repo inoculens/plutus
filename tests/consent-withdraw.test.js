@@ -3,7 +3,7 @@
 // A visitor who accepted analytics must be able to withdraw: the footer
 // "Cookie settings" button reopens the banner, and Decline stops analytics
 // (disable flag + consent update) and expires the Google Analytics cookies.
-// Loads app.js in a stubbed vm context.
+// Loads the app in a stubbed vm context.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

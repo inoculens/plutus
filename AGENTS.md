@@ -1,7 +1,7 @@
 # PLUTUS — instructions for AI agents (and humans)
 
-Local-first portfolio tracker. Static site: `index.html`, `app.js` (boot),
-the feature scripts under `js/`, the stylesheets under `css/`, `netlify.toml`, and
+Local-first portfolio tracker. Static site: `index.html`, the scripts under
+`js/` (`js/app.js` boots the app), the stylesheets under `css/`, `netlify.toml`, and
 `stamp-version.sh`.
 No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
@@ -11,7 +11,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   `js/core` (generic helpers, dates), `js/data` (state model, validation,
   storage, backup), `js/fx`, `js/ledger` (pure accounting engine),
   `js/prices`, `js/ui` (views, dialogs, record form, render loop),
-  `js/sync`, `js/analytics`. `app.js` loads last: version + boot.
+  `js/sync`, `js/analytics`. `js/app.js` loads last: version + boot.
   `js/boot/` holds the two scripts that run during parsing (consent default,
   startup loader); they are not deferred.
 - Function declarations are only hoisted within their own file. Code that
@@ -83,7 +83,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - A commit id only exists AFTER committing, so never hand-write it: the
   Netlify build runs `stamp-version.sh`, which stamps the exact id + count
   into `APP_VERSION` at deploy time.
-- DO NOT reformat the `var APP_VERSION = '...';` line in `app.js`
+- DO NOT reformat the `var APP_VERSION = '...';` line in `js/app.js`
   (single quotes, exact shape) — the stamp script's sed anchors on
   `^var APP_VERSION = '.*';$`. Reformatting it silently breaks stamping and
   the footer will show a stale version forever.
@@ -91,7 +91,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 - Cache-busters: every local script and stylesheet tag in `index.html` has a
   `?v=` cache-buster. The same build step stamps the commit id into all of
   them, so each deploy ships fresh URLs (and Netlify caches `/js/*`,
-  `/app.js`, `/css/*` as immutable). Never hand-bump them; keep the
+  `/css/*` as immutable). Never hand-bump them; keep the
   checked-in fallback values as they are. New tags must carry `?v=` too.
 - The footer renders the version automatically (`#app-ver`); users only ever
   see that string, never these notes.
@@ -112,7 +112,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
 
 ## Verify before every push
 - Syntax-check every script with any available JS runtime
-  (`node --check app.js` and each file under `js/`, e.g.
+  (`node --check` each file under `js/`, e.g.
   `find js -name '*.js' -exec node --check {} \;`).
 - Run the tests: `for t in tests/*.test.js; do node "$t" || break; done`.
 - Smoke-test the app in a browser when changing user-facing behavior.

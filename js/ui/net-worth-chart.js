@@ -1478,63 +1478,6 @@
     draw();
   }
 
-  function revalue(data, context) {
-    var signature = String(context.signature || '');
-    if (!signature || data.signature === signature || data.pendingSignature === signature || !data.points.length) return;
-    data.pendingSignature = signature;
-    data.pendingContext = context;
-    data.updating = true;
-    data.incomplete = false;
-    navigatorCache = null;
-    draw();
-
-    var points = data.points.slice();
-    var index = 0;
-    var incomplete = false;
-    function next() {
-      if (data.pendingSignature !== signature) return;
-      if (index >= points.length) {
-        data.signature = signature;
-        data.pendingSignature = '';
-        data.pendingContext = null;
-        data.updating = false;
-        data.incomplete = incomplete;
-        navigatorCache = null;
-        saveStore(data);
-        draw();
-        return;
-      }
-      var point = points[index++];
-      Promise.resolve().then(function () {
-        return context.revalue(pointCopy(point));
-      }).then(function (result) {
-        if (result && Object.prototype.hasOwnProperty.call(result, 'value')) {
-          for (var i = 0; i < data.points.length; i++) {
-            if (data.points[i].at !== point.at) continue;
-            data.points[i].value = result.value === null || !isFinite(Number(result.value)) ? null : Number(result.value);
-            if (result.prices) {
-              data.points[i].prices = pointCopy({
-                at: point.at,
-                value: data.points[i].value,
-                prices: result.prices
-              }).prices;
-            }
-            break;
-          }
-        } else {
-          incomplete = true;
-        }
-        if (result && result.complete === false) incomplete = true;
-        if (index % 10 === 0) saveStore(data);
-        root.setTimeout(next, 0);
-      }, function () {
-        incomplete = true;
-        root.setTimeout(next, 0);
-      });
-    }
-    next();
-  }
-
   function record(data, value, prices) {
     if (value === null || value === undefined || !isFinite(Number(value))) return;
     var now = Date.now();

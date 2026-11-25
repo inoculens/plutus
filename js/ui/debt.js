@@ -514,8 +514,8 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   var section = document.createElement('section');
   section.className = 'debt-positions-section';
   if (financial && financial.debt && financial.debt.hasDebt) {
-    var summary = document.createElement('div');
-    summary.className = 'debt-net-summary';
+    var netSummary = document.createElement('div');
+    netSummary.className = 'debt-net-summary';
     function summaryLine(label, value) {
       var line = document.createElement('div');
       line.className = 'debt-net-line';
@@ -526,7 +526,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       valueEl.title = value; // full figure stays reachable when the box truncates it
       line.appendChild(labelEl);
       line.appendChild(valueEl);
-      summary.appendChild(line);
+      netSummary.appendChild(line);
     }
     var debtLoading = !financial.debt.complete && scope.some(function (owner) {
       return accountDebtPositions(owner).some(function (p) {
@@ -538,7 +538,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
     summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, st.settings.mainCurrency) : (debtLoading ? PRICE_LOADING_TEXT : '—'));
     summaryLine('Net value', financial.gross && financial.gross.complete && financial.debt.complete
       ? fmtMoney(financial.gross.value - financial.debt.value, st.settings.mainCurrency) : '—');
-    section.appendChild(summary);
+    section.appendChild(netSummary);
   }
   var header = document.createElement('div');
   header.className = 'section-head debt-section-head';

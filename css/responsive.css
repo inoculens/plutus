@@ -47,8 +47,6 @@
   .trade-bottom-bar { flex-wrap: wrap; }
   .trade-bottom-bar .trade-pager { order: 3; flex: 1 1 100%; justify-content: center; flex-wrap: wrap; }
   .filter-panel { position: fixed; left: 0.9rem; right: 0.9rem; top: auto; bottom: calc(0.9rem + env(safe-area-inset-bottom)); max-height: 50vh; max-height: 50dvh; }
-  .account-create-row { flex-direction: column; align-items: stretch; }
-  .account-create-row .fld { min-width: 0; }
 
   /* — Detail header (mobile): name row 1 left + menu pinned top-right — */
   .detail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; padding: 1.1rem 1rem 0.95rem; gap: 0.55rem 0.75rem; }
@@ -154,7 +152,6 @@
   .trade-block.is-open .trade-caret { transform: rotate(180deg); }
   .trade-block:not(.is-open) .trade-facts > .stat-row:not(.is-primary),
   .trade-block:not(.is-open) .lot-links { display: none; }
-  .trade-foot { flex: 1 1 100%; padding-bottom: 0.3rem; }
 
   /* — Dialogs: bottom sheets that survive the on-screen keyboard. —
      dvh/svh track the shrunken viewport (with vh fallback); the sheet is

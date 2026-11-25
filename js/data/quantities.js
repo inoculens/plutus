@@ -77,7 +77,6 @@ function exactScaledOf(raw, dec) {
     }
   }
   if (ip === '') ip = '0';
-  var scale = exactPow10(dec);
   var kept = fp.slice(0, dec);
   while (kept.length < dec) kept += '0';
   var scaled = BigInt(ip + kept);

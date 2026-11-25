@@ -145,12 +145,6 @@ function yahooSymbol(sym) {
   return s;
 }
 
-function yahooChartUrl(sym, query) {
-  return 'https://api.allorigins.win/raw?url=' +
-    encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' +
-      encodeURIComponent(sym) + '?' + query);
-}
-
 // Both CORS proxies for the Yahoo chart URL, in order: allorigins first,
 // codetabs second (some networks/adblockers kill one but not the other).
 function yahooProxyUrls(sym, query) {

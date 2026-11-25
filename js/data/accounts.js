@@ -143,20 +143,6 @@ function isValidLedgerLabel(v) {
   return String(v).trim().length <= 80;
 }
 
-function isValidLedgerLabels(map) {
-  if (map === undefined || map === null) return true;
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return false;
-  var keys = Object.keys(map);
-  if (keys.length > 500) return false;
-  for (var i = 0; i < keys.length; i++) {
-    var k = keys[i];
-    if (typeof k !== 'string' || k.trim() === '' || k.trim().length > 24) return false;
-    var lv = map[k];
-    if (typeof lv !== 'string' || lv.trim() === '' || lv.trim().length > 80) return false;
-  }
-  return true;
-}
-
 function normalizeLedgerLabels(map) {
   var out = {};
   if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
@@ -173,11 +159,6 @@ function normalizeLedgerLabels(map) {
 
 function isCashKind(k) {
   return String(k === undefined || k === null ? '' : k).trim().toLowerCase() === 'cash';
-}
-
-function isCashAccount(st, id) {
-  var a = accountById(st, id);
-  return !!a && isCashKind(a.kind);
 }
 
 // Effective ledger chart for an account: its own chart when present,

@@ -640,7 +640,7 @@ function wireTradeDnDEvents(host) {
     // books it EARLIER — which is exactly where the shortfall check must
     // bite. The validator/engine speak execution order (store order), i.e.
     // the displayed group read bottom-up, so reverse before applying.
-    var st = loadState();
+    st = loadState();
     if (!accountById(st, accId)) return;
     var dateTrades = (st.trades || []).filter(function (t) {
       return tradeInReorderScope(t, accId, date);

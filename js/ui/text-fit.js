@@ -370,10 +370,10 @@ function syncInfoDots() {
     // Trade what-pills (.trade-what) trim their own text box; the ⓘ dot is
     // a child of the pill, right after the text.
     var whats = document.querySelectorAll('.trade-what[data-info-cond]');
-    for (var i = 0; i < whats.length; i++) {
+    for (i = 0; i < whats.length; i++) {
       var w = whats[i];
       var wt = w.querySelector('.trade-what-text');
-      var dot = w.querySelector('.info-dot');
+      dot = w.querySelector('.info-dot');
       var trimmed = isTrimmed(wt || w);
       if (dot) dot.style.display = trimmed ? 'inline' : 'none';
       try { w.style.cursor = trimmed ? 'pointer' : ''; } catch (e) { /* ignore */ }

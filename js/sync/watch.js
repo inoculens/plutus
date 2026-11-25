@@ -22,17 +22,6 @@ var priceDataWatchSeen = false;
 var priceDataWatchUnknown = 0;
 var priceDataWatchLoc = '';
 
-function syncWatchDelay(ms) {
-  if (ms !== undefined && isFinite(Number(ms)) && Number(ms) > 0) {
-    SYNC_WATCH_MS = Number(ms);
-    if (syncWatchTimer) {
-      syncWatchStop();
-      syncWatchStart();
-    }
-  }
-  return SYNC_WATCH_MS;
-}
-
 // Our own push/pull just moved the drive. The next tick still verifies the
 // file (another device may have pushed in between) but stays quiet instead of
 // spinning the cloud for the copy we ourselves wrote.

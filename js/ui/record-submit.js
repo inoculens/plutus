@@ -689,7 +689,6 @@ function onTradeSubmit(ev) {
   var transferSourcesBuilt = null;
   var transferSourceAutoBuilt = null;
   var transferSelfBuilt = 0;
-  var toAccId = (side === 'swap') ? uiVal('t-toaccount', '') : '';
   var toAccCash = null;
   var isCrossFiat = false;
   if (side === 'transfer') {
@@ -702,7 +701,6 @@ function onTradeSubmit(ev) {
       if (sb.error) { tradeFormError(sb.error); return; }
       srcBuilt = sb.sources;
     }
-    var sentChk = Number(qtyRaw);
     var symDecSave = qtyDecimals(symbol);
     var sentScSave = exactScaledOf(qtyRaw, symDecSave);
     var sentOkSave = sentScSave !== null && sentScSave > 0n;
@@ -821,7 +819,6 @@ function onTradeSubmit(ev) {
       }
       networkFee = backChk.fee;
     }
-    var nfChkSave = Number(networkFee);
     var nfScChk = exactScaledOf(networkFee, symDecSave);
     if (nfScChk === null || nfScChk < 0n || nfScChk >= sentScSave) { tradeFormError('Transfer fees must be >= 0 and < qty.'); return; }
     uiSetVal('t-networkfee', exactToStringTrim(exactScaledOf(networkFee, symDecSave), symDecSave));

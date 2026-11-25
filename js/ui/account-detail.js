@@ -201,7 +201,6 @@ function renderAccountDetail(st, id) {
   if (acc.note) addMeta('Note', acc.note, 'Account note');
   var stats = document.createElement('div');
   stats.className = 'cards detail-stats';
-  var pl = 0;
   var mv = 0;
   var mvKnown = false;
   var un = 0;
@@ -209,7 +208,6 @@ function renderAccountDetail(st, id) {
   var rz = 0;
   rows.forEach(function (r) {
     rz += r.realized;
-    pl += r.totalPL;
     if (r.marketValue !== null) { mv += r.marketValue; mvKnown = true; }
     if (r.unrealized !== null) { un += r.unrealized; unKnown = true; }
   });

@@ -371,7 +371,7 @@ function ledgerSignedMain(t, cashHint, main) {
       }
       return dir * q * ledgerFxRate(t.fxLock);
     }
-    var q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
+    q = (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') ? NaN : Number(t.qty);
     if (isFinite(q) && q > 0) return dir * q * ledgerFxRate(t.fxLock);
     if (t.type === 'expense') {
       var et = Number(t.total);

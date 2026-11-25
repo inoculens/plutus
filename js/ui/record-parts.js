@@ -40,13 +40,6 @@ function statRow(label, text, raw, tint, skipPopup) {
   return d;
 }
 
-function sectionTitle(text) {
-  var h = document.createElement('h2');
-  h.className = 'section-title';
-  h.textContent = text;
-  return h;
-}
-
 function fmtFeeAmount(t) {
   var f = Number(t.fee);
   if (!(isFinite(f) && f > 0)) return '—';

@@ -82,15 +82,6 @@ function fmtMoney(n, currency) {
   }
 }
 
-// Round half-up to 2 decimals (3rd decimal >= 5 rounds up, <= 4 rounds down),
-// e.g. 85920.98706029935 -> 85920.99. Display helper: ledger math always
-// keeps full precision; only the shown price is rounded.
-function roundHalfUp2(n) {
-  var v = Number(n);
-  if (!isFinite(v)) return NaN;
-  return Math.round((v + Number.EPSILON) * 100) / 100;
-}
-
 var btcQtyFmt = null;
 var xmrQtyFmt = null;
 

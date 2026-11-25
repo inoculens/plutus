@@ -20,10 +20,10 @@ function buildTopbar() {
     }
     applyColorToSelection(hex);
   }
-  var cdlg = document.getElementById('color-dialog');
-  if (cdlg && !cdlg.getAttribute('data-color-wired')) {
-    cdlg.setAttribute('data-color-wired', '1');
-    cdlg.addEventListener('click', function (e) {
+  var colorDlg = document.getElementById('color-dialog');
+  if (colorDlg && !colorDlg.getAttribute('data-color-wired')) {
+    colorDlg.setAttribute('data-color-wired', '1');
+    colorDlg.addEventListener('click', function (e) {
       var pick = e.target && e.target.closest ? e.target.closest('[data-color-pick]') : null;
       if (pick) {
         applyColorTarget(pick.getAttribute('data-color-pick'));
@@ -90,11 +90,11 @@ function buildTopbar() {
       else settleConfirm(false);
     });
   }
-  var cdlg = document.getElementById('confirm-dialog');
-  if (cdlg && !cdlg.getAttribute('data-ev-wired')) {
-    cdlg.setAttribute('data-ev-wired', '1');
-    cdlg.addEventListener('cancel', function () { settleConfirm(false); settleConfirm3('dismiss'); });
-    cdlg.addEventListener('close', function () { settleConfirm(false); settleConfirm3('dismiss'); });
+  var confirmDlg = document.getElementById('confirm-dialog');
+  if (confirmDlg && !confirmDlg.getAttribute('data-ev-wired')) {
+    confirmDlg.setAttribute('data-ev-wired', '1');
+    confirmDlg.addEventListener('cancel', function () { settleConfirm(false); settleConfirm3('dismiss'); });
+    confirmDlg.addEventListener('close', function () { settleConfirm(false); settleConfirm3('dismiss'); });
   }
   var main = document.getElementById('tb-main');
   if (main && !main.getAttribute('data-wired')) {

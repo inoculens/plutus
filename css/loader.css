@@ -16,8 +16,6 @@
 
 #app-loader.is-exiting { opacity: 0; pointer-events: none; }
 
-.app-loader-glow { display: none; }
-
 .app-loader-content {
   position: relative;
   display: flex;

@@ -127,8 +127,6 @@ try {
   }
 } catch (e) { /* ignore: default stands */ }
 
-function tradePageSizeGet() { return tradePageSize; }
-
 function tradePageSizeSet(n) {
   var v = Number(n);
   if (TRADE_PAGE_SIZES.indexOf(v) === -1) return tradePageSize;

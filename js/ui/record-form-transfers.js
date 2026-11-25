@@ -603,17 +603,17 @@ function syncTransferFeePreview() {
   }
   // No recipients: same-account move — fee derives from sent − arrived back.
   if (!rows.length) {
-    var r = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-selfrecv', ''), tick);
-    if (!r) {
+    var selfMove = transferFeeFrom(uiVal('t-qty', ''), uiVal('t-selfrecv', ''), tick);
+    if (!selfMove) {
       var recvTxt = selfRaw;
       feeInput.value = '';
       if (hint) hint.textContent = recvTxt === '' ? 'Enter what arrived back — the fee below fills in itself.' : 'Received back must be > 0 and at most what you sent.';
       return;
     }
-    var rFeeSc = exactScaledOf(r.fee, symDec);
-    feeInput.value = rFeeSc !== null ? exactToStringTrim(rFeeSc, symDec) : String(r.fee);
+    var rFeeSc = exactScaledOf(selfMove.fee, symDec);
+    feeInput.value = rFeeSc !== null ? exactToStringTrim(rFeeSc, symDec) : String(selfMove.fee);
     if (hint) {
-      var rFeeTxt = (rFeeSc !== null) ? exactToStringTrim(rFeeSc, symDec) : String(r.fee);
+      var rFeeTxt = (rFeeSc !== null) ? exactToStringTrim(rFeeSc, symDec) : String(selfMove.fee);
       hint.textContent = rFeeSc === 0n
         ? 'No fee — everything stayed in this account.'
         : 'Fee ' + rFeeTxt + sym + ' will be recorded as the loss.';
@@ -672,7 +672,7 @@ function syncTransferFeePreview() {
   feeInput.value = feeTxt;
   if (hint) {
     var n = rows.length + (rows.length === 1 ? ' recipient' : ' recipients');
-    var backTxt = selfSc > 0n ? ' ' + exactToStringTrim(selfSc, symDec) + sym + ' stayed here.' : '';
+    backTxt = selfSc > 0n ? ' ' + exactToStringTrim(selfSc, symDec) + sym + ' stayed here.' : '';
     if (feeSumSc > feeSc) {
       hint.textContent = 'Row fees exceed the tx fee (' + feeTxt + sym + ') — lower a fee share.';
     } else {

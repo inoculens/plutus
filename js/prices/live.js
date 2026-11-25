@@ -98,7 +98,6 @@ function fetchLivePrice(symbol, vs, kind) {
   var curLow = String(cur).toLowerCase();
   // (2) Fresh cache (60s) avoids network.
   var key = priceCacheKey(sym, cur);
-  var now = Date.now();
   var cached = priceCache[key];
   // (1) Manual override wins — no market network. A legacy bare number is
   // denominated in the requested fiat (old behavior); a fiat-tagged override

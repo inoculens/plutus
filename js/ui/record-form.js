@@ -433,7 +433,7 @@ function syncTradeTypeUI() {
     var toSel = document.getElementById('t-toaccount');
     var hint = hintTextTarget(document.getElementById('t-toaccount-hint'));
     if (toSel && isSwap) {
-      var cur = toSel.value;
+      var prevTo = toSel.value;
       toSel.innerHTML = '';
       var curKept = false;
       (st.accounts || []).forEach(function (a) {
@@ -442,9 +442,9 @@ function syncTradeTypeUI() {
         o.value = a.id;
         o.textContent = a.name + ' · ' + String(a.ticker).toUpperCase();
         toSel.appendChild(o);
-        if (a.id === cur) curKept = true;
+        if (a.id === prevTo) curKept = true;
       });
-      if (cur && curKept) toSel.value = cur;
+      if (prevTo && curKept) toSel.value = prevTo;
       else if (toSel.options.length) toSel.selectedIndex = 0;
       if (hint) hint.textContent = 'Both legs belong to one swap — the pair is edited and deleted together.';
     }

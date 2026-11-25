@@ -142,11 +142,6 @@ var COMMODITY_MAP = {
   PA: 'pa.f'
 };
 
-function isStooqKind(kd) {
-  var k = (typeof kd === 'string') ? kd.trim().toLowerCase() : '';
-  return k === 'stock' || k === 'commodity';
-}
-
 function stooqCommoditySymbol(sym) {
   var s = String(sym || '').trim().toUpperCase();
   if (!/^[A-Z0-9._-]{1,12}$/.test(s)) return null;

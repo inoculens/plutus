@@ -9,7 +9,6 @@
 }
 .history-panel[hidden] { display: none; }
 .history-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-.history-head-meta { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; }
 .history-kicker {
   margin: 0;
   color: var(--muted);
@@ -29,17 +28,6 @@
 }
 .history-reading { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.25rem 0 0; color: var(--muted); font-size: 0.76rem; }
 .history-reading #history-change { font-weight: 700; }
-.history-local-badge {
-  flex: 0 0 auto;
-  padding: 0.25rem 0.65rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 0.64rem;
-  font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .history-plot-wrap { position: relative; min-width: 0; margin-top: 0.55rem; }
 .history-plot { display: block; width: 100%; height: auto; min-height: 10rem; overflow: visible; touch-action: pan-y; outline: none; }
 .history-plot:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }

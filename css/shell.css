@@ -92,14 +92,6 @@ header.brand {
   gap: 0.45rem;
 }
 
-.tb-label {
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
 .tb-field select {
   width: auto;
   min-width: 4.6rem;

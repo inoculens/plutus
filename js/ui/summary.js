@@ -1,35 +1,6 @@
 'use strict';
-// Totals panel: summary cards, held quantities and debt valuations.
-// Grand totals are the sum of the per-account runs.
-
-function heldQtyFor(trades, symbol) {
-  var sym = String(symbol || '').toUpperCase();
-  var held = 0;
-  (trades || []).forEach(function (t) {
-    if (!t || String(t.symbol || '').toUpperCase() !== sym) return;
-    if (t.type === 'buy' || t.type === 'income') {
-      var qb = Number(t.qty);
-      if (!isFinite(qb) || qb <= 0) return;
-      held += qb;
-    } else if (t.type === 'sell') {
-      var qs = Number(t.qty);
-      if (!isFinite(qs) || qs <= 0) return;
-      held -= qs;
-    } else if (t.type === 'expense') {
-      if (t.qty === undefined || t.qty === null || String(t.qty).trim() === '') return;
-      var qe = Number(t.qty);
-      if (!isFinite(qe) || qe <= 0) return;
-      held -= qe;
-    } else if (t.type === 'transfer') {
-      var qt = Number(t.qty);
-      if (!isFinite(qt) || qt <= 0) return;
-      var nft = (t.networkFee === undefined || t.networkFee === null || String(t.networkFee).trim() === '') ? 0 : Number(t.networkFee);
-      if (!isFinite(nft) || nft < 0) nft = 0;
-      held -= nft; // global net: out+in cancel except on-chain fee
-    }
-  });
-  return held < 0 ? 0 : held;
-}
+// Totals panel: summary cards and debt valuations. Grand totals are the sum
+// of the per-account runs.
 
 function uniqueSymbols(trades) {
   var seen = {};
@@ -42,7 +13,6 @@ function uniqueSymbols(trades) {
   });
   return out;
 }
-
 
 // gain/loss tint for P&L figures (Revolut-style): '' for zero/unknown.
 function plClass(n) {
@@ -136,7 +106,6 @@ function summaryLifetimeCost(st, rows, dtrades, visibleAccounts) {
   }
   return lifetime > 0 ? lifetime : 0;
 }
-
 
 // Current liability valuation is separate from holdings/trade accounting.
 // Prices are already denominated in the selected main currency; fiat debt

@@ -11,7 +11,6 @@ function attUiSync() {
   try {
     var cur = document.getElementById('t-attach-cur');
     var rm = document.getElementById('t-attach-remove');
-    var inp = document.getElementById('t-attach');
     var label = '';
     var removed = !pendingAttachFile && pendingAttachRemove;
     if (pendingAttachFile) label = 'New file: ' + pendingAttachFile.name;

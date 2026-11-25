@@ -224,18 +224,6 @@ function syncIsEncryptedBackup(text) {
   }
 }
 
-// 'local-newer' | 'remote-newer' | 'equal' | 'unknown' (unparseable dates).
-function syncCompareTimestamps(localIso, remoteIso) {
-  var aOk = (typeof localIso === 'string') && isFinite(Date.parse(localIso));
-  var bOk = (typeof remoteIso === 'string') && isFinite(Date.parse(remoteIso));
-  if (!aOk || !bOk) return 'unknown';
-  var ta = Date.parse(localIso);
-  var tb = Date.parse(remoteIso);
-  if (ta > tb) return 'local-newer';
-  if (tb > ta) return 'remote-newer';
-  return 'equal';
-}
-
 // Three-way sync decision from content hashes — never wall clocks. A fresh
 // exportState() stamps exportedAt with "now", so comparing exportedAt values
 // always reads local-newer and a stale device silently overwrites the drive

@@ -95,7 +95,6 @@
 .gain { color: var(--gain); }
 .loss { color: var(--loss); }
 .card-value.gain::before { content: "+"; }
-.skeleton { color: var(--muted); }
 
 /* ————— Key figures strip ————— */
 #overview { padding: 0; }

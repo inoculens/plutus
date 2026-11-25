@@ -299,11 +299,6 @@ function transferSelfQtyOf(t) {
   return (isFinite(s) && s > 0) ? s : 0;
 }
 
-// Portion of a transfer that returns to the source account: explicit selfQty
-// on multi-output records, or the legacy same-account move (no outputs, no
-// destination) where sent - fee stayed in place.
-function transferSelfArrivalOf(t){if(!t||t.type!=='transfer')return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;var outs=transferOutputsOf(t);if(outs.length)return transferSelfQtyOf(t);var hasTo=t.toAccountId!==undefined&&t.toAccountId!==null&&String(t.toAccountId).trim()!=='';if(hasTo)return 0;var sent=Number(t.qty),nfRaw=(t.networkFee===undefined||t.networkFee===null||String(t.networkFee).trim()==='')?0:Number(t.networkFee),nf=isFinite(nfRaw)&&nfRaw>=0?nfRaw:0,net=sent-nf;return isFinite(net)&&net>0?net:0;}
-
 // External recipient amount: value genuinely leaving the portfolio.
 function transferExternalQtyOf(t){if(!t||t.type!=='transfer'||!(Array.isArray(t.outputs)&&t.outputs.length))return 0;if(t.sources!==undefined&&t.sources!==null&&transferSourcesOf(t)===false)return 0;var q=0;t.outputs.forEach(function(o){if(!o||isTransferOutputInternal(o))return;var rq=Number(o.qty);if(isFinite(rq)&&rq>0)q+=rq;});return q;}
 

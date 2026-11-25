@@ -133,11 +133,6 @@ function syncRefreshHeaderIcon(st) {
 var SYNC_AUTO_DELAY_MS = 8000;
 var syncAutoTimer = null;
 
-function syncAutoDelay(ms) {
-  if (ms !== undefined && isFinite(Number(ms)) && Number(ms) >= 0) SYNC_AUTO_DELAY_MS = Number(ms);
-  return SYNC_AUTO_DELAY_MS;
-}
-
 function syncScheduleAuto() {
   try {
     if (typeof setTimeout === 'undefined') return;

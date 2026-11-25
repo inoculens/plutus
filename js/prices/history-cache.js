@@ -118,17 +118,6 @@ function histRetryLater(key) {
 // on "—"). Entries are removed on settle; also reset with the cache.
 var histInflight = {};
 
-function clearHistCache() {
-  histPriceCache = {};
-  histFailKeys = {};
-  histInflight = {};
-  try { feeRateErr = {}; } catch (e) { /* ignore */ }
-  try { histDiag = {}; } catch (e) { /* ignore */ }
-  try {
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(HISTCACHE_KEY);
-  } catch (e) { /* ignore */ }
-}
-
 // Last per-quote history failure, in plain words (session-only): attached
 // to the fee-rate tooltip so a failed lookup names its cause.
 var histDiag = {}; // key(sym|day|vs|crypto) -> text

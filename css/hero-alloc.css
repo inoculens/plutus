@@ -94,18 +94,6 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
-/* Account kind chip + address line */
-.acct-kind {
-  font-size: 0.66rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  padding: 0.12rem 0.55rem;
-}
-
 /* Smoother focus + hover for new interactive rows */
 .account-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .trade-block { transition: border-color 0.15s ease, background 0.15s ease; }

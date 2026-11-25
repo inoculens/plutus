@@ -21,10 +21,6 @@ function stableToUsd(ccy) {
   return FX_STABLES.indexOf(ccy.toUpperCase()) !== -1;
 }
 
-function normalizeToMain(total, fee, rate) {
-  return (Number(total) + Number(fee)) * Number(rate);
-}
-
 function fxShiftDate(dateStr, deltaDays) {
   if (!isValidDateStr(dateStr)) return null;
   var parts = String(dateStr).slice(0, 10).split('-');

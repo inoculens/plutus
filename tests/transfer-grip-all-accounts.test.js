@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const store = new Map();
 const noop = () => {};
 
@@ -41,7 +41,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 const fx = { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false };
 const mk = o => Object.assign({ total: 0, currency: 'EUR', fee: 0, feeCurrency: 'EUR', note: '', fxLock: fx, createdAt: '2025-01-01T00:00:00Z' }, o);

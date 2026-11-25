@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.join(__dirname, '..');
-const src = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const noop = () => {};
 const store = new Map();
@@ -33,7 +33,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 // Footer markup carries the button.
 assert.match(html, /<button type="button" id="cookie-settings" class="foot-link foot-btn">Cookie settings<\/button>/);

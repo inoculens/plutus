@@ -24,7 +24,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const src = require('./app-source').appSource();
 const noop = () => {};
 const store = new Map();
 const C = {
@@ -38,7 +38,7 @@ const C = {
 };
 C.window = C; C.self = C; C.globalThis = C;
 vm.createContext(C);
-vm.runInContext(src, C, { filename: 'app.js' });
+vm.runInContext(src, C, { filename: 'app-scripts.js' });
 
 
 // ---- Independent reference model -------------------------------------------

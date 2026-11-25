@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'net-worth-history.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'ui', 'net-worth-chart.js'), 'utf8');
 const marker = '  root.NetWorthHistory = { update: update, refresh: refresh };';
 assert(src.includes(marker), 'chart test hook marker missing');
 const instrumented = src.replace(marker, [
@@ -23,7 +23,7 @@ const instrumented = src.replace(marker, [
 const context = { Promise, Date, Math, isFinite };
 context.window = context;
 vm.createContext(context);
-vm.runInContext(instrumented, context, { filename: 'net-worth-history.js' });
+vm.runInContext(instrumented, context, { filename: 'net-worth-chart.js' });
 
 const chart = context.__netWorthHistoryTest;
 const inactivePoints = [{ at: 2, value: 2 }, { at: 1, value: 1 }];

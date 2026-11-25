@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const appSrc = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const appSrc = require('./app-source').appSource();
 const cssSrc = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
 
 // Verify styles.css extends is-busy and btn-spin to .t-dock button.primary.is-busy

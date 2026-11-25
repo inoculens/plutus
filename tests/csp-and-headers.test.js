@@ -37,17 +37,17 @@ for (const attrs of scripts) {
 assert.ok(html.indexOf('Content-Security-Policy') < html.search(/<script\b/i), 'CSP meta precedes every script');
 // Both extracted files exist and the page references them.
 for (const f of ['consent-default.js', 'startup-loader.js']) {
-  assert.ok(fs.existsSync(path.join(root, 'js', f)), 'js/' + f + ' exists');
-  assert.ok(html.includes('/js/' + f), 'index.html loads /js/' + f);
+  assert.ok(fs.existsSync(path.join(root, 'js', 'boot', f)), 'js/boot/' + f + ' exists');
+  assert.ok(html.includes('/js/boot/' + f), 'index.html loads /js/boot/' + f);
 }
 // The consent default must run before app.js and stay synchronous (no defer/async).
-const consentTag = /<script src="\/js\/consent-default\.js[^"]*"([^>]*)>/.exec(html);
+const consentTag = /<script src="\/js\/boot\/consent-default\.js[^"]*"([^>]*)>/.exec(html);
 assert.ok(consentTag && !/defer|async/.test(consentTag[1]), 'consent default is a blocking script');
-assert.ok(html.indexOf('/js/consent-default.js') < html.indexOf('/app.js'), 'consent default precedes app.js');
+assert.ok(html.indexOf('/js/boot/consent-default.js') < html.indexOf('/app.js'), 'consent default precedes app.js');
 // The startup loader starts the intro during parsing: synchronous, right after its markup.
-const loaderTag = /<script src="\/js\/startup-loader\.js[^"]*"([^>]*)>/.exec(html);
+const loaderTag = /<script src="\/js\/boot\/startup-loader\.js[^"]*"([^>]*)>/.exec(html);
 assert.ok(loaderTag && !/defer|async/.test(loaderTag[1]), 'startup loader is a blocking script');
-assert.ok(html.indexOf('id="app-loader"') < html.indexOf('/js/startup-loader.js'), 'startup loader follows the loader markup');
+assert.ok(html.indexOf('id="app-loader"') < html.indexOf('/js/boot/startup-loader.js'), 'startup loader follows the loader markup');
 
 // Headers for rewritten account URLs.
 for (const p of ['/account/*', '/account']) {

@@ -25,6 +25,10 @@ function dict() {
   return Object.create(null);
 }
 
+// Deep copy of JSON-shaped data (plain objects, arrays, primitives). Own keys
+// only; a "__proto__" key (JSON.parse keeps it as ordinary data) is copied as
+// data, never turned into the copy's prototype, and null-prototype objects
+// stay null-prototype.
 function cloneJson(v) {
   if (v === null || typeof v !== 'object') return v;
   if (Array.isArray(v)) {
@@ -32,9 +36,15 @@ function cloneJson(v) {
     for (var i = 0; i < v.length; i++) a[i] = cloneJson(v[i]);
     return a;
   }
-  var o = {};
-  for (var k in v) {
-    if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = cloneJson(v[k]);
+  var o = Object.getPrototypeOf(v) === null ? Object.create(null) : {};
+  var keys = Object.keys(v);
+  for (var j = 0; j < keys.length; j++) {
+    var k = keys[j];
+    if (k === '__proto__') {
+      Object.defineProperty(o, k, { value: cloneJson(v[k]), writable: true, enumerable: true, configurable: true });
+    } else {
+      o[k] = cloneJson(v[k]);
+    }
   }
   return o;
 }

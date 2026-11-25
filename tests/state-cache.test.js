@@ -81,7 +81,48 @@ for (let i = 0; i < 200; i++) C.peekState();
 const ms = Number(process.hrtime.bigint() - t0) / 1e6;
 assert.ok(ms < 200, '200 cached reads of 2000 records took ' + ms.toFixed(1) + 'ms');
 
-// 5. Empty storage still yields a fresh default state each time.
+// 5. Copies are exact for any JSON: a "__proto__" key is data (JSON.parse
+// keeps it as an ordinary own key). It must never become a prototype, in the
+// cached copy or in the normalized record, so nothing is inherited from it.
+store.set(KEY, '{"settings":{"mainCurrency":"EUR","costMethod":"fifo"},"accounts":[{"id":"a1","name":"Wallet","ticker":"BTC","kind":"crypto"}],' +
+  '"trades":[{"id":"p1","type":"buy","accountId":"a1","symbol":"BTC","qty":1,"total":100,"currency":"EUR","date":"2025-01-01",' +
+  '"fxLock":{"__proto__":{"rate":5},"pair":"EUR/EUR","rate":1,"source":"1:1","interpolated":false},"__proto__":{"swapId":"evil","qty":7}}],"priceOverrides":{}}');
+for (const read of [() => C.loadState(), () => C.loadState(), () => C.peekState()]) {
+  const t = read().trades[0];
+  assert.equal(Object.getPrototypeOf(Object.getPrototypeOf(t)), null, 'record keeps the plain object prototype');
+  assert.equal(t.swapId, undefined, 'nothing is inherited from a "__proto__" key');
+  assert.ok(Object.prototype.hasOwnProperty.call(t, '__proto__'), 'the key itself is kept as data');
+  assert.ok(Object.prototype.hasOwnProperty.call(t.fxLock, '__proto__'), 'nested "__proto__" key kept as data');
+  assert.equal(Object.getPrototypeOf(Object.getPrototypeOf(t.fxLock)), null);
+}
+assert.equal(C.cloneJson(Object.assign(Object.create(null), { a: 1 })).toString, undefined, 'null-prototype objects stay null-prototype');
+
+// 6. Validation uses the price kinds of the state being read, already on the
+// first read after start-up. A stock ticker keeps 8 decimals even when it is
+// also a crypto symbol (SOL has 9), and a multi-source transfer must add up
+// exactly at that precision: 0.100000005 + 0.200000005 = 0.30000001 holds at
+// 9 decimals but not at 8, so the record is rejected (and the original kept
+// as a recovery copy) on every read, not only from the second read on.
+const solAcc = id => ({ id, name: 'Shares ' + id, ticker: 'SOL', kind: 'stock' });
+const solState = JSON.stringify({ settings: { mainCurrency: 'EUR', costMethod: 'fifo' }, accounts: [solAcc('s1'), solAcc('s2'), solAcc('s3')],
+  trades: [buy('k1', '2025-01-01'), Object.assign(buy('k2', '2025-01-01'), { accountId: 's2', symbol: 'SOL' }),
+    { id: 'ms', type: 'transfer', accountId: 's1', symbol: 'SOL', qty: '0.30000001', currency: 'EUR', total: 0, date: '2025-01-02', networkFee: 0,
+      sources: [{ accountId: 's1', qty: '0.100000005' }, { accountId: 's2', qty: '0.200000005' }], outputs: [{ toAccountId: 's3', qty: '0.30000001' }] }].map(t => Object.assign(t, t.id === 'k1' ? { accountId: 's1', symbol: 'SOL' } : {})),
+  priceOverrides: {} });
+{
+  const fresh = new Map([[KEY, solState]]);
+  const D = Object.assign({}, C, { localStorage: { getItem: k => (fresh.has(k) ? fresh.get(k) : null), setItem: (k, v) => fresh.set(k, String(v)), removeItem: k => fresh.delete(k) } });
+  D.window = D; D.self = D; D.globalThis = D;
+  vm.createContext(D);
+  vm.runInContext(src, D, { filename: 'app.js' });
+  const first = D.loadState().trades.map(t => t.id).join(',');
+  const later = D.loadState().trades.map(t => t.id).join(',');
+  assert.equal(first, 'k1,k2', 'first read already uses stock precision');
+  assert.equal(later, first, 'same answer on every read');
+  assert.ok(D.storageRecovery && D.storageRecovery.trades === 1, 'the rejected record is reported');
+}
+
+// 7. Empty storage still yields a fresh default state each time.
 store.delete(KEY);
 const e1 = C.loadState(); e1.trades.push(1);
 assert.equal(C.loadState().trades.length, 0);

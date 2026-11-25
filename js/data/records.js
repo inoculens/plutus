@@ -234,7 +234,14 @@ function isValidImportTrade(t, accountIds, accounts) {
 
 function normalizeTradeForStore(t) {
   var c = {};
-  for (var k in t) { if (Object.prototype.hasOwnProperty.call(t, k)) c[k] = t[k]; }
+  for (var k in t) {
+    if (!Object.prototype.hasOwnProperty.call(t, k)) continue;
+    // A "__proto__" key from a file is plain data (JSON.parse keeps it as an
+    // own key): plain assignment would make it the record's prototype and the
+    // record would inherit its fields (e.g. a swapId).
+    if (k === '__proto__') Object.defineProperty(c, k, { value: t[k], writable: true, enumerable: true, configurable: true });
+    else c[k] = t[k];
+  }
   if (typeof c.symbol === 'string') c.symbol = c.symbol.trim().toUpperCase();
   if (typeof c.ledger === 'string' && c.ledger.trim() !== '') c.ledger = c.ledger.trim();
   if (typeof c.ledgerLabel === 'string' && c.ledgerLabel.trim() !== '') c.ledgerLabel = c.ledgerLabel.trim();

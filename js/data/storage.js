@@ -255,6 +255,10 @@ function readStoredState(raw) {
 var stateCache = null; // {raw, day, state, damage}
 var symbolKindsSource = null; // stateCache entry the price-kind maps were last built from
 
+function qtyKindsSignature() {
+  return Object.keys(QTY_NON_CRYPTO).sort().join('|');
+}
+
 function readStateCached() {
   var fallback = defaultState();
   var raw = null;
@@ -269,6 +273,16 @@ function readStateCached() {
   if (!hit) {
     var info = readStoredState(raw);
     var state = null;
+    if (info.parsed) {
+      // Record validation reads the price-kind maps (a stock or commodity
+      // ticker keeps 8 decimals even when it is also a crypto symbol), and the
+      // maps are built from the loaded state. Build them from THIS state and
+      // validate again when they differ from the ones just used, so the result
+      // never depends on what was loaded before.
+      var kindsUsed = qtyKindsSignature();
+      try { noteSymbolKinds(info.accounts, info.trades); } catch (e) { /* never breaks load */ }
+      if (qtyKindsSignature() !== kindsUsed) info = readStoredState(raw);
+    }
     if (info.parsed) {
       var accounts = info.accounts;
       var trades = info.trades;

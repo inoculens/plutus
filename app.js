@@ -20266,9 +20266,10 @@ function isMobileView() {
 }
 
 // Mobile-only keyboard avoidance: when the on-screen keyboard opens inside
-// an open bottom-sheet dialog, the focused field is scrolled to the visible
-// middle of the sheet. Purely additive — no dialog geometry, focus order or
-// ledger/price logic changes; every handler early-returns off-mobile.
+// an open bottom-sheet dialog, a focused field that ended up hidden is
+// scrolled just far enough to be visible (visible fields never move).
+// Purely additive — no dialog geometry, focus order or ledger/price logic
+// changes; every handler early-returns off-mobile.
 (function mobileKbAvoid() {
   try {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -20283,9 +20284,29 @@ function isMobileView() {
         setTimeout(function () {
           try {
             if (document.activeElement !== field) return;
+            // Only move when the field is actually hidden (behind the
+            // keyboard or scrolled out of the sheet). A field the user can
+            // already see stays put: re-centering it on every tap yanked the
+            // form around while scrolling through it.
+            var fr = null;
+            try { fr = field.getBoundingClientRect(); } catch (e7) { fr = null; }
+            if (fr) {
+              var visTop = 0;
+              var visBottom = window.innerHeight || 0;
+              try {
+                var vv = window.visualViewport;
+                if (vv && vv.height) { visTop = vv.offsetTop || 0; visBottom = visTop + vv.height; }
+              } catch (e8) { /* layout viewport bounds */ }
+              try {
+                var dr = scroller.getBoundingClientRect();
+                if (dr.top > visTop) visTop = dr.top;
+                if (dr.bottom < visBottom) visBottom = dr.bottom;
+              } catch (e9) { /* viewport bounds only */ }
+              if (fr.top >= visTop && fr.bottom <= visBottom) return;
+            }
             if (field.scrollIntoView) {
-              try { field.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' }); } catch (e2) {
-                try { field.scrollIntoView(); } catch (e3) { /* ignore */ }
+              try { field.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' }); } catch (e2) {
+                try { field.scrollIntoView(false); } catch (e3) { /* ignore */ }
               }
             }
             // Keep the sheet itself settled: nudge its scroll so a tall
@@ -21598,8 +21619,8 @@ function renderHeroAlloc(st) {
 }
 
 // The legend never stretches its box: capped at six rows on desktop / three
-// rows on phones (the next asset scrolls) and never taller than the left
-// amount block, so the hero cannot expand no matter how many assets exist.
+// rows on phones (the seventh / fourth asset scrolls, never earlier) and
+// never taller than the left amount block, so the hero cannot expand no matter how many assets exist.
 // Re-synced on render + viewport and font changes because the amount scales
 // with the viewport.
 function syncHeroAllocHeight() {
@@ -21614,20 +21635,24 @@ function syncHeroAllocHeight() {
     if (!(h > 0)) return;
     var cap = h;
     try {
-      var root = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       var narrow = false;
       try {
         if (typeof window !== 'undefined' && window.matchMedia) {
           narrow = window.matchMedia('(max-width: 720px)').matches;
         }
       } catch (eN) {}
-      // Row budget mirrors the legend metrics: desktop li 0.85rem / 0.35rem
-      // gap, mobile li 0.6rem / 0.3rem gap (shared by all phone breakpoints).
+      // Measure the rendered rows instead of estimating them from font
+      // metrics: an estimate drifts per browser/font (it left six desktop
+      // rows a few pixels short, so they scrolled). The cap ends exactly at
+      // the last row that must fit, so the next one is what scrolls.
       var rows = narrow ? 3 : 6;
-      var rfs = narrow ? 0.6 : 0.85;
-      var rlg = narrow ? 0.3 : 0.35;
-      var budget = rows * (rfs * 1.55 * root) + (rows - 1) * (rlg * root);
-      if (budget > 0 && budget < cap) cap = budget;
+      var lis = leg.children;
+      if (lis && lis.length > rows) {
+        var lr = leg.getBoundingClientRect();
+        var lastR = lis[rows - 1].getBoundingClientRect();
+        var fit = lastR.bottom - lr.top + (leg.scrollTop || 0) + (leg.clientTop || 0);
+        if (fit > 0 && fit < cap) cap = fit;
+      }
     } catch (e2) { /* fall back to the measured block height */ }
     leg.style.maxHeight = cap + 'px';
     // Pin the ring to exact pixels as well: percentage heights resolve

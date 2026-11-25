@@ -21619,8 +21619,8 @@ function renderHeroAlloc(st) {
 }
 
 // The legend never stretches its box: capped at six rows on desktop / three
-// rows on phones (the next asset scrolls) and never taller than the left
-// amount block, so the hero cannot expand no matter how many assets exist.
+// rows on phones (the seventh / fourth asset scrolls, never earlier) and
+// never taller than the left amount block, so the hero cannot expand no matter how many assets exist.
 // Re-synced on render + viewport and font changes because the amount scales
 // with the viewport.
 function syncHeroAllocHeight() {
@@ -21635,20 +21635,24 @@ function syncHeroAllocHeight() {
     if (!(h > 0)) return;
     var cap = h;
     try {
-      var root = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
       var narrow = false;
       try {
         if (typeof window !== 'undefined' && window.matchMedia) {
           narrow = window.matchMedia('(max-width: 720px)').matches;
         }
       } catch (eN) {}
-      // Row budget mirrors the legend metrics: desktop li 0.85rem / 0.35rem
-      // gap, mobile li 0.6rem / 0.3rem gap (shared by all phone breakpoints).
+      // Measure the rendered rows instead of estimating them from font
+      // metrics: an estimate drifts per browser/font (it left six desktop
+      // rows a few pixels short, so they scrolled). The cap ends exactly at
+      // the last row that must fit, so the next one is what scrolls.
       var rows = narrow ? 3 : 6;
-      var rfs = narrow ? 0.6 : 0.85;
-      var rlg = narrow ? 0.3 : 0.35;
-      var budget = rows * (rfs * 1.55 * root) + (rows - 1) * (rlg * root);
-      if (budget > 0 && budget < cap) cap = budget;
+      var lis = leg.children;
+      if (lis && lis.length > rows) {
+        var lr = leg.getBoundingClientRect();
+        var lastR = lis[rows - 1].getBoundingClientRect();
+        var fit = lastR.bottom - lr.top + (leg.scrollTop || 0) + (leg.clientTop || 0);
+        if (fit > 0 && fit < cap) cap = fit;
+      }
     } catch (e2) { /* fall back to the measured block height */ }
     leg.style.maxHeight = cap + 'px';
     // Pin the ring to exact pixels as well: percentage heights resolve

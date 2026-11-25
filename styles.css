@@ -3679,6 +3679,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
   padding: 0 0.25rem 0 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  /* Rows keep their natural height. With plain auto rows, Firefox lets the
+     max-height cap squeeze every row (the li clip their overflow, so their
+     minimum is 0) instead of scrolling: rows overlapped into an unreadable
+     smear. */
+  grid-auto-rows: max-content;
   gap: 0.4rem;
   overflow-y: auto;
   overflow-x: hidden;

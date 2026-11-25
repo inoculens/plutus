@@ -53,6 +53,21 @@ input:focus, select:focus, textarea:focus {
 }
 /* Resize downwards only: dragging sideways would push past the dialog edge. */
 textarea { min-height: 4rem; resize: vertical; max-width: 100%; }
+/* Scrollbar inset (same technique as dialog above): a transparent border
+   keeps an overflowing note's scrollbar inside the rounded corners; padding
+   gives the inset back. At rest the edge line is an inset outline (exactly
+   where the 1px border was, so textareas line up with inputs); focused, the
+   field rule above drops the outline, so the line becomes a ring under the
+   glow. */
+textarea {
+  --ta-gut: 4px;
+  border-color: transparent;
+  border-width: var(--ta-gut);
+  padding: calc(0.4rem + 1px - var(--ta-gut)) calc(0.75rem + 1px - var(--ta-gut));
+  outline: 1px solid var(--border-strong);
+  outline-offset: -1px;
+}
+textarea:focus { border-color: transparent; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55), 0 0 0 4px rgba(255, 255, 255, 0.08); }
 input::placeholder { color: var(--muted-2); }
 /* Missing mandatory field: red edge, kept visible while focused. */
 input.fld-invalid, select.fld-invalid, textarea.fld-invalid,
@@ -60,6 +75,8 @@ input.fld-invalid:focus, select.fld-invalid:focus, textarea.fld-invalid:focus {
   border-color: var(--red);
   box-shadow: 0 0 0 3px var(--red-bg);
 }
+textarea.fld-invalid, textarea.fld-invalid:focus { border-color: transparent; outline-color: var(--red); }
+textarea.fld-invalid:focus { box-shadow: 0 0 0 1px var(--red), 0 0 0 3px var(--red-bg); }
 /* Number fields never show the browser's up/down stepper: amounts are typed. */
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button,

@@ -40,8 +40,10 @@ assert.equal(C.isValidStakeRewards(eth), true);
 assert.equal(C.isValidStakeRewards(acc('plain', 'BTC', 'crypto')), true, 'accounts without rewards stay valid');
 assert.equal(C.isValidStakeReward(reward({ assetKind: 'crypto', assetTicker: 'CRV' })), true,
   'a reward can pay out in a token other than the staked one');
+assert.equal(C.isValidStakeReward(reward({ assetKind: 'cash', assetTicker: 'USD' })), true,
+  'fiat pending income (deposit interest, invoices, dividends) is valid');
 for (const [bad, why] of [
-  [reward({ assetKind: 'cash', assetTicker: 'USD' }), 'fiat payouts are interest, not stake rewards'],
+  [reward({ assetKind: 'cash', assetTicker: 'US1' }), 'a fiat entry needs a currency code a cash record can carry'],
   [reward({ assetKind: undefined }), 'the denomination is required'],
   [reward({ assetTicker: 'not a ticker' }), 'tickers follow the account ticker rule'],
   [reward({ collateral: [] }), 'rewards carry no collateral'],
@@ -170,6 +172,42 @@ for (const [claim, pattern] of [
 }
 assert.match(C.buildStakeRewardClaim(main, ethReward, null, { amount: '1', at: claimAt }, 'EUR').error, /Choose the account/);
 
+// --- Fiat pending income: paid as a cash Income record in its currency ---
+const usdBank = acc('usd-bank', 'USD', 'cash');
+const eurBank = acc('eur-bank', 'EUR', 'cash');
+const invoice = reward({ id: 'inv', name: 'Invoice 2026-114', assetKind: 'cash', assetTicker: 'USD',
+  balanceSnapshots: [snap('i1', 1200, '2026-11-01T10:00:00.000Z')] });
+assert.equal(C.stakeRewardsAllowedOn(usdBank), true, 'cash accounts carry pending income too');
+assert.equal(C.isFiatStakeReward(invoice), true);
+assert.deepEqual(Array.from(C.stakeRewardClaimTargets({ accounts: [eurBank, usdBank], trades: [] }, usdBank, invoice), a => a.id), ['usd-bank'],
+  'a USD entry is paid into a USD cash account only');
+const usdLock = { pair: 'USD/EUR', rate: 0.9, source: 'ECB', interpolated: false };
+const paid = C.buildStakeRewardClaim(usdBank, invoice, usdBank, { amount: '700', at: claimAt, value: '999', fxLock: usdLock }, 'EUR');
+assert.equal(paid.error, undefined);
+assert.equal(paid.trade.type, 'income');
+assert.equal(paid.trade.symbol, 'USD');
+assert.equal(paid.trade.qty, 700);
+assert.equal(paid.trade.total, 700, 'a cash record\'s value is its amount; a typed value is ignored');
+assert.equal(paid.trade.currency, 'USD');
+assert.equal(paid.trade.feeCurrency, 'USD');
+assert.equal(paid.trade.fxLock.rate, 0.9, 'the USD/EUR rate of the payment date');
+assert.match(paid.trade.note, /^Paid · Invoice/);
+assert.equal(C.validateTrade(paid.trade, 1e18), null);
+assert.equal(C.isValidImportTrade(paid.trade, ['usd-bank'], [usdBank]), true);
+assert.equal(paid.snapshot.amount, 500, '1200 owed - 700 paid');
+assert.match(paid.snapshot.note, /^Paid 700 USD$/);
+assert.match(C.buildStakeRewardClaim(usdBank, invoice, usdBank, { amount: '700', at: claimAt }, 'EUR').error, /exchange rate/,
+  'a foreign-currency payment never saves without a rate');
+const eurInterest = reward({ id: 'int', name: 'Deposit interest', assetKind: 'cash', assetTicker: 'EUR',
+  balanceSnapshots: [snap('e1', 35.5, '2026-11-01T10:00:00.000Z')] });
+const eurPaid = C.buildStakeRewardClaim(eurBank, eurInterest, eurBank, { amount: '35.5', at: claimAt }, 'EUR');
+assert.equal(eurPaid.trade.fxLock.rate, 1, 'main-currency payments lock 1:1');
+assert.equal(eurPaid.trade.total, 35.5);
+assert.equal(eurPaid.snapshot.amount, 0);
+const fiatVal = C.currentStakeRewardValuation([acc('ib', 'EUR', 'cash', { stakeRewards: [eurInterest] })], 'EUR', {}, valueAtFiat());
+assert.equal(fiatVal.value, 35.5, 'fiat pending income in the main currency needs no price');
+function valueAtFiat() { return Date.parse('2026-11-12T00:00:00.000Z'); }
+
 // --- Valuation: pending rewards are an asset; unknown prices stay unknown ---
 const valueAt = Date.parse('2026-11-12T00:00:00.000Z');
 const rv = C.currentStakeRewardValuation([eth], 'USD', { ETH: 2000 }, valueAt);
@@ -218,5 +256,11 @@ assert.equal(C.priceKeyOf('W', 'commodity'), 'COMMODITY:W', 'reward kinds join t
     1000, 'history nets rewards against debt');
   assert.equal(C.netWorthHistoryStart(hist, { eth: true }), Date.parse('2026-11-01T10:00:00.000Z'),
     'a reward-only account starts the chart at its first report');
+  const eurOwed = acc('eur-owed', 'EUR', 'cash', { stakeRewards: [reward({ id: 'inv2', name: 'Invoice', assetKind: 'cash', assetTicker: 'EUR',
+    balanceSnapshots: [snap('o1', 100, '2026-11-01T10:00:00.000Z')] })] });
+  C.cacheRate('2026-11-05', 'EUR', 'USD', 1.1, 'test-history');
+  const fiatPoint = await C.netWorthHistoryPointValue({ at: Date.parse('2026-11-05T12:00:00.000Z'), prices: {} },
+    { settings: histSettings, accounts: [eurOwed], trades: [], priceOverrides: {} }, 'USD', false);
+  assert.ok(Math.abs(fiatPoint.value - 110) < 1e-9, 'fiat pending income uses the historical FX rate: ' + fiatPoint.value);
   console.log('stake-rewards: ok');
 })().catch(err => { console.error(err); process.exit(1); });

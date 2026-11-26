@@ -1,16 +1,19 @@
 'use strict';
-// Stake rewards: rewards a stake has earned but the owner has not claimed yet.
+// Pending income ("Pending income" in the UI; stored as account.stakeRewards,
+// the name it was introduced under): income earned but not received yet.
+// Unclaimed stake rewards, interest accrued on a deposit or on supplied
+// collateral, invoices a client owes, dividends declared but not paid.
 // Same reported-balance model as debt positions (js/data/debt.js): the
-// protocol shows a pending total, Plutus keeps it as a snapshot and never
-// derives yield between reports. A pending reward is an asset: it adds to
+// payer shows a pending total, Plutus keeps it as a snapshot and never
+// derives yield between reports. Pending income is an asset: it adds to
 // net worth, where a debt position subtracts.
 //
-// A reward is denominated in the token it pays out, which may differ from
-// the staked asset (stake an LP token, earn CRV). One stake that pays
-// several tokens is recorded as one reward per token. Fiat payouts are
-// interest, not stake rewards: they are recorded as income on a cash account.
+// An entry is denominated in what it pays out, which may differ from the
+// account's own asset (stake an LP token, earn CRV). One source that pays
+// several assets is recorded as one entry per asset. Fiat entries are paid
+// into a cash account in that currency.
 
-var STAKE_REWARD_KINDS = ['crypto', 'stock', 'commodity', 'custom'];
+var STAKE_REWARD_KINDS = ['crypto', 'stock', 'commodity', 'custom', 'cash'];
 
 function accountStakeRewards(account) {
   return (account && Array.isArray(account.stakeRewards)) ? account.stakeRewards : [];
@@ -23,9 +26,14 @@ function accountBalancePositions(account) {
   return accountDebtPositions(account).concat(accountStakeRewards(account));
 }
 
-// A stake account can pay its rewards out in its own asset only.
+// Every account can carry pending income: assets for rewards and accrued
+// yield, cash accounts for interest, receivables and declared dividends.
 function stakeRewardsAllowedOn(account) {
-  return !!account && !isCashKind(account.kind);
+  return !!account;
+}
+
+function isFiatStakeReward(reward) {
+  return !!reward && isCashKind(reward.assetKind);
 }
 
 function isValidStakeReward(reward) {
@@ -38,6 +46,9 @@ function isValidStakeReward(reward) {
   if (typeof reward.assetKind !== 'string' || typeof reward.assetTicker !== 'string') return false;
   if (STAKE_REWARD_KINDS.indexOf(reward.assetKind.trim().toLowerCase()) === -1) return false;
   if (!/^[A-Z0-9._-]{1,12}$/.test(reward.assetTicker.trim().toUpperCase())) return false;
+  // Fiat is paid as a cash record in that currency, so it must be a code a
+  // record can carry.
+  if (isCashKind(reward.assetKind) && !isValidCurrencyCode(reward.assetTicker)) return false;
   if (!isValidBalanceSnapshotList(reward.balanceSnapshots)) return false;
   if (reward.notes !== undefined && reward.notes !== null &&
       (typeof reward.notes !== 'string' || reward.notes.length > 280)) return false;
@@ -127,9 +138,13 @@ function stakeRewardClaimDate(ms) {
 // The two writes of one claim, built together so they are saved together:
 // an income record in the receiving account and a new pending report on
 // the reward. Returns { trade, snapshot } or { error }.
-// `value` is the optional value of the claimed tokens in the main currency
-// (their cost basis); null records them at zero cost, like an Income record
-// saved without a value.
+// Assets: `value` is the optional value of the claimed amount in the main
+// currency (its cost basis); empty records it at zero cost, like an Income
+// record saved without a value.
+// Fiat: the record matches a cash Income record from the record form: the
+// amount is the value, in the account's own currency, and claim.fxLock is
+// that currency's rate to the main currency on the claim date (callers
+// fetch it; 1:1 when the currency is the main one).
 function buildStakeRewardClaim(owner, reward, target, claim, main) {
   if (!owner || !reward) return { error: 'This stake reward no longer exists. Refresh and try again.' };
   if (!target) return { error: 'Choose the account that received the claimed tokens.' };
@@ -143,8 +158,15 @@ function buildStakeRewardClaim(owner, reward, target, claim, main) {
   if (qtyOverPrecise(raw, ticker)) return { error: qtyPrecisionError(ticker) };
   var qty = exactQtyValue(raw, ticker);
   if (!(Number(qty) > 0)) return { error: 'Enter the claimed amount (more than 0).' };
+  var fiat = isCashKind(target.kind);
   var value = claim.value === null || claim.value === undefined || String(claim.value).trim() === '' ? 0 : Number(claim.value);
-  if (!isFinite(value) || value < 0) return { error: 'The value at claim must be 0 or more.' };
+  if (!fiat && (!isFinite(value) || value < 0)) return { error: 'The value at claim must be 0 or more.' };
+  var lock = { pair: mainU + '/' + mainU, rate: 1, source: '1:1', interpolated: false };
+  if (fiat) {
+    if (ticker === mainU) lock = { pair: ticker + '/' + mainU, rate: 1, source: '1:1', interpolated: false };
+    else if (claim.fxLock && isFinite(Number(claim.fxLock.rate)) && Number(claim.fxLock.rate) > 0) lock = claim.fxLock;
+    else return { error: 'No ' + ticker + '/' + mainU + ' rate for that date — enter the exchange rate.' };
+  }
   var pendingSnapshot = latestDebtBalanceSnapshot(reward, at);
   var pending = pendingSnapshot ? Number(pendingSnapshot.amount) : 0;
   var remaining = stakeRewardRemainder(pending, raw, ticker);
@@ -156,13 +178,13 @@ function buildStakeRewardClaim(owner, reward, target, claim, main) {
     type: 'income',
     symbol: ticker,
     qty: qty,
-    total: value,
-    currency: mainU,
+    total: fiat ? qty : value,
+    currency: fiat ? ticker : mainU,
     date: date,
     fee: 0,
-    feeCurrency: mainU,
-    note: note || ('Stake reward claim · ' + reward.name),
-    fxLock: { pair: mainU + '/' + mainU, rate: 1, source: '1:1', interpolated: false },
+    feeCurrency: fiat ? ticker : mainU,
+    note: note || ((fiat ? 'Paid · ' : 'Claimed · ') + reward.name),
+    fxLock: lock,
     accountId: target.id,
     createdAt: now
   };
@@ -172,7 +194,7 @@ function buildStakeRewardClaim(owner, reward, target, claim, main) {
     amount: remaining,
     reportedAt: new Date(at).toISOString(),
     enteredAt: now,
-    note: ('Claimed ' + claimedText + ' ' + ticker + (target.id !== owner.id ? ' into ' + target.name : '')).slice(0, 280)
+    note: ((fiat ? 'Paid ' : 'Claimed ') + claimedText + ' ' + ticker + (target.id !== owner.id ? ' into ' + target.name : '')).slice(0, 280)
   };
   return { trade: trade, snapshot: snapshot, remaining: remaining };
 }

@@ -139,6 +139,37 @@ const state = JSON.stringify({
   assert.deepEqual(fiat.t, ['income', 'USD', 700, 700, 'USD', 0.9, 'manual'], 'a cash Income record in USD at the typed rate');
   assert.equal(fiat.pending, 500, '1200 owed - 700 paid');
 
+  // Pledge mode (Aave-style): pledge 2 ETH from the account itself, report
+  // the total Aave shows, and only the growth counts.
+  await page.goto(base + '/account/eth', { waitUntil: 'load' });
+  await page.waitForFunction(() => typeof uiBooted !== 'undefined' && uiBooted);
+  await page.click('button[aria-label="Add pending income to ETH staking"]');
+  await page.fill('#stake-reward-name', 'Aave ETH supply');
+  await page.selectOption('#stake-reward-mode', 'pledge');
+  assert.equal(await page.$eval('#stake-reward-pledge-wrap', el => el.hidden), false);
+  await page.click('#stake-reward-add-pledge');
+  await page.selectOption('#stake-reward-pledge-list .stake-pledge-row select', 'eth');
+  await page.fill('#stake-reward-pledge-list .stake-pledge-row input', '20');
+  await page.fill('#stake-reward-balance', '2.03');
+  await page.click('#stake-reward-save');
+  await page.waitForFunction(() => /holds only/.test((document.getElementById('stake-reward-error-text') || {}).textContent || ''));
+  await page.fill('#stake-reward-pledge-list .stake-pledge-row input', '2');
+  assert.equal(await page.textContent('#stake-reward-earned'), 'Earned: 0.03 ETH (total − 2 ETH pledged)', 'live earned line');
+  await page.click('#stake-reward-save');
+  await page.waitForFunction(() => !document.getElementById('stake-reward-dialog').open);
+  const pledgeOut = await page.evaluate(() => {
+    const st = loadState();
+    const entry = st.accounts.find(a => a.id === 'eth').stakeRewards.find(r => r.name === 'Aave ETH supply');
+    const s = entry.balanceSnapshots[0];
+    return { pledge: entry.pledge, snap: [s.amount, s.total, s.pledged],
+      held: computePositions(st.trades.filter(t => t.accountId === 'eth'), {}, 'average')[0].qtyHeld,
+      cards: Array.from(document.querySelectorAll('.stake-reward-card')).map(c => c.textContent).join(' | ') };
+  });
+  assert.deepEqual(pledgeOut.pledge, [{ accountId: 'eth', quantity: 2 }]);
+  assert.deepEqual(pledgeOut.snap, [0.03, 2.03, 2], 'only the growth is pending');
+  assert.equal(pledgeOut.held, 10.25, 'the pledged ETH stays in the holdings, no record moved it');
+  assert.ok(/0\.03 ETH earned/.test(pledgeOut.cards) && /Payer shows 2\.03 ETH · 2 ETH pledged/.test(pledgeOut.cards), pledgeOut.cards);
+
   assert.deepEqual(errors, [], 'no page errors');
   await browser.close();
   server.close();

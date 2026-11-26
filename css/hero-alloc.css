@@ -29,17 +29,44 @@
 
 .donut-num {
   font-family: var(--font-display);
-  font-size: 30px;
-  font-weight: 500;
+  font-size: 33px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
   fill: var(--text);
 }
 
+/* A share ("42%") sits smaller than the count; "100%", "12.5%" and
+   "<0.1%" smaller still, so every value clears the hole. */
+.donut-num[data-pct] { font-size: 25px; letter-spacing: -0.03em; }
+.donut-num[data-pct][data-long] { font-size: 20px; }
+
 .donut-lab {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: 8.5px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.2em;
   fill: var(--muted-2);
+  transition: fill 0.18s var(--ease);
+}
+
+.hero-alloc.has-active .donut-lab { fill: var(--muted); }
+
+/* Ring segments: rounded sectors drawn in hero-alloc.js. Hover / tap
+   slides the segment out a few units and dims the others; only transform
+   and opacity animate. */
+.alloc-seg {
+  cursor: pointer;
+  transform: translate(0, 0);
+  transition: transform 0.22s var(--ease), opacity 0.22s var(--ease);
+}
+
+.hero-alloc.has-active .alloc-seg { opacity: 0.28; }
+
+.hero-alloc .alloc-seg.is-active {
+  opacity: 1;
+  transform: translate(var(--dx, 0px), var(--dy, 0px));
 }
 
 #hero-value-num {
@@ -78,7 +105,15 @@
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  cursor: default;
+  border-radius: 6px;
+  transition: color 0.18s var(--ease), opacity 0.18s var(--ease);
 }
+
+.hero-alloc-legend li:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+
+.hero-alloc.has-active .hero-alloc-legend li { opacity: 0.45; }
+.hero-alloc.has-active .hero-alloc-legend li.is-active { opacity: 1; color: var(--text); }
 
 .hero-alloc-legend li > span:last-child {
   min-width: 0;
@@ -89,10 +124,12 @@
 .hero-alloc-dot {
   width: 0.55rem;
   height: 0.55rem;
-  border-radius: 50%;
+  border-radius: 3px;
   flex-shrink: 0;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: transform 0.18s var(--ease);
 }
+
+.hero-alloc-legend li.is-active .hero-alloc-dot { transform: scale(1.25); }
 
 /* Smoother focus + hover for new interactive rows */
 .account-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

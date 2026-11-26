@@ -106,6 +106,9 @@ function importState(json, opts) {
     if (!isValidDebtPositions(data.accounts[dpa], data.accounts)) {
       throw new Error('import failed: invalid debt positions for account ' + data.accounts[dpa].id);
     }
+    if (!isValidStakeRewards(data.accounts[dpa])) {
+      throw new Error('import failed: invalid stake rewards for account ' + data.accounts[dpa].id);
+    }
   }
   if (!Array.isArray(data.trades)) {
     throw new Error('import failed: trades must be an array');

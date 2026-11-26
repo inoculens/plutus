@@ -516,7 +516,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   var financialRewards = financial && financial.rewards && financial.rewards.hasRewards ? financial.rewards : null;
   if (financial && financial.debt && (financial.debt.hasDebt || financialRewards)) {
     var netSummary = document.createElement('div');
-    netSummary.className = 'debt-net-summary';
+    netSummary.className = 'debt-net-summary' + (financialRewards && financial.debt.hasDebt ? ' debt-net-summary-4' : '');
     function summaryLine(label, value) {
       var line = document.createElement('div');
       line.className = 'debt-net-line';
@@ -704,4 +704,5 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   section.appendChild(details);
   if (stats && stats.parentNode === host) host.insertBefore(section, stats.nextSibling);
   else host.appendChild(section);
+  return section;
 }

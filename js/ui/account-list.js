@@ -97,17 +97,25 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
       if (!balance || !isFinite(Number(balance.main))) grossIncomplete = true;
     }
   });
+  // Debt and reward chips share one row, so a card with both is no taller
+  // than a card with one.
+  var chipHost = mid;
+  if (debtInfo.hasDebt && rewardInfo.hasRewards) {
+    chipHost = document.createElement('span');
+    chipHost.className = 'acct-chip-row';
+    mid.appendChild(chipHost);
+  }
   if (debtInfo.hasDebt) {
     var debtIndicator = document.createElement('span');
     debtIndicator.className = 'acct-debt-indicator';
     debtIndicator.textContent = 'Debt · ' + debtInfo.positionCount;
-    mid.appendChild(debtIndicator);
+    chipHost.appendChild(debtIndicator);
   }
   if (rewardInfo.hasRewards) {
     var rewardIndicator = document.createElement('span');
     rewardIndicator.className = 'acct-debt-indicator acct-reward-indicator';
     rewardIndicator.textContent = 'Rewards · ' + rewardInfo.positionCount;
-    mid.appendChild(rewardIndicator);
+    chipHost.appendChild(rewardIndicator);
   }
   var valKnown = reportedNet.has
     ? (reportedNet.complete && !grossIncomplete)

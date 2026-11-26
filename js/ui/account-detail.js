@@ -343,7 +343,8 @@ function renderAccountDetail(st, id) {
     var detailRewards = currentStakeRewardValuation(detailScopeAccounts, main, livePrices);
     debtSummaryForDetail = { gross: detailGross, debt: detailDebt, rewards: detailRewards };
   }
-  buildDebtPositionsSection(st, acc, members, host, stats, debtSummaryForDetail);
+  var debtSection = buildDebtPositionsSection(st, acc, members, host, stats, debtSummaryForDetail);
+  buildStakeRewardsSection(st, acc, members, host, debtSection);
   // Group mains: merged ledgers in the group currency plus sub-account
   // cards instead of the spent/fees lines and the trade history below.
   if (members.length) {

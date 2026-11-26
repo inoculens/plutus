@@ -126,10 +126,11 @@
   height: 0.55rem;
   border-radius: 3px;
   flex-shrink: 0;
-  transition: transform 0.18s var(--ease);
 }
 
-.hero-alloc-legend li.is-active .hero-alloc-dot { transform: scale(1.25); }
+/* The active row is marked by its text and the others dimming. The swatch
+   keeps its size: the row clips its overflow (for the … truncation), so a
+   grown swatch would be cut off at the row's left edge. */
 
 /* Smoother focus + hover for new interactive rows */
 .account-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

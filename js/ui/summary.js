@@ -146,7 +146,10 @@ function debtPositionValuation(position, main, prices, asOf, owningAccount) {
   };
 }
 
-function currentDebtValuation(accounts, main, prices, asOf) {
+// Current value of reported balances (debt positions or stake rewards, picked
+// by positionsOf). The sum is unsigned; callers subtract debt and add
+// rewards. One unknown price makes the total unknown, never zero.
+function currentReportedValuation(accounts, positionsOf, main, prices, asOf) {
   var source = Array.isArray(accounts) ? accounts : [];
   var priceMap = prices || livePrices || {};
   var cutoff = asOf === undefined || asOf === null ? Date.now() : asOf;
@@ -158,7 +161,7 @@ function currentDebtValuation(accounts, main, prices, asOf) {
   source.forEach(function (account) {
     if (!account || !account.id || seen[account.id]) return;
     seen[account.id] = true;
-    var positions = accountDebtPositions(account);
+    var positions = positionsOf(account);
     if (!positions.length) return;
     positionCount += positions.length;
     hasDebt = true;
@@ -176,6 +179,29 @@ function currentDebtValuation(accounts, main, prices, asOf) {
     complete: complete,
     positionCount: positionCount
   };
+}
+
+function currentDebtValuation(accounts, main, prices, asOf) {
+  return currentReportedValuation(accounts, accountDebtPositions, main, prices, asOf);
+}
+
+// Same shape as currentDebtValuation; `hasRewards` mirrors `hasDebt`.
+function currentStakeRewardValuation(accounts, main, prices, asOf) {
+  var out = currentReportedValuation(accounts, accountStakeRewards, main, prices, asOf);
+  out.hasRewards = out.hasDebt;
+  return out;
+}
+
+// Net reported balances of a scope for a total: rewards minus debt, or null
+// when any of them has no known value yet. `has` is false when the scope
+// owns neither, so the caller's own total stands as it is.
+function reportedBalancesNet(debt, rewards) {
+  var has = !!(debt && debt.hasDebt) || !!(rewards && rewards.hasRewards);
+  var complete = (!debt || !debt.hasDebt || debt.complete) && (!rewards || !rewards.hasRewards || rewards.complete);
+  var value = complete
+    ? ((rewards && rewards.hasRewards ? rewards.value : 0) - (debt && debt.hasDebt ? debt.value : 0))
+    : null;
+  return { has: has, complete: complete, value: value };
 }
 
 function currentAccountGrossValue(accounts, rows, trades, main) {
@@ -256,8 +282,10 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
   if (cashBalKnown) { mv += cashBalTotal; mvKnown = true; }
   var debtAccountsForSummary = debtAccountsForScope(st, visibleAccounts || st.accounts || []);
   var debtSummary = currentDebtValuation(debtAccountsForSummary, main, livePrices);
+  var rewardSummary = currentStakeRewardValuation(debtAccountsForSummary, main, livePrices);
+  var reportedNet = reportedBalancesNet(debtSummary, rewardSummary);
   var grossIncomplete = rows.some(function (p) { return Number(p.qtyHeld) > 0 && p.marketValue === null; });
-  var anyContent = rows.length > 0 || cashTrades > 0 || debtSummary.hasDebt;
+  var anyContent = rows.length > 0 || cashTrades > 0 || reportedNet.has;
   rows.forEach(function (p) {
     rz += p.realized;
     if (Math.abs(p.realized || 0) > 1e-9) hasRealized = true;
@@ -269,9 +297,10 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
     if (p.marketValue !== null) { mv += p.marketValue; mvKnown = true; }
     if (p.unrealized !== null) { un += p.unrealized; unKnown = true; }
   });
-  if (debtSummary.hasDebt) {
-    if (!debtSummary.complete || grossIncomplete) mvKnown = false;
-    else { mv -= debtSummary.value; mvKnown = true; }
+  // Pending stake rewards add to the total, liabilities subtract from it.
+  if (reportedNet.has) {
+    if (!reportedNet.complete || grossIncomplete) mvKnown = false;
+    else { mv += reportedNet.value; mvKnown = true; }
   }
   var lifetime = 0;
   try { lifetime = summaryLifetimeCost(st, rows, dtradesOpt || convertTrades(st.trades, main), visibleAccounts || []); } catch (e) { lifetime = 0; }

@@ -33,7 +33,7 @@ function netWorthHistoryKinds(st) {
     if (account && account.kind) kinds[String(trade.symbol).toUpperCase()] = account.kind;
   });
   (st.accounts || []).forEach(function (account) {
-    accountDebtPositions(account).forEach(function (position) {
+    accountBalancePositions(account).forEach(function (position) {
       var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
       if (ticker) kinds[ticker] = position.assetKind || account.kind || 'crypto';
     });
@@ -104,7 +104,7 @@ function netWorthHistoryStart(st, included) {
   });
   (st.accounts || []).forEach(function (account) {
     if (!account || !included[account.id]) return;
-    accountDebtPositions(account).forEach(function (position) {
+    accountBalancePositions(account).forEach(function (position) {
       (position.balanceSnapshots || []).forEach(function (snapshot) {
         var timestamp = Date.parse(snapshot.reportedAt);
         if (isFinite(timestamp) && timestamp < earliest) earliest = timestamp;
@@ -818,12 +818,12 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
     }
   });
 
-  // Liabilities need market history even when their owner account has never
-  // held a trade. Each position is priced by its own denomination; fiat debt
-  // uses historical FX inside netWorthHistoryPointValue.
+  // Liabilities and pending stake rewards need market history even when their
+  // owner account has never held a trade. Each position is priced by its own
+  // denomination; fiat debt uses historical FX inside netWorthHistoryPointValue.
   (st.accounts || []).forEach(function (account) {
     if (!account || !included[account.id]) return;
-    accountDebtPositions(account).forEach(function (position) {
+    accountBalancePositions(account).forEach(function (position) {
       var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
       var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
       if (!ticker || isCashKind(kind)) return;
@@ -1272,17 +1272,22 @@ function netWorthHistoryPointValue(point, st, main, allowFetch) {
     }));
   });
 
-  // Each liability uses its own denomination and latest report at/before the chart point.
+  // Each liability and pending stake reward uses its own denomination and
+  // latest report at/before the chart point. debtTotal is subtracted from
+  // the total below, so liabilities enter it positive and rewards negative.
   var debtCashTotal = 0;
   var debtCashJobs = [];
   var debtAmounts = [];
   var includedDebtAccounts = netWorthHistoryIncludedAccounts(st);
   (st.accounts || []).forEach(function (account) {
     if (!account || !includedDebtAccounts[account.id]) return;
-    accountDebtPositions(account).forEach(function (position) {
+    accountDebtPositions(account).map(function (position) { return { position: position, sign: 1 }; })
+      .concat(accountStakeRewards(account).map(function (position) { return { position: position, sign: -1 }; }))
+      .forEach(function (entry) {
+      var position = entry.position;
       var snapshot = latestDebtBalanceSnapshot(position, point.at);
-      var amount = snapshot ? Number(snapshot.amount) : 0;
-      if (!(amount > 0)) return;
+      var amount = snapshot ? Number(snapshot.amount) * entry.sign : 0;
+      if (!(Math.abs(amount) > 0)) return;
       var ticker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
       var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
       if (!ticker) { complete = false; return; }

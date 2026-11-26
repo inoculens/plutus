@@ -170,4 +170,53 @@ for (const [claim, pattern] of [
 }
 assert.match(C.buildStakeRewardClaim(main, ethReward, null, { amount: '1', at: claimAt }, 'EUR').error, /Choose the account/);
 
-console.log('stake-rewards: ok');
+// --- Valuation: pending rewards are an asset; unknown prices stay unknown ---
+const valueAt = Date.parse('2026-11-12T00:00:00.000Z');
+const rv = C.currentStakeRewardValuation([eth], 'USD', { ETH: 2000 }, valueAt);
+assert.equal(rv.hasRewards, true);
+assert.equal(rv.complete, true);
+assert.equal(rv.value, 1500, '0.75 ETH pending at 2000');
+assert.equal(rv.positionCount, 1);
+assert.equal(C.currentStakeRewardValuation([eth], 'USD', {}, valueAt).value, null,
+  'a reward without a price is unknown, never 0');
+assert.equal(C.currentStakeRewardValuation([acc('p', 'ETH', 'crypto')], 'USD', {}, valueAt).hasRewards, false);
+assert.equal(C.currentDebtValuation([eth], 'USD', { ETH: 2000 }, valueAt).hasDebt, false,
+  'rewards are never counted as debt');
+const both = acc('both', 'ETH', 'crypto', {
+  stakeRewards: [reward()],
+  debtPositions: [{ id: 'd', name: 'Borrow', assetKind: 'crypto', assetTicker: 'ETH', createdAt: '2026-11-01T10:00:00.000Z',
+    balanceSnapshots: [snap('d1', 0.25, '2026-11-01T10:00:00.000Z')] }]
+});
+const net = C.reportedBalancesNet(
+  C.currentDebtValuation([both], 'USD', { ETH: 2000 }, valueAt),
+  C.currentStakeRewardValuation([both], 'USD', { ETH: 2000 }, valueAt));
+assert.equal(net.has, true);
+assert.equal(net.value, 1000, 'rewards (1500) minus debt (500)');
+const netUnknown = C.reportedBalancesNet(
+  C.currentDebtValuation([both], 'USD', { ETH: 2000 }, valueAt),
+  C.currentStakeRewardValuation([both], 'USD', {}, valueAt));
+assert.equal(netUnknown.complete, false);
+assert.equal(netUnknown.value, null);
+assert.equal(C.reportedBalancesNet(C.currentDebtValuation([], 'USD', {}), C.currentStakeRewardValuation([], 'USD', {})).has, false);
+
+// --- Price identity: a reward-only token is fetched as its own kind ---
+const goldReward = acc('gold-stake', 'W', 'crypto', { stakeRewards: [reward({ assetKind: 'commodity', assetTicker: 'W' })] });
+C.noteSymbolKinds([goldReward], []);
+assert.equal(C.priceKeyOf('W', 'commodity'), 'COMMODITY:W', 'reward kinds join ticker collision identity');
+
+(async () => {
+  // --- Net-worth history adds the pending report current at each point ---
+  const histSettings = { mainCurrency: 'USD', costMethod: 'average', assetLedgers: true, dateFormat: 'DD/MM/YYYY' };
+  const hist = { settings: histSettings, accounts: [eth], trades: [], priceOverrides: {} };
+  const point = async (iso, prices) => (await C.netWorthHistoryPointValue({ at: Date.parse(iso), prices }, hist, 'USD', false)).value;
+  assert.equal(await point('2026-10-31T00:00:00.000Z', {}), 0, 'nothing pending before the first report');
+  assert.equal(await point('2026-11-05T00:00:00.000Z', { ETH: 2000 }), 1000, '0.5 ETH pending then');
+  assert.equal(await point('2026-11-11T00:00:00.000Z', { ETH: 2000 }), 1500, 'the later report replaces it');
+  assert.equal(await point('2026-11-11T00:00:00.000Z', {}), null, 'unknown historical price leaves a gap');
+  const histBoth = { settings: histSettings, accounts: [both], trades: [], priceOverrides: {} };
+  assert.equal((await C.netWorthHistoryPointValue({ at: Date.parse('2026-11-11T00:00:00.000Z'), prices: { ETH: 2000 } }, histBoth, 'USD', false)).value,
+    1000, 'history nets rewards against debt');
+  assert.equal(C.netWorthHistoryStart(hist, { eth: true }), Date.parse('2026-11-01T10:00:00.000Z'),
+    'a reward-only account starts the chart at its first report');
+  console.log('stake-rewards: ok');
+})().catch(err => { console.error(err); process.exit(1); });

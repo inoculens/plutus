@@ -37,7 +37,7 @@ function refreshPrices() {
   (st.accounts || []).forEach(function (a) {
     if (!a) return;
     if (a.ticker) addPrice(a.ticker, a.kind);
-    accountDebtPositions(a).forEach(function (position) {
+    accountBalancePositions(a).forEach(function (position) {
       var ticker = position.assetTicker || a.ticker;
       var kind = position.assetKind || a.kind;
       if (ticker && !isCashKind(kind)) addPrice(ticker, kind);

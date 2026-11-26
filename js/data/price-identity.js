@@ -99,10 +99,11 @@ function noteSymbolKinds(accounts, trades) {
     else if (k === 'crypto') crypto[t] = true;
     noteKind(t, a.kind);
   });
-  // Liability-only assets participate in kind-qualified price identity too.
+  // Liability-only and reward-only assets participate in kind-qualified
+  // price identity too.
   (Array.isArray(accounts) ? accounts : []).forEach(function (account) {
     if (!account) return;
-    accountDebtPositions(account).forEach(function (position) {
+    accountBalancePositions(account).forEach(function (position) {
       var debtTicker = String(position.assetTicker || account.ticker || '').trim().toUpperCase();
       var debtKind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
       if (!debtTicker) return;

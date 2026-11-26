@@ -17,6 +17,74 @@ function describeStakeRewardAsset(kind, ticker) {
   return describeDebtAsset(kind, ticker);
 }
 
+// Pledge rows reuse the debt collateral row styles: account, quantity, Max
+// (everything the account holds today) and Remove. Only accounts holding
+// the entry's own asset are offered.
+function stakePledgeRow(list, accounts, row) {
+  var el = document.createElement('div');
+  el.className = 'debt-collateral-row stake-pledge-row';
+  var select = document.createElement('select');
+  select.setAttribute('aria-label', 'Pledged account');
+  var empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = 'Select account';
+  select.appendChild(empty);
+  (accounts || []).forEach(function (account) {
+    var option = document.createElement('option');
+    option.value = account.id;
+    option.textContent = account.name + ' · ' + String(account.ticker || '').toUpperCase();
+    if (row && row.accountId === account.id) option.selected = true;
+    select.appendChild(option);
+  });
+  var quantity = document.createElement('input');
+  quantity.type = 'number';
+  quantity.min = '0';
+  quantity.step = 'any';
+  quantity.placeholder = 'Pledged quantity';
+  quantity.setAttribute('aria-label', 'Pledged quantity');
+  quantity.value = row && isFinite(Number(row.quantity)) ? qtyUiText(String(row.quantity), (accounts[0] || {}).ticker) : '';
+  var actions = document.createElement('div');
+  actions.className = 'debt-collateral-actions';
+  var max = document.createElement('button');
+  max.type = 'button';
+  max.className = 'quiet debt-max-collateral';
+  max.textContent = 'Max';
+  max.addEventListener('click', function () {
+    var st = loadState();
+    var account = accountById(st, select.value);
+    if (!account) { dockError('stake-reward-error', 'Choose the pledged account first.'); return; }
+    var maxText = debtCollateralMaxText(st.trades, account);
+    if (!maxText) { dockError('stake-reward-error', account.name + ' holds no ' + String(account.ticker || '').toUpperCase() + ' to pledge.'); return; }
+    quantity.value = maxText;
+    dockError('stake-reward-error', '');
+    quantity.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  var remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'quiet debt-remove-collateral';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', function () {
+    el.remove();
+    list.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  actions.appendChild(max);
+  actions.appendChild(remove);
+  el.appendChild(select);
+  el.appendChild(quantity);
+  el.appendChild(actions);
+  list.appendChild(el);
+}
+
+// Accounts a pledge in this asset can come from: same ticker and kind.
+function stakePledgeAccounts(st, kind, ticker) {
+  var k = String(kind || '').trim().toLowerCase();
+  var t = String(ticker || '').trim().toUpperCase();
+  return (st.accounts || []).filter(function (account) {
+    return !!account && String(account.ticker || '').trim().toUpperCase() === t &&
+      String(account.kind || 'crypto').trim().toLowerCase() === k;
+  });
+}
+
 function buildStakeRewardDialog() {
   var existing = document.getElementById('stake-reward-dialog');
   if (existing) return existing;
@@ -27,25 +95,41 @@ function buildStakeRewardDialog() {
     '<div class="dialog-head"><h2 id="stake-reward-title">Pending income</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="stake-reward-form" novalidate>' +
-    '<label for="stake-reward-name">Name</label><input id="stake-reward-name" maxlength="120" required autocomplete="off" placeholder="e.g. Validator rewards, Invoice 114">' +
+    '<label for="stake-reward-name">Name</label><input id="stake-reward-name" maxlength="120" required autocomplete="off" placeholder="e.g. Aave ETH supply, Invoice 114">' +
     '<label>Paid in' + infoPill('Choose what this income is paid in.', 'stake-reward-asset-status') + '</label><div class="debt-asset-fields">' +
     '<select id="stake-reward-asset-kind" aria-label="Asset type">' + stakeRewardKindOptions() + '</select>' +
     '<input id="stake-reward-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. ETH" aria-label="Ticker"></div>' +
-    '<label for="stake-reward-balance">Pending amount<span id="stake-reward-unit"></span>' + infoPill('Enter the total still owed to you, as the payer shows it: unclaimed rewards, accrued interest, an unpaid invoice. Only the earned part, never what you already hold. Plutus keeps this exact amount, and counts it in your net worth, until you report a new one or it is paid.') + '</label>' +
+    '<label for="stake-reward-mode">Reported as' + infoPill('Earned amount only: the payer shows just what you earned (unclaimed rewards, an invoice). Total including a pledge: the payer shows what you put in plus what it earned, as Aave or a term deposit does. Plutus subtracts the pledge for you; the pledged amount stays in its accounts, no record moves it.') + '</label>' +
+    '<select id="stake-reward-mode"><option value="plain">Earned amount only</option><option value="pledge">Total including a pledge</option></select>' +
+    '<div id="stake-reward-pledge-wrap" hidden><div class="debt-collateral-heading"><label>Pledged from</label>' +
+    '<button id="stake-reward-add-pledge" type="button">+ Add account</button></div>' +
+    '<div id="stake-reward-pledge-list" class="debt-collateral-list"></div></div>' +
+    '<label for="stake-reward-balance"><span id="stake-reward-balance-label">Pending amount</span><span id="stake-reward-unit"></span>' + infoPill('The amount as the payer shows it now. Plutus keeps this exact figure, and counts what is earned in your net worth, until you report a new one or it is paid.') + '</label>' +
     '<input id="stake-reward-balance" type="number" min="0" step="any" required inputmode="decimal">' +
-    '<label for="stake-reward-reported-at">Balance reported at</label><input id="stake-reward-reported-at" type="datetime-local" required>' +
+    '<p id="stake-reward-earned" class="stake-claim-pending" hidden></p>' +
+    '<label for="stake-reward-reported-at">Reported at</label><input id="stake-reward-reported-at" type="datetime-local" required>' +
     '<label for="stake-reward-note">Snapshot note (optional)</label><textarea id="stake-reward-note" maxlength="280" rows="2"></textarea>' +
     '<label for="stake-reward-notes">Notes (optional)</label><textarea id="stake-reward-notes" maxlength="280" rows="2"></textarea>' +
-    dockMarkup('stake-reward-error', 'Save pending amount', 'stake-reward-save') + '</form>';
+    dockMarkup('stake-reward-error', 'Save', 'stake-reward-save') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('stake-reward-dialog');
   var form = document.getElementById('stake-reward-form');
+  document.getElementById('stake-reward-add-pledge').addEventListener('click', function () {
+    var st = loadState();
+    var kind = document.getElementById('stake-reward-asset-kind').value;
+    var ticker = document.getElementById('stake-reward-asset-ticker').value;
+    var choices = stakePledgeAccounts(st, kind, ticker);
+    if (!choices.length) { dockError('stake-reward-error', 'No account holds ' + String(ticker || 'that asset').toUpperCase() + ' to pledge.'); return; }
+    stakePledgeRow(document.getElementById('stake-reward-pledge-list'), choices, null);
+  });
+  form.addEventListener('input', function () { stakeRewardSyncEarned(); });
+  form.addEventListener('change', function () { stakeRewardSyncEarned(); });
   form.addEventListener('submit', function (event) {
     if (event && event.preventDefault) event.preventDefault();
     var saveBtn = form.querySelector('.t-dock button.primary');
     if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
     function fail(message) {
-      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save pending amount');
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save');
       dockError('stake-reward-error', message);
     }
     dockError('stake-reward-error', '');
@@ -59,6 +143,7 @@ function buildStakeRewardDialog() {
     var name = String(document.getElementById('stake-reward-name').value || '').trim();
     var assetKind = reward ? reward.assetKind : String(document.getElementById('stake-reward-asset-kind').value || '').trim().toLowerCase();
     var assetTicker = reward ? reward.assetTicker : String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
+    var pledgeMode = reward ? isStakePledgeEntry(reward) : document.getElementById('stake-reward-mode').value === 'pledge';
     if (STAKE_REWARD_KINDS.indexOf(assetKind) === -1 || !/^[A-Z0-9._-]{1,12}$/.test(assetTicker)) {
       fail('Choose a supported asset type and enter a valid ticker.'); return;
     }
@@ -69,12 +154,37 @@ function buildStakeRewardDialog() {
     var note = String(document.getElementById('stake-reward-note').value || '').trim();
     var notes = String(document.getElementById('stake-reward-notes').value || '').trim();
     if (!name || name.length > 120) { fail('Enter a name (up to 120 characters).'); return; }
-    if (!isFinite(amount) || amount < 0) { fail('Enter a valid pending amount (0 or more).'); return; }
+    if (!isFinite(amount) || amount < 0) { fail(pledgeMode ? 'Enter the total the payer shows (0 or more).' : 'Enter a valid pending amount (0 or more).'); return; }
     if (qtyOverPrecise(amountRaw, assetTicker)) { fail(qtyPrecisionError(assetTicker)); return; }
     var reportedDate = new Date(reportedInput);
     var reportedIssue = reportedInput ? debtReportedAtIssue(reportedDate.getTime(), Date.now()) : 'Enter when the balance was reported.';
     if (reportedIssue) { fail(reportedIssue); return; }
     if (notes.length > 280) { fail('Notes can be up to 280 characters.'); return; }
+    var pledge = null;
+    if (pledgeMode) {
+      pledge = [];
+      var seen = Object.create(null);
+      var rows = document.querySelectorAll('#stake-reward-pledge-list .stake-pledge-row');
+      for (var ri = 0; ri < rows.length; ri++) {
+        var sourceId = String(rows[ri].querySelector('select').value || '');
+        var qtyText = String(rows[ri].querySelector('input').value || '').trim();
+        if (!sourceId && !qtyText) continue;
+        var qty = Number(qtyText);
+        if (!sourceId || !isFinite(qty) || qty <= 0) { fail('Choose an account and enter a positive pledged quantity, or remove the empty row.'); return; }
+        if (seen[sourceId]) { fail('Each account can appear only once in a pledge.'); return; }
+        var source = accountById(state, sourceId);
+        if (!source || stakePledgeAccounts(state, assetKind, assetTicker).indexOf(source) === -1) {
+          fail('Pledged accounts must hold ' + assetTicker + '.'); return;
+        }
+        if (qtyOverPrecise(qtyText, assetTicker)) { fail(qtyPrecisionError(assetTicker)); return; }
+        var maxText = debtCollateralMaxText(state.trades, source);
+        if (!maxText || qty > Number(maxText)) {
+          fail(source.name + (maxText ? ' holds only ' + maxText : ' holds no') + ' ' + assetTicker + ' to pledge.'); return;
+        }
+        seen[sourceId] = true;
+        pledge.push({ accountId: sourceId, quantity: Number(exactQtyValue(qtyText, assetTicker)) });
+      }
+    }
     var now = new Date().toISOString();
     var next = {
       id: reward ? reward.id : uid(),
@@ -85,17 +195,24 @@ function buildStakeRewardDialog() {
       balanceSnapshots: reward ? reward.balanceSnapshots.slice() : []
     };
     if (notes) next.notes = notes;
-    var snapshot = { id: uid(), amount: amount, reportedAt: reportedDate.toISOString(), enteredAt: now };
-    if (note) snapshot.note = note;
+    var snapshot;
+    if (pledgeMode) {
+      next.pledge = pledge;
+      snapshot = stakePledgeSnapshot(next, amountRaw, reportedDate.toISOString(), note);
+      if (!snapshot) { fail('Enter the total the payer shows (0 or more).'); return; }
+    } else {
+      snapshot = { id: uid(), amount: amount, reportedAt: reportedDate.toISOString(), enteredAt: now };
+      if (note) snapshot.note = note;
+    }
     next.balanceSnapshots.push(snapshot);
-    if (!isValidStakeReward(next)) { fail('The pending income is invalid. Check the amount and timestamp.'); return; }
+    if (!isValidStakeReward(next, owner, state.accounts)) { fail('The pending income is invalid. Check the amounts and timestamp.'); return; }
     setTradeSubmitBusy(saveBtn, true, 'Saving…');
     deferTradeSubmitWork(function () {
       if (!Array.isArray(owner.stakeRewards)) owner.stakeRewards = [];
       if (reward) owner.stakeRewards = owner.stakeRewards.map(function (r) { return r.id === reward.id ? next : r; });
       else owner.stakeRewards.push(next);
       if (!saveStateGuarded(state)) { fail('Storage unavailable — the pending income was not saved.'); return; }
-      setTradeSubmitBusy(saveBtn, false, 'Save pending amount');
+      setTradeSubmitBusy(saveBtn, false, 'Save');
       closeDialog(dlg);
       clearBanner();
       render();
@@ -103,6 +220,34 @@ function buildStakeRewardDialog() {
     });
   });
   return dlg;
+}
+
+// Pledge mode: the amount field holds the total the payer shows; a live line
+// under it shows what Plutus will count (total - pledge).
+function stakeRewardSyncEarned() {
+  var mode = document.getElementById('stake-reward-mode');
+  var wrap = document.getElementById('stake-reward-pledge-wrap');
+  var out = document.getElementById('stake-reward-earned');
+  var label = document.getElementById('stake-reward-balance-label');
+  if (!mode || !wrap || !out || !label) return;
+  var pledgeMode = mode.value === 'pledge';
+  wrap.hidden = !pledgeMode;
+  label.textContent = pledgeMode ? 'Total the payer shows' : 'Pending amount';
+  out.hidden = !pledgeMode;
+  if (!pledgeMode) return;
+  var ticker = String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
+  var rows = [];
+  document.querySelectorAll('#stake-reward-pledge-list .stake-pledge-row').forEach(function (row) {
+    var q = String(row.querySelector('input').value || '').trim();
+    if (q !== '' && isFinite(Number(q)) && Number(q) > 0) rows.push({ quantity: q });
+  });
+  var pledged = stakePledgeSum(rows, ticker);
+  var totalRaw = String(document.getElementById('stake-reward-balance').value || '').trim();
+  var earned = totalRaw === '' ? null : stakePledgeEarned(totalRaw, pledged, ticker);
+  var pledgedText = qtyUiText(String(pledged), ticker) + ' ' + ticker;
+  out.textContent = earned === null
+    ? 'Pledged: ' + pledgedText + '. Enter the total to see what is earned.'
+    : 'Earned: ' + qtyUiText(String(earned), ticker) + ' ' + ticker + ' (total − ' + pledgedText + ' pledged)';
 }
 
 function openStakeRewardDialog(ownerId, rewardId) {
@@ -115,12 +260,15 @@ function openStakeRewardDialog(ownerId, rewardId) {
   dlg.setAttribute('data-reward-id', reward ? reward.id : '');
   var kindInput = document.getElementById('stake-reward-asset-kind');
   var tickerInput = document.getElementById('stake-reward-asset-ticker');
+  var modeInput = document.getElementById('stake-reward-mode');
   var unit = document.getElementById('stake-reward-unit');
   var reported = document.getElementById('stake-reward-reported-at');
-  document.getElementById('stake-reward-title').textContent = reward ? 'Update pending amount' : 'New pending income';
+  var pledgeMode = isStakePledgeEntry(reward);
+  document.getElementById('stake-reward-title').textContent = reward ? (pledgeMode ? 'Update total' : 'Update pending amount') : 'New pending income';
   document.getElementById('stake-reward-name').value = reward ? reward.name : '';
   var latest = reward ? latestDebtBalanceSnapshot(reward, Date.now()) : null;
-  document.getElementById('stake-reward-balance').value = latest ? qtyUiText(String(latest.amount), reward.assetTicker) : '';
+  var shown = latest ? (pledgeMode && typeof latest.total === 'number' ? latest.total : latest.amount) : null;
+  document.getElementById('stake-reward-balance').value = shown !== null ? qtyUiText(String(shown), reward.assetTicker) : '';
   reported.value = debtLocalDateTimeValue(new Date());
   reported.max = reported.value;
   document.getElementById('stake-reward-note').value = '';
@@ -129,8 +277,16 @@ function openStakeRewardDialog(ownerId, rewardId) {
   var ownerKind = String(owner.kind || 'crypto').trim().toLowerCase();
   kindInput.value = reward ? reward.assetKind : (STAKE_REWARD_KINDS.indexOf(ownerKind) !== -1 ? ownerKind : 'crypto');
   tickerInput.value = reward ? reward.assetTicker : String(owner.ticker || '').trim().toUpperCase();
+  modeInput.value = pledgeMode ? 'pledge' : 'plain';
   kindInput.disabled = !!reward;
   tickerInput.disabled = !!reward;
+  modeInput.disabled = !!reward;
+  var list = document.getElementById('stake-reward-pledge-list');
+  list.innerHTML = '';
+  if (pledgeMode) {
+    var choices = stakePledgeAccounts(state, reward.assetKind, reward.assetTicker);
+    reward.pledge.forEach(function (row) { stakePledgeRow(list, choices, row); });
+  }
   function syncAsset() {
     var ticker = String(tickerInput.value || '').trim().toUpperCase();
     unit.textContent = ticker ? ' (' + ticker + ')' : '';
@@ -140,10 +296,11 @@ function openStakeRewardDialog(ownerId, rewardId) {
   kindInput.onchange = syncAsset;
   tickerInput.oninput = syncAsset;
   syncAsset();
+  stakeRewardSyncEarned();
   dockError('stake-reward-error', '');
   clearInvalidFields(document.getElementById('stake-reward-form'));
   var saveBtn = document.getElementById('stake-reward-save');
-  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save pending amount');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save');
   openDialog('stake-reward-dialog');
 }
 
@@ -248,7 +405,7 @@ function buildStakeRewardClaimDialog() {
         var recordIssue = validateTrade(built.trade, 1e18);
         if (recordIssue) { fail('The income record is invalid: ' + recordIssue + '.'); return; }
         var nextSnapshots = reward.balanceSnapshots.concat([built.snapshot]);
-        if (!isValidStakeReward(Object.assign({}, reward, { balanceSnapshots: nextSnapshots }))) {
+        if (!isValidStakeReward(Object.assign({}, reward, { balanceSnapshots: nextSnapshots }), owner, state.accounts)) {
           fail('The payment could not be recorded. Check the amount and time.');
           return;
         }
@@ -289,7 +446,9 @@ function openStakeRewardClaimDialog(ownerId, rewardId) {
   var latest = latestDebtBalanceSnapshot(reward, Date.now());
   var pending = latest ? Number(latest.amount) : 0;
   document.getElementById('stake-claim-title').textContent = (fiat ? 'Payment · ' : 'Claim ') + reward.name;
-  document.getElementById('stake-claim-pending').textContent = 'Pending: ' + formatDebtPositionAmount(pending, reward) +
+  document.getElementById('stake-claim-pending').textContent = (isStakePledgeEntry(reward) ? 'Earned: ' : 'Pending: ') +
+    formatDebtPositionAmount(pending, reward) +
+    (latest && typeof latest.pledged === 'number' && latest.pledged > 0 ? ' · the ' + formatDebtPositionAmount(latest.pledged, reward) + ' pledge stays' : '') +
     (latest ? ' · reported ' + new Date(latest.reportedAt).toLocaleString() : '');
   document.getElementById('stake-claim-amount-label').textContent = fiat ? 'Amount paid' : 'Amount claimed';
   document.getElementById('stake-claim-unit').textContent = ' (' + ticker + ')';
@@ -336,7 +495,7 @@ function buildStakeRewardSnapshotDialog() {
     '<div class="dialog-head"><h2 id="stake-snapshot-title">Edit pending amount</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="stake-snapshot-form" novalidate>' +
-    '<label for="stake-snapshot-amount">Pending amount<span id="stake-snapshot-unit"></span>' + infoPill('This corrects the selected entry. The other reports stay. Income records already saved are not changed.') + '</label>' +
+    '<label for="stake-snapshot-amount"><span id="stake-snapshot-label">Pending amount</span><span id="stake-snapshot-unit"></span>' + infoPill('This corrects the selected entry. The other reports stay. Income records already saved are not changed.') + '</label>' +
     '<input id="stake-snapshot-amount" type="number" min="0" step="any" required inputmode="decimal">' +
     '<label for="stake-snapshot-reported-at">Balance reported at</label>' +
     '<input id="stake-snapshot-reported-at" type="datetime-local" required>' +
@@ -384,9 +543,17 @@ function buildStakeRewardSnapshotDialog() {
       reportedAt: sameTime ? previous.reportedAt : reportedDate.toISOString(),
       enteredAt: previous.enteredAt
     };
+    // A pledge report is corrected by its total; the pledge in force then
+    // stays, and the earned part follows.
+    if (isStakePledgeEntry(reward)) {
+      var pledgedThen = typeof previous.pledged === 'number' ? previous.pledged : stakePledgeSum(reward.pledge, reward.assetTicker);
+      edited.total = amount;
+      edited.pledged = pledgedThen;
+      edited.amount = stakePledgeEarned(amountRaw, pledgedThen, reward.assetTicker);
+    }
     if (note) edited.note = note;
     reward.balanceSnapshots[index] = edited;
-    if (!isValidStakeReward(reward)) { fail('The report is invalid. Check the amount and timestamp.'); return; }
+    if (!isValidStakeReward(reward, owner, state.accounts)) { fail('The report is invalid. Check the amount and timestamp.'); return; }
     setTradeSubmitBusy(saveBtn, true, 'Saving…');
     deferTradeSubmitWork(function () {
       if (!saveStateGuarded(state)) { fail('Storage unavailable — the report was not saved.'); return; }
@@ -412,7 +579,9 @@ function openStakeRewardSnapshotDialog(ownerId, rewardId, snapshotId) {
   dlg.setAttribute('data-reward-id', reward.id);
   dlg.setAttribute('data-snapshot-id', snapshot.id);
   document.getElementById('stake-snapshot-unit').textContent = ' (' + reward.assetTicker + ')';
-  document.getElementById('stake-snapshot-amount').value = qtyUiText(String(snapshot.amount), reward.assetTicker);
+  var pledgeReport = isStakePledgeEntry(reward) && typeof snapshot.total === 'number';
+  document.getElementById('stake-snapshot-label').textContent = pledgeReport ? 'Total the payer showed' : 'Pending amount';
+  document.getElementById('stake-snapshot-amount').value = qtyUiText(String(pledgeReport ? snapshot.total : snapshot.amount), reward.assetTicker);
   var reported = document.getElementById('stake-snapshot-reported-at');
   reported.value = debtLocalDateTimeValue(new Date(snapshot.reportedAt));
   dlg.setAttribute('data-reported-local', reported.value);
@@ -440,7 +609,7 @@ function removeStakeRewardSnapshot(ownerId, rewardId, snapshotId) {
     var kept = freshReward.balanceSnapshots.filter(function (s) { return s.id !== snapshotId; });
     if (kept.length === freshReward.balanceSnapshots.length) return;
     freshReward.balanceSnapshots = kept;
-    if (!isValidStakeReward(freshReward) || !saveStateGuarded(fresh)) return;
+    if (!isValidStakeReward(freshReward, accountById(fresh, ownerId), fresh.accounts) || !saveStateGuarded(fresh)) return;
     clearBanner();
     render();
   });
@@ -528,7 +697,7 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       actions.appendChild(stakeRewardButton('debt-position-update stake-reward-claim', fiatEntry ? 'Mark paid' : 'Claim',
         (fiatEntry ? 'Mark paid: ' : 'Claim ') + reward.name,
         function () { openStakeRewardClaimDialog(owner.id, reward.id); }));
-      actions.appendChild(stakeRewardButton('debt-position-update', 'Update amount', 'Update the pending amount of ' + reward.name,
+      actions.appendChild(stakeRewardButton('debt-position-update', isStakePledgeEntry(reward) ? 'Update total' : 'Update amount', (isStakePledgeEntry(reward) ? 'Update the total of ' : 'Update the pending amount of ') + reward.name,
         function () { openStakeRewardDialog(owner.id, reward.id); }));
       top.appendChild(actions);
       item.appendChild(top);
@@ -536,7 +705,8 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       var latest = latestDebtBalanceSnapshot(reward, Date.now());
       var amount = document.createElement('p');
       amount.className = 'debt-position-amount';
-      var text = latest ? formatDebtPositionAmount(latest.amount, reward) : 'No reported balance';
+      var pledgeEntry = isStakePledgeEntry(reward);
+      var text = latest ? formatDebtPositionAmount(latest.amount, reward) + (pledgeEntry ? ' earned' : '') : 'No reported balance';
       var val = latest ? debtPositionValuation(reward, mainCur, livePrices, null, owner) : null;
       var inMain = isCashKind(reward.assetKind) && reward.assetTicker === mainCur;
       if (val && val.known && val.value !== null && latest.amount > 0 && !inMain) text += ' (≈ ' + fmtMoney(val.value, mainCur) + ')';
@@ -547,6 +717,26 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       reported.className = 'debt-position-reported';
       reported.textContent = latest ? 'Pending · last reported ' + new Date(latest.reportedAt).toLocaleString() : 'No report recorded';
       item.appendChild(reported);
+      // Pledge: what the payer shows, and where the pledge sits (it stays in
+      // those accounts' holdings).
+      if (pledgeEntry) {
+        if (latest && typeof latest.total === 'number') {
+          var totals = document.createElement('p');
+          totals.className = 'debt-position-reported';
+          totals.textContent = 'Payer shows ' + formatDebtPositionAmount(latest.total, reward) +
+            ' · ' + formatDebtPositionAmount(latest.pledged, reward) + ' pledged';
+          item.appendChild(totals);
+        }
+        var sources = document.createElement('p');
+        sources.className = 'debt-position-collateral';
+        sources.textContent = reward.pledge.length
+          ? 'Pledged from: ' + reward.pledge.map(function (row) {
+            var source = accountById(st, row.accountId);
+            return (source ? source.name : 'Missing account') + ' · ' + formatDebtPositionAmount(row.quantity, reward);
+          }).join(', ')
+          : 'Nothing pledged now';
+        item.appendChild(sources);
+      }
       if (reward.assetTicker !== String(owner.ticker || '').trim().toUpperCase()) {
         var paid = document.createElement('p');
         paid.className = 'debt-position-reported';
@@ -577,11 +767,16 @@ function buildStakeRewardsSection(st, account, members, host, after) {
         var snapBody = document.createElement('div');
         snapBody.className = 'debt-snapshot-body';
         var label = document.createElement('strong');
-        label.textContent = formatDebtPositionAmount(snapshot.amount, reward);
+        label.textContent = formatDebtPositionAmount(snapshot.amount, reward) + (typeof snapshot.total === 'number' ? ' earned' : '');
         snapBody.appendChild(label);
         var when = document.createElement('span');
         when.textContent = new Date(snapshot.reportedAt).toLocaleString();
         snapBody.appendChild(when);
+        if (typeof snapshot.total === 'number') {
+          var split = document.createElement('span');
+          split.textContent = 'Total ' + formatDebtPositionAmount(snapshot.total, reward) + ' · pledged ' + formatDebtPositionAmount(snapshot.pledged, reward);
+          snapBody.appendChild(split);
+        }
         if (snapshot.note) {
           var memo = document.createElement('p');
           memo.textContent = snapshot.note;

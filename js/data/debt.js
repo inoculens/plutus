@@ -95,44 +95,43 @@ function isValidDebtPositions(account, accounts) {
   return true;
 }
 
-// Reported-balance history shared by debt positions and stake rewards: 1 to
-// 5000 valid snapshots with unique ids.
-function isValidBalanceSnapshotList(list) {
+// Reported-balance history shared by debt positions and pending income: 1 to
+// 5000 valid snapshots with unique ids. `isValidSnapshot` defaults to the
+// debt snapshot shape; pending income passes its own (pledge totals).
+function isValidBalanceSnapshotList(list, isValidSnapshot) {
   if (!Array.isArray(list) || list.length < 1 || list.length > 5000) return false;
+  var check = typeof isValidSnapshot === 'function' ? isValidSnapshot : isValidDebtSnapshot;
   var snapshotIds = Object.create(null);
   for (var si = 0; si < list.length; si++) {
     var snapshot = list[si];
-    if (!isValidDebtSnapshot(snapshot) || snapshotIds[snapshot.id]) return false;
+    if (!check(snapshot) || snapshotIds[snapshot.id]) return false;
     snapshotIds[snapshot.id] = true;
   }
   return true;
 }
 
 // Stored order is chronological by report time; equal times keep entry order.
-function normalizeBalanceSnapshots(list) {
+// `numberKeys` lists extra numeric fields to keep (pending income pledges).
+function normalizeBalanceSnapshots(list, numberKeys) {
+  var extra = Array.isArray(numberKeys) ? numberKeys : [];
   var snapshots = list.map(function (snapshot, index) {
-    return {
+    var out = {
       id: snapshot.id,
       amount: Number(snapshot.amount),
       reportedAt: snapshot.reportedAt,
       enteredAt: snapshot.enteredAt,
-      note: (typeof snapshot.note === 'string' && snapshot.note !== '') ? snapshot.note : undefined,
-      _order: index
+      note: (typeof snapshot.note === 'string' && snapshot.note !== '') ? snapshot.note : undefined
     };
+    extra.forEach(function (key) {
+      if (snapshot[key] !== undefined && snapshot[key] !== null) out[key] = Number(snapshot[key]);
+    });
+    return { snapshot: out, order: index };
   });
   snapshots.sort(function (a, b) {
-    var delta = Date.parse(a.reportedAt) - Date.parse(b.reportedAt);
-    return delta || a._order - b._order;
+    var delta = Date.parse(a.snapshot.reportedAt) - Date.parse(b.snapshot.reportedAt);
+    return delta || a.order - b.order;
   });
-  return snapshots.map(function (snapshot) {
-    return {
-      id: snapshot.id,
-      amount: snapshot.amount,
-      reportedAt: snapshot.reportedAt,
-      enteredAt: snapshot.enteredAt,
-      note: snapshot.note
-    };
-  });
+  return snapshots.map(function (item) { return item.snapshot; });
 }
 
 function normalizeDebtPosition(position, owningAccount) {
@@ -230,6 +229,17 @@ function debtAccountDeleteBlock(st, ids) {
   });
   if (referenced) {
     return 'This account is referenced as collateral by an open debt position. Remove that collateral reference before deleting the account.';
+  }
+  // Pending income pledged from another account names it the same way.
+  var pledged = accounts.some(function (owner) {
+    return !!owner && deleting[owner.id] !== true && accountStakeRewards(owner).some(function (entry) {
+      return Array.isArray(entry.pledge) && entry.pledge.some(function (row) {
+        return !!row && deleting[row.accountId] === true;
+      });
+    });
+  });
+  if (pledged) {
+    return 'This account is pledged in pending income on another account. Remove that pledge before deleting the account.';
   }
   return '';
 }

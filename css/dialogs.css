@@ -90,6 +90,36 @@ select {
   padding-right: 2.3rem;
   cursor: pointer;
 }
+/* Date-time fields wear the select chevron instead of the browser's own
+   arrow/calendar icon (Android drew a small off-centre caret). The native
+   picker button stays clickable, invisible, over the chevron; the value
+   starts at the same inset as every other field. */
+input[type="datetime-local"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23a0a0a5' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  padding-right: 2.3rem;
+  text-align: left;
+  cursor: pointer;
+}
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2.3rem;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+input[type="datetime-local"]::-webkit-date-and-time-value { margin: 0; text-align: left; }
+input[type="datetime-local"]::-webkit-datetime-edit,
+input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper { padding: 0; line-height: inherit; }
 #trade-form, #account-dialog-body, #ledger-dialog-body, #group-dialog-body, #settings-dialog-body { display: grid; gap: 0.15rem; padding-bottom: 0.5rem; }
 /* Settings body is a flex item of the fixed-height dialog AND a grid parent
    of .set-layout: without min-height:0 + a shrinkable row, tall tabs (Sync)

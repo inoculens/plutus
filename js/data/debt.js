@@ -1,6 +1,8 @@
 'use strict';
 // Debt positions: manual reported-balance snapshots on an account.
 // Validation, normalization and point-in-time balances. No interest math.
+// The snapshot helpers here are shared with stake rewards (stake-rewards.js),
+// which use the same reported-balance shape with the opposite sign.
 
 // A snapshot is the lender's total reported outstanding balance. There is
 // deliberately no interest, APR, accrual, interpolation or event arithmetic.
@@ -55,14 +57,7 @@ function isValidDebtPosition(position, owningAccount, accounts) {
   if (!isValidDebtId(position.id) || typeof position.name !== 'string' ||
       position.name.trim() === '' || position.name.length > 120 ||
       !isValidDebtTimestamp(position.createdAt)) return false;
-  if (!Array.isArray(position.balanceSnapshots) || position.balanceSnapshots.length < 1 ||
-      position.balanceSnapshots.length > 5000) return false;
-  var snapshotIds = Object.create(null);
-  for (var si = 0; si < position.balanceSnapshots.length; si++) {
-    var snapshot = position.balanceSnapshots[si];
-    if (!isValidDebtSnapshot(snapshot) || snapshotIds[snapshot.id]) return false;
-    snapshotIds[snapshot.id] = true;
-  }
+  if (!isValidBalanceSnapshotList(position.balanceSnapshots)) return false;
   if (position.notes !== undefined && position.notes !== null &&
       (typeof position.notes !== 'string' || position.notes.length > 280)) return false;
   if (position.collateral !== undefined && position.collateral !== null) {
@@ -100,8 +95,22 @@ function isValidDebtPositions(account, accounts) {
   return true;
 }
 
-function normalizeDebtPosition(position, owningAccount) {
-  var snapshots = position.balanceSnapshots.map(function (snapshot, index) {
+// Reported-balance history shared by debt positions and stake rewards: 1 to
+// 5000 valid snapshots with unique ids.
+function isValidBalanceSnapshotList(list) {
+  if (!Array.isArray(list) || list.length < 1 || list.length > 5000) return false;
+  var snapshotIds = Object.create(null);
+  for (var si = 0; si < list.length; si++) {
+    var snapshot = list[si];
+    if (!isValidDebtSnapshot(snapshot) || snapshotIds[snapshot.id]) return false;
+    snapshotIds[snapshot.id] = true;
+  }
+  return true;
+}
+
+// Stored order is chronological by report time; equal times keep entry order.
+function normalizeBalanceSnapshots(list) {
+  var snapshots = list.map(function (snapshot, index) {
     return {
       id: snapshot.id,
       amount: Number(snapshot.amount),
@@ -115,7 +124,7 @@ function normalizeDebtPosition(position, owningAccount) {
     var delta = Date.parse(a.reportedAt) - Date.parse(b.reportedAt);
     return delta || a._order - b._order;
   });
-  snapshots = snapshots.map(function (snapshot) {
+  return snapshots.map(function (snapshot) {
     return {
       id: snapshot.id,
       amount: snapshot.amount,
@@ -124,6 +133,10 @@ function normalizeDebtPosition(position, owningAccount) {
       note: snapshot.note
     };
   });
+}
+
+function normalizeDebtPosition(position, owningAccount) {
+  var snapshots = normalizeBalanceSnapshots(position.balanceSnapshots);
   var out = {
     id: position.id,
     name: position.name.trim(),

@@ -513,9 +513,10 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   var scope = [account].concat(members || []);
   var section = document.createElement('section');
   section.className = 'debt-positions-section';
-  if (financial && financial.debt && financial.debt.hasDebt) {
+  var financialRewards = financial && financial.rewards && financial.rewards.hasRewards ? financial.rewards : null;
+  if (financial && financial.debt && (financial.debt.hasDebt || financialRewards)) {
     var netSummary = document.createElement('div');
-    netSummary.className = 'debt-net-summary';
+    netSummary.className = 'debt-net-summary' + (financialRewards && financial.debt.hasDebt ? ' debt-net-summary-4' : '');
     function summaryLine(label, value) {
       var line = document.createElement('div');
       line.className = 'debt-net-line';
@@ -528,11 +529,19 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
       line.appendChild(valueEl);
       netSummary.appendChild(line);
     }
-    var debtLoading = !financial.debt.complete && scope.some(debtPricesLoading);
-    summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, st.settings.mainCurrency) : '—');
-    summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, st.settings.mainCurrency) : (debtLoading ? PRICE_LOADING_TEXT : '—'));
-    summaryLine('Net value', financial.gross && financial.gross.complete && financial.debt.complete
-      ? fmtMoney(financial.gross.value - financial.debt.value, st.settings.mainCurrency) : '—');
+    var mainCcy = st.settings.mainCurrency;
+    var net = reportedBalancesNet(financial.debt, financialRewards);
+    summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, mainCcy) : '—');
+    if (financialRewards) {
+      var rewardsLoading = !financialRewards.complete && scope.some(stakeRewardPricesLoading);
+      summaryLine('Pending income', financialRewards.complete ? fmtMoney(financialRewards.value, mainCcy) : (rewardsLoading ? PRICE_LOADING_TEXT : '—'));
+    }
+    if (financial.debt.hasDebt) {
+      var debtLoading = !financial.debt.complete && scope.some(debtPricesLoading);
+      summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, mainCcy) : (debtLoading ? PRICE_LOADING_TEXT : '—'));
+    }
+    summaryLine('Net value', financial.gross && financial.gross.complete && net.complete
+      ? fmtMoney(financial.gross.value + net.value, mainCcy) : '—');
     section.appendChild(netSummary);
   }
   var header = document.createElement('div');
@@ -695,4 +704,5 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   section.appendChild(details);
   if (stats && stats.parentNode === host) host.insertBefore(section, stats.nextSibling);
   else host.appendChild(section);
+  return section;
 }

@@ -72,8 +72,15 @@ function paintLoading(el, on, label) {
 // True while a live price one of the account's debt positions is valued in
 // is still loading.
 function debtPricesLoading(account) {
-  return accountDebtPositions(account).some(function (p) {
-    var pt = String(p.assetTicker || '').trim().toUpperCase();
-    return !!pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
-  });
+  return accountDebtPositions(account).some(reportedPriceLoading);
+}
+
+// Same for the account's stake rewards.
+function stakeRewardPricesLoading(account) {
+  return accountStakeRewards(account).some(reportedPriceLoading);
+}
+
+function reportedPriceLoading(p) {
+  var pt = String(p.assetTicker || '').trim().toUpperCase();
+  return !!pt && (isPriceLoading(pt) || isPriceLoading(priceKeyOf(pt, p.assetKind)));
 }

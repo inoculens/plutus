@@ -1,0 +1,25 @@
+/* Stake rewards: the debt positions section and cards (css/debt.css) with
+   reward-only additions. Loaded right after debt.css so these win. */
+
+.stake-reward-actions {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.4rem;
+  flex-shrink: 0;
+}
+.stake-reward-actions .stake-reward-claim {
+  border-color: var(--green-line);
+  color: var(--green);
+}
+.stake-reward-card .debt-position-amount {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stake-claim-pending { margin: 0 0 0.25rem; color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.acct-chip-row { display: flex; flex-wrap: nowrap; gap: 0.3rem; min-width: 0; overflow: hidden; }
+.acct-chip-row .acct-debt-indicator { flex-shrink: 0; white-space: nowrap; }
+
+/* Net summary with both rewards and liabilities: four equal columns, a
+   2 x 2 grid on phones so the figures keep their room. */
+.debt-net-summary.debt-net-summary-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 520px) {
+  .debt-net-summary.debt-net-summary-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 0.55rem; }
+  .stake-reward-actions { flex-direction: column; align-items: stretch; }
+}

@@ -119,13 +119,14 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
   window.addEventListener('online', function () { fxFillFailures = {}; });
 }
 
+// Today's FX for fiat debt positions and fiat pending income alike.
 function ensureDebtDisplayRates(accounts, main) {
   var day = todayStr();
   var seen = {};
   var jobs = [];
   (accounts || []).forEach(function (account) {
     if (!account) return;
-    accountDebtPositions(account).forEach(function (position) {
+    accountBalancePositions(account).forEach(function (position) {
       var snapshot = latestDebtBalanceSnapshot(position, Date.now());
       var amount = snapshot ? Number(snapshot.amount) : 0;
       var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();

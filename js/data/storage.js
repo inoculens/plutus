@@ -120,6 +120,7 @@ function accountFieldIssues(a, accounts) {
   if (fieldPresent(a.groupCurrency) &&
       (typeof a.groupCurrency !== 'string' || MAIN_CURRENCIES.indexOf(a.groupCurrency.trim().toUpperCase()) === -1)) n++;
   if (a.debtPositions !== undefined && a.debtPositions !== null && !isValidDebtPositions(a, accounts)) n++;
+  if (a.stakeRewards !== undefined && a.stakeRewards !== null && !isValidStakeRewards(a)) n++;
   return n;
 }
 

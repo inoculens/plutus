@@ -86,6 +86,8 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var grossValNum = (mvKnown ? mv : 0) + (cashKnown ? cashMain : 0);
   var scopeAccounts = scope.map(function (sid) { return accountById(st, sid); }).filter(Boolean);
   var debtInfo = currentDebtValuation(scopeAccounts, main, livePrices);
+  var rewardInfo = currentStakeRewardValuation(scopeAccounts, main, livePrices);
+  var reportedNet = reportedBalancesNet(debtInfo, rewardInfo);
   var grossIncomplete = rows.some(function (row) { return Number(row.qtyHeld) > 0 && row.marketValue === null; });
   scopeAccounts.forEach(function (account) {
     if (!isCashKind(account.kind)) return;
@@ -95,17 +97,31 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
       if (!balance || !isFinite(Number(balance.main))) grossIncomplete = true;
     }
   });
+  // Debt and reward chips share one row, so a card with both is no taller
+  // than a card with one.
+  var chipHost = mid;
+  if (debtInfo.hasDebt && rewardInfo.hasRewards) {
+    chipHost = document.createElement('span');
+    chipHost.className = 'acct-chip-row';
+    mid.appendChild(chipHost);
+  }
   if (debtInfo.hasDebt) {
     var debtIndicator = document.createElement('span');
     debtIndicator.className = 'acct-debt-indicator';
     debtIndicator.textContent = 'Debt · ' + debtInfo.positionCount;
-    mid.appendChild(debtIndicator);
+    chipHost.appendChild(debtIndicator);
   }
-  var valKnown = debtInfo.hasDebt
-    ? (debtInfo.complete && !grossIncomplete)
+  if (rewardInfo.hasRewards) {
+    var rewardIndicator = document.createElement('span');
+    rewardIndicator.className = 'acct-debt-indicator acct-reward-indicator';
+    rewardIndicator.textContent = 'Pending · ' + rewardInfo.positionCount;
+    chipHost.appendChild(rewardIndicator);
+  }
+  var valKnown = reportedNet.has
+    ? (reportedNet.complete && !grossIncomplete)
     : grossValKnown;
-  var valNum = debtInfo.hasDebt
-    ? (grossValNum - (debtInfo.complete ? debtInfo.value : 0))
+  var valNum = reportedNet.has
+    ? (grossValNum + (reportedNet.complete ? reportedNet.value : 0))
     : grossValNum;
   var figs = document.createElement('span');
   figs.className = 'acct-figs';
@@ -113,9 +129,10 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   valv.className = 'acct-value';
   var plv = document.createElement('span');
   var accTick = String(acc.ticker || '').toUpperCase();
-  var debtLoading = debtInfo.hasDebt && !debtInfo.complete && scopeAccounts.some(debtPricesLoading);
+  var debtLoading = reportedNet.has && !reportedNet.complete &&
+    (scopeAccounts.some(debtPricesLoading) || scopeAccounts.some(stakeRewardPricesLoading));
   var accLoading = (!valKnown) && (debtLoading || (!!scopeTrades && isPriceLoading(accTick, acc.id)));
-  valv.textContent = valKnown ? fmtMoney(valNum, main) : (debtInfo.hasDebt || scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
+  valv.textContent = valKnown ? fmtMoney(valNum, main) : (reportedNet.has || scopeTrades ? (accLoading ? PRICE_LOADING_TEXT : '—') : 'New');
   paintLoading(valv, accLoading, acc.name + ' value');
   if (cashKnown && isFinite(Number(valNum))) valv.setAttribute('data-value', String(Number(valNum)));
   var hasKnownPl = rows.some(function (r) { return r.unrealized !== null || Math.abs(r.realized || 0) > 1e-9; });
@@ -262,7 +279,7 @@ function renderAccounts(st) {
   var overview = document.getElementById('overview');
   var fab = document.getElementById('fab-trade');
   var emptyState = !accounts.length;
-  var hasDebtPositions = accounts.some(function (account) { return accountDebtPositions(account).length > 0; });
+  var hasDebtPositions = accounts.some(function (account) { return accountBalancePositions(account).length > 0; });
   var noTrades = !emptyState && !(st.trades || []).length && !hasDebtPositions;
   if (landing) landing.hidden = !emptyState;
   var landingTicker = document.getElementById('landing-ticker-wrap');

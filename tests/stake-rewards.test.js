@@ -1,0 +1,266 @@
+#!/usr/bin/env node
+'use strict';
+// Stake rewards are pending reported balances (the debt snapshot model with
+// the opposite sign). This test covers validation, normalization, storage
+// recovery, import/export, claim targets and the claim's two writes.
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const src = require('./app-source').appSource();
+const noop = () => {};
+const KEY = 'inoculens.v2';
+function createApp(initial) {
+  const store = new Map(Object.entries(initial || {}));
+  const C = {
+    console, setTimeout: noop, clearTimeout: noop, setInterval: noop, Promise, Map, Set, BigInt, JSON, Math, Date,
+    localStorage: { getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
+    document: { getElementById: () => null, addEventListener: noop, querySelector: () => null, querySelectorAll: () => [], createElement: () => ({}), body: {}, documentElement: {}, readyState: 'loading' },
+    navigator: { userAgent: 'node' }, location: { hash: '', href: '', pathname: '/' }, addEventListener: noop,
+    fetch: () => Promise.reject(new Error('no net')), matchMedia: () => ({ matches: false, addEventListener: noop }),
+    requestAnimationFrame: noop, Event: function () {}, crypto: { getRandomValues: a => a, subtle: {} },
+    history: { pushState: noop, replaceState: noop }, performance: { now: () => 0 }
+  };
+  C.window = C; C.self = C; C.globalThis = C;
+  vm.createContext(C);
+  vm.runInContext(src, C, { filename: 'app-scripts.js' });
+  return { C, store };
+}
+const acc = (id, ticker, kind, extra) => Object.assign({ id, name: id, ticker, kind, createdAt: '2026-01-01T00:00:00.000Z' }, extra || {});
+const snap = (id, amount, reportedAt, note) => ({ id, amount, reportedAt, enteredAt: '2026-11-10T12:01:00.000Z', note });
+const reward = (extra) => Object.assign({
+  id: 'rw-1', name: 'Validator rewards', assetKind: 'crypto', assetTicker: 'ETH',
+  createdAt: '2026-11-01T10:00:00.000Z',
+  balanceSnapshots: [snap('r1', 0.5, '2026-11-01T10:00:00.000Z'), snap('r2', 0.75, '2026-11-10T10:00:00.000Z', 'Dashboard total')]
+}, extra || {});
+
+const { C, store } = createApp();
+
+// --- Validation ---
+const eth = acc('eth', 'ETH', 'crypto', { stakeRewards: [reward()] });
+assert.equal(C.isValidStakeRewards(eth), true);
+assert.equal(C.isValidStakeRewards(acc('plain', 'BTC', 'crypto')), true, 'accounts without rewards stay valid');
+assert.equal(C.isValidStakeReward(reward({ assetKind: 'crypto', assetTicker: 'CRV' })), true,
+  'a reward can pay out in a token other than the staked one');
+assert.equal(C.isValidStakeReward(reward({ assetKind: 'cash', assetTicker: 'USD' })), true,
+  'fiat pending income (deposit interest, invoices, dividends) is valid');
+for (const [bad, why] of [
+  [reward({ assetKind: 'cash', assetTicker: 'US1' }), 'a fiat entry needs a currency code a cash record can carry'],
+  [reward({ assetKind: undefined }), 'the denomination is required'],
+  [reward({ assetTicker: 'not a ticker' }), 'tickers follow the account ticker rule'],
+  [reward({ collateral: [] }), 'rewards carry no collateral'],
+  [reward({ apr: 4 }), 'no yield model is stored'],
+  [reward({ toString: 'x' }), 'inherited names are not schema keys'],
+  [reward({ balanceSnapshots: [] }), 'a reward keeps at least one report'],
+  [reward({ balanceSnapshots: [snap('n', -1, '2026-11-01T10:00:00.000Z')] }), 'pending balances are never negative'],
+  [reward({ balanceSnapshots: [snap('d', 1, '2026-11-01T10:00:00Z'), snap('d', 2, '2026-11-02T10:00:00Z')] }), 'snapshot ids are unique'],
+  [reward({ name: ' ' }), 'a name is required'],
+  [reward({ notes: 'x'.repeat(281) }), 'notes are capped']
+]) {
+  assert.equal(C.isValidStakeReward(bad), false, why);
+}
+assert.equal(C.isValidStakeRewards(acc('dup', 'ETH', 'crypto', { stakeRewards: [reward(), reward()] })), false,
+  'reward ids are unique per account');
+assert.equal(C.isValidStakeRewards(acc('notarray', 'ETH', 'crypto', { stakeRewards: {} })), false);
+assert.equal(C.isValidStakeReward(reward({ balanceSnapshots: [snap('z', 0, '2026-11-01T10:00:00.000Z')] })), true,
+  'zero pending (everything claimed) is a valid report');
+
+// --- Normalization keeps the list on the account, chronologically ---
+const messy = acc('messy', 'ETH', 'crypto', { stakeRewards: [reward({
+  name: '  Lido  ', assetKind: 'Crypto', assetTicker: 'eth',
+  balanceSnapshots: [snap('late', 2, '2026-11-09T10:00:00.000Z'), snap('early', 1, '2026-11-02T10:00:00.000Z')]
+})] });
+const normalized = C.normalizeAccount(messy, [messy]);
+assert.equal(normalized.stakeRewards.length, 1);
+assert.equal(normalized.stakeRewards[0].name, 'Lido');
+assert.equal(normalized.stakeRewards[0].assetKind, 'crypto');
+assert.equal(normalized.stakeRewards[0].assetTicker, 'ETH');
+assert.deepEqual(Array.from(normalized.stakeRewards[0].balanceSnapshots, s => s.id), ['early', 'late']);
+assert.equal(C.normalizeAccount(acc('none', 'ETH', 'crypto', { stakeRewards: [] })).stakeRewards, undefined,
+  'an empty list is not stored');
+assert.equal(C.normalizeAccount(acc('bad', 'ETH', 'crypto', { stakeRewards: [reward({ apr: 1 })] })).stakeRewards, undefined,
+  'an invalid list is dropped from the clean copy');
+
+// --- Storage keeps them, and a damaged list is counted for recovery ---
+const stored = C.defaultState();
+stored.accounts = [eth];
+store.set(KEY, JSON.stringify(stored));
+const loaded = C.loadState();
+assert.equal(loaded.accounts[0].stakeRewards[0].balanceSnapshots[1].amount, 0.75);
+assert.equal(C.accountFieldIssues(acc('x', 'ETH', 'crypto', { stakeRewards: [reward({ apr: 1 })] }), []), 1);
+assert.equal(C.accountFieldIssues(eth, [eth]), 0);
+
+// --- Import/export: same envelope, nested rewards survive, damage is refused ---
+const state = {
+  settings: { mainCurrency: 'EUR', costMethod: 'average', assetLedgers: true, dateFormat: 'DD/MM/YYYY' },
+  accounts: [eth], trades: [], priceOverrides: {}
+};
+const exported = JSON.parse(C.exportState(state));
+assert.deepEqual(Object.keys(exported), ['app', 'version', 'exportedAt', 'settings', 'accounts', 'trades', 'priceOverrides']);
+assert.equal(exported.accounts[0].stakeRewards[0].assetTicker, 'ETH');
+const imported = C.importState(JSON.stringify(exported));
+assert.equal(imported.accounts[0].stakeRewards[0].balanceSnapshots.length, 2);
+const badImport = JSON.parse(JSON.stringify(exported));
+badImport.accounts[0].stakeRewards[0].balanceSnapshots[0].amount = -3;
+assert.throws(() => C.importState(JSON.stringify(badImport)), /invalid stake rewards/);
+
+// --- Claim targets: same ticker and kind, owner first, then its group ---
+const lp = acc('lp', 'CRVLP', 'crypto', { groupId: 'main' });
+const main = acc('main', 'ETH', 'crypto');
+const crvOther = acc('crv-other', 'CRV', 'crypto');
+const crvGroup = acc('crv-group', 'CRV', 'crypto', { groupId: 'main' });
+const crvStock = acc('crv-stock', 'CRV', 'stock');
+const st = { accounts: [crvOther, main, lp, crvGroup, crvStock], trades: [] };
+const crvReward = reward({ assetTicker: 'CRV', balanceSnapshots: [snap('c1', 10, '2026-11-01T10:00:00.000Z')] });
+assert.deepEqual(Array.from(C.stakeRewardClaimTargets(st, lp, crvReward), a => a.id), ['crv-group', 'crv-other'],
+  'group accounts come before other accounts; another kind never matches');
+const ethReward = reward();
+assert.deepEqual(Array.from(C.stakeRewardClaimTargets(st, main, ethReward), a => a.id), ['main'],
+  'a reward in the staked asset is claimed into its own account');
+assert.equal(C.stakeRewardClaimTargets(st, lp, reward({ assetTicker: "GMX" })).length, 0,
+  'no matching account means nothing to claim into yet');
+
+// --- Remainder is exact at token precision and never negative ---
+assert.equal(C.stakeRewardRemainder(0.3, '0.1', 'ETH'), 0.2, 'no float dust (0.3 - 0.1)');
+assert.equal(C.stakeRewardRemainder(1.2, '0.2', 'ETH'), 1);
+assert.equal(C.stakeRewardRemainder(1, '1.5', 'ETH'), 0, 'claiming more than the last report leaves 0');
+assert.equal(C.stakeRewardRemainder(0, '1', 'ETH'), 0);
+assert.equal(C.stakeRewardRemainder(5, '5', 'ETH'), 0);
+
+// --- A claim builds one income record and one pending report ---
+const claimAt = Date.parse('2026-11-12T09:30:00.000Z');
+const built = C.buildStakeRewardClaim(main, ethReward, main, { amount: '0.25', at: claimAt, value: '600', note: '' }, 'eur');
+assert.equal(built.error, undefined);
+assert.equal(built.trade.type, 'income');
+assert.equal(built.trade.symbol, 'ETH');
+assert.equal(built.trade.qty, 0.25);
+assert.equal(built.trade.total, 600);
+assert.equal(built.trade.currency, 'EUR');
+assert.equal(built.trade.accountId, 'main');
+assert.equal(built.trade.date, C.stakeRewardClaimDate(claimAt));
+assert.equal(built.trade.fxLock.rate, 1);
+assert.match(built.trade.note, /Validator rewards/);
+assert.equal(C.validateTrade(built.trade, 1e18), null, 'the record passes the record form validation');
+assert.equal(C.isValidImportTrade(built.trade, ['main'], [main]), true, 'and survives export/import');
+assert.equal(built.snapshot.amount, 0.5, '0.75 pending - 0.25 claimed');
+assert.equal(built.snapshot.reportedAt, new Date(claimAt).toISOString());
+assert.match(built.snapshot.note, /^Claimed 0\.25 ETH$/);
+assert.equal(C.isValidDebtSnapshot(built.snapshot), true);
+
+const noValue = C.buildStakeRewardClaim(main, ethReward, main, { amount: '1', at: claimAt, value: '' }, 'EUR');
+assert.equal(noValue.trade.total, 0, 'no value means zero cost basis, like an Income record without a value');
+assert.equal(noValue.snapshot.amount, 0, 'claiming everything (and more) leaves nothing pending');
+
+const backdated = C.buildStakeRewardClaim(main, ethReward, main, { amount: '0.1', at: Date.parse('2026-11-05T10:00:00.000Z') }, 'EUR');
+assert.equal(backdated.snapshot.amount, 0.4, 'a backdated claim reduces the report that was current then');
+
+const crossToken = C.buildStakeRewardClaim(lp, crvReward, crvGroup, { amount: '4', at: claimAt }, 'EUR');
+assert.equal(crossToken.trade.accountId, 'crv-group', 'a CRV reward on an LP stake is paid into the CRV account');
+assert.equal(crossToken.trade.symbol, 'CRV');
+assert.equal(crossToken.snapshot.amount, 6);
+assert.match(crossToken.snapshot.note, /into crv-group$/);
+
+for (const [claim, pattern] of [
+  [{ amount: '0', at: claimAt }, /claimed amount/],
+  [{ amount: '', at: claimAt }, /claimed amount/],
+  [{ amount: 'abc', at: claimAt }, /claimed amount/],
+  [{ amount: '0.0000000000000000001', at: claimAt }, /at most 18 decimals/],
+  [{ amount: '1', at: Date.now() + 3 * 86400000 }, /future/],
+  [{ amount: '1', at: NaN }, /when the reward was claimed/],
+  [{ amount: '1', at: claimAt, value: '-5' }, /0 or more/]
+]) {
+  const res = C.buildStakeRewardClaim(main, ethReward, main, claim, 'EUR');
+  assert.match(res.error || '', pattern, JSON.stringify(claim));
+}
+assert.match(C.buildStakeRewardClaim(main, ethReward, null, { amount: '1', at: claimAt }, 'EUR').error, /Choose the account/);
+
+// --- Fiat pending income: paid as a cash Income record in its currency ---
+const usdBank = acc('usd-bank', 'USD', 'cash');
+const eurBank = acc('eur-bank', 'EUR', 'cash');
+const invoice = reward({ id: 'inv', name: 'Invoice 2026-114', assetKind: 'cash', assetTicker: 'USD',
+  balanceSnapshots: [snap('i1', 1200, '2026-11-01T10:00:00.000Z')] });
+assert.equal(C.stakeRewardsAllowedOn(usdBank), true, 'cash accounts carry pending income too');
+assert.equal(C.isFiatStakeReward(invoice), true);
+assert.deepEqual(Array.from(C.stakeRewardClaimTargets({ accounts: [eurBank, usdBank], trades: [] }, usdBank, invoice), a => a.id), ['usd-bank'],
+  'a USD entry is paid into a USD cash account only');
+const usdLock = { pair: 'USD/EUR', rate: 0.9, source: 'ECB', interpolated: false };
+const paid = C.buildStakeRewardClaim(usdBank, invoice, usdBank, { amount: '700', at: claimAt, value: '999', fxLock: usdLock }, 'EUR');
+assert.equal(paid.error, undefined);
+assert.equal(paid.trade.type, 'income');
+assert.equal(paid.trade.symbol, 'USD');
+assert.equal(paid.trade.qty, 700);
+assert.equal(paid.trade.total, 700, 'a cash record\'s value is its amount; a typed value is ignored');
+assert.equal(paid.trade.currency, 'USD');
+assert.equal(paid.trade.feeCurrency, 'USD');
+assert.equal(paid.trade.fxLock.rate, 0.9, 'the USD/EUR rate of the payment date');
+assert.match(paid.trade.note, /^Paid · Invoice/);
+assert.equal(C.validateTrade(paid.trade, 1e18), null);
+assert.equal(C.isValidImportTrade(paid.trade, ['usd-bank'], [usdBank]), true);
+assert.equal(paid.snapshot.amount, 500, '1200 owed - 700 paid');
+assert.match(paid.snapshot.note, /^Paid 700 USD$/);
+assert.match(C.buildStakeRewardClaim(usdBank, invoice, usdBank, { amount: '700', at: claimAt }, 'EUR').error, /exchange rate/,
+  'a foreign-currency payment never saves without a rate');
+const eurInterest = reward({ id: 'int', name: 'Deposit interest', assetKind: 'cash', assetTicker: 'EUR',
+  balanceSnapshots: [snap('e1', 35.5, '2026-11-01T10:00:00.000Z')] });
+const eurPaid = C.buildStakeRewardClaim(eurBank, eurInterest, eurBank, { amount: '35.5', at: claimAt }, 'EUR');
+assert.equal(eurPaid.trade.fxLock.rate, 1, 'main-currency payments lock 1:1');
+assert.equal(eurPaid.trade.total, 35.5);
+assert.equal(eurPaid.snapshot.amount, 0);
+const fiatVal = C.currentStakeRewardValuation([acc('ib', 'EUR', 'cash', { stakeRewards: [eurInterest] })], 'EUR', {}, valueAtFiat());
+assert.equal(fiatVal.value, 35.5, 'fiat pending income in the main currency needs no price');
+function valueAtFiat() { return Date.parse('2026-11-12T00:00:00.000Z'); }
+
+// --- Valuation: pending rewards are an asset; unknown prices stay unknown ---
+const valueAt = Date.parse('2026-11-12T00:00:00.000Z');
+const rv = C.currentStakeRewardValuation([eth], 'USD', { ETH: 2000 }, valueAt);
+assert.equal(rv.hasRewards, true);
+assert.equal(rv.complete, true);
+assert.equal(rv.value, 1500, '0.75 ETH pending at 2000');
+assert.equal(rv.positionCount, 1);
+assert.equal(C.currentStakeRewardValuation([eth], 'USD', {}, valueAt).value, null,
+  'a reward without a price is unknown, never 0');
+assert.equal(C.currentStakeRewardValuation([acc('p', 'ETH', 'crypto')], 'USD', {}, valueAt).hasRewards, false);
+assert.equal(C.currentDebtValuation([eth], 'USD', { ETH: 2000 }, valueAt).hasDebt, false,
+  'rewards are never counted as debt');
+const both = acc('both', 'ETH', 'crypto', {
+  stakeRewards: [reward()],
+  debtPositions: [{ id: 'd', name: 'Borrow', assetKind: 'crypto', assetTicker: 'ETH', createdAt: '2026-11-01T10:00:00.000Z',
+    balanceSnapshots: [snap('d1', 0.25, '2026-11-01T10:00:00.000Z')] }]
+});
+const net = C.reportedBalancesNet(
+  C.currentDebtValuation([both], 'USD', { ETH: 2000 }, valueAt),
+  C.currentStakeRewardValuation([both], 'USD', { ETH: 2000 }, valueAt));
+assert.equal(net.has, true);
+assert.equal(net.value, 1000, 'rewards (1500) minus debt (500)');
+const netUnknown = C.reportedBalancesNet(
+  C.currentDebtValuation([both], 'USD', { ETH: 2000 }, valueAt),
+  C.currentStakeRewardValuation([both], 'USD', {}, valueAt));
+assert.equal(netUnknown.complete, false);
+assert.equal(netUnknown.value, null);
+assert.equal(C.reportedBalancesNet(C.currentDebtValuation([], 'USD', {}), C.currentStakeRewardValuation([], 'USD', {})).has, false);
+
+// --- Price identity: a reward-only token is fetched as its own kind ---
+const goldReward = acc('gold-stake', 'W', 'crypto', { stakeRewards: [reward({ assetKind: 'commodity', assetTicker: 'W' })] });
+C.noteSymbolKinds([goldReward], []);
+assert.equal(C.priceKeyOf('W', 'commodity'), 'COMMODITY:W', 'reward kinds join ticker collision identity');
+
+(async () => {
+  // --- Net-worth history adds the pending report current at each point ---
+  const histSettings = { mainCurrency: 'USD', costMethod: 'average', assetLedgers: true, dateFormat: 'DD/MM/YYYY' };
+  const hist = { settings: histSettings, accounts: [eth], trades: [], priceOverrides: {} };
+  const point = async (iso, prices) => (await C.netWorthHistoryPointValue({ at: Date.parse(iso), prices }, hist, 'USD', false)).value;
+  assert.equal(await point('2026-10-31T00:00:00.000Z', {}), 0, 'nothing pending before the first report');
+  assert.equal(await point('2026-11-05T00:00:00.000Z', { ETH: 2000 }), 1000, '0.5 ETH pending then');
+  assert.equal(await point('2026-11-11T00:00:00.000Z', { ETH: 2000 }), 1500, 'the later report replaces it');
+  assert.equal(await point('2026-11-11T00:00:00.000Z', {}), null, 'unknown historical price leaves a gap');
+  const histBoth = { settings: histSettings, accounts: [both], trades: [], priceOverrides: {} };
+  assert.equal((await C.netWorthHistoryPointValue({ at: Date.parse('2026-11-11T00:00:00.000Z'), prices: { ETH: 2000 } }, histBoth, 'USD', false)).value,
+    1000, 'history nets rewards against debt');
+  assert.equal(C.netWorthHistoryStart(hist, { eth: true }), Date.parse('2026-11-01T10:00:00.000Z'),
+    'a reward-only account starts the chart at its first report');
+  const eurOwed = acc('eur-owed', 'EUR', 'cash', { stakeRewards: [reward({ id: 'inv2', name: 'Invoice', assetKind: 'cash', assetTicker: 'EUR',
+    balanceSnapshots: [snap('o1', 100, '2026-11-01T10:00:00.000Z')] })] });
+  C.cacheRate('2026-11-05', 'EUR', 'USD', 1.1, 'test-history');
+  const fiatPoint = await C.netWorthHistoryPointValue({ at: Date.parse('2026-11-05T12:00:00.000Z'), prices: {} },
+    { settings: histSettings, accounts: [eurOwed], trades: [], priceOverrides: {} }, 'USD', false);
+  assert.ok(Math.abs(fiatPoint.value - 110) < 1e-9, 'fiat pending income uses the historical FX rate: ' + fiatPoint.value);
+  console.log('stake-rewards: ok');
+})().catch(err => { console.error(err); process.exit(1); });

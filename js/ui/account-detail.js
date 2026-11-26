@@ -53,7 +53,7 @@ function renderAccountDetail(st, id) {
         addHistorySymbol(symbol);
         historyKinds[symbol] = a.kind || '';
       }
-      accountDebtPositions(a).forEach(function (position) {
+      accountBalancePositions(a).forEach(function (position) {
         var debtTicker = String(position.assetTicker || a.ticker || '').trim().toUpperCase();
         var debtKind = String(position.assetKind || a.kind || 'crypto').trim().toLowerCase();
         if (!debtTicker || isCashKind(debtKind)) return;
@@ -340,9 +340,11 @@ function renderAccountDetail(st, id) {
     var detailScopeAccounts = scopeIds.map(function (scopeId) { return accountById(st, scopeId); }).filter(Boolean);
     var detailGross = currentAccountGrossValue(detailScopeAccounts, rows, allDtrades, main);
     var detailDebt = currentDebtValuation(detailScopeAccounts, main, livePrices);
-    debtSummaryForDetail = { gross: detailGross, debt: detailDebt };
+    var detailRewards = currentStakeRewardValuation(detailScopeAccounts, main, livePrices);
+    debtSummaryForDetail = { gross: detailGross, debt: detailDebt, rewards: detailRewards };
   }
-  buildDebtPositionsSection(st, acc, members, host, stats, debtSummaryForDetail);
+  var debtSection = buildDebtPositionsSection(st, acc, members, host, stats, debtSummaryForDetail);
+  buildStakeRewardsSection(st, acc, members, host, debtSection);
   // Group mains: merged ledgers in the group currency plus sub-account
   // cards instead of the spent/fees lines and the trade history below.
   if (members.length) {

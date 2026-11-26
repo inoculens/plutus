@@ -1,17 +1,19 @@
 'use strict';
-// Stake rewards UI: pending totals reported by the protocol, no yield math.
-// Shares the debt UI's building blocks (js/ui/debt.js): reported-time check,
-// datetime field values, denomination hints and remembered <details> state.
-// Claim is the one action debt has no equivalent of: it records the claimed
-// tokens as an Income record and lowers the pending balance in one save.
+// Pending income UI (stake rewards, accrued yield, receivables): pending
+// totals reported by the payer, no yield math. Shares the debt UI's building
+// blocks (js/ui/debt.js): reported-time check, datetime field values,
+// denomination hints and remembered <details> state.
+// Claim (Mark paid for fiat) is the one action debt has no equivalent of: it
+// records the received amount as an Income record and lowers the pending
+// amount in one save.
 
 function stakeRewardKindOptions() {
-  return '<option value="crypto">Crypto</option><option value="stock">Stock</option>' +
+  return '<option value="crypto">Crypto</option><option value="cash">Fiat</option><option value="stock">Stock</option>' +
     '<option value="commodity">Commodity</option><option value="custom">Custom</option>';
 }
 
 function describeStakeRewardAsset(kind, ticker) {
-  if (!String(ticker || '').trim()) return 'Choose the token the rewards are paid in.';
+  if (!String(ticker || '').trim()) return 'Choose what this income is paid in.';
   return describeDebtAsset(kind, ticker);
 }
 
@@ -22,19 +24,19 @@ function buildStakeRewardDialog() {
   dlg.id = 'stake-reward-dialog';
   dlg.setAttribute('aria-labelledby', 'stake-reward-title');
   dlg.innerHTML =
-    '<div class="dialog-head"><h2 id="stake-reward-title">Stake reward</h2>' +
+    '<div class="dialog-head"><h2 id="stake-reward-title">Pending income</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="stake-reward-form" novalidate>' +
-    '<label for="stake-reward-name">Reward name</label><input id="stake-reward-name" maxlength="120" required autocomplete="off" placeholder="e.g. Validator rewards">' +
-    '<label>Paid in' + infoPill('Choose the token the rewards are paid in.', 'stake-reward-asset-status') + '</label><div class="debt-asset-fields">' +
-    '<select id="stake-reward-asset-kind" aria-label="Reward asset type">' + stakeRewardKindOptions() + '</select>' +
+    '<label for="stake-reward-name">Name</label><input id="stake-reward-name" maxlength="120" required autocomplete="off" placeholder="e.g. Validator rewards, Invoice 114">' +
+    '<label>Paid in' + infoPill('Choose what this income is paid in.', 'stake-reward-asset-status') + '</label><div class="debt-asset-fields">' +
+    '<select id="stake-reward-asset-kind" aria-label="Asset type">' + stakeRewardKindOptions() + '</select>' +
     '<input id="stake-reward-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. ETH" aria-label="Ticker"></div>' +
-    '<label for="stake-reward-balance">Unclaimed balance<span id="stake-reward-unit"></span>' + infoPill('Enter the total unclaimed rewards the protocol currently shows. Plutus keeps this exact amount, and counts it in your net worth, until you report a new one or claim.') + '</label>' +
+    '<label for="stake-reward-balance">Pending amount<span id="stake-reward-unit"></span>' + infoPill('Enter the total still owed to you, as the payer shows it: unclaimed rewards, accrued interest, an unpaid invoice. Only the earned part, never what you already hold. Plutus keeps this exact amount, and counts it in your net worth, until you report a new one or it is paid.') + '</label>' +
     '<input id="stake-reward-balance" type="number" min="0" step="any" required inputmode="decimal">' +
     '<label for="stake-reward-reported-at">Balance reported at</label><input id="stake-reward-reported-at" type="datetime-local" required>' +
     '<label for="stake-reward-note">Snapshot note (optional)</label><textarea id="stake-reward-note" maxlength="280" rows="2"></textarea>' +
-    '<label for="stake-reward-notes">Reward notes (optional)</label><textarea id="stake-reward-notes" maxlength="280" rows="2"></textarea>' +
-    dockMarkup('stake-reward-error', 'Save unclaimed balance', 'stake-reward-save') + '</form>';
+    '<label for="stake-reward-notes">Notes (optional)</label><textarea id="stake-reward-notes" maxlength="280" rows="2"></textarea>' +
+    dockMarkup('stake-reward-error', 'Save pending amount', 'stake-reward-save') + '</form>';
   document.body.appendChild(dlg);
   wireDialog('stake-reward-dialog');
   var form = document.getElementById('stake-reward-form');
@@ -43,35 +45,36 @@ function buildStakeRewardDialog() {
     var saveBtn = form.querySelector('.t-dock button.primary');
     if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
     function fail(message) {
-      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save unclaimed balance');
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save pending amount');
       dockError('stake-reward-error', message);
     }
     dockError('stake-reward-error', '');
     if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
-    if (!owner) { fail('The staking account no longer exists.'); return; }
+    if (!owner) { fail('The account no longer exists.'); return; }
     var rewardId = dlg.getAttribute('data-reward-id') || '';
     var reward = rewardId ? findStakeReward(owner, rewardId) : null;
-    if (rewardId && !reward) { fail('This stake reward no longer exists. Refresh and try again.'); return; }
+    if (rewardId && !reward) { fail('This pending income no longer exists. Refresh and try again.'); return; }
     var name = String(document.getElementById('stake-reward-name').value || '').trim();
     var assetKind = reward ? reward.assetKind : String(document.getElementById('stake-reward-asset-kind').value || '').trim().toLowerCase();
     var assetTicker = reward ? reward.assetTicker : String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
     if (STAKE_REWARD_KINDS.indexOf(assetKind) === -1 || !/^[A-Z0-9._-]{1,12}$/.test(assetTicker)) {
       fail('Choose a supported asset type and enter a valid ticker.'); return;
     }
+    if (isCashKind(assetKind) && !isValidCurrencyCode(assetTicker)) { fail('Enter a currency code for fiat, e.g. EUR.'); return; }
     var amountRaw = String(document.getElementById('stake-reward-balance').value || '').trim();
     var amount = Number(amountRaw);
     var reportedInput = document.getElementById('stake-reward-reported-at').value;
     var note = String(document.getElementById('stake-reward-note').value || '').trim();
     var notes = String(document.getElementById('stake-reward-notes').value || '').trim();
-    if (!name || name.length > 120) { fail('Enter a reward name (up to 120 characters).'); return; }
-    if (!isFinite(amount) || amount < 0) { fail('Enter a valid unclaimed balance (0 or more).'); return; }
+    if (!name || name.length > 120) { fail('Enter a name (up to 120 characters).'); return; }
+    if (!isFinite(amount) || amount < 0) { fail('Enter a valid pending amount (0 or more).'); return; }
     if (qtyOverPrecise(amountRaw, assetTicker)) { fail(qtyPrecisionError(assetTicker)); return; }
     var reportedDate = new Date(reportedInput);
     var reportedIssue = reportedInput ? debtReportedAtIssue(reportedDate.getTime(), Date.now()) : 'Enter when the balance was reported.';
     if (reportedIssue) { fail(reportedIssue); return; }
-    if (notes.length > 280) { fail('Reward notes can be up to 280 characters.'); return; }
+    if (notes.length > 280) { fail('Notes can be up to 280 characters.'); return; }
     var now = new Date().toISOString();
     var next = {
       id: reward ? reward.id : uid(),
@@ -85,14 +88,14 @@ function buildStakeRewardDialog() {
     var snapshot = { id: uid(), amount: amount, reportedAt: reportedDate.toISOString(), enteredAt: now };
     if (note) snapshot.note = note;
     next.balanceSnapshots.push(snapshot);
-    if (!isValidStakeReward(next)) { fail('The stake reward is invalid. Check the balance and timestamp.'); return; }
+    if (!isValidStakeReward(next)) { fail('The pending income is invalid. Check the amount and timestamp.'); return; }
     setTradeSubmitBusy(saveBtn, true, 'Saving…');
     deferTradeSubmitWork(function () {
       if (!Array.isArray(owner.stakeRewards)) owner.stakeRewards = [];
       if (reward) owner.stakeRewards = owner.stakeRewards.map(function (r) { return r.id === reward.id ? next : r; });
       else owner.stakeRewards.push(next);
-      if (!saveStateGuarded(state)) { fail('Storage unavailable — the stake reward was not saved.'); return; }
-      setTradeSubmitBusy(saveBtn, false, 'Save unclaimed balance');
+      if (!saveStateGuarded(state)) { fail('Storage unavailable — the pending income was not saved.'); return; }
+      setTradeSubmitBusy(saveBtn, false, 'Save pending amount');
       closeDialog(dlg);
       clearBanner();
       render();
@@ -114,7 +117,7 @@ function openStakeRewardDialog(ownerId, rewardId) {
   var tickerInput = document.getElementById('stake-reward-asset-ticker');
   var unit = document.getElementById('stake-reward-unit');
   var reported = document.getElementById('stake-reward-reported-at');
-  document.getElementById('stake-reward-title').textContent = reward ? 'Update unclaimed rewards' : 'New stake reward';
+  document.getElementById('stake-reward-title').textContent = reward ? 'Update pending amount' : 'New pending income';
   document.getElementById('stake-reward-name').value = reward ? reward.name : '';
   var latest = reward ? latestDebtBalanceSnapshot(reward, Date.now()) : null;
   document.getElementById('stake-reward-balance').value = latest ? qtyUiText(String(latest.amount), reward.assetTicker) : '';
@@ -122,7 +125,7 @@ function openStakeRewardDialog(ownerId, rewardId) {
   reported.max = reported.value;
   document.getElementById('stake-reward-note').value = '';
   document.getElementById('stake-reward-notes').value = (reward && typeof reward.notes === 'string') ? reward.notes : '';
-  // Rewards are usually paid in the staked asset: a new reward starts there.
+  // Income is usually paid in the account's own asset: a new entry starts there.
   var ownerKind = String(owner.kind || 'crypto').trim().toLowerCase();
   kindInput.value = reward ? reward.assetKind : (STAKE_REWARD_KINDS.indexOf(ownerKind) !== -1 ? ownerKind : 'crypto');
   tickerInput.value = reward ? reward.assetTicker : String(owner.ticker || '').trim().toUpperCase();
@@ -140,12 +143,18 @@ function openStakeRewardDialog(ownerId, rewardId) {
   dockError('stake-reward-error', '');
   clearInvalidFields(document.getElementById('stake-reward-form'));
   var saveBtn = document.getElementById('stake-reward-save');
-  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save unclaimed balance');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Save pending amount');
   openDialog('stake-reward-dialog');
 }
 
-// Claim: the claimed tokens become an Income record in the receiving
-// account, and the reward gets a new report for what is left pending.
+// Claim / Mark paid: the received amount becomes an Income record in the
+// receiving account, and the entry gets a new report for what is left
+// pending. Fiat in a foreign currency needs that day's rate to the main
+// currency, fetched like the record form does; a typed rate wins.
+function stakeClaimLabel(dlg) {
+  return (dlg && dlg.getAttribute('data-label')) || 'Claim';
+}
+
 function buildStakeRewardClaimDialog() {
   var existing = document.getElementById('stake-claim-dialog');
   if (existing) return existing;
@@ -153,17 +162,19 @@ function buildStakeRewardClaimDialog() {
   dlg.id = 'stake-claim-dialog';
   dlg.setAttribute('aria-labelledby', 'stake-claim-title');
   dlg.innerHTML =
-    '<div class="dialog-head"><h2 id="stake-claim-title">Claim stake reward</h2>' +
+    '<div class="dialog-head"><h2 id="stake-claim-title">Claim</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="stake-claim-form" novalidate>' +
     '<p id="stake-claim-pending" class="stake-claim-pending"></p>' +
-    '<label for="stake-claim-amount">Claimed amount<span id="stake-claim-unit"></span>' + infoPill('The amount the protocol paid out. A partial claim keeps the rest pending; claiming more than the last report (rewards kept accruing) leaves nothing pending.') + '</label>' +
+    '<label for="stake-claim-amount"><span id="stake-claim-amount-label">Amount received</span><span id="stake-claim-unit"></span>' + infoPill('The amount actually paid out. A partial payment keeps the rest pending; receiving more than the last report (it kept accruing) leaves nothing pending.') + '</label>' +
     '<input id="stake-claim-amount" type="number" min="0" step="any" required inputmode="decimal">' +
-    '<label for="stake-claim-at">Claimed at</label><input id="stake-claim-at" type="datetime-local" required>' +
-    '<div id="stake-claim-target-wrap"><label for="stake-claim-target">Paid into' + infoPill('The account that holds the reward token. The claim is recorded there as an Income record.') + '</label>' +
+    '<label for="stake-claim-at">Received at</label><input id="stake-claim-at" type="datetime-local" required>' +
+    '<div id="stake-claim-target-wrap"><label for="stake-claim-target">Paid into' + infoPill('The account that holds this asset or currency. The payment is recorded there as an Income record.') + '</label>' +
     '<select id="stake-claim-target"></select></div>' +
-    '<label for="stake-claim-value">Value at claim<span id="stake-claim-ccy"></span> (optional)' + infoPill('What the claimed tokens were worth when you claimed them. It becomes their cost basis. Leave it empty to record them at zero cost, like an Income record without a value.') + '</label>' +
-    '<input id="stake-claim-value" type="number" min="0" step="any" inputmode="decimal">' +
+    '<div id="stake-claim-value-wrap"><label for="stake-claim-value">Value when received<span id="stake-claim-ccy"></span> (optional)' + infoPill('What the received amount was worth when it arrived. It becomes its cost basis. Leave it empty to record it at zero cost, like an Income record without a value.') + '</label>' +
+    '<input id="stake-claim-value" type="number" min="0" step="any" inputmode="decimal"></div>' +
+    '<div id="stake-claim-rate-wrap"><label for="stake-claim-rate">Exchange rate<span id="stake-claim-pair"></span> (optional)' + infoPill('Leave it empty to use the ECB rate of the payment date. Enter a rate only if that rate is unavailable or your bank used another one.') + '</label>' +
+    '<input id="stake-claim-rate" type="number" min="0" step="any" inputmode="decimal"></div>' +
     '<label for="stake-claim-note">Record note (optional)</label><textarea id="stake-claim-note" maxlength="280" rows="2"></textarea>' +
     dockMarkup('stake-claim-error', 'Claim', 'stake-claim-save') + '</form>';
   document.body.appendChild(dlg);
@@ -173,48 +184,85 @@ function buildStakeRewardClaimDialog() {
     if (event && event.preventDefault) event.preventDefault();
     var saveBtn = form.querySelector('.t-dock button.primary');
     if (saveBtn && (saveBtn.disabled || saveBtn.classList.contains('is-busy'))) return;
+    var label = stakeClaimLabel(dlg);
     function fail(message) {
-      if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Claim');
+      if (saveBtn) setTradeSubmitBusy(saveBtn, false, label);
       dockError('stake-claim-error', message);
     }
     dockError('stake-claim-error', '');
     if (flagMissingFields(form)) { fail(MISSING_FIELDS_MESSAGE); return; }
-    var state = loadState();
-    var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
-    var reward = owner ? findStakeReward(owner, dlg.getAttribute('data-reward-id') || '') : null;
-    if (!owner || !reward) { fail('This stake reward no longer exists. Refresh and try again.'); return; }
+    var state0 = loadState();
+    var owner0 = accountById(state0, dlg.getAttribute('data-owner-id') || '');
+    var reward0 = owner0 ? findStakeReward(owner0, dlg.getAttribute('data-reward-id') || '') : null;
+    if (!owner0 || !reward0) { fail('This pending income no longer exists. Refresh and try again.'); return; }
     var targetId = String(document.getElementById('stake-claim-target').value || '');
-    var target = null;
-    stakeRewardClaimTargets(state, owner, reward).forEach(function (a) { if (a.id === targetId) target = a; });
-    if (!target) { fail('The receiving account no longer holds ' + reward.assetTicker + '. Choose another one.'); return; }
+    var target0 = null;
+    stakeRewardClaimTargets(state0, owner0, reward0).forEach(function (a) { if (a.id === targetId) target0 = a; });
+    if (!target0) { fail('The receiving account no longer holds ' + reward0.assetTicker + '. Choose another one.'); return; }
     var atInput = document.getElementById('stake-claim-at').value;
     var atMs = atInput ? new Date(atInput).getTime() : NaN;
-    if (!isFinite(atMs)) { fail('Enter when the reward was claimed.'); return; }
-    if (debtReportedAtIssue(atMs, Date.now())) { fail('The claim time cannot be in the future.'); return; }
-    var built = buildStakeRewardClaim(owner, reward, target, {
+    if (!isFinite(atMs)) { fail('Enter when the payment was received.'); return; }
+    if (debtReportedAtIssue(atMs, Date.now())) { fail('The payment time cannot be in the future.'); return; }
+    var main = String(state0.settings.mainCurrency || '').toUpperCase();
+    var ticker = String(target0.ticker || '').trim().toUpperCase();
+    var rateRaw = String(document.getElementById('stake-claim-rate').value || '').trim();
+    var claim = {
       amount: document.getElementById('stake-claim-amount').value,
       at: atMs,
       value: document.getElementById('stake-claim-value').value,
       note: document.getElementById('stake-claim-note').value
-    }, state.settings.mainCurrency);
-    if (built.error) { fail(built.error); return; }
-    var recordIssue = validateTrade(built.trade, 1e18);
-    if (recordIssue) { fail('The claim record is invalid: ' + recordIssue + '.'); return; }
-    var nextSnapshots = reward.balanceSnapshots.concat([built.snapshot]);
-    var nextReward = Object.assign({}, reward, { balanceSnapshots: nextSnapshots });
-    if (!isValidStakeReward(nextReward)) { fail('The claim could not be recorded. Check the amount and time.'); return; }
+    };
+    // Validate everything that needs no rate before any network wait.
+    var dry = buildStakeRewardClaim(owner0, reward0, target0,
+      Object.assign({}, claim, { fxLock: { rate: 1 } }), main);
+    if (dry.error) { fail(dry.error); return; }
+    var needRate = isCashKind(target0.kind) && ticker !== main;
+    var date = stakeRewardClaimDate(atMs);
+    var lockP;
+    if (!needRate) lockP = Promise.resolve(null);
+    else if (rateRaw !== '') {
+      var manual = Number(rateRaw);
+      if (!isFinite(manual) || manual <= 0) { fail('The exchange rate must be more than 0.'); return; }
+      lockP = Promise.resolve({ pair: ticker + '/' + main, rate: manual, source: 'manual', interpolated: false });
+    } else {
+      lockP = fetchEcbRate(date, ticker, main).then(function (res) {
+        try { cacheRate(date, ticker, main, res.rate, res.source); saveFxCache(); } catch (e) { /* ignore */ }
+        return { pair: ticker + '/' + main, rate: res.rate, source: res.source, interpolated: !!res.interpolated };
+      }, function () { return null; });
+    }
     setTradeSubmitBusy(saveBtn, true, 'Saving…');
-    deferTradeSubmitWork(function () {
-      reward.balanceSnapshots = nextSnapshots;
-      if (!Array.isArray(state.trades)) state.trades = [];
-      state.trades.push(built.trade);
-      if (!saveStateGuarded(state)) { fail('Storage unavailable — the claim was not saved.'); return; }
-      try { tradePageByAccount[target.id] = 0; } catch (e) { /* ignore */ }
-      setTradeSubmitBusy(saveBtn, false, 'Claim');
-      closeDialog(dlg);
-      clearBanner();
-      render();
-      try { refreshPrices(); } catch (e) { /* ignore */ }
+    lockP.then(function (lock) {
+      if (needRate && !lock) {
+        fail('ECB rate for ' + ticker + '/' + main + ' unavailable — enter the exchange rate.');
+        return;
+      }
+      deferTradeSubmitWork(function () {
+        // Fresh state: a slow rate fetch must not overwrite newer writes.
+        var state = loadState();
+        var owner = accountById(state, owner0.id);
+        var reward = owner ? findStakeReward(owner, reward0.id) : null;
+        var target = accountById(state, target0.id);
+        if (!owner || !reward || !target) { fail('This pending income no longer exists. Refresh and try again.'); return; }
+        var built = buildStakeRewardClaim(owner, reward, target, Object.assign({}, claim, { fxLock: lock }), main);
+        if (built.error) { fail(built.error); return; }
+        var recordIssue = validateTrade(built.trade, 1e18);
+        if (recordIssue) { fail('The income record is invalid: ' + recordIssue + '.'); return; }
+        var nextSnapshots = reward.balanceSnapshots.concat([built.snapshot]);
+        if (!isValidStakeReward(Object.assign({}, reward, { balanceSnapshots: nextSnapshots }))) {
+          fail('The payment could not be recorded. Check the amount and time.');
+          return;
+        }
+        reward.balanceSnapshots = nextSnapshots;
+        if (!Array.isArray(state.trades)) state.trades = [];
+        state.trades.push(built.trade);
+        if (!saveStateGuarded(state)) { fail('Storage unavailable — nothing was saved.'); return; }
+        try { tradePageByAccount[target.id] = 0; } catch (e) { /* ignore */ }
+        setTradeSubmitBusy(saveBtn, false, label);
+        closeDialog(dlg);
+        clearBanner();
+        render();
+        try { refreshPrices(); } catch (e) { /* ignore */ }
+      });
     });
   });
   return dlg;
@@ -225,29 +273,39 @@ function openStakeRewardClaimDialog(ownerId, rewardId) {
   var owner = accountById(state, ownerId);
   var reward = owner ? findStakeReward(owner, rewardId) : null;
   if (!owner || !reward) return;
+  var fiat = isFiatStakeReward(reward);
   var targets = stakeRewardClaimTargets(state, owner, reward);
   if (!targets.length) {
-    showBanner('Add a ' + reward.assetTicker + ' account first: claimed rewards are recorded as income there.');
+    showBanner('Add a ' + reward.assetTicker + (fiat ? ' cash' : '') + ' account first: the payment is recorded as income there.');
     return;
   }
   var dlg = buildStakeRewardClaimDialog();
+  var label = fiat ? 'Mark paid' : 'Claim';
   dlg.setAttribute('data-owner-id', owner.id);
   dlg.setAttribute('data-reward-id', reward.id);
+  dlg.setAttribute('data-label', label);
   var ticker = reward.assetTicker;
   var main = String(state.settings.mainCurrency || '').toUpperCase();
   var latest = latestDebtBalanceSnapshot(reward, Date.now());
   var pending = latest ? Number(latest.amount) : 0;
-  document.getElementById('stake-claim-title').textContent = 'Claim ' + reward.name;
-  document.getElementById('stake-claim-pending').textContent = 'Unclaimed: ' + formatDebtPositionAmount(pending, reward) +
+  document.getElementById('stake-claim-title').textContent = (fiat ? 'Payment · ' : 'Claim ') + reward.name;
+  document.getElementById('stake-claim-pending').textContent = 'Pending: ' + formatDebtPositionAmount(pending, reward) +
     (latest ? ' · reported ' + new Date(latest.reportedAt).toLocaleString() : '');
+  document.getElementById('stake-claim-amount-label').textContent = fiat ? 'Amount paid' : 'Amount claimed';
   document.getElementById('stake-claim-unit').textContent = ' (' + ticker + ')';
   document.getElementById('stake-claim-ccy').textContent = main ? ' (' + main + ')' : '';
+  document.getElementById('stake-claim-pair').textContent = ' (1 ' + ticker + ' in ' + main + ')';
   document.getElementById('stake-claim-amount').value = pending > 0 ? qtyUiText(String(pending), ticker) : '';
   var at = document.getElementById('stake-claim-at');
   at.value = debtLocalDateTimeValue(new Date());
   at.max = at.value;
   document.getElementById('stake-claim-value').value = '';
+  document.getElementById('stake-claim-rate').value = '';
   document.getElementById('stake-claim-note').value = '';
+  // Cash records carry their own value (the amount); only foreign fiat
+  // needs a rate.
+  document.getElementById('stake-claim-value-wrap').hidden = fiat;
+  document.getElementById('stake-claim-rate-wrap').hidden = !fiat || ticker === main;
   var select = document.getElementById('stake-claim-target');
   select.innerHTML = '';
   targets.forEach(function (account) {
@@ -257,12 +315,12 @@ function openStakeRewardClaimDialog(ownerId, rewardId) {
     select.appendChild(option);
   });
   select.value = targets[0].id;
-  // Paid in the staked asset: the claim lands in the staking account itself.
+  // Paid in the account's own asset: the payment lands in that account.
   document.getElementById('stake-claim-target-wrap').hidden = targets.length === 1 && targets[0].id === owner.id;
   dockError('stake-claim-error', '');
   clearInvalidFields(document.getElementById('stake-claim-form'));
   var saveBtn = document.getElementById('stake-claim-save');
-  if (saveBtn) setTradeSubmitBusy(saveBtn, false, 'Claim');
+  if (saveBtn) setTradeSubmitBusy(saveBtn, false, label);
   openDialog('stake-claim-dialog');
 }
 
@@ -275,10 +333,10 @@ function buildStakeRewardSnapshotDialog() {
   dlg.id = 'stake-snapshot-dialog';
   dlg.setAttribute('aria-labelledby', 'stake-snapshot-title');
   dlg.innerHTML =
-    '<div class="dialog-head"><h2 id="stake-snapshot-title">Edit unclaimed balance</h2>' +
+    '<div class="dialog-head"><h2 id="stake-snapshot-title">Edit pending amount</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="stake-snapshot-form" novalidate>' +
-    '<label for="stake-snapshot-amount">Unclaimed balance<span id="stake-snapshot-unit"></span>' + infoPill('This corrects the selected entry. The reward keeps its other reports. Income records of past claims are not changed.') + '</label>' +
+    '<label for="stake-snapshot-amount">Pending amount<span id="stake-snapshot-unit"></span>' + infoPill('This corrects the selected entry. The other reports stay. Income records already saved are not changed.') + '</label>' +
     '<input id="stake-snapshot-amount" type="number" min="0" step="any" required inputmode="decimal">' +
     '<label for="stake-snapshot-reported-at">Balance reported at</label>' +
     '<input id="stake-snapshot-reported-at" type="datetime-local" required>' +
@@ -301,7 +359,7 @@ function buildStakeRewardSnapshotDialog() {
     var state = loadState();
     var owner = accountById(state, dlg.getAttribute('data-owner-id') || '');
     var reward = owner ? findStakeReward(owner, dlg.getAttribute('data-reward-id') || '') : null;
-    if (!owner || !reward) { fail('This stake reward no longer exists. Refresh and try again.'); return; }
+    if (!owner || !reward) { fail('This pending income no longer exists. Refresh and try again.'); return; }
     var snapshotId = dlg.getAttribute('data-snapshot-id') || '';
     var index = -1;
     for (var i = 0; i < reward.balanceSnapshots.length; i++) {
@@ -312,7 +370,7 @@ function buildStakeRewardSnapshotDialog() {
     var amount = Number(amountRaw);
     var reportedInput = document.getElementById('stake-snapshot-reported-at').value;
     var note = String(document.getElementById('stake-snapshot-note').value || '').trim();
-    if (!isFinite(amount) || amount < 0) { fail('Enter a valid unclaimed balance (0 or more).'); return; }
+    if (!isFinite(amount) || amount < 0) { fail('Enter a valid pending amount (0 or more).'); return; }
     if (qtyOverPrecise(amountRaw, reward.assetTicker)) { fail(qtyPrecisionError(reward.assetTicker)); return; }
     if (!reportedInput) { fail('Enter when the balance was reported.'); return; }
     var reportedDate = new Date(reportedInput);
@@ -374,7 +432,7 @@ function removeStakeRewardSnapshot(ownerId, rewardId, snapshotId) {
   reward.balanceSnapshots.forEach(function (s) { if (s.id === snapshotId) snapshot = s; });
   if (!snapshot) return;
   confirmAction('Remove report', 'Remove the ' + formatDebtPositionAmount(snapshot.amount, reward) + ' report from ' +
-    new Date(snapshot.reportedAt).toLocaleString() + '? The reward keeps its other reports; income records of past claims are not changed.', 'Remove', true).then(function (ok) {
+    new Date(snapshot.reportedAt).toLocaleString() + '? The other reports stay; income records already saved are not changed.', 'Remove', true).then(function (ok) {
     if (!ok) return;
     var fresh = loadState();
     var freshReward = findStakeReward(accountById(fresh, ownerId), rewardId);
@@ -392,7 +450,7 @@ function removeStakeReward(ownerId, rewardId) {
   var state = loadState();
   var reward = findStakeReward(accountById(state, ownerId), rewardId);
   if (!reward) return;
-  confirmAction('Remove stake reward', 'Permanently remove "' + reward.name + '" and its unclaimed balance history? Income records of past claims stay.', 'Remove', true).then(function (ok) {
+  confirmAction('Remove pending income', 'Permanently remove "' + reward.name + '" and its history? Income records already saved stay.', 'Remove', true).then(function (ok) {
     if (!ok) return;
     var fresh = loadState();
     var owner = accountById(fresh, ownerId);
@@ -415,9 +473,8 @@ function stakeRewardButton(className, text, label, onClick) {
   return button;
 }
 
-// Account view section, placed after the debt positions. Shown on every
-// asset account (the entry point lives with its list) and wherever a group
-// member already carries rewards.
+// Account view section, placed after the debt positions, on every account
+// (the entry point lives with its list).
 function buildStakeRewardsSection(st, account, members, host, after) {
   var scope = [account].concat(members || []);
   var canAdd = stakeRewardsAllowedOn(account);
@@ -432,7 +489,7 @@ function buildStakeRewardsSection(st, account, members, host, after) {
   var summary = document.createElement('summary');
   var title = document.createElement('span');
   title.className = 'section-title';
-  title.textContent = 'Stake rewards';
+  title.textContent = 'Pending income';
   summary.appendChild(title);
   var count = document.createElement('span');
   count.className = 'debt-position-count';
@@ -441,7 +498,7 @@ function buildStakeRewardsSection(st, account, members, host, after) {
   details.appendChild(summary);
   header.appendChild(details);
   if (canAdd) {
-    header.appendChild(stakeRewardButton('ghost', '+ Reward', 'Add stake reward to ' + account.name,
+    header.appendChild(stakeRewardButton('ghost', '+ Pending', 'Add pending income to ' + account.name,
       function () { openStakeRewardDialog(account.id, null); }));
   }
   section.appendChild(header);
@@ -467,9 +524,11 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       top.appendChild(nameEl);
       var actions = document.createElement('div');
       actions.className = 'stake-reward-actions';
-      actions.appendChild(stakeRewardButton('debt-position-update stake-reward-claim', 'Claim', 'Claim ' + reward.name,
+      var fiatEntry = isFiatStakeReward(reward);
+      actions.appendChild(stakeRewardButton('debt-position-update stake-reward-claim', fiatEntry ? 'Mark paid' : 'Claim',
+        (fiatEntry ? 'Mark paid: ' : 'Claim ') + reward.name,
         function () { openStakeRewardClaimDialog(owner.id, reward.id); }));
-      actions.appendChild(stakeRewardButton('debt-position-update', 'Update balance', 'Update the unclaimed balance of ' + reward.name,
+      actions.appendChild(stakeRewardButton('debt-position-update', 'Update amount', 'Update the pending amount of ' + reward.name,
         function () { openStakeRewardDialog(owner.id, reward.id); }));
       top.appendChild(actions);
       item.appendChild(top);
@@ -479,13 +538,14 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       amount.className = 'debt-position-amount';
       var text = latest ? formatDebtPositionAmount(latest.amount, reward) : 'No reported balance';
       var val = latest ? debtPositionValuation(reward, mainCur, livePrices, null, owner) : null;
-      if (val && val.known && val.value !== null && latest.amount > 0) text += ' (≈ ' + fmtMoney(val.value, mainCur) + ')';
+      var inMain = isCashKind(reward.assetKind) && reward.assetTicker === mainCur;
+      if (val && val.known && val.value !== null && latest.amount > 0 && !inMain) text += ' (≈ ' + fmtMoney(val.value, mainCur) + ')';
       amount.textContent = text;
       amount.title = text;
       item.appendChild(amount);
       var reported = document.createElement('p');
       reported.className = 'debt-position-reported';
-      reported.textContent = latest ? 'Unclaimed · last reported ' + new Date(latest.reportedAt).toLocaleString() : 'No report recorded';
+      reported.textContent = latest ? 'Pending · last reported ' + new Date(latest.reportedAt).toLocaleString() : 'No report recorded';
       item.appendChild(reported);
       if (reward.assetTicker !== String(owner.ticker || '').trim().toUpperCase()) {
         var paid = document.createElement('p');
@@ -502,7 +562,7 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       var history = debtPanel(document.createElement('details'), 'reward-history:' + reward.id);
       history.className = 'debt-snapshot-history';
       var historySummary = document.createElement('summary');
-      historySummary.textContent = 'Unclaimed history (' + reward.balanceSnapshots.length + ')';
+      historySummary.textContent = 'History (' + reward.balanceSnapshots.length + ')';
       history.appendChild(historySummary);
       var list = document.createElement('ol');
       // Newest first; equal times (a claim in the same minute as a report)
@@ -542,7 +602,7 @@ function buildStakeRewardsSection(st, account, members, host, after) {
       });
       history.appendChild(list);
       item.appendChild(history);
-      item.appendChild(stakeRewardButton('debt-position-delete', 'Remove reward', 'Remove ' + reward.name,
+      item.appendChild(stakeRewardButton('debt-position-delete', 'Remove', 'Remove ' + reward.name,
         function () { removeStakeReward(owner.id, reward.id); }));
       body.appendChild(item);
     });
@@ -550,7 +610,7 @@ function buildStakeRewardsSection(st, account, members, host, after) {
   if (!totalCount) {
     var empty = document.createElement('p');
     empty.className = 'muted debt-empty';
-    empty.textContent = 'No stake rewards recorded for this account.';
+    empty.textContent = 'No pending income recorded for this account.';
     body.appendChild(empty);
   }
   details.appendChild(body);

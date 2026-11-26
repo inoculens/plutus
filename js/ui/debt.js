@@ -534,7 +534,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
     summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, mainCcy) : '—');
     if (financialRewards) {
       var rewardsLoading = !financialRewards.complete && scope.some(stakeRewardPricesLoading);
-      summaryLine('Unclaimed rewards', financialRewards.complete ? fmtMoney(financialRewards.value, mainCcy) : (rewardsLoading ? PRICE_LOADING_TEXT : '—'));
+      summaryLine('Pending income', financialRewards.complete ? fmtMoney(financialRewards.value, mainCcy) : (rewardsLoading ? PRICE_LOADING_TEXT : '—'));
     }
     if (financial.debt.hasDebt) {
       var debtLoading = !financial.debt.complete && scope.some(debtPricesLoading);

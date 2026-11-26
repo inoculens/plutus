@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Stake rewards in a real browser: add an unclaimed balance in the staked
+// Pending income in a real browser (stake rewards and a fiat invoice): add an unclaimed balance in the staked
 // token and one paid in another token, see both in the hero total, claim
 // part of one and all of the other. A claim must write one Income record in
 // the receiving account and lower the unclaimed balance in the same save.
@@ -27,7 +27,8 @@ const state = JSON.stringify({
   settings: { mainCurrency: 'EUR', costMethod: 'average' },
   accounts: [
     { id: 'eth', name: 'ETH staking', ticker: 'ETH', kind: 'crypto' },
-    { id: 'crv', name: 'CRV wallet', ticker: 'CRV', kind: 'crypto' }
+    { id: 'crv', name: 'CRV wallet', ticker: 'CRV', kind: 'crypto' },
+    { id: 'usd', name: 'USD business', ticker: 'USD', kind: 'cash' }
   ],
   trades: [{ id: 'b1', type: 'buy', accountId: 'eth', symbol: 'ETH', qty: 10, total: 20000, currency: 'EUR', date: '2026-10-01',
     fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false } }],
@@ -51,7 +52,7 @@ const state = JSON.stringify({
   await page.waitForSelector('.stake-rewards-section');
 
   async function addReward(name, ticker, balance) {
-    await page.click('button[aria-label="Add stake reward to ETH staking"]');
+    await page.click('button[aria-label="Add pending income to ETH staking"]');
     await page.fill('#stake-reward-name', name);
     if (ticker) await page.fill('#stake-reward-asset-ticker', ticker);
     await page.fill('#stake-reward-balance', balance);
@@ -59,14 +60,14 @@ const state = JSON.stringify({
     await page.waitForFunction(() => !document.getElementById('stake-reward-dialog').open);
   }
   // A new reward defaults to the staked token.
-  await page.click('button[aria-label="Add stake reward to ETH staking"]');
+  await page.click('button[aria-label="Add pending income to ETH staking"]');
   assert.equal(await page.inputValue('#stake-reward-asset-ticker'), 'ETH');
   await page.evaluate(() => closeDialog('stake-reward-dialog'));
   await addReward('Validator rewards', '', '0.75');
   await addReward('Gauge CRV', 'CRV', '40');
 
   const summary = await page.$$eval('.debt-net-line', els => els.map(e => e.textContent));
-  assert.ok(summary.some(t => /Unclaimed rewards/.test(t) && /1,520\.00/.test(t)), 'account summary lists the unclaimed rewards: ' + summary);
+  assert.ok(summary.some(t => /Pending income/.test(t) && /1,520\.00/.test(t)), 'account summary lists the unclaimed rewards: ' + summary);
   assert.ok(summary.some(t => /Net value/.test(t) && /21,520\.00/.test(t)), 'net value adds them: ' + summary);
 
   // The panel starts collapsed, like Debt positions.
@@ -104,7 +105,39 @@ const state = JSON.stringify({
   await page.waitForFunction(() => typeof uiBooted !== 'undefined' && uiBooted);
   await page.waitForFunction(() => /21,520\.00/.test((document.getElementById('hero-value-num') || {}).textContent || ''), null, { timeout: 10000 });
   const chip = await page.$eval('.acct-reward-indicator', el => el.textContent);
-  assert.equal(chip, 'Rewards · 2');
+  assert.equal(chip, 'Pending · 2');
+
+  // Fiat: an invoice owed in USD on a cash account (main currency EUR).
+  await page.goto(base + '/account/usd', { waitUntil: 'load' });
+  await page.waitForFunction(() => typeof uiBooted !== 'undefined' && uiBooted);
+  await page.click('button[aria-label="Add pending income to USD business"]');
+  assert.equal(await page.inputValue('#stake-reward-asset-kind'), 'cash', 'a cash account starts with its own fiat');
+  assert.equal(await page.inputValue('#stake-reward-asset-ticker'), 'USD');
+  await page.fill('#stake-reward-name', 'Invoice 114');
+  await page.fill('#stake-reward-balance', '1200');
+  await page.click('#stake-reward-save');
+  await page.waitForFunction(() => !document.getElementById('stake-reward-dialog').open);
+  await page.click('.stake-rewards-section summary');
+  await page.click('button[aria-label="Mark paid: Invoice 114"]');
+  assert.equal(await page.$eval('#stake-claim-value-wrap', el => el.hidden), true, 'a cash payment is its own value');
+  assert.equal(await page.$eval('#stake-claim-rate-wrap', el => el.hidden), false, 'foreign fiat offers a rate');
+  assert.equal(await page.textContent('#stake-claim-save'), 'Mark paid');
+  await page.fill('#stake-claim-amount', '700');
+  // Network blocked: no ECB rate, so nothing is saved and a rate is asked for.
+  await page.click('#stake-claim-save');
+  await page.waitForFunction(() => /enter the exchange rate/.test((document.getElementById('stake-claim-error-text') || {}).textContent || ''));
+  assert.equal(await page.evaluate(() => loadState().trades.filter(t => t.accountId === 'usd').length), 0, 'nothing saved without a rate');
+  await page.fill('#stake-claim-rate', '0.9');
+  await page.click('#stake-claim-save');
+  await page.waitForFunction(() => !document.getElementById('stake-claim-dialog').open);
+  const fiat = await page.evaluate(() => {
+    const st = loadState();
+    const t = st.trades.find(x => x.accountId === 'usd');
+    return { t: [t.type, t.symbol, t.qty, t.total, t.currency, t.fxLock.rate, t.fxLock.source],
+      pending: latestDebtBalanceSnapshot(st.accounts.find(a => a.id === 'usd').stakeRewards[0], Date.now()).amount };
+  });
+  assert.deepEqual(fiat.t, ['income', 'USD', 700, 700, 'USD', 0.9, 'manual'], 'a cash Income record in USD at the typed rate');
+  assert.equal(fiat.pending, 500, '1200 owed - 700 paid');
 
   assert.deepEqual(errors, [], 'no page errors');
   await browser.close();

@@ -114,7 +114,7 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   if (rewardInfo.hasRewards) {
     var rewardIndicator = document.createElement('span');
     rewardIndicator.className = 'acct-debt-indicator acct-reward-indicator';
-    rewardIndicator.textContent = 'Rewards · ' + rewardInfo.positionCount;
+    rewardIndicator.textContent = 'Pending · ' + rewardInfo.positionCount;
     chipHost.appendChild(rewardIndicator);
   }
   var valKnown = reportedNet.has

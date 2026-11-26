@@ -64,7 +64,7 @@ function normalizeAccount(a, accountList) {
   if (isValidDebtPositions(a, accountList || [a])) {
     if (Array.isArray(a.debtPositions)) out.debtPositions = a.debtPositions.map(function (position) { return normalizeDebtPosition(position, a); });
   }
-  if (isValidStakeRewards(a) && Array.isArray(a.stakeRewards) && a.stakeRewards.length) {
+  if (isValidStakeRewards(a, accountList || [a]) && Array.isArray(a.stakeRewards) && a.stakeRewards.length) {
     out.stakeRewards = a.stakeRewards.map(normalizeStakeReward);
   }
   return out;

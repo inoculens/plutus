@@ -242,6 +242,71 @@ const goldReward = acc('gold-stake', 'W', 'crypto', { stakeRewards: [reward({ as
 C.noteSymbolKinds([goldReward], []);
 assert.equal(C.priceKeyOf('W', 'commodity'), 'COMMODITY:W', 'reward kinds join ticker collision identity');
 
+// --- Pledge mode: the protocol shows the total, Plutus keeps the earned part ---
+const wallet = acc('wallet', 'ETH', 'crypto');
+const ledgerEth = acc('ledger-eth', 'ETH', 'crypto');
+const supply = (extra) => Object.assign({
+  id: 'aave', name: 'Aave ETH supply', assetKind: 'crypto', assetTicker: 'ETH', createdAt: '2026-11-01T10:00:00.000Z',
+  pledge: [{ accountId: 'wallet', quantity: 1.5 }, { accountId: 'ledger-eth', quantity: 0.5 }],
+  balanceSnapshots: [
+    { id: 'p1', amount: 0, total: 2, pledged: 2, reportedAt: '2026-11-01T10:00:00.000Z', enteredAt: '2026-11-01T10:00:00.000Z' },
+    { id: 'p2', amount: 0.03, total: 2.03, pledged: 2, reportedAt: '2026-11-10T10:00:00.000Z', enteredAt: '2026-11-10T10:00:00.000Z' }
+  ]
+}, extra || {});
+const pledgeAccounts = [wallet, ledgerEth];
+wallet.stakeRewards = [supply()];
+assert.equal(C.isValidStakeRewards(wallet, pledgeAccounts), true);
+assert.equal(C.isStakePledgeEntry(supply()), true);
+assert.equal(C.isStakePledgeEntry(reward()), false);
+assert.equal(C.isValidStakeReward(supply({ pledge: [] }), wallet, pledgeAccounts), true, 'an emptied pledge keeps pledge mode');
+for (const [bad, why] of [
+  [supply({ pledge: [{ accountId: 'missing', quantity: 1 }] }), 'pledged accounts must exist'],
+  [supply({ pledge: [{ accountId: 'wallet', quantity: 0 }] }), 'pledged quantities are positive'],
+  [supply({ pledge: [{ accountId: 'wallet', quantity: 1 }, { accountId: 'wallet', quantity: 1 }] }), 'one row per account'],
+  [supply({ pledge: [{ accountId: 'wallet', quantity: 1, apy: 3 }] }), 'no extra row fields'],
+  [supply({ balanceSnapshots: [snap('plain', 1, '2026-11-01T10:00:00.000Z')] }), 'pledge reports carry total and pledged'],
+  [reward({ balanceSnapshots: [{ id: 'x', amount: 0, total: 1, pledged: 1, reportedAt: '2026-11-01T10:00:00.000Z', enteredAt: '2026-11-01T10:00:00.000Z' }] }), 'plain entries never carry totals'],
+  [supply({ balanceSnapshots: [{ id: 'h', amount: 0, total: 1, reportedAt: '2026-11-01T10:00:00.000Z', enteredAt: '2026-11-01T10:00:00.000Z' }] }), 'total without pledged is damage'],
+  [supply({ balanceSnapshots: [{ id: 'n', amount: 0, total: -1, pledged: 1, reportedAt: '2026-11-01T10:00:00.000Z', enteredAt: '2026-11-01T10:00:00.000Z' }] }), 'totals are never negative']
+]) {
+  assert.equal(C.isValidStakeReward(bad, wallet, pledgeAccounts), false, why);
+}
+const normPledge = C.normalizeAccount(wallet, pledgeAccounts).stakeRewards[0];
+assert.equal(normPledge.pledge.length, 2, 'normalization keeps the pledge');
+assert.equal(normPledge.balanceSnapshots[1].total, 2.03, 'and each report keeps its total');
+assert.equal(normPledge.balanceSnapshots[1].pledged, 2);
+assert.equal(C.normalizeAccount(wallet, [wallet]).stakeRewards, undefined,
+  'without the pledged account in the list the entry is invalid (never silently re-pointed)');
+
+assert.equal(C.stakePledgeSum(supply().pledge, 'ETH'), 2);
+assert.equal(C.stakePledgeEarned(2.03, 2, 'ETH'), 0.03, 'exact: no float dust');
+assert.equal(C.stakePledgeEarned(1.99, 2, 'ETH'), 0, 'a total below the pledge never adds a loss');
+const rep = C.stakePledgeSnapshot(supply(), '2.0412', '2026-11-12T10:00:00.000Z', 'Aave dashboard');
+assert.equal(rep.amount, 0.0412);
+assert.equal(rep.total, 2.0412);
+assert.equal(rep.pledged, 2);
+assert.equal(C.isValidStakeRewardSnapshot(rep), true);
+
+// Net worth counts only the earned part; holdings are untouched.
+const pv = C.currentStakeRewardValuation([wallet], 'USD', { ETH: 2000 }, Date.parse('2026-11-11T00:00:00.000Z'));
+assert.equal(pv.value, 60, '0.03 ETH earned, not 2.03');
+
+// Claiming the earned part keeps the pledge: the protocol then shows the pledge plus what is left.
+const pledgeClaim = C.buildStakeRewardClaim(wallet, supply(), wallet, { amount: '0.01', at: Date.parse('2026-11-12T10:00:00.000Z') }, 'USD');
+assert.equal(pledgeClaim.error, undefined);
+assert.equal(pledgeClaim.trade.qty, 0.01);
+assert.equal(pledgeClaim.snapshot.amount, 0.02);
+assert.equal(pledgeClaim.snapshot.pledged, 2);
+assert.equal(pledgeClaim.snapshot.total, 2.02);
+assert.equal(C.isValidStakeRewardSnapshot(pledgeClaim.snapshot), true);
+
+// An account named in a pledge cannot be deleted from under it.
+const pledgeState = { accounts: [wallet, ledgerEth], trades: [] };
+assert.match(C.debtAccountDeleteBlock(pledgeState, ['ledger-eth']), /pledged in pending income/);
+assert.equal(C.debtAccountDeleteBlock(pledgeState, ['wallet']), '', 'deleting the owner takes its own entries along');
+assert.equal(C.debtAccountDeleteBlock(pledgeState, ['wallet', 'ledger-eth']), '');
+wallet.stakeRewards = undefined;
+
 (async () => {
   // --- Net-worth history adds the pending report current at each point ---
   const histSettings = { mainCurrency: 'USD', costMethod: 'average', assetLedgers: true, dateFormat: 'DD/MM/YYYY' };

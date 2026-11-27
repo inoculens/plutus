@@ -249,6 +249,9 @@ function normalizeTradeForStore(t) {
   if (typeof c.currency === 'string' && c.currency.trim() !== '') c.currency = c.currency.trim().toUpperCase();
   if (typeof c.feeCurrency === 'string' && c.feeCurrency.trim() !== '') c.feeCurrency = c.feeCurrency.trim().toUpperCase();
   if (typeof c.txid === 'string' && c.txid.trim() !== '') c.txid = c.txid.trim();
+  // Duplicate-tx confirmation (js/data/tx-duplicates.js): only `true` means
+  // anything; any other value is dropped so the warning stays on.
+  if (c.txidDupOk !== undefined && c.txidDupOk !== true) { try { delete c.txidDupOk; } catch (e) { c.txidDupOk = undefined; } }
   // Normalize only exact valid source lists. Malformed explicit lists remain
   // explicit so accounting functions fail closed rather than falling back.
   if(c.sources!==undefined&&c.sources!==null){

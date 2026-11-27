@@ -104,6 +104,7 @@ function submitNewSwap(ctx) {
     } catch (e) { /* validation continues; engine clamps anyway */ }
     st.trades.push(sellLeg);
     st.trades.push(buyLeg);
+    txidDupApply(st, [sellLeg, buyLeg], ctx.txDup);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
     // Freeze reference exec quotes in the background (saving never waits).
     try { freezeExecLock(sellLeg.id, fromSym, date, String(main).toUpperCase(), (acc && acc.kind) || undefined); } catch (e) { /* ignore */ }
@@ -319,6 +320,7 @@ function submitSwapEdit(ctx) {
     } catch (e) { /* validation continues; engine clamps anyway */ }
     st.trades[sellIdx] = sellNew;
     st.trades[buyIdx] = buyNew;
+    txidDupApply(st, [sellNew, buyNew], ctx.txDup);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Save changes'); return; }
     var mainUE = String(main).toUpperCase();
     if (needFreezeSellE) { try { freezeExecLock(sellNew.id, fromSymE, date, mainUE, nowFrom.kind); } catch (e) { /* ignore */ } }

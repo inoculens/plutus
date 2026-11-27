@@ -415,7 +415,7 @@ function syncTradeHeadRows() {
       if (!when) { // no date pill: nothing to measure against
         continue;
       }
-      var pills = head.querySelectorAll('.trade-now, .trade-pair, .trade-what, .trade-id');
+      var pills = head.querySelectorAll('.trade-now, .trade-pair, .trade-dup, .trade-what, .trade-id');
       if (!pills.length) {
         continue;
       }

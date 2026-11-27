@@ -88,7 +88,8 @@
   /* Once measured (syncTradeHeadRows) on a line below the pinned corner, the
      cap lifts: the pill runs the full width under the ▾ ✎ 🗑 buttons. */
   .trade-head .trade-now.head-own-row,
-  .trade-head .trade-pair.head-own-row { max-width: none; }
+  .trade-head .trade-pair.head-own-row,
+  .trade-head .trade-dup.head-own-row { max-width: none; }
   /* Record head on phones: date + type + pair left, the ▾ ✎ 🗑 cluster
      pinned top-right (line-1 pills self-cap short of it), and the long
      pills — now-worth when it wraps, the swap/what route, the FIFO record #
@@ -130,6 +131,9 @@
   .trade-block.is-swap .trade-head .trade-what { order: 6; }
   .trade-block.is-swap .trade-head .trade-id { order: 7; }
   .trade-head .trade-now { order: 4; }
+  /* Duplicate-tx pill: right after the type/pair, capped short of the
+     pinned ▾ ✎ 🗑 corner like the other line-1 pills. */
+  .trade-head .trade-dup { order: 3; max-width: calc(100% - 7rem); overflow: hidden; text-overflow: ellipsis; }
   .trade-head .trade-what { order: 5; }
   .trade-head .trade-id { order: 6; flex-basis: 100%; max-width: fit-content; }
   /* The route pill is a mini flex row: the text trims with an ellipsis and
@@ -174,7 +178,7 @@
   dialog[open] { display: flex; flex-direction: column; }
   .dialog-head [data-close] { min-height: 2.75rem; min-width: 2.75rem; }
   #trade-dialog[open], #account-dialog[open], #ledger-dialog[open], #group-dialog[open], #settings-dialog[open],
-  #confirm-dialog[open], #note-dialog[open], #error-dialog[open], #color-dialog[open] {
+  #confirm-dialog[open], #note-dialog[open], #error-dialog[open], #color-dialog[open], #txdup-dialog[open] {
     width: 100vw; max-width: 100vw;
     margin: auto 0 0 0;
     border-radius: 20px 20px 0 0;

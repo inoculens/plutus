@@ -102,6 +102,17 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
       head.appendChild(nowPill);
     }
   }
+  // Duplicate tx ID (js/data/tx-duplicates.js): the pill shows while the
+  // warning is on; an ignored group only keeps the quiet Tx-row marker.
+  var dupState = null;
+  try {
+    var dupLegs = (isSwap && swap && swap.sell && swap.buy) ? [swap.sell.id, swap.buy.id] : [t.id];
+    dupState = txidDupCardState(dupLegs);
+  } catch (e) { dupState = null; }
+  if (dupState && dupState.open) {
+    head.appendChild(txidDupPill(dupState));
+    try { box.classList.add('has-dup-tx'); } catch (e) { /* ignore */ }
+  }
   var whatTxt = '';
   if (t.type === 'transfer' && accountNameById) {
     try {
@@ -489,13 +500,13 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
     if (isSwap && swap && swap.sell && swap.buy) {
       var sId = validId(swap.sell.txid) ? String(swap.sell.txid).trim() : '';
       var rId = validId(swap.buy.txid) ? String(swap.buy.txid).trim() : '';
-      if (sId !== '' && sId === rId) txEntries.push({ label: 'Tx', id: sId, sym: t.symbol });
+      if (sId !== '' && sId === rId) txEntries.push({ label: 'Tx', id: sId, sym: t.symbol, legs: [swap.sell.id, swap.buy.id] });
       else {
-        if (sId !== '') txEntries.push({ label: 'Sent Tx', id: sId, sym: swap.sell.symbol });
-        if (rId !== '') txEntries.push({ label: 'Received Tx', id: rId, sym: swap.buy.symbol });
+        if (sId !== '') txEntries.push({ label: 'Sent Tx', id: sId, sym: swap.sell.symbol, legs: [swap.sell.id] });
+        if (rId !== '') txEntries.push({ label: 'Received Tx', id: rId, sym: swap.buy.symbol, legs: [swap.buy.id] });
       }
     } else if (validId(t.txid)) {
-      txEntries.push({ label: 'Tx', id: String(t.txid).trim(), sym: t.symbol });
+      txEntries.push({ label: 'Tx', id: String(t.txid).trim(), sym: t.symbol, legs: [t.id] });
     }
   })();
   txEntries.forEach(function (te) {
@@ -528,6 +539,9 @@ function tradeBlock(t, main, accountNameById, kind, fifoCtx, swapInfo, viewScope
       txV.appendChild(txS);
     }
     txV.appendChild(txCopyButton(txFull));
+    var rowDup = null;
+    try { rowDup = dupState ? txidDupCardState(te.legs || []) : null; } catch (e) { rowDup = null; }
+    if (rowDup) txV.appendChild(txidDupRowMark(rowDup));
     txRow.appendChild(txL);
     txRow.appendChild(txV);
     box.appendChild(txRow);

@@ -14,7 +14,7 @@ var dialogOpener = null;
 // dialogs (e.g. Settings + confirm) count, so closing one never unlocks
 // while another is still open. Ancient browsers without showModal fall
 // back to the [open] attribute: scroll still locks, clicks do not.
-var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'group-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog', 'attach-dialog'];
+var MODAL_IDS = ['trade-dialog', 'account-dialog', 'ledger-dialog', 'group-dialog', 'settings-dialog', 'confirm-dialog', 'note-dialog', 'error-dialog', 'color-dialog', 'attach-dialog', 'txdup-dialog'];
 
 function updateModalLock() {
   try {

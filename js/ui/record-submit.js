@@ -298,6 +298,29 @@ function onTradeSubmit(ev) {
     var lconf = ledgerRecordConflict(st0, accountId, ledgerCode, isEditing ? editingTradeId : null, null, lscope);
     if (lconf) { tradeFormError(ledgerConflictMessage(lconf)); return; }
   }
+  // Duplicate tx IDs (js/data/tx-duplicates.js): the same asset + hash on
+  // another record asks before saving; Save anyway resubmits the form.
+  var dupDrafts = [];
+  var dupExclude = [];
+  if (side === 'swap') {
+    var dupPair = null;
+    if (isEditing) {
+      try {
+        var dupClicked = (st0.trades || []).filter(function (x) { return x && x.id === editingTradeId; })[0];
+        dupPair = dupClicked ? swapPairForTrade(st0, dupClicked) : null;
+      } catch (e) { dupPair = null; }
+    }
+    if (dupPair) dupExclude = [dupPair.sell.id, dupPair.buy.id];
+    var dupFrom = accountById(st0, uiVal('t-account', '')) || (dupPair ? accountById(st0, dupPair.sell.accountId) : null) || acc;
+    var dupTo = accountById(st0, uiVal('t-toaccount', ''));
+    dupDrafts.push({ symbol: dupFrom.ticker, txid: txid, accountId: dupFrom.id, prevId: dupPair ? dupPair.sell.id : null });
+    if (dupTo) dupDrafts.push({ symbol: dupTo.ticker, txid: txidTo, accountId: dupTo.id, prevId: dupPair ? dupPair.buy.id : null });
+  } else {
+    if (isEditing) dupExclude = [editingTradeId];
+    dupDrafts.push({ symbol: symbol, txid: txid, accountId: accountId, prevId: isEditing ? editingTradeId : null });
+  }
+  var txDup = txidDupGate(st0, dupDrafts, dupExclude, function () { onTradeSubmit(null); });
+  if (txDup.prompt) return;
   // Swaps are saved by js/ui/record-submit-swap.js with these form values.
   function swapContext() {
     return {
@@ -314,7 +337,8 @@ function onTradeSubmit(ev) {
       manualRate: manualRate,
       manualPrice: manualPrice,
       lockSubmit: lockSubmit,
-      fxError: fxError
+      fxError: fxError,
+      txDup: txDup
     };
   }
   // --- Swap: creates a linked sell+buy pair ---
@@ -704,6 +728,7 @@ function onTradeSubmit(ev) {
       } catch (e2) { /* ignore */ }
       st.trades[idx] = trade;
       learnLedgerLabel(st, trade);
+      txidDupApply(st, [trade], txDup);
       if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Save changes'); return; }
       attReset(trade.attachment);
       if (needRefreeze) {
@@ -795,6 +820,7 @@ function onTradeSubmit(ev) {
     } catch (e3) { /* validation continues; engine clamps anyway */ }
     st.trades.push(trade);
     learnLedgerLabel(st, trade);
+    txidDupApply(st, [trade], txDup);
     if (!saveStateGuarded(st)) { tradeFormError('Storage unavailable — trade was not saved.'); lockSubmit(false, 'Add record'); return; }
     if ((side === 'buy' || side === 'sell' || side === 'transfer' || isCryptoQtyExpense(trade)) && manualPrice === null) {
       // No manual quote: freeze the reference exec price in the background.

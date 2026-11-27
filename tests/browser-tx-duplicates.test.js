@@ -119,18 +119,20 @@ const state = JSON.stringify({
   const count = () => page.evaluate(() => loadState().trades.length);
   const n0 = await count();
   await addBuy('ada2', '  ' + H1 + ' ');
-  await page.waitForSelector('#confirm-dialog[open]');
-  const msg = await page.textContent('#confirm-message');
-  assert.ok(/ADA transaction ID is already on 2 records/.test(msg), msg);
+  await page.waitForSelector('#txdup-dialog[open]');
+  const rows = await page.$$eval('#txdup-list li .txdup-acc', els => els.map(e => e.textContent));
+  assert.deepEqual(rows, ['ADA hot', 'ADA cold'], 'the prompt names both accounts');
+  assert.equal(await page.textContent('#txdup-toggle'), 'Save anyway');
+  assert.ok((await page.textContent('#txdup-hash')).indexOf('ADA') === 0);
   await shot('3-save-anyway');
-  await page.click('#confirm-cancel');
-  await page.waitForFunction(() => !document.getElementById('confirm-dialog').open);
+  await page.click('#txdup-cancel');
+  await page.waitForFunction(() => !document.getElementById('txdup-dialog').open);
   await page.waitForTimeout(300); // the dialog's own close event settles first (as it does for a person)
   assert.equal(await count(), n0, 'Cancel saves nothing');
   assert.equal(await page.evaluate(() => document.getElementById('trade-dialog').open), true, 'the form stays open to fix the hash');
   await page.evaluate(() => document.getElementById('t-submit').click());
-  await page.waitForSelector('#confirm-dialog[open]');
-  await page.click('#confirm-ok');
+  await page.waitForSelector('#txdup-dialog[open]');
+  await page.click('#txdup-toggle');
   await page.waitForFunction((n) => !tradeSubmitBusy && loadState().trades.length === n + 1, n0, { timeout: 20000 });
   assert.equal(await page.evaluate((h) => loadState().trades.filter(t => String(t.txid).toLowerCase() === h && t.symbol === 'ADA').every(t => t.txidDupOk === true), H1), true,
     'Save anyway marks the whole group');
@@ -140,7 +142,7 @@ const state = JSON.stringify({
   const n1 = await count();
   await addBuy('btc', 'cafebabe');
   await page.waitForFunction((n) => !tradeSubmitBusy && loadState().trades.length === n + 1, n1, { timeout: 20000 });
-  assert.equal(await page.evaluate(() => document.getElementById('confirm-dialog').open), false);
+  assert.equal(await page.evaluate(() => document.getElementById('txdup-dialog').open), false);
 
   // --- Phone layout: the pill sits in the head without breaking it ---
   await page.evaluate(() => { const s = loadState(); s.trades.forEach(t => { delete t.txidDupOk; }); saveState(s); });

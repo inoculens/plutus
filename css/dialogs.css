@@ -149,30 +149,73 @@ details.adv[open], details.opt[open] { border-color: var(--border-strong); }
 details.adv summary, details.opt summary { color: var(--muted); font-size: 0.88rem; font-weight: 600; cursor: pointer; min-height: 2rem; line-height: 2rem; }
 details.opt + details.opt { margin-top: 0.65rem; }
 
-/* Duplicate tx ID dialog: the group's records, one per line. */
-#txdup-dialog[open] { width: min(520px, 94vw); }
-#txdup-message { margin: 0.4rem 0 0; line-height: 1.6; }
+/* Duplicate tx ID dialog (record-form prompt + card review): the hash on
+   top, a short lead, one row per record with the account standing out
+   (color dot + name, "this record" tag) and its date · type · amount muted
+   below, then a one-line hint. Rows truncate, the box never resizes. */
+#txdup-dialog[open] { width: min(480px, 94vw); }
+#txdup-dialog .dialog-head { margin-bottom: 0.6rem; }
+#txdup-hash {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--amber);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#txdup-message { margin: 1rem 0 0; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
 #txdup-list {
   list-style: none;
-  margin: 0.75rem 0 0;
+  margin: 0.5rem 0 0;
   padding: 0;
+  display: grid;
+  gap: 0.45rem;
   max-height: 40vh;
   overflow-y: auto;
 }
 #txdup-list li {
-  padding: 0.55rem 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.88rem;
-  overflow-wrap: anywhere;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
-#txdup-list li:last-child { border-bottom: none; }
+#txdup-list .txdup-dot {
+  grid-row: 1 / span 2;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: var(--dot, var(--muted));
+}
+#txdup-list .txdup-acc {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#txdup-list .txdup-meta {
+  grid-column: 2 / span 2;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 #txdup-list .txdup-this {
-  margin-left: 0.5rem;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--muted);
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 0.05rem 0.45rem;
+  white-space: nowrap;
 }
+#txdup-hint { margin: 0.9rem 0 0; font-size: 0.82rem; line-height: 1.5; }

@@ -424,3 +424,49 @@ p.muted.ledger-warn { margin: 0.5rem 0 0; }
    wrapper has no box there (display:contents) and the ▾ stays hidden. */
 .trade-actions { display: contents; }
 .trade-more { display: none; }
+
+/* Duplicate tx ID warning (js/ui/tx-duplicates.js): amber pill in the head
+   while the warning is on, a marker after the hash in the Tx row (amber
+   while warning, muted once ignored — the way back to the warning). Same
+   pill geometry as the other head chips; fixed text, never resizes. */
+.trade-dup {
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-line);
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  min-height: 0;
+  flex-shrink: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.trade-dup::before { content: "⚠"; margin-right: 0.4em; }
+.trade-dup:hover, .trade-dup:focus-visible { border-color: var(--amber); }
+.trade-block .tx-dup-mark {
+  font: inherit;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  min-width: 0;
+  min-height: 0;
+  margin-left: 0.3rem;
+  padding: 0;
+  font-size: 0.72rem;
+  line-height: 1;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.trade-block .tx-dup-mark.is-open { color: var(--amber); background: var(--amber-bg); border-color: var(--amber-line); }
+.trade-block .tx-dup-mark.is-ignored { opacity: 0.55; }
+.trade-block .tx-dup-mark.is-ignored:hover,
+.trade-block .tx-dup-mark.is-ignored:focus-visible { opacity: 1; }

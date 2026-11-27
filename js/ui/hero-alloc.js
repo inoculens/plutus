@@ -46,6 +46,20 @@ function allocationData(st, dtrades, visibleIds) {
       credit(key, aid, cb.main);
     });
   } catch (e) { /* ignore */ }
+  // Pending income joins its asset's slice (the hero total counts it too);
+  // an entry without a known value is left out, never counted as 0.
+  try {
+    (st.accounts || []).forEach(function (owner) {
+      if (!owner || !owner.id || (visibleIds && visibleIds.indexOf(owner.id) === -1)) return;
+      accountStakeRewards(owner).forEach(function (reward) {
+        var val = debtPositionValuation(reward, st.settings.mainCurrency, livePrices, null, owner);
+        if (!val.known || val.value === null || !(val.value > 0)) return;
+        var key = String(reward.assetTicker || '').toUpperCase();
+        bySym[key] = (bySym[key] || 0) + val.value;
+        credit(key, owner.id, val.value);
+      });
+    });
+  } catch (e) { /* the ring never breaks the hero */ }
   Object.keys(bySym).forEach(function (k) { total += bySym[k]; });
   // Accounts of the same asset share its segment color, holding or not.
   var accById = {};

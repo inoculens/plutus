@@ -307,6 +307,32 @@ assert.equal(C.debtAccountDeleteBlock(pledgeState, ['wallet']), '', 'deleting th
 assert.equal(C.debtAccountDeleteBlock(pledgeState, ['wallet', 'ledger-eth']), '');
 wallet.stakeRewards = undefined;
 
+// --- Own-asset pending joins the account's quantity (explorer view) ---
+const adaWallet = acc('ada', 'ADA', 'crypto', { stakeRewards: [
+  reward({ id: 'ada-r', name: 'Staking', assetTicker: 'ADA', balanceSnapshots: [snap('a1', 12, '2026-11-20T10:00:00.000Z')] }),
+  reward({ id: 'ada-other', name: 'Airdrop', assetTicker: 'MIN', balanceSnapshots: [snap('a2', 40, '2026-11-20T10:00:00.000Z')] })
+] });
+const own = C.stakeRewardOwnAssetPending([adaWallet], 'ADA', 'crypto', Date.parse('2026-11-21T00:00:00.000Z'));
+assert.equal(own.amount, 12, 'only entries paid in the account asset count');
+assert.equal(own.entries.length, 1);
+assert.equal(C.stakeRewardOwnAssetPending([adaWallet], 'ADA', 'crypto', Date.parse('2026-11-19T00:00:00.000Z')).amount, 0,
+  'as of a date before the report nothing is pending');
+assert.equal(C.stakeRewardOwnAssetPending([adaWallet], 'ADA', 'stock', Date.now()).amount, 0, 'kind must match too');
+
+// --- The hero allocation gives pending income to its asset's slice ---
+C.livePrices.ADA = 0.5;
+C.livePrices.MIN = 0.1;
+const allocState = { settings: { mainCurrency: 'EUR', costMethod: 'average' }, accounts: [adaWallet], trades: [] };
+const alloc = C.allocationData(allocState, [], null);
+const bySym = Object.fromEntries(Array.from(alloc.items, it => [it.symbol, it.value]));
+assert.equal(bySym.ADA, 6, '12 ADA pending at 0.5');
+assert.equal(bySym.MIN, 4, 'another token gets its own slice');
+assert.equal(alloc.total, 10);
+delete C.livePrices.MIN;
+const allocUnknown = C.allocationData(allocState, [], null);
+assert.equal(Array.from(allocUnknown.items, it => it.symbol).join(), 'ADA', 'no price: left out, never 0');
+delete C.livePrices.ADA;
+
 (async () => {
   // --- Net-worth history adds the pending report current at each point ---
   const histSettings = { mainCurrency: 'USD', costMethod: 'average', assetLedgers: true, dateFormat: 'DD/MM/YYYY' };

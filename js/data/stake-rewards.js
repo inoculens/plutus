@@ -34,6 +34,32 @@ function accountBalancePositions(account) {
   return accountDebtPositions(account).concat(accountStakeRewards(account));
 }
 
+// Pending income paid in the account's own asset (same ticker and kind):
+// unclaimed ADA rewards on an ADA wallet. Explorers count these in the
+// address total, so the account view adds them to its Quantity and Value.
+// Returns { scaled, amount, entries } summed over `accounts` as of `asOf`
+// (a BigInt at the asset's quantity precision, its Number, and the entries
+// that contributed).
+function stakeRewardOwnAssetPending(accounts, ticker, kind, asOf) {
+  var t = String(ticker || '').trim().toUpperCase();
+  var k = String(kind || 'crypto').trim().toLowerCase();
+  var dec = qtyDecimals(t);
+  var sum = 0n;
+  var entries = [];
+  (accounts || []).forEach(function (owner) {
+    accountStakeRewards(owner).forEach(function (reward) {
+      if (String(reward.assetTicker || '').toUpperCase() !== t) return;
+      if (String(reward.assetKind || '').toLowerCase() !== k) return;
+      var snapshot = latestDebtBalanceSnapshot(reward, asOf);
+      var sc = snapshot ? exactScaledOf(snapshot.amount, dec) : null;
+      if (sc === null || sc <= 0n) return;
+      sum += sc;
+      entries.push({ owner: owner, reward: reward });
+    });
+  });
+  return { scaled: sum, amount: Number(exactToStringTrim(sum, dec)), entries: entries };
+}
+
 // Every account can carry pending income: assets for rewards and accrued
 // yield, cash accounts for interest, receivables and declared dividends.
 function stakeRewardsAllowedOn(account) {

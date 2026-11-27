@@ -102,6 +102,11 @@ const state = JSON.stringify({
   await page.waitForFunction(() => typeof uiBooted !== 'undefined' && uiBooted);
   await page.waitForSelector('.acct-lent-indicator');
   assert.equal(await page.textContent('.acct-lent-indicator'), 'Lent · 1');
+  assert.match(await page.textContent('.acct-value'), /4,300\.00/, 'the card shows what is available, like the hero');
+  assert.match(await page.textContent('.acct-pl'), /4,300/, 'and the cash in the bank: records minus the principal lent out');
+  await page.waitForFunction(() => /4,300\.00/.test(document.getElementById('hero-value-num').textContent));
+  assert.match(await page.textContent('#hero-networth-value'), /4,950\.00/, 'net worth keeps the lending');
+  assert.match(await page.textContent('#hero-networth-note'), /incl\. €650\.00 lent out/);
 
   assert.deepEqual(errors, []);
   await browser.close();

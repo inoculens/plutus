@@ -18,6 +18,8 @@
 }
 
 .hero-label {
+  display: flex;
+  align-items: center;
   margin: 0;
   color: var(--muted);
   font-size: 0.72rem;
@@ -25,9 +27,10 @@
   text-transform: uppercase;
   letter-spacing: 0.14em;
 }
+.hero-label .info-pill { margin-left: 0.45rem; flex-basis: 1.1rem; width: 1.1rem; min-width: 1.1rem; height: 1.1rem; min-height: 1.1rem; }
 
 .hero-value {
-  margin: 0.45rem 0 0.55rem;
+  margin: 0.45rem 0 0.4rem;
   font-family: var(--font-display);
   font-size: clamp(2.5rem, 5.6vw, 3.9rem);
   font-weight: 500;
@@ -39,22 +42,91 @@
   text-overflow: ellipsis;
 }
 
-.hero-pl { margin: 0.2rem 0 0.15rem; display: inline-block; min-height: 2rem; }
-
-.hero-invested,
-.hero-spent {
-  margin: 0 0 0.2rem;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+/* Net worth: the second figure. Smaller, quieter, on one line; what is lent
+   out rides along in blue (still yours, not available). */
+.hero-networth {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+  margin: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
-.hero-invested[hidden],
-.hero-spent[hidden] { display: none; }
+.hero-networth[hidden] { display: none; }
+.hero-networth-label {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.hero-networth-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.hero-networth-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.hero-networth-note[hidden] { display: none; }
+
+/* Key figures: three equal cells under a hairline, label over value. The
+   cells never resize with their numbers: long amounts truncate. */
+.hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 1.05rem 0 0;
+  padding: 0.85rem 0 0;
+  border-top: 1px solid var(--border);
+}
+.hero-metrics[hidden] { display: none; }
+.hero-metric {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0 0.9rem;
+  border-left: 1px solid var(--border);
+}
+.hero-metric:first-child { padding-left: 0; border-left: none; }
+.hero-metric dt {
+  color: var(--muted-2);
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.hero-metric dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  font-variant-numeric: tabular-nums;
+}
+.hero-metric dd.hero-pl.gain { color: var(--gain); }
+.hero-metric dd.hero-pl.loss { color: var(--loss); }
+/* The arrow carries the direction, so meaning never rests on color alone. */
+.hero-metric dd.hero-pl.gain::before { content: "▲"; margin-right: 0.4em; font-size: 0.6em; vertical-align: 0.15em; }
+.hero-metric dd.hero-pl.loss::before { content: "▼"; margin-right: 0.4em; font-size: 0.6em; vertical-align: 0.15em; }
 
 .pill {
   display: inline-flex;
@@ -69,13 +141,6 @@
   border: 1px solid var(--border-strong);
 }
 
-.hero-pl.pill {
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* Gain = green wash, loss = deep red wash. Both also carry an arrow, so the
    meaning never depends on color alone. */
 .pill.gain { color: var(--gain); background: var(--gain-bg); border-color: var(--gain-line); }
@@ -84,7 +149,7 @@
 .pill.loss::before { content: "▼"; margin-right: 0.5em; font-size: 0.62em; }
 
 .hero-sub {
-  margin: 0.8rem 0 0;
+  margin: 0.85rem 0 0;
   color: var(--muted-2);
   font-size: 0.8rem;
   white-space: nowrap;

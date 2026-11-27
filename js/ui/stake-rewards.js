@@ -642,15 +642,17 @@ function stakeRewardButton(className, text, label, onClick) {
   return button;
 }
 
-// Account view section, placed after the debt positions, on every account
-// (the entry point lives with its list).
-function buildStakeRewardsSection(st, account, members, host, after) {
+// Account view panel, on every account that can hold it (the entry point
+// lives with its list). It is a row of the balance sheet card that
+// buildDebtPositionsSection made (`sheet`), above the debt row, so the panels
+// follow the summary equation: + Pending income, − Liabilities.
+function buildStakeRewardsSection(st, account, members, host, sheet) {
   var scope = [account].concat(members || []);
   var canAdd = stakeRewardsAllowedOn(account);
   var totalCount = scope.reduce(function (count, owner) { return count + accountStakeRewards(owner).length; }, 0);
   if (!canAdd && !totalCount) return null;
-  var section = document.createElement('section');
-  section.className = 'debt-positions-section stake-rewards-section';
+  var section = document.createElement('div');
+  section.className = 'balance-sheet-row stake-rewards-section';
   var header = document.createElement('div');
   header.className = 'section-head debt-section-head';
   var details = debtPanel(document.createElement('details'), 'rewards:' + account.id);
@@ -665,7 +667,6 @@ function buildStakeRewardsSection(st, account, members, host, after) {
   count.textContent = String(totalCount);
   summary.appendChild(count);
   details.appendChild(summary);
-  header.appendChild(details);
   if (canAdd) {
     header.appendChild(stakeRewardButton('ghost', '+ Pending', 'Add pending income to ' + account.name,
       function () { openStakeRewardDialog(account.id, null); }));
@@ -810,7 +811,15 @@ function buildStakeRewardsSection(st, account, members, host, after) {
   }
   details.appendChild(body);
   section.appendChild(details);
-  if (after && after.parentNode === host) host.insertBefore(section, after.nextSibling);
-  else host.appendChild(section);
+  var debtRow = sheet && sheet.parentNode === host ? sheet.querySelector(':scope > .debt-positions-row') : null;
+  if (debtRow) {
+    sheet.insertBefore(section, debtRow);
+  } else {
+    // No balance sheet to join: the row gets a card of its own.
+    var card = document.createElement('section');
+    card.className = 'debt-positions-section balance-sheet';
+    card.appendChild(section);
+    host.appendChild(card);
+  }
   return section;
 }

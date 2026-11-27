@@ -1,16 +1,40 @@
 /* Debt positions. */
 
+/* Balance sheet card: the net summary on top, read as an equation
+   (Gross assets + Pending income − Liabilities = Net value), then one
+   disclosure row per panel that feeds it, in the same order. One card,
+   hairline dividers, no nested boxes. */
 .debt-positions-section {
   margin: 1.1rem 0 0.25rem;
   border: 1px solid var(--border); border-radius: 14px;
-  background: var(--surface-2); padding: 0.75rem 1rem 0.6rem;
+  background: var(--surface-2);
 }
-.debt-positions-section > .debt-net-summary {
-  margin: -0.75rem -1rem 0.65rem; border: 0; border-bottom: 1px solid var(--border);
-  border-radius: 14px 14px 0 0; background: var(--surface-3);
-  padding: 0.75rem 1rem;
+.balance-sheet-row { position: relative; padding: 0.55rem 1rem; min-width: 0; }
+.balance-sheet > * + .balance-sheet-row { border-top: 1px solid var(--border); }
+/* The add button sits on the row's line, just left of the disclosure chip;
+   the summary keeps that strip clear. */
+.balance-sheet-row > .debt-section-head {
+  position: absolute; top: 0.55rem; right: calc(1rem + 2rem + 0.45rem);
+  z-index: 1; display: flex; margin: 0; gap: 0;
 }
-.debt-section-head { align-items: center; gap: 0.75rem; margin-top: 0; margin-bottom: 0.35rem; }
+.balance-sheet-row > .debt-section-head > button {
+  min-height: 2rem; padding: 0.2rem 0.8rem; font-size: 0.78rem;
+}
+.balance-sheet-row .debt-positions-details > summary { min-height: 2rem; padding-right: 7.25rem; }
+/* Chip box pinned to the row's right edge, under its turning glyph. */
+.balance-sheet-row .debt-positions-details > summary::after {
+  position: absolute; right: 0; top: 50%; margin: -1rem 0 0;
+}
+.balance-sheet-row .debt-positions-details > summary .section-title { display: inline-flex; align-items: center; gap: 0.55rem; }
+/* Key dot: ties each row to its coloured figure in the summary. */
+.balance-sheet-row .debt-positions-details > summary .section-title::before {
+  content: ''; flex: 0 0 auto; width: 0.42rem; height: 0.42rem; border-radius: 50%;
+  background: var(--red); box-shadow: 0 0 0 3px var(--red-bg);
+}
+.stake-rewards-section .debt-positions-details > summary .section-title::before {
+  background: var(--green); box-shadow: 0 0 0 3px var(--green-bg);
+}
+.balance-sheet-row .debt-position-list { padding: 0.65rem 0 0.45rem; }
 .debt-positions-details { min-width: 0; flex: 1 1 auto; }
 .debt-positions-details .section-title { margin: 0; line-height: 1; }
 .debt-positions-details > summary {
@@ -177,8 +201,8 @@
   .debt-collateral-row select { grid-column: 1 / -1; }
   .debt-collateral-actions { justify-self: end; }
   .debt-position-top { align-items: flex-start; }
-  .debt-positions-section { padding: 0.6rem 0.75rem 0.5rem; }
-  .debt-positions-section > .debt-net-summary { margin: -0.6rem -0.75rem 0.55rem; padding: 0.65rem 0.75rem; }
+  .balance-sheet-row { padding: 0.5rem 0.75rem; }
+  .balance-sheet-row > .debt-section-head { top: 0.5rem; right: calc(0.75rem + 2rem + 0.4rem); }
 }
 @media (max-width: 360px) {
   .debt-collateral-row { grid-template-columns: minmax(0, 1fr); }
@@ -190,17 +214,40 @@
   border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.4rem;
 }
 .debt-net-summary {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem;
-  padding: 0.75rem 0.9rem; margin: 0 0 0.65rem;
-  border: 1px solid var(--border); border-radius: 14px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem 0.9rem;
+  padding: 0.85rem 1rem 0.8rem; margin: 0;
 }
-.debt-net-line { display: grid; gap: 0.2rem; min-width: 0; }
-.debt-net-line span { color: var(--muted); font-size: 0.72rem; }
-.debt-net-line strong { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.debt-net-line { display: grid; gap: 0.25rem; min-width: 0; }
+.debt-net-line span {
+  display: flex; align-items: center; min-width: 0;
+  color: var(--muted); font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.debt-net-op {
+  flex: 0 0 auto; width: 0.85rem; margin-right: 0.2rem;
+  color: var(--muted); font-style: normal; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1; opacity: 0.75;
+}
+.debt-net-line strong {
+  font-size: 0.95rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.debt-net-income strong { color: var(--green); }
+.debt-net-debt strong { color: var(--red); }
+/* The result: a hairline before it, the brightest figure of the strip. */
+.debt-net-net { border-left: 1px solid var(--border); padding-left: 0.9rem; }
+.debt-net-net span { color: var(--text); }
+.debt-net-net strong { font-family: var(--font-display); font-size: 1.05rem; color: var(--text); }
+.debt-net-net.is-negative strong { color: var(--red); }
 @media (max-width: 520px) {
-  .debt-net-summary { gap: 0.3rem; padding: 0.65rem; }
+  /* Phones: the parts in two columns, the result as a total line below. */
+  .debt-net-summary, .debt-net-summary.debt-net-summary-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem 0.75rem; padding: 0.7rem 0.75rem; }
+  .debt-net-net {
+    grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem;
+    border-left: 0; padding: 0.55rem 0 0; border-top: 1px solid var(--border);
+  }
+  .debt-net-net span { flex: 0 0 auto; }
   .debt-net-line span { font-size: 0.66rem; }
-  .debt-net-line strong { font-size: 0.82rem; }
+  .debt-net-line strong { font-size: 0.84rem; }
+  .debt-net-net strong { font-size: 0.95rem; }
 }
 
 /* Debt denomination is independent of the owning account. */

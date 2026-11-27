@@ -67,6 +67,38 @@
   align-items: stretch;
   gap: 0.15rem;
 }
+/* Descriptions are prose of any length: body font, clamped to five lines
+   so the header box keeps its size; "Show more" opens the full text. */
+.detail-meta-val.detail-meta-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+/* Twice the block's row gap between the label text and this caption. */
+.detail-meta-block > * + .detail-meta[data-label="Description"] { margin-top: 0.2rem; }
+.detail-meta-more {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 0.1rem 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+.detail-meta-more:hover { color: var(--text); }
+.detail-meta-more[hidden] { display: none; }
+.meta-editor { display: grid; min-width: 0; }
+.meta-editor textarea[data-description-input] { min-height: 8rem; max-height: 60vh; resize: vertical; }
 .label-edit-row {
   display: flex;
   gap: 0.6rem;

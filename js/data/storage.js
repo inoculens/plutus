@@ -114,6 +114,7 @@ function accountFieldIssues(a, accounts) {
   if (a.note !== undefined && a.note !== null) {
     if (typeof a.note !== 'string' || a.note.trim().length > 280) n++;
   }
+  if (a.description !== undefined && a.description !== null && typeof a.description !== 'string') n++;
   if (fieldPresent(a.color) && !isValidHexColor(a.color)) n++;
   if (a.ledgers !== undefined && a.ledgers !== null && !ledgerMapIsClean(a.ledgers)) n++;
   if (fieldPresent(a.groupId) && (typeof a.groupId !== 'string' || a.groupId === a.id)) n++;

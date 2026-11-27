@@ -738,32 +738,52 @@ function detailMetaRow(label, text, title) {
   var d = document.createElement('div');
   d.className = 'detail-meta';
   d.setAttribute('data-label', label);
-  // Account labels stack: caption on top, wrapped text underneath.
-  if (String(label) === 'Label') d.classList.add('detail-meta-stacked');
+  var isLabel = String(label) === 'Label';
+  var isDesc = String(label) === 'Description';
+  // Account labels and descriptions stack: caption on top, text underneath.
+  if (isLabel || isDesc) d.classList.add('detail-meta-stacked');
   var l = document.createElement('span');
   l.className = 'detail-meta-label';
   l.textContent = label;
   var v = document.createElement('span');
   v.className = 'detail-meta-val';
   // Account labels are multi-line by design: wrap them fully instead of
-  // trimming to one line. Notes keep the trim + popup treatment.
-  if (String(label) === 'Label') v.classList.add('detail-meta-multiline');
+  // trimming to one line. Descriptions wrap too but are uncapped, so they
+  // clamp to a few lines (fixed header) and open in full in a popup.
+  // Notes keep the trim + popup treatment.
+  if (isLabel || isDesc) v.classList.add('detail-meta-multiline');
+  if (isDesc) v.classList.add('detail-meta-desc');
   v.textContent = String(text);
-  v.title = String(text);
+  if (!isDesc) v.title = String(text);
   v.setAttribute('role', 'button');
   v.setAttribute('tabindex', '0');
   v.setAttribute('aria-label', 'Show full ' + String(title).toLowerCase());
+  function cut() {
+    return isDesc ? v.scrollHeight > v.clientHeight + 1 : isVisuallyCut(v);
+  }
   function open() {
-    if (!isVisuallyCut(v)) return;
+    if (!cut()) return;
     openNoteDialog(text, title);
   }
   v.addEventListener('click', open);
   v.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
   });
-  // Wrapped rows (multi-line labels) show everything: no hidden info, no dot.
-  if (!v.classList.contains('detail-meta-multiline')) infoDot(l, open, v);
+  // Wrapped labels show everything: no hidden info, no dot.
+  if (!isLabel && !isDesc) infoDot(l, open, v);
   d.appendChild(l);
   d.appendChild(v);
+  if (isDesc) {
+    var more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'detail-meta-more';
+    more.textContent = 'Show more';
+    more.hidden = true;
+    more.addEventListener('click', function () { openNoteDialog(text, title); });
+    d.appendChild(more);
+    // Only a clamped description offers "Show more" (measured once laid out).
+    var check = function () { more.hidden = !cut(); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(check);
+  }
   return d;
 }

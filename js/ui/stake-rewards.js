@@ -85,6 +85,132 @@ function stakePledgeAccounts(st, kind, ticker) {
   });
 }
 
+var STAKE_REWARD_TYPE_HELP = 'Pending income: earned but not received yet (rewards, interest, an invoice), and deposits you can withdraw any time, such as Aave (choose Total including a pledge). Lending: money lent out of this account that is not under your control until it is repaid, such as a loan to a person or a locked deposit. It stays in your net worth but leaves your Available balance.';
+
+// What this account can still lend: what it holds minus what its other
+// lendings already have out (exact). { scaled, dec, ticker } or null.
+function lendingLendable(state, owner, excludeId) {
+  if (!owner) return null;
+  var ticker = String(owner.ticker || '').trim().toUpperCase();
+  var dec = qtyDecimals(ticker);
+  var heldTxt = exactQtyHeldString(state.trades || [], owner.id, ticker);
+  var held = heldTxt === null ? 0n : exactScaledOf(heldTxt, dec);
+  if (held === null) held = 0n;
+  accountStakeRewards(owner).forEach(function (entry) {
+    if (!isStakeLendingEntry(entry) || entry.id === excludeId) return;
+    var p = exactScaledOf(lendingParts(entry).principal, dec);
+    if (p !== null && p > 0n) held -= p;
+  });
+  return { scaled: held > 0n ? held : 0n, dec: dec, ticker: ticker };
+}
+
+function stakeRewardSyncLendable(owner, reward) {
+  var out = document.getElementById('stake-reward-lendable');
+  if (!out) return;
+  var info = owner ? lendingLendable(loadState(), owner, reward ? reward.id : '') : null;
+  out.hidden = !info;
+  if (!info) return;
+  out.textContent = 'Available to lend from ' + owner.name + ': ' +
+    formatDebtPositionAmount(Number(exactToStringTrim(info.scaled, info.dec)), { assetKind: owner.kind, assetTicker: info.ticker });
+}
+
+// Switches the dialog between pending income and lending. A lending is in
+// the account's own asset, so its denomination fields lock to it.
+function stakeRewardSetType(type, initial) {
+  var dlg = document.getElementById('stake-reward-dialog');
+  if (!dlg) return;
+  var lending = type === 'lending';
+  document.getElementById('stake-reward-type').value = lending ? 'lending' : 'income';
+  Array.prototype.forEach.call(dlg.querySelectorAll('.stake-type-toggle button'), function (button) {
+    button.setAttribute('aria-checked', button.getAttribute('data-type') === (lending ? 'lending' : 'income') ? 'true' : 'false');
+  });
+  document.getElementById('stake-reward-income-wrap').hidden = lending;
+  document.getElementById('stake-reward-lending-wrap').hidden = !lending;
+  document.getElementById('stake-reward-due-wrap').hidden = !lending;
+  var editing = !!dlg.getAttribute('data-reward-id');
+  if (lending && !editing) {
+    document.getElementById('stake-reward-asset-kind').value = dlg.getAttribute('data-owner-kind') || 'crypto';
+    document.getElementById('stake-reward-asset-ticker').value = dlg.getAttribute('data-owner-ticker') || '';
+  }
+  if (!editing) {
+    document.getElementById('stake-reward-title').textContent = lending ? 'New lending' : 'New pending income';
+    if (!initial) document.getElementById('stake-reward-balance').value = '';
+    dlg.setAttribute('data-total-touched', '0');
+  }
+  document.getElementById('stake-reward-name').placeholder = lending ? 'e.g. Loan to Alex, Locked deposit' : 'e.g. Aave ETH supply, Invoice 114';
+  var help = hintTextTarget(document.getElementById('stake-reward-balance-help'));
+  if (help) {
+    help.textContent = lending
+      ? 'Principal plus interest so far, as agreed or as the platform shows. It starts at the amount lent; report a new total whenever interest is added.'
+      : 'The amount as the payer shows it now. Plutus keeps this exact figure, and counts what is earned in your net worth, until you report a new one or it is paid.';
+  }
+  var ticker = String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
+  document.getElementById('stake-reward-principal-unit').textContent = ticker ? ' (' + ticker + ')' : '';
+  if (typeof dlg.syncAsset === 'function') dlg.syncAsset();
+  stakeRewardSyncEarned();
+}
+
+// Builds the lending entry the dialog describes (new, or `reward` updated):
+// the amount lent becomes the pledge and the report's principal, the total
+// owed the report's total. Returns the entry, or null after fail(message).
+function stakeRewardLendingDraft(state, owner, reward, name, fail) {
+  var kind = String(owner.kind || 'crypto').trim().toLowerCase();
+  var ticker = String(owner.ticker || '').trim().toUpperCase();
+  if (STAKE_REWARD_KINDS.indexOf(kind) === -1 || !/^[A-Z0-9._-]{1,12}$/.test(ticker)) {
+    fail('This account cannot hold a lending.'); return null;
+  }
+  var borrower = String(document.getElementById('stake-reward-borrower').value || '').trim();
+  var due = String(document.getElementById('stake-reward-due').value || '').trim();
+  var principalRaw = String(document.getElementById('stake-reward-principal').value || '').trim();
+  var totalRaw = String(document.getElementById('stake-reward-balance').value || '').trim();
+  var reportedInput = document.getElementById('stake-reward-reported-at').value;
+  var note = String(document.getElementById('stake-reward-note').value || '').trim();
+  var notes = String(document.getElementById('stake-reward-notes').value || '').trim();
+  if (borrower.length > 120) { fail('The borrower can be up to 120 characters.'); return null; }
+  if (due !== '' && !isValidDateStr(due)) { fail('Enter a valid due date, or leave it empty.'); return null; }
+  if (notes.length > 280) { fail('Notes can be up to 280 characters.'); return null; }
+  var dec = qtyDecimals(ticker);
+  if (qtyOverPrecise(principalRaw, ticker) || qtyOverPrecise(totalRaw, ticker)) { fail(qtyPrecisionError(ticker)); return null; }
+  var principalSc = principalRaw === '' ? null : exactScaledOf(principalRaw, dec);
+  if (principalSc === null || principalSc < 0n || (!reward && principalSc === 0n)) {
+    fail('Enter the amount lent (more than 0).'); return null;
+  }
+  var totalSc = totalRaw === '' ? null : exactScaledOf(totalRaw, dec);
+  if (totalSc === null || totalSc < 0n) { fail('Enter the total owed now (0 or more).'); return null; }
+  if (totalSc < principalSc) {
+    fail('The total owed cannot be below the amount lent. Record a repayment or a write-off instead.'); return null;
+  }
+  var lendable = lendingLendable(state, owner, reward ? reward.id : '');
+  var previous = reward ? exactScaledOf(lendingParts(reward).principal, dec) : 0n;
+  if (principalSc > (previous || 0n) && lendable && principalSc > lendable.scaled) {
+    fail(owner.name + ' has only ' + formatDebtPositionAmount(Number(exactToStringTrim(lendable.scaled, dec)), { assetKind: kind, assetTicker: ticker }) + ' that is not lent out already.');
+    return null;
+  }
+  var reportedDate = new Date(reportedInput);
+  var reportedIssue = reportedInput ? debtReportedAtIssue(reportedDate.getTime(), Date.now()) : 'Enter when the balance was reported.';
+  if (reportedIssue) { fail(reportedIssue); return null; }
+  var principal = Number(exactToStringTrim(principalSc, dec));
+  var next = {
+    id: reward ? reward.id : uid(),
+    name: name,
+    assetKind: kind,
+    assetTicker: ticker,
+    createdAt: reward ? reward.createdAt : new Date().toISOString(),
+    balanceSnapshots: reward ? reward.balanceSnapshots.slice() : [],
+    pledge: lendingPledgeFor(owner, principal),
+    lent: true
+  };
+  if (borrower) next.borrower = borrower;
+  if (due) next.dueDate = due;
+  if (notes) next.notes = notes;
+  var snapshot = stakePledgeSnapshot(next, exactToStringTrim(totalSc, dec), reportedDate.toISOString(), note);
+  if (!snapshot) { fail('Enter the total owed now (0 or more).'); return null; }
+  snapshot.pledged = principal;
+  next.balanceSnapshots.push(snapshot);
+  if (!isValidStakeReward(next, owner, state.accounts)) { fail('The lending is invalid. Check the amounts and timestamp.'); return null; }
+  return next;
+}
+
 function buildStakeRewardDialog() {
   var existing = document.getElementById('stake-reward-dialog');
   if (existing) return existing;
@@ -95,7 +221,13 @@ function buildStakeRewardDialog() {
     '<div class="dialog-head"><h2 id="stake-reward-title">Pending income</h2>' +
     '<button type="button" data-close aria-label="Close dialog">✕</button></div>' +
     '<form id="stake-reward-form" novalidate>' +
+    '<label id="stake-reward-type-label">Type' + infoPill(STAKE_REWARD_TYPE_HELP) + '</label>' +
+    '<div class="stake-type-toggle" role="radiogroup" aria-labelledby="stake-reward-type-label">' +
+    '<button type="button" role="radio" data-type="income" aria-checked="true">Pending income</button>' +
+    '<button type="button" role="radio" data-type="lending" aria-checked="false">Lending</button></div>' +
+    '<input id="stake-reward-type" type="hidden" value="income">' +
     '<label for="stake-reward-name">Name</label><input id="stake-reward-name" maxlength="120" required autocomplete="off" placeholder="e.g. Aave ETH supply, Invoice 114">' +
+    '<div id="stake-reward-income-wrap">' +
     '<label>Paid in' + infoPill('Choose what this income is paid in.', 'stake-reward-asset-status') + '</label><div class="debt-asset-fields">' +
     '<select id="stake-reward-asset-kind" aria-label="Asset type">' + stakeRewardKindOptions() + '</select>' +
     '<input id="stake-reward-asset-ticker" maxlength="12" pattern="[A-Za-z0-9._-]{1,12}" required autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="Ticker, e.g. ETH" aria-label="Ticker"></div>' +
@@ -104,9 +236,17 @@ function buildStakeRewardDialog() {
     '<div id="stake-reward-pledge-wrap" hidden><div class="debt-collateral-heading"><label>Pledged from</label>' +
     '<button id="stake-reward-add-pledge" type="button">+ Add account</button></div>' +
     '<div id="stake-reward-pledge-list" class="debt-collateral-list"></div></div>' +
-    '<label for="stake-reward-balance"><span id="stake-reward-balance-label">Pending amount</span><span id="stake-reward-unit"></span>' + infoPill('The amount as the payer shows it now. Plutus keeps this exact figure, and counts what is earned in your net worth, until you report a new one or it is paid.') + '</label>' +
+    '</div>' +
+    '<div id="stake-reward-lending-wrap" hidden>' +
+    '<label for="stake-reward-borrower">Borrower or platform (optional)</label><input id="stake-reward-borrower" maxlength="120" autocomplete="off" placeholder="e.g. Alex, Nexo">' +
+    '<label for="stake-reward-principal">Amount lent<span id="stake-reward-principal-unit"></span>' + infoPill('What left your hands, in this account\'s own asset. It stays in the account\'s records and in your net worth, but leaves your Available balance until it is repaid. Lending more later? Raise it here.') + '</label>' +
+    '<input id="stake-reward-principal" type="number" min="0" step="any" inputmode="decimal">' +
+    '<p id="stake-reward-lendable" class="stake-claim-pending" hidden></p>' +
+    '</div>' +
+    '<label for="stake-reward-balance"><span id="stake-reward-balance-label">Pending amount</span><span id="stake-reward-unit"></span>' + infoPill('The amount as the payer shows it now. Plutus keeps this exact figure, and counts what is earned in your net worth, until you report a new one or it is paid.', 'stake-reward-balance-help') + '</label>' +
     '<input id="stake-reward-balance" type="number" min="0" step="any" required inputmode="decimal">' +
     '<p id="stake-reward-earned" class="stake-claim-pending" hidden></p>' +
+    '<div id="stake-reward-due-wrap" hidden><label for="stake-reward-due">Due date (optional)</label><input id="stake-reward-due" type="date"></div>' +
     '<label for="stake-reward-reported-at">Reported at</label><input id="stake-reward-reported-at" type="datetime-local" required>' +
     '<label for="stake-reward-note">Snapshot note (optional)</label><textarea id="stake-reward-note" maxlength="280" rows="2"></textarea>' +
     '<label for="stake-reward-notes">Notes (optional)</label><textarea id="stake-reward-notes" maxlength="280" rows="2"></textarea>' +
@@ -121,6 +261,27 @@ function buildStakeRewardDialog() {
     var choices = stakePledgeAccounts(st, kind, ticker);
     if (!choices.length) { dockError('stake-reward-error', 'No account holds ' + String(ticker || 'that asset').toUpperCase() + ' to pledge.'); return; }
     stakePledgeRow(document.getElementById('stake-reward-pledge-list'), choices, null);
+  });
+  Array.prototype.forEach.call(dlg.querySelectorAll('.stake-type-toggle button'), function (button) {
+    button.addEventListener('click', function () {
+      if (button.disabled) return;
+      stakeRewardSetType(button.getAttribute('data-type'));
+    });
+  });
+  // Lending: the total owed follows the amount lent until it is typed.
+  document.getElementById('stake-reward-balance').addEventListener('input', function () {
+    dlg.setAttribute('data-total-touched', '1');
+  });
+  document.getElementById('stake-reward-principal').addEventListener('input', function () {
+    if (dlg.getAttribute('data-total-touched') === '1') return;
+    var ticker = String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
+    var dec = qtyDecimals(ticker);
+    var p = exactScaledOf(String(this.value || '').trim(), dec);
+    var p0 = exactScaledOf(dlg.getAttribute('data-orig-principal') || '0', dec);
+    var t0 = exactScaledOf(dlg.getAttribute('data-orig-total') || '0', dec);
+    if (p === null || p0 === null || t0 === null) return;
+    var next = t0 + (p - p0);
+    document.getElementById('stake-reward-balance').value = next > 0n ? qtyUiText(exactToStringTrim(next, dec), ticker) : '';
   });
   form.addEventListener('input', function () { stakeRewardSyncEarned(); });
   form.addEventListener('change', function () { stakeRewardSyncEarned(); });
@@ -141,6 +302,25 @@ function buildStakeRewardDialog() {
     var reward = rewardId ? findStakeReward(owner, rewardId) : null;
     if (rewardId && !reward) { fail('This pending income no longer exists. Refresh and try again.'); return; }
     var name = String(document.getElementById('stake-reward-name').value || '').trim();
+    var lendingMode = reward ? isStakeLendingEntry(reward) : document.getElementById('stake-reward-type').value === 'lending';
+    if (lendingMode) {
+      if (!name || name.length > 120) { fail('Enter a name (up to 120 characters).'); return; }
+      var lendingNext = stakeRewardLendingDraft(state, owner, reward, name, fail);
+      if (!lendingNext) return;
+      setTradeSubmitBusy(saveBtn, true, 'Saving…');
+      deferTradeSubmitWork(function () {
+        if (!Array.isArray(owner.stakeRewards)) owner.stakeRewards = [];
+        if (reward) owner.stakeRewards = owner.stakeRewards.map(function (r) { return r.id === reward.id ? lendingNext : r; });
+        else owner.stakeRewards.push(lendingNext);
+        if (!saveStateGuarded(state)) { fail('Storage unavailable — the lending was not saved.'); return; }
+        setTradeSubmitBusy(saveBtn, false, 'Save');
+        closeDialog(dlg);
+        clearBanner();
+        render();
+        try { refreshPrices(); } catch (e) { /* ignore */ }
+      });
+      return;
+    }
     var assetKind = reward ? reward.assetKind : String(document.getElementById('stake-reward-asset-kind').value || '').trim().toLowerCase();
     var assetTicker = reward ? reward.assetTicker : String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
     var pledgeMode = reward ? isStakePledgeEntry(reward) : document.getElementById('stake-reward-mode').value === 'pledge';
@@ -230,6 +410,20 @@ function stakeRewardSyncEarned() {
   var out = document.getElementById('stake-reward-earned');
   var label = document.getElementById('stake-reward-balance-label');
   if (!mode || !wrap || !out || !label) return;
+  var typeInput = document.getElementById('stake-reward-type');
+  if (typeInput && typeInput.value === 'lending') {
+    var lTicker = String(document.getElementById('stake-reward-asset-ticker').value || '').trim().toUpperCase();
+    var principalRaw = String(document.getElementById('stake-reward-principal').value || '').trim();
+    var owedRaw = String(document.getElementById('stake-reward-balance').value || '').trim();
+    label.textContent = 'Total owed now';
+    out.hidden = false;
+    var lent = principalRaw === '' || !(Number(principalRaw) >= 0) ? null : principalRaw;
+    var interest = (lent === null || owedRaw === '') ? null : stakePledgeEarned(owedRaw, lent, lTicker);
+    out.textContent = interest === null
+      ? 'Enter the amount lent and what is owed now; the difference is the interest.'
+      : 'Interest: ' + formatDebtPositionAmount(interest, { assetKind: document.getElementById('stake-reward-asset-kind').value, assetTicker: lTicker }) + ' (total owed − amount lent)';
+    return;
+  }
   var pledgeMode = mode.value === 'pledge';
   wrap.hidden = !pledgeMode;
   label.textContent = pledgeMode ? 'Total the payer shows' : 'Pending amount';
@@ -264,10 +458,14 @@ function openStakeRewardDialog(ownerId, rewardId) {
   var unit = document.getElementById('stake-reward-unit');
   var reported = document.getElementById('stake-reward-reported-at');
   var pledgeMode = isStakePledgeEntry(reward);
-  document.getElementById('stake-reward-title').textContent = reward ? (pledgeMode ? 'Update total' : 'Update pending amount') : 'New pending income';
+  var lendingEntry = isStakeLendingEntry(reward);
+  document.getElementById('stake-reward-title').textContent = reward
+    ? (lendingEntry ? 'Update lending' : (pledgeMode ? 'Update total' : 'Update pending amount'))
+    : 'New pending income';
   document.getElementById('stake-reward-name').value = reward ? reward.name : '';
   var latest = reward ? latestDebtBalanceSnapshot(reward, Date.now()) : null;
   var shown = latest ? (pledgeMode && typeof latest.total === 'number' ? latest.total : latest.amount) : null;
+  if (lendingEntry) shown = lendingParts(reward).total;
   document.getElementById('stake-reward-balance').value = shown !== null ? qtyUiText(String(shown), reward.assetTicker) : '';
   reported.value = debtLocalDateTimeValue(new Date());
   reported.max = reported.value;
@@ -283,7 +481,19 @@ function openStakeRewardDialog(ownerId, rewardId) {
   modeInput.disabled = !!reward;
   var list = document.getElementById('stake-reward-pledge-list');
   list.innerHTML = '';
-  if (pledgeMode) {
+  // Lending fields: borrower, amount lent (the principal outstanding), due date.
+  var lentNow = lendingEntry ? lendingParts(reward) : null;
+  document.getElementById('stake-reward-borrower').value = lendingEntry && typeof reward.borrower === 'string' ? reward.borrower : '';
+  document.getElementById('stake-reward-due').value = lendingEntry && typeof reward.dueDate === 'string' ? reward.dueDate : '';
+  document.getElementById('stake-reward-principal').value = lentNow ? qtyUiText(String(lentNow.principal), reward.assetTicker) : '';
+  dlg.setAttribute('data-orig-principal', lentNow ? String(lentNow.principal) : '0');
+  dlg.setAttribute('data-orig-total', lentNow ? String(lentNow.total) : '0');
+  dlg.setAttribute('data-total-touched', '0');
+  dlg.setAttribute('data-owner-kind', String(owner.kind || 'crypto').trim().toLowerCase());
+  dlg.setAttribute('data-owner-ticker', String(owner.ticker || '').trim().toUpperCase());
+  Array.prototype.forEach.call(dlg.querySelectorAll('.stake-type-toggle button'), function (button) { button.disabled = !!reward; });
+  stakeRewardSetType(lendingEntry ? 'lending' : 'income', true);
+  if (pledgeMode && !lendingEntry) {
     var choices = stakePledgeAccounts(state, reward.assetKind, reward.assetTicker);
     reward.pledge.forEach(function (row) { stakePledgeRow(list, choices, row); });
   }
@@ -295,7 +505,9 @@ function openStakeRewardDialog(ownerId, rewardId) {
   }
   kindInput.onchange = syncAsset;
   tickerInput.oninput = syncAsset;
+  dlg.syncAsset = syncAsset;
   syncAsset();
+  stakeRewardSyncLendable(owner, reward);
   stakeRewardSyncEarned();
   dockError('stake-reward-error', '');
   clearInvalidFields(document.getElementById('stake-reward-form'));
@@ -619,7 +831,10 @@ function removeStakeReward(ownerId, rewardId) {
   var state = loadState();
   var reward = findStakeReward(accountById(state, ownerId), rewardId);
   if (!reward) return;
-  confirmAction('Remove pending income', 'Permanently remove "' + reward.name + '" and its history? Income records already saved stay.', 'Remove', true).then(function (ok) {
+  var lendingGone = isStakeLendingEntry(reward);
+  confirmAction(lendingGone ? 'Remove lending' : 'Remove pending income', 'Permanently remove "' + reward.name + '" and its history? ' +
+    (lendingGone ? 'Records already saved stay. Use Repayment or Write off to record what happened to the money; removing only stops tracking it as lent out.' : 'Income records already saved stay.'),
+    'Remove', true).then(function (ok) {
     if (!ok) return;
     var fresh = loadState();
     var owner = accountById(fresh, ownerId);
@@ -668,7 +883,7 @@ function buildStakeRewardsSection(st, account, members, host, sheet) {
   summary.appendChild(count);
   details.appendChild(summary);
   if (canAdd) {
-    header.appendChild(stakeRewardButton('ghost', '+ Pending', 'Add pending income to ' + account.name,
+    header.appendChild(stakeRewardButton('ghost', '+ Add', 'Add pending income to ' + account.name,
       function () { openStakeRewardDialog(account.id, null); }));
   }
   section.appendChild(header);
@@ -689,35 +904,63 @@ function buildStakeRewardsSection(st, account, members, host, sheet) {
       item.className = 'debt-position-card stake-reward-card';
       var top = document.createElement('div');
       top.className = 'debt-position-top';
+      var lendingEntry = isStakeLendingEntry(reward);
+      var lendingOpen = lendingEntry && lendingParts(reward).total > 0;
+      if (lendingEntry) item.classList.add('lending-card');
       var nameEl = document.createElement('strong');
       nameEl.textContent = reward.name;
-      top.appendChild(nameEl);
+      if (lendingEntry) {
+        var nameWrap = document.createElement('span');
+        nameWrap.className = 'lending-name';
+        var chip = document.createElement('span');
+        chip.className = 'lending-chip';
+        chip.textContent = 'Lent';
+        nameWrap.appendChild(nameEl);
+        nameWrap.appendChild(chip);
+        top.appendChild(nameWrap);
+      } else {
+        top.appendChild(nameEl);
+      }
       var actions = document.createElement('div');
       actions.className = 'stake-reward-actions';
-      var fiatEntry = isFiatStakeReward(reward);
-      actions.appendChild(stakeRewardButton('debt-position-update stake-reward-claim', fiatEntry ? 'Mark paid' : 'Claim',
-        (fiatEntry ? 'Mark paid: ' : 'Claim ') + reward.name,
-        function () { openStakeRewardClaimDialog(owner.id, reward.id); }));
-      actions.appendChild(stakeRewardButton('debt-position-update', isStakePledgeEntry(reward) ? 'Update total' : 'Update amount', (isStakePledgeEntry(reward) ? 'Update the total of ' : 'Update the pending amount of ') + reward.name,
-        function () { openStakeRewardDialog(owner.id, reward.id); }));
+      if (lendingEntry) {
+        if (lendingOpen) {
+          actions.appendChild(stakeRewardButton('debt-position-update stake-reward-claim', 'Repayment', 'Record a repayment of ' + reward.name,
+            function () { openLendingSettleDialog(owner.id, reward.id, 'repay'); }));
+        }
+        actions.appendChild(stakeRewardButton('debt-position-update', 'Update', 'Update ' + reward.name,
+          function () { openStakeRewardDialog(owner.id, reward.id); }));
+        if (lendingOpen) {
+          actions.appendChild(stakeRewardButton('debt-position-update lending-writeoff', 'Write off', 'Write off ' + reward.name,
+            function () { openLendingSettleDialog(owner.id, reward.id, 'writeoff'); }));
+        }
+      } else {
+        var fiatEntry = isFiatStakeReward(reward);
+        actions.appendChild(stakeRewardButton('debt-position-update stake-reward-claim', fiatEntry ? 'Mark paid' : 'Claim',
+          (fiatEntry ? 'Mark paid: ' : 'Claim ') + reward.name,
+          function () { openStakeRewardClaimDialog(owner.id, reward.id); }));
+        actions.appendChild(stakeRewardButton('debt-position-update', isStakePledgeEntry(reward) ? 'Update total' : 'Update amount', (isStakePledgeEntry(reward) ? 'Update the total of ' : 'Update the pending amount of ') + reward.name,
+          function () { openStakeRewardDialog(owner.id, reward.id); }));
+      }
       top.appendChild(actions);
       item.appendChild(top);
+      if (lendingEntry) buildLendingCardBody(st, owner, reward, item, mainCur);
       // As of now, like the totals: a future-dated report never shows as current.
       var latest = latestDebtBalanceSnapshot(reward, Date.now());
       var amount = document.createElement('p');
       amount.className = 'debt-position-amount';
-      var pledgeEntry = isStakePledgeEntry(reward);
+      var pledgeEntry = isStakePledgeEntry(reward) && !lendingEntry;
       var text = latest ? formatDebtPositionAmount(latest.amount, reward) + (pledgeEntry ? ' earned' : '') : 'No reported balance';
       var val = latest ? debtPositionValuation(reward, mainCur, livePrices, null, owner) : null;
       var inMain = isCashKind(reward.assetKind) && reward.assetTicker === mainCur;
       if (val && val.known && val.value !== null && latest.amount > 0 && !inMain) text += ' (≈ ' + fmtMoney(val.value, mainCur) + ')';
       amount.textContent = text;
       amount.title = text;
-      item.appendChild(amount);
+      if (!lendingEntry) item.appendChild(amount);
       var reported = document.createElement('p');
       reported.className = 'debt-position-reported';
       reported.textContent = latest ? 'Pending · last reported ' + new Date(latest.reportedAt).toLocaleString() : 'No report recorded';
-      item.appendChild(reported);
+      if (!lendingEntry) item.appendChild(reported);
       // Pledge: what the payer shows, and where the pledge sits (it stays in
       // those accounts' holdings).
       if (pledgeEntry) {
@@ -738,7 +981,7 @@ function buildStakeRewardsSection(st, account, members, host, sheet) {
           : 'Nothing pledged now';
         item.appendChild(sources);
       }
-      if (reward.assetTicker !== String(owner.ticker || '').trim().toUpperCase()) {
+      if (!lendingEntry && reward.assetTicker !== String(owner.ticker || '').trim().toUpperCase()) {
         var paid = document.createElement('p');
         paid.className = 'debt-position-reported';
         paid.textContent = 'Paid in ' + reward.assetTicker + ', not ' + String(owner.ticker || '').toUpperCase();
@@ -768,14 +1011,18 @@ function buildStakeRewardsSection(st, account, members, host, sheet) {
         var snapBody = document.createElement('div');
         snapBody.className = 'debt-snapshot-body';
         var label = document.createElement('strong');
-        label.textContent = formatDebtPositionAmount(snapshot.amount, reward) + (typeof snapshot.total === 'number' ? ' earned' : '');
+        label.textContent = lendingEntry
+          ? formatDebtPositionAmount(snapshot.total, reward) + ' owed'
+          : formatDebtPositionAmount(snapshot.amount, reward) + (typeof snapshot.total === 'number' ? ' earned' : '');
         snapBody.appendChild(label);
         var when = document.createElement('span');
         when.textContent = new Date(snapshot.reportedAt).toLocaleString();
         snapBody.appendChild(when);
         if (typeof snapshot.total === 'number') {
           var split = document.createElement('span');
-          split.textContent = 'Total ' + formatDebtPositionAmount(snapshot.total, reward) + ' · pledged ' + formatDebtPositionAmount(snapshot.pledged, reward);
+          split.textContent = lendingEntry
+            ? 'Lent ' + formatDebtPositionAmount(snapshot.pledged, reward) + ' · interest ' + formatDebtPositionAmount(snapshot.amount, reward)
+            : 'Total ' + formatDebtPositionAmount(snapshot.total, reward) + ' · pledged ' + formatDebtPositionAmount(snapshot.pledged, reward);
           snapBody.appendChild(split);
         }
         if (snapshot.note) {

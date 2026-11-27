@@ -377,7 +377,8 @@ function renderAccountDetail(st, id) {
     var detailGross = currentAccountGrossValue(detailScopeAccounts, rows, allDtrades, main);
     var detailDebt = currentDebtValuation(detailScopeAccounts, main, livePrices);
     var detailRewards = currentStakeRewardValuation(detailScopeAccounts, main, livePrices);
-    debtSummaryForDetail = { gross: detailGross, debt: detailDebt, rewards: detailRewards };
+    var detailLent = currentLentOutValuation(detailScopeAccounts, main, livePrices);
+    debtSummaryForDetail = { gross: detailGross, debt: detailDebt, rewards: detailRewards, lent: detailLent };
   }
   var debtSection = buildDebtPositionsSection(st, acc, members, host, stats, debtSummaryForDetail);
   buildStakeRewardsSection(st, acc, members, host, debtSection);

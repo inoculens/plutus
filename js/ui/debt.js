@@ -509,41 +509,58 @@ function debtPanel(details, key) {
   return details;
 }
 
+// The account's balance sheet: one card holding the net summary (an equation
+// read left to right: Gross assets + Pending income − Liabilities = Net value)
+// and, below it, the Pending income and Debt positions panels that feed it,
+// in the same order as the equation. buildStakeRewardsSection slots its row
+// in above the debt row.
 function buildDebtPositionsSection(st, account, members, host, stats, financial) {
   var scope = [account].concat(members || []);
   var section = document.createElement('section');
-  section.className = 'debt-positions-section';
+  section.className = 'debt-positions-section balance-sheet';
+  section.setAttribute('aria-label', 'Balance sheet');
   var financialRewards = financial && financial.rewards && financial.rewards.hasRewards ? financial.rewards : null;
   if (financial && financial.debt && (financial.debt.hasDebt || financialRewards)) {
     var netSummary = document.createElement('div');
     netSummary.className = 'debt-net-summary' + (financialRewards && financial.debt.hasDebt ? ' debt-net-summary-4' : '');
-    function summaryLine(label, value) {
+    function summaryLine(label, value, role, op) {
       var line = document.createElement('div');
-      line.className = 'debt-net-line';
+      line.className = 'debt-net-line debt-net-' + role;
       var labelEl = document.createElement('span');
-      labelEl.textContent = label;
+      if (op) {
+        var opEl = document.createElement('i');
+        opEl.className = 'debt-net-op';
+        opEl.setAttribute('aria-hidden', 'true');
+        opEl.textContent = op;
+        labelEl.appendChild(opEl);
+      }
+      labelEl.appendChild(document.createTextNode(label));
       var valueEl = document.createElement('strong');
       valueEl.textContent = value;
       valueEl.title = value; // full figure stays reachable when the box truncates it
       line.appendChild(labelEl);
       line.appendChild(valueEl);
       netSummary.appendChild(line);
+      return line;
     }
     var mainCcy = st.settings.mainCurrency;
     var net = reportedBalancesNet(financial.debt, financialRewards);
-    summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, mainCcy) : '—');
+    summaryLine('Gross assets', financial.gross && financial.gross.complete ? fmtMoney(financial.gross.value, mainCcy) : '—', 'gross', '');
     if (financialRewards) {
       var rewardsLoading = !financialRewards.complete && scope.some(stakeRewardPricesLoading);
-      summaryLine('Pending income', financialRewards.complete ? fmtMoney(financialRewards.value, mainCcy) : (rewardsLoading ? PRICE_LOADING_TEXT : '—'));
+      summaryLine('Pending income', financialRewards.complete ? fmtMoney(financialRewards.value, mainCcy) : (rewardsLoading ? PRICE_LOADING_TEXT : '—'), 'income', '+');
     }
     if (financial.debt.hasDebt) {
       var debtLoading = !financial.debt.complete && scope.some(debtPricesLoading);
-      summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, mainCcy) : (debtLoading ? PRICE_LOADING_TEXT : '—'));
+      summaryLine('Liabilities', financial.debt.complete ? fmtMoney(financial.debt.value, mainCcy) : (debtLoading ? PRICE_LOADING_TEXT : '—'), 'debt', '−');
     }
-    summaryLine('Net value', financial.gross && financial.gross.complete && net.complete
-      ? fmtMoney(financial.gross.value + net.value, mainCcy) : '—');
+    var netKnown = financial.gross && financial.gross.complete && net.complete;
+    var netLine = summaryLine('Net value', netKnown ? fmtMoney(financial.gross.value + net.value, mainCcy) : '—', 'net', '=');
+    if (netKnown && financial.gross.value + net.value < 0) netLine.classList.add('is-negative');
     section.appendChild(netSummary);
   }
+  var row = document.createElement('div');
+  row.className = 'balance-sheet-row debt-positions-row';
   var header = document.createElement('div');
   header.className = 'section-head debt-section-head';
   var details = debtPanel(document.createElement('details'), 'positions:' + account.id);
@@ -559,7 +576,6 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   count.textContent = String(totalCount);
   summary.appendChild(count);
   details.appendChild(summary);
-  header.appendChild(details);
   var add = document.createElement('button');
   add.type = 'button';
   add.className = 'ghost';
@@ -567,7 +583,8 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
   add.setAttribute('aria-label', 'Add debt position to ' + account.name);
   add.addEventListener('click', function () { openDebtPositionDialog(account.id, null); });
   header.appendChild(add);
-  section.appendChild(header);
+  row.appendChild(header);
+  section.appendChild(row);
   var body = document.createElement('div');
   body.className = 'debt-position-list';
   var found = false;
@@ -701,7 +718,7 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
     body.appendChild(empty);
   }
   details.appendChild(body);
-  section.appendChild(details);
+  row.appendChild(details);
   if (stats && stats.parentNode === host) host.insertBefore(section, stats.nextSibling);
   else host.appendChild(section);
   return section;

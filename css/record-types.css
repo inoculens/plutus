@@ -73,3 +73,66 @@
   margin-top: 0.5rem;
 }
 .label-edit-row button { min-width: 6rem; }
+.label-edit-row .char-counter { margin-left: auto; align-self: center; }
+
+/* ————— Character counter (capped text fields) —————
+   Fixed 2rem box so typing never shifts the layout; the ring starts small,
+   enlarges near the cap to fit the "characters left" number, amber at the
+   warning zone, red at the cap. */
+.char-counter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+}
+.char-counter-ring {
+  width: 1.25rem;
+  height: 1.25rem;
+  overflow: visible;
+  transition: transform 0.15s var(--ease);
+}
+.char-counter[data-state="warn"] .char-counter-ring,
+.char-counter[data-state="full"] .char-counter-ring { transform: scale(1.6); }
+.char-counter-track { fill: none; stroke: var(--border-strong); stroke-width: 2; }
+.char-counter-bar {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.12s linear, stroke 0.15s;
+}
+.char-counter[data-state="warn"] .char-counter-bar { stroke: var(--amber); }
+.char-counter[data-state="full"] .char-counter-bar { stroke: var(--red); }
+.char-counter-num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  pointer-events: none;
+}
+.char-counter[data-state="full"] .char-counter-num { color: var(--red); }
+.char-counter-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+/* Single-line field with the counter tucked inside its right edge. */
+.char-counted { position: relative; }
+.char-counted > input { padding-right: 2.6rem; }
+.char-counted > .char-counter {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+}

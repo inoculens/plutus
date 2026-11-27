@@ -50,7 +50,7 @@ function startInlineLabelEdit(accId) {
   input.setAttribute('data-label-input', '1');
   input.value = acc.address || '';
   input.setAttribute('aria-label', 'Label for ' + acc.name);
-  input.setAttribute('maxlength', '128');
+  input.setAttribute('maxlength', String(ACCOUNT_LABEL_MAX));
   input.setAttribute('rows', '3');
   input.setAttribute('placeholder', accountKindExample(acc.kind, 'label'));
   input.setAttribute('autocomplete', 'off');
@@ -65,6 +65,8 @@ function startInlineLabelEdit(accId) {
   cancelBtn.textContent = 'Cancel';
   row.appendChild(save);
   row.appendChild(cancelBtn);
+  // Characters left, post-composer style, at the end of the action row.
+  row.appendChild(attachCharCounter(input, ACCOUNT_LABEL_MAX).el);
   block.appendChild(input);
   block.appendChild(row);
   try { input.focus(); input.select(); } catch (e) { /* ignore */ }
@@ -75,7 +77,7 @@ function startInlineLabelEdit(accId) {
     var s2 = loadState();
     var a2 = accountById(s2, accId);
     if (!a2) return;
-    var v = String(input.value === undefined || input.value === null ? '' : input.value).trim().slice(0, 128);
+    var v = String(input.value === undefined || input.value === null ? '' : input.value).trim().slice(0, ACCOUNT_LABEL_MAX);
     if (v) a2.address = v;
     else {
       try {

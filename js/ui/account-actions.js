@@ -41,7 +41,7 @@ function createAccount(name, ticker, kind, extra) {
   if (kd !== 'crypto' && kd !== 'stock' && kd !== 'commodity' && kd !== 'custom' && kd !== 'cash') kd = 'crypto';
   var acc = { id: uid(), name: nm, ticker: tk, kind: kd, createdAt: new Date().toISOString() };
   if (extra && typeof extra === 'object') {
-    if (typeof extra.address === 'string' && extra.address.trim() !== '') acc.address = extra.address.trim().slice(0, 128);
+    if (typeof extra.address === 'string' && extra.address.trim() !== '') acc.address = extra.address.trim().slice(0, ACCOUNT_LABEL_MAX);
     if (typeof extra.note === 'string' && extra.note.trim() !== '') acc.note = extra.note.trim().slice(0, 280);
   }
   st.accounts.push(acc);

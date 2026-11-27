@@ -51,9 +51,12 @@ function buildAccountDialog() {
     '<div id="na-fiatcode-row" hidden><label for="na-fiatcode">Currency code</label>' +
     '<input id="na-fiatcode" autocomplete="off" spellcheck="false" placeholder="Code, e.g. JPY"></div>' +
     '<label for="na-address">Label (optional)</label>' +
-    '<input id="na-address" autocomplete="off" spellcheck="false" placeholder="' + accountKindExample('cash', 'label') + '">' +
+    '<div class="char-counted"><input id="na-address" autocomplete="off" spellcheck="false" maxlength="' + ACCOUNT_LABEL_MAX + '" placeholder="' + accountKindExample('cash', 'label') + '"></div>' +
     dockMarkup('na-error', 'Create account', 'na-create', 'button');
   host.appendChild(wrap);
+  var naAddress = document.getElementById('na-address');
+  var naCounter = attachCharCounter(naAddress, ACCOUNT_LABEL_MAX);
+  naAddress.parentNode.appendChild(naCounter.el);
   function syncAccountKindUI() {
     // Cash is the first option, so it is the default when the dialog opens.
     var kindNow = uiVal('na-kind', 'cash');
@@ -109,6 +112,7 @@ function buildAccountDialog() {
           uiSetVal('na-name', '');
           uiSetVal('na-ticker', '');
           uiSetVal('na-address', '');
+          naCounter.update();
           uiSetVal('na-fiatcode', '');
           closeDialog('account-dialog');
           clearBanner();
@@ -123,6 +127,7 @@ function buildAccountDialog() {
     uiSetVal('na-name', '');
     uiSetVal('na-ticker', '');
     uiSetVal('na-address', '');
+    naCounter.update();
     uiSetVal('na-fiatcode', '');
     closeDialog('account-dialog');
     // Story guidance: first account + no trades yet → continue straight

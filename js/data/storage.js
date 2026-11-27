@@ -109,7 +109,7 @@ function accountFieldIssues(a, accounts) {
     if (typeof a.createdAt !== 'string' || a.createdAt.trim() === '' || !isFinite(Date.parse(a.createdAt))) n++;
   }
   if (a.address !== undefined && a.address !== null) {
-    if (typeof a.address !== 'string' || a.address.trim().length > 128) n++;
+    if (typeof a.address !== 'string' || a.address.trim().length > ACCOUNT_LABEL_MAX) n++;
   }
   if (a.note !== undefined && a.note !== null) {
     if (typeof a.note !== 'string' || a.note.trim().length > 280) n++;

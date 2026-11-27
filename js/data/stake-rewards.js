@@ -20,6 +20,15 @@
 // `total` and the `pledged` sum in force at the time; its `amount` (what
 // every total, card and chart reads) is the earned part, total - pledged,
 // never below 0.
+//
+// Lending (entry.lent === true): money lent out of the owning account (a
+// loan to a person, a locked deposit). It is a pledge entry whose one pledge
+// row is the owning account and whose asset is that account's own: the
+// principal stays in the account's records (it is still yours), `pledged`
+// is the principal outstanding and `amount` the interest earned. Net worth
+// counts it as before; the Available balance leaves the whole outstanding
+// total (principal + interest) out, because it is not under your control
+// until it is repaid. Repayment and write-off live in js/data/lendings.js.
 
 var STAKE_REWARD_KINDS = ['crypto', 'stock', 'commodity', 'custom', 'cash'];
 
@@ -48,6 +57,8 @@ function stakeRewardOwnAssetPending(accounts, ticker, kind, asOf) {
   var entries = [];
   (accounts || []).forEach(function (owner) {
     accountStakeRewards(owner).forEach(function (reward) {
+      // Interest owed on a lending is not in the wallet.
+      if (isStakeLendingEntry(reward)) return;
       if (String(reward.assetTicker || '').toUpperCase() !== t) return;
       if (String(reward.assetKind || '').toLowerCase() !== k) return;
       var snapshot = latestDebtBalanceSnapshot(reward, asOf);
@@ -110,9 +121,31 @@ function isStakePledgeEntry(reward) {
   return !!reward && Array.isArray(reward.pledge);
 }
 
+function isStakeLendingEntry(reward) {
+  return !!reward && reward.lent === true && Array.isArray(reward.pledge);
+}
+
+// A lending is denominated in its owning account's own asset and its pledge
+// can only name that account (0 rows once the principal is repaid).
+function isValidLendingShape(reward, owner) {
+  if (reward.borrower !== undefined && reward.borrower !== null &&
+      (typeof reward.borrower !== 'string' || reward.borrower.trim() === '' || reward.borrower.length > 120)) return false;
+  if (reward.dueDate !== undefined && reward.dueDate !== null && !isValidDateStr(reward.dueDate)) return false;
+  if (reward.lent === undefined || reward.lent === null) {
+    // Borrower and due date belong to lendings only.
+    return (reward.borrower === undefined || reward.borrower === null) && (reward.dueDate === undefined || reward.dueDate === null);
+  }
+  if (reward.lent !== true || !Array.isArray(reward.pledge) || reward.pledge.length > 1) return false;
+  if (!owner) return true;
+  var ownerKind = String(owner.kind || 'crypto').trim().toLowerCase();
+  if (reward.assetKind.trim().toLowerCase() !== ownerKind ||
+      reward.assetTicker.trim().toUpperCase() !== String(owner.ticker || '').trim().toUpperCase()) return false;
+  return reward.pledge.every(function (row) { return !!row && row.accountId === owner.id; });
+}
+
 function isValidStakeReward(reward, owner, accounts) {
   if (!reward || typeof reward !== 'object' || Array.isArray(reward)) return false;
-  var allowed = Object.assign(Object.create(null), { id: true, name: true, assetKind: true, assetTicker: true, createdAt: true, balanceSnapshots: true, notes: true, pledge: true });
+  var allowed = Object.assign(Object.create(null), { id: true, name: true, assetKind: true, assetTicker: true, createdAt: true, balanceSnapshots: true, notes: true, pledge: true, lent: true, borrower: true, dueDate: true });
   if (Object.keys(reward).some(function (key) { return !allowed[key]; })) return false;
   if (!isValidDebtId(reward.id) || typeof reward.name !== 'string' ||
       reward.name.trim() === '' || reward.name.length > 120 ||
@@ -134,7 +167,7 @@ function isValidStakeReward(reward, owner, accounts) {
     if (!isValidStakePledge(reward.pledge, accountList)) return false;
   }
   if (reward.balanceSnapshots.some(function (s) { return (s.total !== undefined && s.total !== null) !== pledgeMode; })) return false;
-  return true;
+  return isValidLendingShape(reward, owner);
 }
 
 function isValidStakeRewards(account, accounts) {
@@ -162,6 +195,11 @@ function normalizeStakeReward(reward) {
   if (typeof reward.notes === 'string' && reward.notes !== '') out.notes = reward.notes;
   if (Array.isArray(reward.pledge)) {
     out.pledge = reward.pledge.map(function (row) { return { accountId: row.accountId, quantity: Number(row.quantity) }; });
+  }
+  if (reward.lent === true) {
+    out.lent = true;
+    if (typeof reward.borrower === 'string') out.borrower = reward.borrower.trim();
+    if (typeof reward.dueDate === 'string') out.dueDate = reward.dueDate;
   }
   return out;
 }

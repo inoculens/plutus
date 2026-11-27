@@ -192,6 +192,27 @@ function currentStakeRewardValuation(accounts, main, prices, asOf) {
   return out;
 }
 
+// What is lent out (lendings, js/data/lendings.js): every open lending's
+// whole outstanding total, principal + interest, in the main currency. Net
+// worth already holds it (principal in the records, interest as pending
+// income); the Available balance leaves it out. `hasLent` mirrors `hasDebt`
+// and counts lendings still owed something.
+function currentLentOutValuation(accounts, main, prices, asOf) {
+  var lentOnly = function (account) {
+    return accountStakeRewards(account).filter(function (entry) { return isStakeLendingEntry(entry); }).map(function (entry) {
+      var parts = lendingParts(entry, asOf);
+      return {
+        assetKind: entry.assetKind,
+        assetTicker: entry.assetTicker,
+        balanceSnapshots: parts.snapshot ? [{ id: 'lent', amount: parts.total, reportedAt: parts.snapshot.reportedAt, enteredAt: parts.snapshot.enteredAt }] : []
+      };
+    }).filter(function (shim) { return shim.balanceSnapshots.length && shim.balanceSnapshots[0].amount > 0; });
+  };
+  var out = currentReportedValuation(accounts, lentOnly, main, prices, asOf);
+  out.hasLent = out.hasDebt;
+  return out;
+}
+
 // Net reported balances of a scope for a total: rewards minus debt, or null
 // when any of them has no known value yet. `has` is false when the scope
 // owns neither, so the caller's own total stands as it is.

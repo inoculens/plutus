@@ -80,8 +80,9 @@
   line-height: 1.5;
   color: var(--text);
 }
-/* Twice the block's row gap between the label text and this caption. */
-.detail-meta-block > * + .detail-meta[data-label="Description"] { margin-top: 0.2rem; }
+/* 12px (0.75rem) between the label text and this caption: the block's
+   0.2rem row gap plus this margin. */
+.detail-meta-block > * + .detail-meta[data-label="Description"] { margin-top: 0.55rem; }
 .detail-meta-more {
   align-self: flex-start;
   min-height: 0;

@@ -13,7 +13,7 @@ function txidDupRow(st, t, isThis) {
   try { type = tradeTypeMeta(tradeUiType(t) || t.type).label; } catch (e) { type = String(t.type || ''); }
   var qty = '';
   try {
-    if (t.qty !== undefined && t.qty !== null && String(t.qty).trim() !== '') qty = fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase();
+    if (t.qty !== undefined && t.qty !== null && String(t.qty).trim() !== '' && isFinite(Number(t.qty)) && Number(t.qty) > 0) qty = fmtQty(t.qty, t.symbol) + ' ' + String(t.symbol || '').toUpperCase();
   } catch (e) { qty = ''; }
   var li = document.createElement('li');
   var dot = document.createElement('span');
@@ -57,6 +57,17 @@ function txidDupFill(o) {
   lead.textContent = o.lead;
   ul.innerHTML = '';
   o.rows.forEach(function (li) { ul.appendChild(li); });
+  // Five rows fit; a sixth turns on the list's own scroll (css/dialogs.css).
+  ul.classList.toggle('is-scrolling', o.rows.length > 5);
+  ul.scrollTop = 0;
+  // The bottom edge fades while more rows wait below the fifth.
+  ul.classList.toggle('has-more', o.rows.length > 5);
+  if (!ul.getAttribute('data-wired')) {
+    ul.setAttribute('data-wired', '1');
+    ul.addEventListener('scroll', function () {
+      ul.classList.toggle('has-more', ul.scrollTop + ul.clientHeight < ul.scrollHeight - 2);
+    });
+  }
   hint.textContent = o.hint;
   cancel.textContent = o.cancel;
   btn.textContent = o.action;
@@ -104,8 +115,11 @@ function txidDupHashLine(pairs) {
 // Save-time question. Resolves true for Save anyway.
 function txidDupConfirm(st, hits) {
   if (txidDupPromptSettle) txidDupSettlePrompt(false);
+  // The record being saved leads the list, tagged "this record" (a swap
+  // shows each colliding leg); the saved records follow.
   var rows = [];
   var seen = {};
+  hits.forEach(function (h) { if (h.draft) rows.push(txidDupRow(st, h.draft, true)); });
   hits.forEach(function (h) {
     h.matches.forEach(function (t) {
       var u = txidDupUnit(t);
@@ -117,9 +131,9 @@ function txidDupConfirm(st, hits) {
   txidDupMode = 'prompt';
   var ok = txidDupFill({
     hash: txidDupHashLine(hits.map(function (h) { return { symbol: h.symbol, txid: h.matches[0].txid }; })),
-    lead: 'Already saved on:',
+    lead: 'Same transaction ID on:',
     rows: rows,
-    hint: 'Save anyway only if one transaction is split into several records.',
+    hint: 'Save anyway only if you\'re sure this is what you want to do.',
     cancel: 'Cancel',
     action: 'Save anyway'
   });
@@ -226,7 +240,11 @@ function openTxDupDialog(tradeId) {
   var shown = {};
   var self = null;
   s.records.forEach(function (t) { if (t.id === tradeId) self = t; });
-  s.records.forEach(function (t) {
+  // The opened record leads the list (with its "this record" tag); a swap's
+  // other leg never repeats it.
+  var ordered = s.records.filter(function (t) { return t.id === tradeId; })
+    .concat(s.records.filter(function (t) { return t.id !== tradeId; }));
+  ordered.forEach(function (t) {
     var u = txidDupUnit(t);
     if (shown[u]) return;
     shown[u] = true;

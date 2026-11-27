@@ -165,22 +165,37 @@ details.opt + details.opt { margin-top: 0.65rem; }
   text-overflow: ellipsis;
 }
 #txdup-message { margin: 1rem 0 0; font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+/* Rows have a fixed height so the list shows exactly five; from the sixth
+   on it scrolls inside its own box (the dialog itself stays put). */
+#txdup-dialog {
+  --txdup-row: calc(3.55rem + 2px);
+  --txdup-gap: 0.45rem;
+}
 #txdup-list {
   list-style: none;
   margin: 0.5rem 0 0;
   padding: 0;
   display: grid;
-  gap: 0.45rem;
-  max-height: 40vh;
+  gap: var(--txdup-gap);
+  max-height: calc(5 * var(--txdup-row) + 4 * var(--txdup-gap));
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#txdup-list.is-scrolling { padding-right: 0.35rem; scrollbar-width: thin; }
+#txdup-list.has-more {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.75rem), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.75rem), transparent);
 }
 #txdup-list li {
+  box-sizing: border-box;
+  height: var(--txdup-row);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: 1.25rem 1.05rem;
   align-items: center;
   column-gap: 0.6rem;
   row-gap: 0.15rem;
-  padding: 0.6rem 0.8rem;
+  padding: 0.55rem 0.8rem;
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -193,6 +208,7 @@ details.opt + details.opt { margin-top: 0.65rem; }
   background: var(--dot, var(--muted));
 }
 #txdup-list .txdup-acc {
+  line-height: 1.25rem;
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
@@ -201,6 +217,7 @@ details.opt + details.opt { margin-top: 0.65rem; }
 }
 #txdup-list .txdup-meta {
   grid-column: 2 / span 2;
+  line-height: 1.05rem;
   font-size: 0.8rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -209,6 +226,7 @@ details.opt + details.opt { margin-top: 0.65rem; }
   text-overflow: ellipsis;
 }
 #txdup-list .txdup-this {
+  line-height: 1.2;
   font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.04em;

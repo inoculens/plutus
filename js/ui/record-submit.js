@@ -313,11 +313,11 @@ function onTradeSubmit(ev) {
     if (dupPair) dupExclude = [dupPair.sell.id, dupPair.buy.id];
     var dupFrom = accountById(st0, uiVal('t-account', '')) || (dupPair ? accountById(st0, dupPair.sell.accountId) : null) || acc;
     var dupTo = accountById(st0, uiVal('t-toaccount', ''));
-    dupDrafts.push({ symbol: dupFrom.ticker, txid: txid, accountId: dupFrom.id, prevId: dupPair ? dupPair.sell.id : null });
-    if (dupTo) dupDrafts.push({ symbol: dupTo.ticker, txid: txidTo, accountId: dupTo.id, prevId: dupPair ? dupPair.buy.id : null });
+    dupDrafts.push({ symbol: dupFrom.ticker, txid: txid, accountId: dupFrom.id, prevId: dupPair ? dupPair.sell.id : null, type: 'sell', swapId: 'draft', date: date, qty: uiVal('t-qty', '').trim() });
+    if (dupTo) dupDrafts.push({ symbol: dupTo.ticker, txid: txidTo, accountId: dupTo.id, prevId: dupPair ? dupPair.buy.id : null, type: 'buy', swapId: 'draft', date: date, qty: uiVal('t-toqty', '').trim() });
   } else {
     if (isEditing) dupExclude = [editingTradeId];
-    dupDrafts.push({ symbol: symbol, txid: txid, accountId: accountId, prevId: isEditing ? editingTradeId : null });
+    dupDrafts.push({ symbol: symbol, txid: txid, accountId: accountId, prevId: isEditing ? editingTradeId : null, type: side, date: date, qty: uiVal('t-qty', '').trim() });
   }
   var txDup = txidDupGate(st0, dupDrafts, dupExclude, function () { onTradeSubmit(null); });
   if (txDup.prompt) return;

@@ -31,7 +31,36 @@ function startInlineRename(accId, headEl, nameEl) {
   input.addEventListener('blur', commit);
 }
 
+// Label (stored as `address`): capped, with a characters-left counter.
 function startInlineLabelEdit(accId) {
+  startInlineMetaEdit(accId, {
+    field: 'address',
+    rowLabel: 'Label',
+    max: ACCOUNT_LABEL_MAX,
+    rows: 3,
+    inputAttr: 'data-label-input',
+    ariaPrefix: 'Label for ',
+    placeholder: function (acc) { return accountKindExample(acc.kind, 'label'); }
+  });
+}
+
+// Description: uncapped free text about the account.
+function startInlineDescriptionEdit(accId) {
+  startInlineMetaEdit(accId, {
+    field: 'description',
+    rowLabel: 'Description',
+    max: 0,
+    rows: 6,
+    inputAttr: 'data-description-input',
+    ariaPrefix: 'Description for ',
+    placeholder: function () { return 'Anything worth knowing about this account: what it is for, where it is held, who manages it…'; }
+  });
+}
+
+// Edits one free-text account field in place of its row in the header's
+// meta block (other rows stay visible). cfg.max > 0 caps the text and shows
+// the counter; 0 means no cap.
+function startInlineMetaEdit(accId, cfg) {
   var st = loadState();
   var acc = accountById(st, accId);
   if (!acc) return;
@@ -44,15 +73,17 @@ function startInlineLabelEdit(accId) {
     block.className = 'detail-meta-block';
     headEl.appendChild(block);
   }
-  if (!block || block.querySelector('[data-label-input]')) return;
-  block.innerHTML = '';
+  if (!block || block.querySelector('[data-meta-editor]')) return;
+  var editor = document.createElement('div');
+  editor.className = 'meta-editor';
+  editor.setAttribute('data-meta-editor', cfg.field);
   var input = document.createElement('textarea');
-  input.setAttribute('data-label-input', '1');
-  input.value = acc.address || '';
-  input.setAttribute('aria-label', 'Label for ' + acc.name);
-  input.setAttribute('maxlength', '128');
-  input.setAttribute('rows', '3');
-  input.setAttribute('placeholder', accountKindExample(acc.kind, 'label'));
+  input.setAttribute(cfg.inputAttr, '1');
+  input.value = typeof acc[cfg.field] === 'string' ? acc[cfg.field] : '';
+  input.setAttribute('aria-label', cfg.ariaPrefix + acc.name);
+  if (cfg.max > 0) input.setAttribute('maxlength', String(cfg.max));
+  input.setAttribute('rows', String(cfg.rows));
+  input.setAttribute('placeholder', cfg.placeholder(acc));
   input.setAttribute('autocomplete', 'off');
   var row = document.createElement('div');
   row.className = 'label-edit-row';
@@ -65,8 +96,19 @@ function startInlineLabelEdit(accId) {
   cancelBtn.textContent = 'Cancel';
   row.appendChild(save);
   row.appendChild(cancelBtn);
-  block.appendChild(input);
-  block.appendChild(row);
+  // Characters left, post-composer style, at the end of the action row.
+  if (cfg.max > 0) row.appendChild(attachCharCounter(input, cfg.max).el);
+  editor.appendChild(input);
+  editor.appendChild(row);
+  // Take the field's own row; a new field sits in display order
+  // (Label, Description, Note).
+  var own = block.querySelector('.detail-meta[data-label="' + cfg.rowLabel + '"]');
+  if (own) block.replaceChild(editor, own);
+  else {
+    var next = cfg.field === 'address' ? block.firstChild
+      : block.querySelector('.detail-meta[data-label="Note"]');
+    block.insertBefore(editor, next || null);
+  }
   try { input.focus(); input.select(); } catch (e) { /* ignore */ }
   var done = false;
   function commit() {
@@ -75,13 +117,14 @@ function startInlineLabelEdit(accId) {
     var s2 = loadState();
     var a2 = accountById(s2, accId);
     if (!a2) return;
-    var v = String(input.value === undefined || input.value === null ? '' : input.value).trim().slice(0, 128);
-    if (v) a2.address = v;
+    var v = String(input.value === undefined || input.value === null ? '' : input.value).trim();
+    if (cfg.max > 0) v = v.slice(0, cfg.max);
+    if (v) a2[cfg.field] = v;
     else {
       try {
-        delete a2.address;
+        delete a2[cfg.field];
       } catch (e) {
-        a2.address = undefined;
+        a2[cfg.field] = undefined;
       }
     }
     if (!saveStateGuarded(s2)) { done = false; return; }
@@ -98,7 +141,7 @@ function startInlineLabelEdit(accId) {
   cancelBtn.addEventListener('mousedown', function (e) { if (e && e.preventDefault) e.preventDefault(); });
   cancelBtn.addEventListener('click', cancelFn);
   input.addEventListener('keydown', function (e) {
-    // Plain Enter inserts a newline (multi-line label); Ctrl/Cmd+Enter saves.
+    // Plain Enter inserts a newline (multi-line text); Ctrl/Cmd+Enter saves.
     if ((e.key === 'Enter') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(); }
     else if (e.key === 'Escape') cancelFn();
   });

@@ -3,6 +3,8 @@
 // labels), account groups (main + sub-accounts) and lookup helpers.
 
 var ACCOUNT_ID_MAX_LENGTH = 128;
+// Account label (stored as `address`): free text, capped.
+var ACCOUNT_LABEL_MAX = 128;
 
 // Account ids: 1-128 chars of [A-Za-z0-9._:-] (uid() emits 't' + base36),
 // never a name that already exists on Object.prototype ("__proto__",
@@ -45,8 +47,10 @@ function normalizeAccount(a, accountList) {
       ? a.createdAt
       : new Date().toISOString()
   };
-  if (a && typeof a.address === 'string' && a.address.trim() !== '') out.address = a.address.trim().slice(0, 128);
+  if (a && typeof a.address === 'string' && a.address.trim() !== '') out.address = a.address.trim().slice(0, ACCOUNT_LABEL_MAX);
   if (a && typeof a.note === 'string' && a.note.trim() !== '') out.note = a.note.trim().slice(0, 280);
+  // Description: free text with no length cap (details about the account).
+  if (a && typeof a.description === 'string' && a.description.trim() !== '') out.description = a.description.trim();
   if (a && isValidHexColor(a.color)) out.color = String(a.color).trim().toUpperCase();
   // Own ledger chart (bookkeeping): absent means "use the global default".
   // Invalid maps are dropped to the default rather than breaking the account.

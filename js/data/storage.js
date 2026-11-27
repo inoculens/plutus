@@ -109,11 +109,12 @@ function accountFieldIssues(a, accounts) {
     if (typeof a.createdAt !== 'string' || a.createdAt.trim() === '' || !isFinite(Date.parse(a.createdAt))) n++;
   }
   if (a.address !== undefined && a.address !== null) {
-    if (typeof a.address !== 'string' || a.address.trim().length > 128) n++;
+    if (typeof a.address !== 'string' || a.address.trim().length > ACCOUNT_LABEL_MAX) n++;
   }
   if (a.note !== undefined && a.note !== null) {
     if (typeof a.note !== 'string' || a.note.trim().length > 280) n++;
   }
+  if (a.description !== undefined && a.description !== null && typeof a.description !== 'string') n++;
   if (fieldPresent(a.color) && !isValidHexColor(a.color)) n++;
   if (a.ledgers !== undefined && a.ledgers !== null && !ledgerMapIsClean(a.ledgers)) n++;
   if (fieldPresent(a.groupId) && (typeof a.groupId !== 'string' || a.groupId === a.id)) n++;

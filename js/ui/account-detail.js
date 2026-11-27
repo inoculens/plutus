@@ -179,6 +179,7 @@ function renderAccountDetail(st, id) {
   }
   menuBtn('Rename', 'Rename', function () { startInlineRename(acc.id, head, nameEl); });
   menuBtn('Edit label', 'Edit label for', function () { startInlineLabelEdit(acc.id); });
+  menuBtn('Edit description', 'Edit description for', function () { startInlineDescriptionEdit(acc.id); });
   // Flat groups: mains and standalone accounts gain subs; members never do.
   if (!mainOf) menuBtn('Create sub-account', 'Create sub-account in', function () { createSubAccount(acc.id); });
   if (members.length) menuBtn('Ungroup', 'Ungroup', function () { ungroupMain(acc.id); });
@@ -188,6 +189,7 @@ function renderAccountDetail(st, id) {
   host.appendChild(head);
   // Optional free-text label entered at creation (wallet, note, anything) —
   // shown inside the header box with popup-on-overflow like trade notes.
+  // The uncapped description follows it, clamped with a "Show more" popup.
   var metaBlock = null;
   function addMeta(label, text, title) {
     if (!metaBlock) {
@@ -198,6 +200,7 @@ function renderAccountDetail(st, id) {
     metaBlock.appendChild(detailMetaRow(label, text, title));
   }
   if (acc.address) addMeta('Label', acc.address, 'Label');
+  if (acc.description) addMeta('Description', acc.description, 'Description');
   if (acc.note) addMeta('Note', acc.note, 'Account note');
   var stats = document.createElement('div');
   stats.className = 'cards detail-stats';

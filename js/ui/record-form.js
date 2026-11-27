@@ -67,7 +67,7 @@ function buildTradeForm() {
     '<input id="t-fee" autocomplete="off" inputmode="decimal" placeholder="e.g. 0">' +
     '</div>' +
     '<label for="t-note">Note (optional)</label>' +
-    '<input id="t-note" autocomplete="off" placeholder="e.g. monthly savings">' +
+    '<textarea id="t-note" rows="3" autocomplete="off" placeholder="e.g. monthly savings"></textarea>' +
     '<div id="t-txid-row"><label for="t-txid" id="t-txid-label">Transaction ID (optional)' + infoPill('Optional — saved with the record; BTC hashes link to mempool.space, other assets get a copy button.', 't-txid-hint') + '</label>' +
     '<input id="t-txid" autocomplete="off" spellcheck="false" placeholder="e.g. paste the tx hash"></div>' +
     '<div id="t-txid-to-row" hidden><label for="t-txid-to" id="t-txid-to-label">Received TX ID</label>' +

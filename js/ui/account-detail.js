@@ -252,7 +252,40 @@ function renderAccountDetail(st, id) {
   if (pos) {
     try { var qtyScopeIds = [acc.id]; members.forEach(function (m) { qtyScopeIds.push(m.id); }); qtyExactTxt = exactQtyHeldString(dtrades, qtyScopeIds, pos.symbol); } catch (eQ) { qtyExactTxt = null; }
   }
-  stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyDisplayTrim(qtyExactTxt, pos.symbol) : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
+  // Pending income in the account's own asset (unclaimed ADA on an ADA
+  // wallet) belongs to the address total, as explorers show it: Quantity and
+  // Value include it. P&L does not: it has no cost and is not income until
+  // it is claimed.
+  var ownSym = String((pos && pos.symbol) || acc.ticker || '').toUpperCase();
+  var ownAsOf = historicalEnd ? Date.parse(dateFilter.to + 'T23:59:59.999') : Date.now();
+  var ownPending = (!isCashAccD && ownSym)
+    ? stakeRewardOwnAssetPending([acc].concat(members), ownSym, acc.kind || 'crypto', ownAsOf)
+    : { scaled: 0n, amount: 0, entries: [] };
+  var hasOwnPending = ownPending.scaled > 0n;
+  var qtyLabel = hasOwnPending ? 'Total quantity' : 'Quantity';
+  if (hasOwnPending) {
+    var ownDec = qtyDecimals(ownSym);
+    var heldSc = qtyExactTxt !== null && qtyExactTxt !== undefined ? exactScaledOf(qtyExactTxt, ownDec)
+      : exactScaledOf(pos ? pos.qtyHeld : 0, ownDec);
+    var totalSc = (heldSc === null ? 0n : heldSc) + ownPending.scaled;
+    var totalTxt = exactToStringFixed(totalSc, ownDec);
+    stats.appendChild(statCard(qtyLabel, qtyDisplayTrim(totalTxt, ownSym) + ' ' + ownSym, Number(totalTxt)));
+  } else {
+    stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyDisplayTrim(qtyExactTxt, pos.symbol) : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
+  }
+  if (hasOwnPending) {
+    var ownValueKnown = true;
+    var ownValue = 0;
+    ownPending.entries.forEach(function (entry) {
+      var v = debtPositionValuation(entry.reward, main, detailPrices, ownAsOf, entry.owner);
+      if (!v.known || v.value === null) ownValueKnown = false;
+      else ownValue += v.value;
+    });
+    // A held position with an unknown price stays unknown; pending alone
+    // (nothing held yet) still has a value of its own.
+    if (ownValueKnown && (mvKnown || !pos || !(pos.qtyHeld > 0))) { mv += ownValue; mvKnown = true; }
+    else if (!ownValueKnown) mvKnown = false;
+  }
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
   var tickSym = acc && acc.ticker ? String(acc.ticker).toUpperCase() : '';

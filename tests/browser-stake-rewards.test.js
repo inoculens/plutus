@@ -168,6 +168,10 @@ const state = JSON.stringify({
   assert.deepEqual(pledgeOut.pledge, [{ accountId: 'eth', quantity: 2 }]);
   assert.deepEqual(pledgeOut.snap, [0.03, 2.03, 2], 'only the growth is pending');
   assert.equal(pledgeOut.held, 10.25, 'the pledged ETH stays in the holdings, no record moved it');
+  // The account view counts pending ETH (0.5 rewards + 0.03 Aave growth) in
+  // the account total, like an explorer; the CRV entry is another asset.
+  const qtyCard = await page.$eval('.detail-stats .card[data-label="Total quantity"] .card-value', el => el.textContent);
+  assert.equal(qtyCard, '10.78 ETH', 'held 10.25 + 0.5 + 0.03 pending');
   assert.ok(/0\.03 ETH earned/.test(pledgeOut.cards) && /Payer shows 2\.03 ETH · 2 ETH pledged/.test(pledgeOut.cards), pledgeOut.cards);
 
   assert.deepEqual(errors, [], 'no page errors');

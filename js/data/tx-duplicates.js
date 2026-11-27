@@ -106,7 +106,8 @@ function txidDupStatus(st, tradeId) {
 // the stored record the draft replaces (edits). Drafts whose key did not
 // change on an edit are not checked again (their status shows on the card).
 // excludeIds: records being replaced by this save (never matched).
-// Returns [{ key, symbol, matches: [trade, ...] }] for drafts that collide.
+// Returns [{ key, symbol, matches: [trade, ...], draft }] for drafts that
+// collide (draft: the form's own record, shown as "this record").
 function txidDupMatches(st, drafts, excludeIds) {
   var kinds = txidDupKindMap(st);
   var trades = (st && Array.isArray(st.trades)) ? st.trades : [];
@@ -125,7 +126,7 @@ function txidDupMatches(st, drafts, excludeIds) {
     var matches = trades.filter(function (t) { return t && !skip[t.id] && txidDupKeyOfTrade(t, kinds) === k; });
     if (!matches.length) return;
     seen[k] = true;
-    out.push({ key: k, symbol: String(d.symbol).trim().toUpperCase(), matches: matches });
+    out.push({ key: k, symbol: String(d.symbol).trim().toUpperCase(), matches: matches, draft: d });
   });
   return out;
 }

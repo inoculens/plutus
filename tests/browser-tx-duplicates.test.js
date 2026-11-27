@@ -119,28 +119,57 @@ const state = JSON.stringify({
   const count = () => page.evaluate(() => loadState().trades.length);
   const n0 = await count();
   await addBuy('ada2', '  ' + H1 + ' ');
-  await page.waitForSelector('#confirm-dialog[open]');
-  const msg = await page.textContent('#confirm-message');
-  assert.ok(/ADA transaction ID is already on 2 records/.test(msg), msg);
+  await page.waitForSelector('#txdup-dialog[open]');
+  const rows = await page.$$eval('#txdup-list li .txdup-acc', els => els.map(e => e.textContent));
+  assert.deepEqual(rows, ['ADA cold', 'ADA hot', 'ADA cold'], 'the record being saved leads, then both saved accounts');
+  assert.equal(await page.$$eval('#txdup-list li', lis => lis.map(li => !!li.querySelector('.txdup-this')).join()), 'true,false,false',
+    'the record being saved carries the "this record" tag');
+  assert.equal(await page.textContent('#txdup-toggle'), 'Save anyway');
+  assert.equal(await page.textContent('#txdup-hint'), "Save anyway only if you're sure this is what you want to do.");
+  assert.ok((await page.textContent('#txdup-hash')).indexOf('ADA') === 0);
   await shot('3-save-anyway');
-  await page.click('#confirm-cancel');
-  await page.waitForFunction(() => !document.getElementById('confirm-dialog').open);
+  await page.click('#txdup-cancel');
+  await page.waitForFunction(() => !document.getElementById('txdup-dialog').open);
   await page.waitForTimeout(300); // the dialog's own close event settles first (as it does for a person)
   assert.equal(await count(), n0, 'Cancel saves nothing');
   assert.equal(await page.evaluate(() => document.getElementById('trade-dialog').open), true, 'the form stays open to fix the hash');
   await page.evaluate(() => document.getElementById('t-submit').click());
-  await page.waitForSelector('#confirm-dialog[open]');
-  await page.click('#confirm-ok');
+  await page.waitForSelector('#txdup-dialog[open]');
+  await page.click('#txdup-toggle');
   await page.waitForFunction((n) => !tradeSubmitBusy && loadState().trades.length === n + 1, n0, { timeout: 20000 });
   assert.equal(await page.evaluate((h) => loadState().trades.filter(t => String(t.txid).toLowerCase() === h && t.symbol === 'ADA').every(t => t.txidDupOk === true), H1), true,
     'Save anyway marks the whole group');
   assert.equal(byId(await cards('ada2')).a2.pill, false, 'confirmed group stays quiet');
 
+  // --- Five rows fit, the sixth scrolls inside the list ---
+  const listBox = () => page.$eval('#txdup-list', ul => ({ rows: ul.children.length, scrolls: ul.scrollHeight > ul.clientHeight + 1, more: ul.classList.contains('has-more'), cut: ul.children.length ? ul.children[ul.children.length - 1].getBoundingClientRect().bottom > ul.getBoundingClientRect().bottom + 1 : false }));
+  async function promptRows(extra) {
+    await page.evaluate(({ h, extra }) => {
+      const s = loadState();
+      s.trades = s.trades.filter(t => !(t.id || '').startsWith('x'));
+      for (let i = 0; i < extra; i++) s.trades.push({ id: 'x' + i, type: 'buy', symbol: 'ADA', qty: 1, total: 1, currency: 'EUR', date: '2025-01-2' + i, fee: 0, feeCurrency: 'EUR', note: '', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false }, accountId: 'ada1', txid: h, createdAt: '2025-01-01T00:00:00.000Z' });
+      saveState(s);
+    }, { h: H1, extra });
+    await addBuy('ada2', H1);
+    await page.waitForSelector('#txdup-dialog[open]');
+    const box = await listBox();
+    await page.click('#txdup-cancel');
+    await page.waitForFunction(() => !document.getElementById('txdup-dialog').open);
+    await page.waitForTimeout(300);
+    await page.evaluate(() => closeDialog('trade-dialog'));
+    return box;
+  }
+  let box = await promptRows(1); // this record + a1, a2, the Save-anyway buy, x0 = 5
+  assert.deepEqual([box.rows, box.scrolls, box.cut, box.more], [5, false, false, false], 'five rows: no scrolling, no fade');
+  box = await promptRows(2); // 6 rows
+  assert.deepEqual([box.rows, box.scrolls, box.more], [6, true, true], 'six rows: the list scrolls inside its box, bottom edge fades');
+  await page.evaluate(() => { const s = loadState(); s.trades = s.trades.filter(t => !(t.id || '').startsWith('x')); saveState(s); });
+
   // --- Unique hash and other assets save without a question ---
   const n1 = await count();
   await addBuy('btc', 'cafebabe');
   await page.waitForFunction((n) => !tradeSubmitBusy && loadState().trades.length === n + 1, n1, { timeout: 20000 });
-  assert.equal(await page.evaluate(() => document.getElementById('confirm-dialog').open), false);
+  assert.equal(await page.evaluate(() => document.getElementById('txdup-dialog').open), false);
 
   // --- Phone layout: the pill sits in the head without breaking it ---
   await page.evaluate(() => { const s = loadState(); s.trades.forEach(t => { delete t.txidDupOk; }); saveState(s); });

@@ -177,4 +177,18 @@ assert.equal(ethLost.snapshot.pledged, 0.5);
 assert.equal(ethLost.snapshot.total, 0.5);
 assert.equal(C.validateTrade(ethLost.trade, 1e18), null);
 
+// --- Principal out of the account's own asset (what the account view takes off) ---
+const outEur = C.lendingPrincipalOut([eur], 'EUR', 'cash', at);
+assert.equal(outEur.amount, 1000, 'principal only: interest owed was never in the account');
+assert.equal(outEur.entries.length, 1);
+assert.equal(C.lendingPrincipalOut([eur], 'EUR', 'cash', Date.parse('2026-10-01T00:00:00.000Z')).amount, 0, 'nothing out before the first report');
+assert.equal(C.lendingPrincipalOut([eur], 'USD', 'cash', at).amount, 0, 'another asset is untouched');
+assert.equal(C.lendingPrincipalOut([ethAcc], 'ETH', 'crypto', at).amount, 1);
+const cashShown = C.cashAvailableAfterLending({ native: 5000, main: 5000, ticker: 'EUR' }, [eur], eur, at);
+assert.equal(cashShown.native, 4000, 'the bank shows 5,000 - 1,000 lent');
+assert.equal(cashShown.main, 4000);
+assert.equal(cashShown.lent, 1000);
+const usdShown = C.cashAvailableAfterLending({ native: 2000, main: 1800, ticker: 'USD' }, [usd, ], usd, at);
+assert.equal(usdShown.native, 2000, 'no lending on this account: unchanged');
+
 console.log('lendings: ok');

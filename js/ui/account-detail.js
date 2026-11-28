@@ -265,16 +265,33 @@ function renderAccountDetail(st, id) {
     ? stakeRewardOwnAssetPending([acc].concat(members), ownSym, acc.kind || 'crypto', ownAsOf)
     : { scaled: 0n, amount: 0, entries: [] };
   var hasOwnPending = ownPending.scaled > 0n;
+  // Money lent out (lendings) is still in the records but not in the wallet:
+  // Quantity and Value show what is actually there, like the explorer and
+  // the home card. P&L keeps the full records (the lent amount keeps its
+  // cost). The balance sheet below shows the lent part.
+  var ownLent = (!isCashAccD && ownSym)
+    ? lendingPrincipalOut([acc].concat(members), ownSym, acc.kind || 'crypto', ownAsOf)
+    : { scaled: 0n, amount: 0, entries: [] };
+  var hasOwnLent = ownLent.scaled > 0n;
   var qtyLabel = hasOwnPending ? 'Total quantity' : 'Quantity';
-  if (hasOwnPending) {
+  if (hasOwnPending || hasOwnLent) {
     var ownDec = qtyDecimals(ownSym);
     var heldSc = qtyExactTxt !== null && qtyExactTxt !== undefined ? exactScaledOf(qtyExactTxt, ownDec)
       : exactScaledOf(pos ? pos.qtyHeld : 0, ownDec);
-    var totalSc = (heldSc === null ? 0n : heldSc) + ownPending.scaled;
+    var totalSc = (heldSc === null ? 0n : heldSc) + ownPending.scaled - ownLent.scaled;
     var totalTxt = exactToStringFixed(totalSc, ownDec);
-    stats.appendChild(statCard(qtyLabel, qtyDisplayTrim(totalTxt, ownSym) + ' ' + ownSym, Number(totalTxt)));
+    var qtyCard = statCard(qtyLabel, qtyDisplayTrim(totalTxt, ownSym) + ' ' + ownSym, Number(totalTxt));
+    if (hasOwnLent) qtyCard.title = qtyDisplayTrim(exactToStringFixed(ownLent.scaled, ownDec), ownSym) + ' ' + ownSym + ' lent out (still yours; see the balance sheet)';
+    stats.appendChild(qtyCard);
   } else {
     stats.appendChild(statCard('Quantity', pos ? ((qtyExactTxt !== null && qtyExactTxt !== undefined ? qtyDisplayTrim(qtyExactTxt, pos.symbol) : fmtQty(pos.qtyHeld, pos.symbol)) + ' ' + String(pos.symbol || '').toUpperCase()) : '—', pos ? pos.qtyHeld : null));
+  }
+  // Value: + own-asset pending, - principal lent out, each at its own
+  // valuation; any unknown leaves the Value unknown, never a guess.
+  function ownShimValue(amount, owner, asOf) {
+    var shim = { assetKind: String(acc.kind || 'crypto').toLowerCase(), assetTicker: ownSym,
+      balanceSnapshots: [{ id: 'v', amount: amount, reportedAt: new Date(0).toISOString(), enteredAt: new Date(0).toISOString() }] };
+    return debtPositionValuation(shim, main, detailPrices, asOf, owner);
   }
   if (hasOwnPending) {
     var ownValueKnown = true;
@@ -288,6 +305,11 @@ function renderAccountDetail(st, id) {
     // (nothing held yet) still has a value of its own.
     if (ownValueKnown && (mvKnown || !pos || !(pos.qtyHeld > 0))) { mv += ownValue; mvKnown = true; }
     else if (!ownValueKnown) mvKnown = false;
+  }
+  if (hasOwnLent && mvKnown) {
+    var lentValue = ownShimValue(ownLent.amount, acc, ownAsOf);
+    if (!lentValue.known || lentValue.value === null) mvKnown = false;
+    else mv -= lentValue.value;
   }
   // Full grid even with no records yet: unknowns show —, and the live price
   // resolves from the ticker alone so a fresh account already quotes.
@@ -345,6 +367,11 @@ function renderAccountDetail(st, id) {
         } catch (e) { ckind = ''; }
         try { cb = cashBalance(dtrades, cid, main, isCashKind(ckind)); } catch (e) { cb = null; }
         if (!cb) return;
+        // What the bank shows: money lent out of this member is not in it.
+        try {
+          var lentShown = cashAvailableAfterLending(cb, [accountById(st, cid)], accountById(st, cid), ownAsOf);
+          cb = { native: lentShown.native, main: lentShown.main === null ? NaN : lentShown.main, ticker: cb.ticker };
+        } catch (eL) { /* keep the records' balance */ }
         if (isFinite(Number(cb.main))) { gValue += Number(cb.main); gHas = true; }
         gNative += Number(cb.native) || 0;
         var ca = null;
@@ -357,7 +384,7 @@ function renderAccountDetail(st, id) {
       stats.classList.add('cards-duo');
       host.appendChild(stats);
     } else {
-      buildCashDetailStats(st, acc, dtrades, main, stats, host, mainOf ? { skipLedgers: true } : null);
+      buildCashDetailStats(st, acc, dtrades, main, stats, host, { skipLedgers: !!mainOf, asOf: ownAsOf });
     }
   } else {
     host.appendChild(stats);

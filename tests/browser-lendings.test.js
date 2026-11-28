@@ -69,6 +69,9 @@ const state = JSON.stringify({
   assert.ok(lines.some(t => /Lent out/.test(t) && /1,050\.00/.test(t)), lines.join());
   assert.ok(lines.some(t => /Available/.test(t) && /4,000\.00/.test(t)), lines.join());
   assert.equal((await stored()).trades.length, 1, 'lending writes no record');
+  const card = (label) => page.$eval('.detail-stats .card[data-label="' + label + '"] .card-value', el => el.textContent);
+  assert.match(await card('Balance'), /^4,000(\.00)? EUR$/, 'the Balance card shows what is in the bank: 5,000 - 1,000 lent');
+  assert.match(await card('Value'), /4,000\.00/);
 
   // Partial repayment: 50 interest (income record) + 250 principal (no record).
   await page.click('.stake-rewards-section summary');
@@ -97,16 +100,37 @@ const state = JSON.stringify({
   assert.deepEqual(st.trades.slice(1).map(t => [t.type, t.qty]), [['income', 50], ['expense', 100]]);
   assert.equal(st.accounts[0].stakeRewards[0].balanceSnapshots.length, 3);
 
+  // An asset account: Quantity and Value leave the lent principal out.
+  await page.evaluate(() => {
+    const st = loadState();
+    st.accounts.push({ id: 'eth', name: 'ETH wallet', ticker: 'ETH', kind: 'crypto', createdAt: '2026-01-01T00:00:00.000Z',
+      stakeRewards: [{ id: 'el', name: 'Locked ETH', assetKind: 'crypto', assetTicker: 'ETH', createdAt: '2026-11-01T10:00:00.000Z', lent: true,
+        pledge: [{ accountId: 'eth', quantity: 1 }],
+        balanceSnapshots: [{ id: 'e1', amount: 0.05, total: 1.05, pledged: 1, reportedAt: '2026-11-01T10:00:00.000Z', enteredAt: '2026-11-01T10:00:00.000Z' }] }] });
+    st.trades.push({ id: 'eb', type: 'buy', accountId: 'eth', symbol: 'ETH', qty: 10, total: 20000, currency: 'EUR', date: '2026-10-01', fxLock: { pair: 'EUR/EUR', rate: 1, source: '1:1', interpolated: false } });
+    st.priceOverrides = { ETH: 2000 };
+    saveState(st);
+  });
+  await page.goto(base + '/account/eth', { waitUntil: 'load' });
+  await page.waitForFunction(() => typeof uiBooted !== 'undefined' && uiBooted);
+  await page.waitForSelector('.detail-stats .card[data-label="Quantity"]');
+  assert.match(await card('Quantity'), /^9 ETH$/, '10 held - 1 lent out');
+  await page.waitForFunction(() => /18,000\.00/.test(document.querySelector('.detail-stats .card[data-label="Value"] .card-value').textContent));
+  lines = await sheet();
+  assert.ok(lines.some(t => /Gross assets/.test(t) && /20,000\.00/.test(t)), 'the balance sheet keeps the full records: ' + lines);
+  assert.ok(lines.some(t => /Available/.test(t) && /18,000\.00/.test(t)), lines.join());
+
   // Home: the account card carries a Lent chip.
   await page.goto(base + '/', { waitUntil: 'load' });
   await page.waitForFunction(() => typeof uiBooted !== 'undefined' && uiBooted);
   await page.waitForSelector('.acct-lent-indicator');
   assert.equal(await page.textContent('.acct-lent-indicator'), 'Lent · 1');
-  assert.match(await page.textContent('.acct-value'), /4,300\.00/, 'the card shows what is available, like the hero');
-  assert.match(await page.textContent('.acct-pl'), /4,300/, 'and the cash in the bank: records minus the principal lent out');
-  await page.waitForFunction(() => /4,300\.00/.test(document.getElementById('hero-value-num').textContent));
-  assert.match(await page.textContent('#hero-networth-value'), /4,950\.00/, 'net worth keeps the lending');
-  assert.match(await page.textContent('#hero-networth-note'), /incl\. €650\.00 lent out/);
+  const eurCard = await page.$eval('.acct-lent-indicator', el => el.closest('.account-card').textContent);
+  assert.match(eurCard, /4,300\.00/, 'the card shows what is available, like the hero');
+  assert.match(eurCard, /4,300 EUR/, 'and the cash in the bank: records minus the principal lent out');
+  await page.waitForFunction(() => /22,300\.00/.test(document.getElementById('hero-value-num').textContent));
+  assert.match(await page.textContent('#hero-networth-value'), /25,050\.00/, 'net worth keeps the lendings');
+  assert.match(await page.textContent('#hero-networth-note'), /incl\. €2,750\.00 lent out/);
 
   assert.deepEqual(errors, []);
   await browser.close();

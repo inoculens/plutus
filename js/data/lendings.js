@@ -194,3 +194,28 @@ function buildLendingWriteOff(owner, entry, input, main) {
     principal: Number(principalText)
   };
 }
+
+// Principal lent out of `accounts` in their own asset (`ticker` + `kind`),
+// as of `asOf`, exact: { scaled (BigInt at the asset's precision), amount,
+// entries: [{ owner, entry, principal }] }. The account view takes it off
+// the quantity and value it shows, so they match the wallet or bank (the
+// records still hold it: it is still yours).
+function lendingPrincipalOut(accounts, ticker, kind, asOf) {
+  var t = String(ticker || '').trim().toUpperCase();
+  var k = String(kind || 'crypto').trim().toLowerCase();
+  var dec = qtyDecimals(t);
+  var sum = 0n;
+  var entries = [];
+  (accounts || []).forEach(function (owner) {
+    accountStakeRewards(owner).forEach(function (entry) {
+      if (!isStakeLendingEntry(entry)) return;
+      if (String(entry.assetTicker || '').toUpperCase() !== t || String(entry.assetKind || '').toLowerCase() !== k) return;
+      var principal = lendingParts(entry, asOf).principal;
+      var sc = exactScaledOf(principal, dec);
+      if (sc === null || sc <= 0n) return;
+      sum += sc;
+      entries.push({ owner: owner, entry: entry, principal: principal });
+    });
+  });
+  return { scaled: sum, amount: Number(exactToStringTrim(sum, dec)), entries: entries };
+}

@@ -44,6 +44,7 @@ function init() {
   buildSettings();
   buildAccountDialog();
   wireMenuOutside();
+  wireDateTimePickers();
   if (!hashWired && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     hashWired = true;
     window.addEventListener('hashchange', route); // hash mode (file://, legacy links)

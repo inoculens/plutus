@@ -118,6 +118,11 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
 }
 input[type="datetime-local"]::-webkit-date-and-time-value { margin: 0; text-align: left; }
+/* Firefox draws its own calendar button, which cannot be hidden and opens
+   the picker itself: no second, dead chevron next to it. */
+@supports (-moz-appearance: none) {
+  input[type="datetime-local"] { background-image: none; padding-right: 0.75rem; }
+}
 input[type="datetime-local"]::-webkit-datetime-edit,
 input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper { padding: 0; line-height: inherit; }
 #trade-form, #account-dialog-body, #ledger-dialog-body, #group-dialog-body, #settings-dialog-body { display: grid; gap: 0.15rem; padding-bottom: 0.5rem; }

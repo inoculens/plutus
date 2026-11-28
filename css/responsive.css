@@ -194,6 +194,8 @@
   /* Textarea keeps its scrollbar inset (dialogs.css) out of the padding. */
   textarea { padding: calc(0.65rem + 1px - var(--ta-gut)) calc(0.8rem + 1px - var(--ta-gut)); }
   select, input[type="datetime-local"] { padding-right: 2.4rem; }
+  /* Firefox: no chevron (dialogs.css), so no room reserved for one. */
+  @supports (-moz-appearance: none) { input[type="datetime-local"] { padding-right: 0.8rem; } }
   #trade-form button.primary, #account-dialog-body button.primary, #ledger-dialog-body button.primary, #group-dialog-body button.primary {
     position: sticky; bottom: 0;
     min-height: 3.25rem; font-size: 1.02rem; z-index: 1;

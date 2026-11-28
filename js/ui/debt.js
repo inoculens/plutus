@@ -558,6 +558,34 @@ function buildDebtPositionsSection(st, account, members, host, stats, financial)
     var netLine = summaryLine('Net value', netKnown ? fmtMoney(financial.gross.value + net.value, mainCcy) : '—', 'net', '=');
     if (netKnown && financial.gross.value + net.value < 0) netLine.classList.add('is-negative');
     section.appendChild(netSummary);
+    // Lendings: still yours (Net value counts them), not under your control
+    // (Available leaves the whole outstanding amount out).
+    var lent = financial.lent && financial.lent.hasLent ? financial.lent : null;
+    if (lent) {
+      var avail = document.createElement('div');
+      avail.className = 'debt-net-available';
+      var lentLoading = !lent.complete && scope.some(stakeRewardPricesLoading);
+      var lentText = lent.complete ? fmtMoney(lent.value, mainCcy) : (lentLoading ? PRICE_LOADING_TEXT : '—');
+      var lentEl = document.createElement('p');
+      lentEl.className = 'debt-net-lent';
+      lentEl.innerHTML = '<span><i class="debt-net-op" aria-hidden="true">−</i>Lent out</span>';
+      var lentVal = document.createElement('strong');
+      lentVal.textContent = lentText;
+      lentVal.title = lentText;
+      lentEl.appendChild(lentVal);
+      var availKnown = netKnown && lent.complete;
+      var availValue = availKnown ? financial.gross.value + net.value - lent.value : null;
+      var availEl = document.createElement('p');
+      availEl.className = 'debt-net-avail' + (availKnown && availValue < 0 ? ' is-negative' : '');
+      availEl.innerHTML = '<span><i class="debt-net-op" aria-hidden="true">=</i>Available</span>';
+      var availVal = document.createElement('strong');
+      availVal.textContent = availKnown ? fmtMoney(availValue, mainCcy) : '—';
+      availVal.title = availVal.textContent;
+      availEl.appendChild(availVal);
+      avail.appendChild(lentEl);
+      avail.appendChild(availEl);
+      section.appendChild(avail);
+    }
   }
   var row = document.createElement('div');
   row.className = 'balance-sheet-row debt-positions-row';

@@ -192,6 +192,27 @@ function currentStakeRewardValuation(accounts, main, prices, asOf) {
   return out;
 }
 
+// What is lent out (lendings, js/data/lendings.js): every open lending's
+// whole outstanding total, principal + interest, in the main currency. Net
+// worth already holds it (principal in the records, interest as pending
+// income); the Available balance leaves it out. `hasLent` mirrors `hasDebt`
+// and counts lendings still owed something.
+function currentLentOutValuation(accounts, main, prices, asOf) {
+  var lentOnly = function (account) {
+    return accountStakeRewards(account).filter(function (entry) { return isStakeLendingEntry(entry); }).map(function (entry) {
+      var parts = lendingParts(entry, asOf);
+      return {
+        assetKind: entry.assetKind,
+        assetTicker: entry.assetTicker,
+        balanceSnapshots: parts.snapshot ? [{ id: 'lent', amount: parts.total, reportedAt: parts.snapshot.reportedAt, enteredAt: parts.snapshot.enteredAt }] : []
+      };
+    }).filter(function (shim) { return shim.balanceSnapshots.length && shim.balanceSnapshots[0].amount > 0; });
+  };
+  var out = currentReportedValuation(accounts, lentOnly, main, prices, asOf);
+  out.hasLent = out.hasDebt;
+  return out;
+}
+
 // Net reported balances of a scope for a total: rewards minus debt, or null
 // when any of them has no known value yet. `has` is false when the scope
 // owns neither, so the caller's own total stands as it is.
@@ -283,6 +304,7 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
   var debtAccountsForSummary = debtAccountsForScope(st, visibleAccounts || st.accounts || []);
   var debtSummary = currentDebtValuation(debtAccountsForSummary, main, livePrices);
   var rewardSummary = currentStakeRewardValuation(debtAccountsForSummary, main, livePrices);
+  var lentSummary = currentLentOutValuation(debtAccountsForSummary, main, livePrices);
   var reportedNet = reportedBalancesNet(debtSummary, rewardSummary);
   var grossIncomplete = rows.some(function (p) { return Number(p.qtyHeld) > 0 && p.marketValue === null; });
   var anyContent = rows.length > 0 || cashTrades > 0 || reportedNet.has;
@@ -322,6 +344,10 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
   updateNetWorthHistory(st, historyValueKnown ? mv : null, main);
   host.innerHTML = '';
   if (!anyContent) {
+    var hnwEmpty = document.getElementById('hero-networth');
+    if (hnwEmpty) hnwEmpty.hidden = true;
+    var hmEmpty = document.getElementById('hero-metrics');
+    if (hmEmpty) hmEmpty.hidden = true;
     var p = document.createElement('p');
     p.className = 'muted';
     p.textContent = 'No trades yet — add your first trade.';
@@ -343,14 +369,22 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
     }
     host.appendChild(cardEl);
   });
+  // The hero leads with the Available balance: net worth (mv) minus what is
+  // lent out, which is still yours but not under your control. Net worth
+  // sits right under it; without lendings the two are equal.
+  var lentKnown = !lentSummary.hasLent || lentSummary.complete;
+  var availKnown = mvKnown && lentKnown;
+  var avail = availKnown ? mv - (lentSummary.hasLent ? lentSummary.value : 0) : null;
   var hv = document.getElementById('hero-value');
   var hvn = null;
   try { hvn = document.getElementById('hero-value-num'); } catch (e0) { hvn = null; }
   var hvTarget = hvn || hv;
   if (hvTarget) {
-    var heroLoading = !!(anyContent && !mvKnown && anyPriceLoading());
-    hvTarget.textContent = anyContent ? (mvKnown ? fmtMoney(mv, main) : (heroLoading ? PRICE_LOADING_TEXT : '—')) : '—';
-    paintLoading(hvTarget, heroLoading, 'Total balance');
+    var heroLoading = !!(anyContent && !availKnown && anyPriceLoading());
+    hvTarget.textContent = anyContent ? (availKnown ? fmtMoney(avail, main) : (heroLoading ? PRICE_LOADING_TEXT : '—')) : '—';
+    if (availKnown) hvTarget.setAttribute('data-value', String(avail));
+    else hvTarget.removeAttribute('data-value');
+    paintLoading(hvTarget, heroLoading, 'Available balance');
     // The tap-to-full rule needs the live full string wherever the element
     // re-renders in place: the wiring snapshot never goes stale, the hero
     // never trims its text (fitHeroValue only shrinks the type size), so
@@ -365,9 +399,33 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
   // the wiring is idempotent because the hero is static markup that only
   // re-renders in place. Placeholders never wire.
   if (hvTarget && anyContent && hvTarget.textContent !== '—' && hvTarget.textContent !== PRICE_LOADING_TEXT) {
-    wireTruncTap(hvTarget, 'Total balance');
+    wireTruncTap(hvTarget, 'Available balance');
   }
   fitHeroValue();
+  var hnw = document.getElementById('hero-networth');
+  if (hnw) {
+    hnw.hidden = !anyContent;
+    var hnwValue = document.getElementById('hero-networth-value');
+    if (hnwValue) {
+      var nwLoading = !!(anyContent && !mvKnown && anyPriceLoading());
+      hnwValue.textContent = mvKnown ? fmtMoney(mv, main) : (nwLoading ? PRICE_LOADING_TEXT : '—');
+      hnwValue.title = hnwValue.textContent;
+      if (mvKnown) hnwValue.setAttribute('data-value', String(mv));
+      else hnwValue.removeAttribute('data-value');
+      paintLoading(hnwValue, nwLoading, 'Net worth');
+    }
+    var hnwNote = document.getElementById('hero-networth-note');
+    if (hnwNote) {
+      // The line stays reserved (fixed layout); it only shows with lendings.
+      hnwNote.classList.toggle('is-empty', !lentSummary.hasLent);
+      hnwNote.textContent = lentSummary.hasLent
+        ? 'incl. ' + (lentSummary.complete ? fmtMoney(lentSummary.value, main) : '—') + ' lent out'
+        : '';
+      hnwNote.title = hnwNote.textContent;
+    }
+  }
+  var hm = document.getElementById('hero-metrics');
+  if (hm) hm.hidden = !anyContent;
   // Invested amount: lifetime gross in (every buy + valued income at its
   // locked historical rate) — never reduced by sells, fees or transfers.
   // Sits between value and pill on one small line; truncates, never resizes
@@ -391,7 +449,9 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
         });
       } catch (e) { inv = 0; }
       hi.hidden = false;
-      hi.textContent = 'INVESTED AMOUNT: ' + fmtMoney(inv, main);
+      hi.textContent = fmtMoney(inv, main);
+      hi.title = 'Invested: ' + hi.textContent;
+      hi.setAttribute('data-value', String(inv));
     }
   }
   // Spent amount: lifetime fiat out — the cash legs of expense and transfer
@@ -444,18 +504,23 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
         });
       } catch (e) { spent = 0; }
       hs.hidden = false;
-      hs.textContent = 'SPENT AMOUNT: ' + fmtMoney(spent, main);
+      hs.textContent = fmtMoney(spent, main);
+      hs.title = 'Spent: ' + hs.textContent;
+      hs.setAttribute('data-value', String(spent));
     }
   }
   var hp = document.getElementById('hero-pl');
   if (hp) {
     if (!anyContent || !plKnown) {
-      hp.textContent = '';
+      hp.textContent = anyContent ? '—' : '';
       hp.className = 'hero-pl';
+      hp.removeAttribute('data-value');
     } else {
       // Arrow carries the direction; show magnitude so signs never glue (▼-€0.14).
       hp.textContent = fmtMoney(Math.abs(pl), main);
-      hp.className = 'hero-pl pill ' + plClass(pl);
+      hp.className = 'hero-pl ' + plClass(pl);
+      hp.title = 'P&L: ' + (pl < 0 ? '−' : '') + hp.textContent;
+      hp.setAttribute('data-value', String(pl));
     }
   }
 }

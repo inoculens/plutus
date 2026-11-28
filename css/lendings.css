@@ -1,0 +1,71 @@
+/* Lendings: lent-out entries inside Pending income (css/stake-rewards.css),
+   the Repayment / Write off dialog and the Available line of the balance
+   sheet. Lent money is blue: still yours, parked with someone else. */
+
+/* Type switch in the pending income dialog: the sidebar segmented control,
+   full width. */
+.stake-type-toggle {
+  position: relative; isolation: isolate;
+  display: grid; grid-template-columns: 1fr 1fr;
+  padding: 3px; margin-bottom: 0.35rem;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+}
+.stake-type-toggle::before {
+  content: ""; position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 3px;
+  width: calc((100% - 6px) / 2); border-radius: 999px;
+  background: var(--surface-4); box-shadow: inset 0 0 0 1px var(--border-strong);
+  transition: transform 0.3s var(--ease);
+}
+.stake-type-toggle:has(button:nth-child(2)[aria-checked="true"])::before { transform: translateX(100%); }
+.stake-type-toggle button {
+  min-height: 2.1rem; padding: 0.3rem 0.8rem; border: none; border-radius: 999px;
+  background: transparent; color: var(--muted); font-size: 0.8rem; font-weight: 600; letter-spacing: 0.02em;
+}
+.stake-type-toggle button:hover { background: transparent; color: var(--text); }
+.stake-type-toggle button[aria-checked="true"] { color: var(--text); }
+.stake-type-toggle button:disabled { cursor: default; }
+.stake-type-toggle button:disabled:not([aria-checked="true"]) { opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { .stake-type-toggle::before { transition: none; } }
+
+/* The lending card */
+.lending-name { display: inline-flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.lending-name strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lending-chip {
+  flex: 0 0 auto; padding: 0.08rem 0.45rem; border-radius: 999px;
+  border: 1px solid var(--blue-line); background: var(--blue-bg); color: var(--blue);
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.lending-card .debt-position-amount { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lending-due.is-overdue { color: var(--amber); }
+.stake-reward-actions .lending-writeoff:hover { color: var(--red); border-color: var(--red-line); background: var(--red-bg); }
+
+/* Repayment / Write off: the interest-first split, live under the amount. */
+.lending-preview { margin: 0.1rem 0 0.35rem; min-height: 1.2em; color: var(--muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+.lending-preview.is-error { color: var(--red); }
+
+/* Balance sheet: what is lent out and what stays under your control. */
+.debt-net-available {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem 1.25rem; flex-wrap: wrap;
+  margin: 0; padding: 0.6rem 1rem 0.7rem; border-top: 1px dashed var(--border-strong);
+}
+.debt-net-available p { display: flex; align-items: baseline; gap: 0.6rem; min-width: 0; margin: 0; }
+.debt-net-available span { display: inline-flex; align-items: center; color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+.debt-net-available strong {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600; font-size: 0.95rem; font-variant-numeric: tabular-nums;
+}
+.debt-net-lent strong { color: var(--blue); }
+.debt-net-avail { margin-left: auto; }
+.debt-net-avail span { color: var(--text); }
+.debt-net-avail strong { font-family: var(--font-display); font-size: 1.05rem; }
+.debt-net-avail.is-negative strong { color: var(--red); }
+@media (max-width: 520px) {
+  .debt-net-available { padding: 0.55rem 0.75rem 0.65rem; flex-direction: column; align-items: stretch; gap: 0.35rem; }
+  .debt-net-available p { justify-content: space-between; }
+  .debt-net-avail { margin-left: 0; }
+  .debt-net-available strong { font-size: 0.84rem; }
+  .debt-net-avail strong { font-size: 0.95rem; }
+}
+
+/* Account card chip */
+.acct-lent-indicator { color: var(--blue); border-color: var(--blue-line); }

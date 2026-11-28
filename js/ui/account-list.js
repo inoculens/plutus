@@ -99,8 +99,21 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   });
   // Debt and reward chips share one row, so a card with both is no taller
   // than a card with one.
+  // Lendings are pending income entries underneath; they get a chip of
+  // their own (open ones only) and leave the Pending count.
+  var lendingTotal = 0;
+  var lendingOpen = 0;
+  scopeAccounts.forEach(function (account) {
+    accountStakeRewards(account).forEach(function (entry) {
+      if (!isStakeLendingEntry(entry)) return;
+      lendingTotal++;
+      if (!lendingIsSettled(entry)) lendingOpen++;
+    });
+  });
+  var pendingCount = rewardInfo.positionCount - lendingTotal;
+  var chipCount = (debtInfo.hasDebt ? 1 : 0) + (pendingCount > 0 ? 1 : 0) + (lendingOpen > 0 ? 1 : 0);
   var chipHost = mid;
-  if (debtInfo.hasDebt && rewardInfo.hasRewards) {
+  if (chipCount > 1) {
     chipHost = document.createElement('span');
     chipHost.className = 'acct-chip-row';
     mid.appendChild(chipHost);
@@ -111,11 +124,17 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
     debtIndicator.textContent = 'Debt · ' + debtInfo.positionCount;
     chipHost.appendChild(debtIndicator);
   }
-  if (rewardInfo.hasRewards) {
+  if (pendingCount > 0) {
     var rewardIndicator = document.createElement('span');
     rewardIndicator.className = 'acct-debt-indicator acct-reward-indicator';
-    rewardIndicator.textContent = 'Pending · ' + rewardInfo.positionCount;
+    rewardIndicator.textContent = 'Pending · ' + pendingCount;
     chipHost.appendChild(rewardIndicator);
+  }
+  if (lendingOpen > 0) {
+    var lentIndicator = document.createElement('span');
+    lentIndicator.className = 'acct-debt-indicator acct-lent-indicator';
+    lentIndicator.textContent = 'Lent · ' + lendingOpen;
+    chipHost.appendChild(lentIndicator);
   }
   var valKnown = reportedNet.has
     ? (reportedNet.complete && !grossIncomplete)
@@ -123,6 +142,13 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
   var valNum = reportedNet.has
     ? (grossValNum + (reportedNet.complete ? reportedNet.value : 0))
     : grossValNum;
+  // Like the hero, the card shows what is available: money lent out stays
+  // in net worth (account view) but not in this figure.
+  var lentInfo = currentLentOutValuation(scopeAccounts, main, livePrices);
+  if (lentInfo.hasLent) {
+    if (!lentInfo.complete) valKnown = false;
+    else valNum -= lentInfo.value;
+  }
   var figs = document.createElement('span');
   figs.className = 'acct-figs';
   var valv = document.createElement('span');
@@ -147,7 +173,18 @@ function accountCardEl(st, acc, rows, dtrades, main, withSelect, scopeIds) {
       var only = null;
       try { only = accountById(st, scope[0]); } catch (e) { only = null; }
       var cb0 = cashBalance(dtrades, scope[0], main);
-      plv.textContent = fmtQty(cb0.native, cb0.ticker || (only && only.ticker) || '') + ' ' + String(cb0.ticker || (only && only.ticker) || '').toUpperCase();
+      // Available in the bank: the records' balance minus the principal lent
+      // out (interest owed was never in it).
+      var nativeShown = Number(cb0.native) || 0;
+      var lentTicker = String(cb0.ticker || (only && only.ticker) || '').toUpperCase();
+      accountStakeRewards(only).forEach(function (entry) {
+        if (!isStakeLendingEntry(entry)) return;
+        var lentDec = qtyDecimals(lentTicker);
+        var nSc = exactScaledOf(nativeShown, lentDec);
+        var pSc = exactScaledOf(lendingParts(entry).principal, lentDec);
+        if (nSc !== null && pSc !== null) nativeShown = Number(exactToStringTrim(nSc - pSc, lentDec));
+      });
+      plv.textContent = fmtQty(nativeShown, lentTicker) + ' ' + lentTicker;
     } else if (tickList.length === 1) {
       plv.textContent = fmtQty(cashNative, tickList[0]) + ' ' + tickList[0];
     } else {

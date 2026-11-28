@@ -154,12 +154,21 @@
   #hero { display: flex; align-items: flex-start; padding: 1.1rem 0.8rem 0.95rem; gap: 0.7rem; }
   .hero-main { flex: 1 1 auto; min-width: 0; }
   .hero-label { font-size: 0.68rem; }
-  .hero-value { font-size: clamp(1.35rem, 6.4vw, 1.7rem); }
-  /* Tight letter-spacing reclaims ~24px per line so long amounts fit. */
-  .hero-invested, .hero-spent { font-size: 0.68rem; letter-spacing: 0.02em; }
-  .hero-pl { min-height: 0; margin-bottom: 0.35rem; }
-  .hero-pl.pill { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
-  .hero-sub { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero-value { font-size: clamp(1.35rem, 6.4vw, 1.7rem); margin: 0.35rem 0 0.3rem; }
+  /* Net worth: label over figure as on desktop; the lent-out note takes
+     its own (always reserved) line in the narrow column. */
+  .hero-networth { gap: 0.2rem; margin-top: 0.25rem; }
+  .hero-networth-label { font-size: 0.58rem; letter-spacing: 0.12em; }
+  .hero-networth-row { flex-wrap: wrap; row-gap: 0.1rem; }
+  .hero-networth-value { font-size: 0.92rem; }
+  .hero-networth-note { flex-basis: 100%; font-size: 0.66rem; }
+  /* Key figures: one row each, label left, figure right, so long amounts
+     keep the narrow column's full width. */
+  .hero-metrics { grid-template-columns: minmax(0, 1fr); row-gap: 0.32rem; margin-top: 0.7rem; padding-top: 0.6rem; }
+  .hero-metric { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; padding: 0; border-left: none; }
+  .hero-metric dt { flex: 0 0 auto; font-size: 0.58rem; letter-spacing: 0.12em; }
+  .hero-metric dd { font-size: 0.78rem; text-align: right; }
+  .hero-sub { font-size: 0.72rem; margin-top: 0.6rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hero-alloc { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex: 0 0 9.5rem; width: 9.5rem; margin-left: auto; align-self: flex-start; }
   /* DOM order is legend-then-ring; order pulls the ring on top. */
   .hero-alloc .donut-sm { order: -1; width: 7.25rem; height: 7.25rem; }
@@ -179,7 +188,6 @@
 
 @media (max-width: 380px) {
   #hero { gap: 0.35rem 0.6rem; padding: 1rem 0.7rem 0.9rem; }
-  .hero-invested, .hero-spent { font-size: 0.66rem; }
   .hero-alloc { flex-basis: 9.25rem; width: 9.25rem; }
   .hero-alloc .donut-sm { width: 6.5rem; height: 6.5rem; }
   .hero-alloc-legend li { font-size: 0.6rem; }

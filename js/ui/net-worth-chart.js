@@ -25,7 +25,11 @@
   var lastDrawn = [];
   // Plot geometry in SVG units. The viewBox follows the rendered pixel width
   // (1 unit = 1px), so axis labels keep their real size on phones.
-  var plotGeom = { width: 960, left: 82, right: 948 };
+  var plotGeom = { width: 960, left: 82, right: 948, start: 0, end: 1 };
+  // Live readings taken since this page opened are the value the balance
+  // shows right now, so the time axis ends at the newest one rather than at
+  // the clock (see drawPlot).
+  var pageOpenedAt = Date.now();
   var lastPlotWidth = 0;
   var storeLoaded = false;
   var pendingUpdateOptions = null;
@@ -435,24 +439,32 @@
 
   // A finished load is the authority for the interval it valued: every saved
   // point inside [range.start, range.end] (an older build, another period's
-  // samples, live readings) gives way to it. Merging only on equal timestamps
-  // let builds made at different times, or from different price sources,
-  // interleave into a saw-tooth line. Known values never turn into gaps: a
-  // saved value survives where the new build is unknown at the same moment,
-  // and a build without a single known value leaves the saved values alone.
+  // samples, stale live readings) gives way to it. Merging only on equal
+  // timestamps let builds made at different times, or from different price
+  // sources, interleave into a saw-tooth line. Live readings taken after the
+  // build's last market sample stay: they are the intraday detail a daily
+  // build does not have (on a new profile, the whole line). Known values never
+  // turn into gaps: a saved value survives where the new build is unknown at
+  // the same moment, and a build without a single known value leaves the
+  // saved values alone.
   function mergeLoadedPoints(existing, incoming, range) {
     if (!incoming.length) return existing;
     var start = Number(range.start);
     var end = Number(range.end);
     var incomingKnown = incoming.some(function (point) { return point.value !== null; });
-    var unknownAt = {};
+    var incomingAt = {};
+    var lastSampleAt = -Infinity;
     incoming.forEach(function (point) {
-      if (point.value === null) unknownAt[point.at] = true;
+      incomingAt[point.at] = point;
+      if (!point.live && point.at > lastSampleAt) lastSampleAt = point.at;
     });
     var keptAt = {};
     var kept = existing.filter(function (point) {
       if (point.at < start || point.at > end) return true;
-      if (point.value === null || (incomingKnown && !unknownAt[point.at])) return false;
+      if (point.value === null) return false;
+      var same = incomingAt[point.at];
+      if (point.live && point.at > lastSampleAt && !same) return true;
+      if (incomingKnown && !(same && same.value === null)) return false;
       keptAt[point.at] = true;
       return true;
     });
@@ -1280,10 +1292,19 @@
     }
     var left = Math.min(Math.round(width * 0.4), Math.max(56, Math.ceil(axisLongest * 6.6) + 16));
     svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-    plotGeom = { width: width, left: left, right: right };
     lastPlotWidth = width;
     var start = validPoints[0].at;
     var end = Math.max(start + 1, range.end);
+    // The newest live reading is the current value. Ending the axis at the
+    // clock instead left a blank strip on the right that widened with every
+    // redraw until the next reading (most visible on a new profile, whose
+    // whole chart spans minutes). A reading from an earlier visit keeps the
+    // honest gap.
+    var newest = validPoints[validPoints.length - 1];
+    if (newest.live && newest.at >= pageOpenedAt && range.end >= newest.at) {
+      end = Math.max(start + 1, newest.at);
+    }
+    plotGeom = { width: width, left: left, right: right, start: start, end: end };
     function xAt(time) { return left + ((time - start) / (end - start)) * (right - left); }
     function yAt(value) { return bottom - ((value - min) / (max - min)) * (bottom - top); }
 
@@ -1436,9 +1457,9 @@
     var rect = svg.getBoundingClientRect();
     if (!rect.width) return null;
     var x = (event.clientX - rect.left) / rect.width * plotGeom.width;
-    var start = currentRange().start;
-    var end = Math.max(start + 1, currentRange().end);
-    var target = start + (x - plotGeom.left) / (plotGeom.right - plotGeom.left) * (end - start);
+    // Same time axis the plot was drawn with.
+    var target = plotGeom.start + (x - plotGeom.left) / (plotGeom.right - plotGeom.left) *
+      (plotGeom.end - plotGeom.start);
     var low = 0;
     var high = lastDrawn.length - 1;
     while (low < high) {
@@ -1489,9 +1510,11 @@
       if (isFinite(price) && price > 0) cleanPrices[String(symbol).toUpperCase()] = price;
     });
     var last = data.points.length ? data.points[data.points.length - 1] : null;
-    var nextPoint = { at: bucket, value: Number(value), prices: cleanPrices, live: true };
-    if (last && last.at >= bucket && last.at < bucket + 5 * 60 * 1000) {
-      nextPoint.at = last.at;
+    // One live reading per 5-minute slot, stamped with the moment it was
+    // taken: a newer reading in the same slot replaces it and moves it to
+    // now, so the line's end keeps up with the clock.
+    var nextPoint = { at: now, value: Number(value), prices: cleanPrices, live: true };
+    if (last && last.at >= bucket && last.at <= now) {
       data.points[data.points.length - 1] = nextPoint;
     } else if (!last || last.at < bucket) {
       data.points.push(nextPoint);

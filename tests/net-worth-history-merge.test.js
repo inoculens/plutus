@@ -75,6 +75,21 @@ const later = pt(T0 + 24 * H + 10 * 60000, 130, true);
 const withLater = merge(merged.concat([later]), build, range);
 assert.equal(withLater[withLater.length - 1], later, 'readings after the loaded interval are kept');
 
+// Live readings taken after the build's last market sample are intraday
+// detail the build does not have: they stay. One exactly at the build's own
+// end point gives way to it.
+const fresh = [pt(T0 + 23 * H + 10 * 60000, 120, true), pt(T0 + 23 * H + 40 * 60000, 121, true)];
+const withFresh = merge(merged.concat(fresh), build, range);
+assert.ok(fresh.every(p => withFresh.indexOf(p) !== -1), 'readings after the last sample are kept');
+assert.equal(withFresh.filter(p => p.at === build[24].at).length, 1, 'one point at the build end');
+
+// A new profile whose only record is from today: a daily build has no market
+// sample yet, only its end point, so the readings that draw the line stay.
+const today = [pt(T0 + 1 * H, 4000, true), pt(T0 + 1 * H + 5 * 60000, 4010, true), pt(T0 + 1 * H + 10 * 60000, 4020, true)];
+const endOnly = [pt(T0 + 1 * H + 12 * 60000, 4030, true)];
+const newProfile = merge(today, endOnly, { start: T0, end: T0 + 1 * H + 12 * 60000 });
+assert.deepEqual(newProfile.map(p => p.value), [4000, 4010, 4020, 4030], 'a new profile keeps its line');
+
 // The 1D sample times are checked in live-price-fallback.test.js.
 const history = fs.readFileSync(path.join(__dirname, '..', 'js', 'ui', 'net-worth.js'), 'utf8');
 assert.match(history, /chartPointsModel: 2/, 'saved chart points from the saw-tooth era are rebuilt once');

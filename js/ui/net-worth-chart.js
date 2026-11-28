@@ -433,6 +433,36 @@
     return normalizePoints(points);
   }
 
+  // A finished load is the authority for the interval it valued: every saved
+  // point inside [range.start, range.end] (an older build, another period's
+  // samples, live readings) gives way to it. Merging only on equal timestamps
+  // let builds made at different times, or from different price sources,
+  // interleave into a saw-tooth line. Known values never turn into gaps: a
+  // saved value survives where the new build is unknown at the same moment,
+  // and a build without a single known value leaves the saved values alone.
+  function mergeLoadedPoints(existing, incoming, range) {
+    if (!incoming.length) return existing;
+    var start = Number(range.start);
+    var end = Number(range.end);
+    var incomingKnown = incoming.some(function (point) { return point.value !== null; });
+    var unknownAt = {};
+    incoming.forEach(function (point) {
+      if (point.value === null) unknownAt[point.at] = true;
+    });
+    var keptAt = {};
+    var kept = existing.filter(function (point) {
+      if (point.at < start || point.at > end) return true;
+      if (point.value === null || (incomingKnown && !unknownAt[point.at])) return false;
+      keptAt[point.at] = true;
+      return true;
+    });
+    var merged = kept.concat(incoming.filter(function (point) {
+      return !(point.value === null && keptAt[point.at]);
+    }));
+    merged.sort(function (a, b) { return a.at - b.at; });
+    return merged;
+  }
+
   function scopeData(scope) {
     var key = String(scope || 'default');
     if (!store.scopes[key] || typeof store.scopes[key] !== 'object') {
@@ -829,36 +859,7 @@
       if (sequence !== requestSequence || active !== data || data.loadingKey !== key) return;
       if (!result) return;
       if (!result || !Array.isArray(result.points)) throw new Error('History provider returned no points.');
-      var historyDays = {};
-      var incoming = normalizePoints(result.points);
-      incoming.forEach(function (point) {
-        if (!point.live) historyDays[dateKey(point.at)] = true;
-      });
-      var today = dateKey(Date.now());
-      var merged = [];
-      var existingIndex = 0;
-      var incomingIndex = 0;
-      while (existingIndex < data.points.length || incomingIndex < incoming.length) {
-        var existing = existingIndex < data.points.length ? data.points[existingIndex] : null;
-        var next = incomingIndex < incoming.length ? incoming[incomingIndex] : null;
-        if (existing && existing.live && dateKey(existing.at) < today &&
-            historyDays[dateKey(existing.at)]) {
-          existingIndex++;
-          continue;
-        }
-        if (existing && next && existing.at === next.at) {
-          merged.push(next);
-          existingIndex++;
-          incomingIndex++;
-        } else if (!existing || (next && next.at < existing.at)) {
-          merged.push(next);
-          incomingIndex++;
-        } else {
-          merged.push(existing);
-          existingIndex++;
-        }
-      }
-      data.points = merged;
+      data.points = mergeLoadedPoints(data.points, normalizePoints(result.points), range);
       data.pointsNormalized = true;
       navigatorCache = null;
       data.historyStart = Number(result.historyStart) || data.historyStart;

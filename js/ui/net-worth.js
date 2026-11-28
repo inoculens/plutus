@@ -11,8 +11,11 @@ function netWorthHistoryDate(timestamp) {
 }
 
 function netWorthHistorySignature(st) {
+  // chartPointsModel: bumped when saved chart points must be rebuilt. 2 drops
+  // the saw-tooth points that earlier loads left interleaved in the store.
   return JSON.stringify({
     debtSnapshotModel: 2,
+    chartPointsModel: 2,
     accounts: st.accounts || [],
     trades: st.trades || [],
     priceOverrides: st.priceOverrides || {},
@@ -773,10 +776,11 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
   if (!(end > start)) end = start + 1;
   var times = [];
   if (range.period === '1D') {
-    var daySpan = end - start;
-    for (var dayIndex = 0; dayIndex < 24; dayIndex++) {
-      times.push(start + daySpan * dayIndex / 23);
-    }
+    // Whole hours plus the current moment: the same instants on every load,
+    // so a later build replaces an earlier one point for point.
+    var hour = 60 * 60 * 1000;
+    for (var mark = Math.ceil(start / hour) * hour; mark < end; mark += hour) times.push(mark);
+    times.push(end);
   } else {
     var sampleDay = new Date(start);
     sampleDay.setHours(0, 0, 0, 0);

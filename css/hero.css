@@ -30,7 +30,7 @@
 .hero-label .info-pill { margin-left: 0.45rem; flex-basis: 1.1rem; width: 1.1rem; min-width: 1.1rem; height: 1.1rem; min-height: 1.1rem; }
 
 .hero-value {
-  margin: 0.45rem 0 0.4rem;
+  margin: 0.45rem 0 0.2rem;
   font-family: var(--font-display);
   font-size: clamp(2.5rem, 5.6vw, 3.9rem);
   font-weight: 500;
@@ -42,25 +42,30 @@
   text-overflow: ellipsis;
 }
 
-/* Net worth: the second figure. Smaller, quieter, on one line; what is lent
-   out rides along in blue (still yours, not available). */
+/* Net worth: the second figure, stacked like the key figures below (label
+   over value, left-aligned). What is lent out rides beside it in blue
+   (still yours, not available). */
 .hero-networth {
-  display: flex;
-  align-items: baseline;
-  gap: 0.55rem;
+  display: grid;
+  gap: 0.3rem;
   min-width: 0;
-  margin: 0;
-  white-space: nowrap;
+  margin: 0.35rem 0 0;
   font-variant-numeric: tabular-nums;
 }
 .hero-networth[hidden] { display: none; }
 .hero-networth-label {
-  flex: 0 0 auto;
   color: var(--muted-2);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
+}
+.hero-networth-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+  white-space: nowrap;
 }
 .hero-networth-value {
   flex: 0 1 auto;
@@ -79,10 +84,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--blue);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 500;
 }
-.hero-networth-note[hidden] { display: none; }
+/* Reserved even without lendings (fixed layout). */
+.hero-networth-note.is-empty { visibility: hidden; }
+.hero-networth-note:empty::before { content: "\00a0"; }
 
 /* Key figures: three equal cells under a hairline, label over value. The
    cells never resize with their numbers: long amounts truncate. */

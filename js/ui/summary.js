@@ -416,7 +416,8 @@ function renderSummaryCards(st, rows, dtradesOpt, nAcctsOpt, visibleAccounts) {
     }
     var hnwNote = document.getElementById('hero-networth-note');
     if (hnwNote) {
-      hnwNote.hidden = !lentSummary.hasLent;
+      // The line stays reserved (fixed layout); it only shows with lendings.
+      hnwNote.classList.toggle('is-empty', !lentSummary.hasLent);
       hnwNote.textContent = lentSummary.hasLent
         ? 'incl. ' + (lentSummary.complete ? fmtMoney(lentSummary.value, main) : '—') + ' lent out'
         : '';

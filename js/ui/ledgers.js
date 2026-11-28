@@ -165,11 +165,41 @@ function appendLedgerList(host, tree, ccy, opts) {
 // (prefix roll-up). No cost-basis cards, no spent/fees lines — the flows
 // below plus the tree are the accounting view. opts.skipLedgers hides the
 // Ledgers section (grouped members show it on their main instead).
+// A cash balance as the bank shows it: the records' balance minus the
+// principal lent out of `accounts` (lendings; interest owed was never in
+// it). The main-currency value moves at the balance's own rate. Returns
+// { native, main (null when unknown), lent }.
+function cashAvailableAfterLending(bal, accounts, acc, asOf) {
+  var ticker = String((bal && bal.ticker) || (acc && acc.ticker) || '').toUpperCase();
+  var native = Number(bal && bal.native) || 0;
+  var mainVal = bal && isFinite(Number(bal.main)) ? Number(bal.main) : null;
+  var out = lendingPrincipalOut(accounts, ticker, 'cash', asOf);
+  if (!(out.scaled > 0n)) return { native: native, main: mainVal, lent: 0 };
+  var dec = qtyDecimals(ticker);
+  var nSc = exactScaledOf(native, dec);
+  var left = nSc === null ? native - out.amount : Number(exactToStringTrim(nSc - out.scaled, dec));
+  var rate = null;
+  if (mainVal !== null && native !== 0) rate = mainVal / native;
+  else {
+    var mainU = String((typeof peekState === 'function' && peekState().settings && peekState().settings.mainCurrency) || '').toUpperCase();
+    if (ticker === mainU) rate = 1;
+    else {
+      var cached = getCachedRate(todayStr(), ticker, mainU);
+      if (cached && Number(cached.rate) > 0) rate = Number(cached.rate);
+    }
+  }
+  return { native: left, main: rate === null ? null : left * rate, lent: out.amount };
+}
+
 function buildCashDetailStats(st, acc, dtrades, main, stats, host, opts) {
   stats.innerHTML = ''; // drop the cost-basis grid (built for assets above)
   var bal = cashBalance(dtrades, acc.id, main);
-  stats.appendChild(statCard('Balance', fmtQty(bal.native, bal.ticker || acc.ticker) + ' ' + String(bal.ticker || acc.ticker || '').toUpperCase(), bal.native));
-  stats.appendChild(statCard('Value', fmtMoney(bal.main, main), bal.main));
+  var shown = cashAvailableAfterLending(bal, [acc], acc, opts && opts.asOf);
+  var balTicker = String(bal.ticker || acc.ticker || '').toUpperCase();
+  var balCard = statCard('Balance', fmtQty(shown.native, balTicker) + ' ' + balTicker, shown.native);
+  if (shown.lent > 0) balCard.title = fmtQty(shown.lent, balTicker) + ' ' + balTicker + ' lent out (still yours; see the balance sheet)';
+  stats.appendChild(balCard);
+  stats.appendChild(statCard('Value', shown.main !== null ? fmtMoney(shown.main, main) : '—', shown.main));
   // Two cards in a four-track box: center the pair (see cards-duo).
   stats.classList.add('cards-duo');
   host.appendChild(stats);

@@ -145,6 +145,50 @@ function fetchEcbRate(date, from, to) {
   return attempt(date.slice(0, 10), 0);
 }
 
+// ECB fixings for a whole date range in one request (Frankfurter's
+// time-series endpoint), for the net worth chart, which needs a rate for
+// every day it values. Resolves { 'YYYY-MM-DD': rate } for the fixing days
+// the source returned (no weekends or holidays), or rejects with
+// 'fx-unavailable' on any failure or an answer that is not daily fixings
+// for the requested pair, so the caller can fall back to fetchEcbRate.
+var FX_RANGE_URL = 'https://api.frankfurter.dev/v1/';
+function fetchEcbRateRange(startDay, endDay, from, to) {
+  var f = String(from || '').trim().toUpperCase();
+  var t = String(to || '').trim().toUpperCase();
+  var effFrom = stableToUsd(f) ? 'USD' : f;
+  var effTo = stableToUsd(t) ? 'USD' : t;
+  if (!isValidDateStr(startDay) || !isValidDateStr(endDay) || startDay > endDay ||
+      !/^[A-Z]{3}$/.test(effFrom) || !/^[A-Z]{3}$/.test(effTo) || effFrom === effTo) {
+    return Promise.reject(new Error('fx-unavailable'));
+  }
+  var url = FX_RANGE_URL + encodeURIComponent(startDay) + '..' + encodeURIComponent(endDay) +
+    '?base=' + encodeURIComponent(effFrom) + '&symbols=' + encodeURIComponent(effTo);
+  var capturedFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+  return fxFetchWithRetry(url, capturedFetch).then(function (data) {
+    var base = String(data && data.base || '').toUpperCase();
+    var rates = data && data.rates;
+    if (base !== effFrom || !rates || typeof rates !== 'object' || Array.isArray(rates)) throw new Error('fx-unavailable');
+    var out = {};
+    var days = Object.keys(rates).filter(function (day) {
+      return isValidDateStr(day) && day >= fxShiftDate(startDay, -FX_MAX_LOOKBACK_DAYS) && day <= endDay;
+    }).sort();
+    days.forEach(function (day) {
+      var rate = Number(rates[day] && rates[day][effTo]);
+      if (isFinite(rate) && rate > 0) out[day] = rate;
+    });
+    var fixings = Object.keys(out).sort();
+    if (!fixings.length) throw new Error('fx-unavailable');
+    // Daily fixings only: a sampled series (one value a week) would hand a
+    // week-old rate to the days in between.
+    for (var i = 1; i < fixings.length; i++) {
+      if (Date.parse(fixings[i] + 'T00:00:00Z') - Date.parse(fixings[i - 1] + 'T00:00:00Z') > FX_MAX_LOOKBACK_DAYS * 86400000) {
+        throw new Error('fx-unavailable');
+      }
+    }
+    return out;
+  }, function () { throw new Error('fx-unavailable'); });
+}
+
 // Current live-price conversions must not depend on the historical ECB archive.
 // Try independent public FX services on separate domains; historical accounting
 // continues to use fetchEcbRate() and its date-pinned ECB fixings.

@@ -224,7 +224,10 @@ function fetchSpotFxRate(date, from, to, fetchImpl) {
 // main and get corrected on the next online render.
 
 var FXCACHE_KEY = 'inoculens.fxcache.v1';
-var FXCACHE_MAX = 1000;
+// Room for multi-year chart histories (a day per pair): a smaller cap evicted
+// older fixings and refetched them every session.
+var FXCACHE_MAX = 6000;
+var FXCACHE_KEEP = 5000;
 var fxCacheStore = null; // key "date|FROM|TO" -> {rate, source}; lazy-loaded
 
 function fxCacheKey(date, from, to) {
@@ -241,7 +244,52 @@ function loadFxCache(reload) {
       if (parsed && typeof parsed === 'object') fxCacheStore = parsed;
     }
   } catch (e) { fxCacheStore = {}; }
+  if (fxCacheDropCopiedRates(fxCacheStore)) {
+    try { localStorage.setItem(FXCACHE_KEY, JSON.stringify(fxCacheStore)); } catch (e) { /* memory copy is clean */ }
+  }
   return fxCacheStore;
+}
+
+// Is `source` a real ECB fixing for `date`? "ECB-<fixing day>" is real when
+// the fixing day is the date itself, or an earlier day with no more than
+// two weekdays (holidays) up to the date and at most FX_MAX_LOOKBACK_DAYS
+// back: what fetchEcbRate answers for a weekend or holiday. Other source
+// names (manual, 1:1, older labels) cannot be checked and are kept.
+function fxCacheSourceTrusted(date, source) {
+  var label = String(source || '');
+  if (label === 'Price Data') return false;
+  var m = /^ECB-(\d{4}-\d{2}-\d{2})$/.exec(label);
+  if (!m || !isValidDateStr(date)) return true;
+  var fixing = m[1];
+  var day = String(date).slice(0, 10);
+  if (fixing === day) return true;
+  if (fixing > day) return false;
+  var weekdays = 0;
+  for (var back = 0; back <= FX_MAX_LOOKBACK_DAYS; back++) {
+    var d = fxShiftDate(day, -back);
+    if (d === fixing) return weekdays <= 2;
+    var w = new Date(d + 'T00:00:00Z').getUTCDay();
+    if (w !== 0 && w !== 6) weekdays++;
+  }
+  return false;
+}
+
+// Drops cached rates that are not real fixings for their date: copies of an
+// earlier day's rate that the chart used to store as the day's own (see
+// fetchNetWorthHistoryRate) and rates copied from the shared chart series.
+// They converted records and chart points at a rate from another time.
+// Returns true when anything was removed.
+function fxCacheDropCopiedRates(store) {
+  var removed = false;
+  Object.keys(store || {}).forEach(function (key) {
+    var entry = store[key];
+    var date = String(key).split('|')[0];
+    if (!entry || !fxCacheSourceTrusted(date, entry.source)) {
+      delete store[key];
+      removed = true;
+    }
+  });
+  return removed;
 }
 
 function saveFxCache() {
@@ -252,7 +300,7 @@ function saveFxCache() {
     if (keys.length > FXCACHE_MAX) {
       // Plain objects keep insertion order for string keys: keep newest.
       store = {};
-      keys.slice(keys.length - 800).forEach(function (k) { store[k] = fxCacheStore[k]; });
+      keys.slice(keys.length - FXCACHE_KEEP).forEach(function (k) { store[k] = fxCacheStore[k]; });
       fxCacheStore = store;
     }
     localStorage.setItem(FXCACHE_KEY, JSON.stringify(store));

@@ -15,7 +15,7 @@ from pathlib import Path
 import ccxt
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_JS = ROOT / "app.js"
+APP_JS = ROOT / "js" / "prices" / "symbols.js"
 OUTPUT = ROOT / "market-history" / "daily.json"
 INITIAL_DAYS = 6 * 365 + 2
 DAY_MS = 86_400_000
@@ -63,7 +63,7 @@ def symbols_from_app() -> list[str]:
     source = APP_JS.read_text(encoding="utf-8")
     match = re.search(r"var\s+SYMBOL_MAP\s*=\s*\{([\s\S]*?)\n\};", source)
     if not match:
-        raise RuntimeError("Could not read SYMBOL_MAP from app.js")
+        raise RuntimeError("Could not read SYMBOL_MAP from " + str(APP_JS.relative_to(ROOT)))
     return list(dict.fromkeys(re.findall(r"^\s*([A-Z0-9]+)\s*:", match.group(1), re.M)))
 
 

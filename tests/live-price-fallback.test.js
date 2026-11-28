@@ -388,6 +388,22 @@ async function main() {
     'the current chart endpoint uses the same live valuation snapshot as the balance');
   assert.equal(currentHistory.points[currentHistory.points.length - 1].prices.BTC, 65000);
 
+  // 1D samples whole hours plus the current moment: two loads minutes apart
+  // value the same instants, so the later one replaces the earlier exactly.
+  const dayHistory = await historyApp.buildNetWorthHistory({
+    accounts: [],
+    trades: [],
+    settings: { mainCurrency: 'USD', costMethod: 'average' }
+  }, 'USD', {
+    period: '1D',
+    start: historyEnd - 86400000,
+    end: historyEnd
+  }, null, null);
+  const dayTimes = dayHistory.points.map(point => point.at);
+  assert.equal(dayTimes[dayTimes.length - 1], historyEnd, 'the 1D chart ends at the current moment');
+  assert(dayTimes.length >= 24 && dayTimes.length <= 25, '1D has one point per hour (' + dayTimes.length + ')');
+  dayTimes.slice(0, -1).forEach(at => assert.equal(at % 3600000, 0, '1D samples sit on whole hours'));
+
   // Valuation yields to the browser after a time slice, not after every point.
   let yields = 0;
   const realSetTimeout = setTimeout;

@@ -92,6 +92,6 @@ assert.deepEqual(newProfile.map(p => p.value), [4000, 4010, 4020, 4030], 'a new 
 
 // The 1D sample times are checked in live-price-fallback.test.js.
 const history = fs.readFileSync(path.join(__dirname, '..', 'js', 'ui', 'net-worth.js'), 'utf8');
-assert.match(history, /chartPointsModel: 2/, 'saved chart points from the saw-tooth era are rebuilt once');
+assert.match(history, /chartPointsModel: 3/, 'saved chart points from the saw-tooth and copied-rate eras are rebuilt');
 
 console.log('net worth history merge checks passed');

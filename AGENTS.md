@@ -3,7 +3,8 @@
 Local-first portfolio tracker. Static site: `index.html`, the scripts under
 `js/` (`js/app.js` boots the app), the stylesheets under `css/`, `netlify.toml`, and
 `stamp-version.sh`.
-No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
+No framework, no bundler. Production is `main` on `inoculens/plutus`; a push
+there makes Netlify redeploy automatically (see Repositories and branches).
 
 ## Code layout — how the scripts fit together
 - The app is a set of classic scripts sharing ONE global scope, listed in
@@ -51,10 +52,19 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   (`js/boot/startup-loader.js`). Don't drive it with fixed timers or
   animate `filter`.
 
-## Branches — mandatory for every agent
-- Make ALL changes on the `developing` branch. Commit and push to `developing` only.
-- The owner reviews and merges `developing` into `main`. Agents never do.
-- Never commit to, push to, or merge into `main` unless the owner
+## Repositories and branches — mandatory for every agent
+- Two repositories, one branch that matters in each:
+  - `sebaptcd/plutus`, branch `developing`: where ALL work happens. Agents
+    commit and push here only.
+  - `inoculens/plutus`, branch `main`: production. The owner pushes
+    `sebaptcd/developing` there; Netlify deploys it. Agents never push to it.
+- Every other branch is irrelevant: ignore it. That includes `main` on
+  `sebaptcd/plutus` (not production, and stale), `developing` on
+  `inoculens/plutus`, and any feature or agent branch. Never sync from,
+  base work on, compare against, or open pull requests into them.
+- "Is it live?" means "is the commit on `inoculens/plutus` `main`?". A change
+  only on `sebaptcd/developing` is not deployed yet.
+- Never commit to, push to, or merge into either `main` unless the owner
   explicitly tells you to.
 
 ## Session start — always work on latest
@@ -65,7 +75,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   (behind `origin/developing`, or no local `developing` yet): FIRST sync with `developing` on a
   clean tree (`git checkout developing`, then `git pull --ff-only origin developing`),
   re-verify, and only then start editing. Never sync from or base work on
-  `main`.
+  any `main` (see Repositories and branches).
 - If the tree is dirty or the pull would overwrite local work: STOP and
   ask the owner before touching anything.
 - Windows exception: a mode-only worktree difference on `stamp-version.sh`
@@ -166,7 +176,7 @@ No framework, no bundler. Pushed to `main`, Netlify redeploys automatically.
   no `z-index`): the fixed mobile bottom-sheet menus (`.filter-panel`) must
   paint above the footer and the FAB.
 - Commit each change separately with a clear message and push to `developing`
-  (never `main`; see Branches).
+  (never `main`; see Repositories and branches).
 
 ## Push replies — mandatory for every agent, no prompting needed
 - Every reply that reports a push must START with the confirmation line

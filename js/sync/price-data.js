@@ -88,6 +88,10 @@ function priceDataNormalizeSeries(input, strict) {
   }
   var out = {};
   keys.forEach(function (key) {
+    // The retired "FX-" rate series held copied rates, not ECB fixings (see
+    // fetchNetWorthHistoryRate): drop it so the next sync removes it from
+    // the shared file. Real fixings now live under "FXECB-".
+    if (/^FX-/.test(key)) return;
     var entry = input[key];
     var series = entry && entry.series;
     var keyParts = key.split('|');

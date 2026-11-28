@@ -12,10 +12,11 @@ function netWorthHistoryDate(timestamp) {
 
 function netWorthHistorySignature(st) {
   // chartPointsModel: bumped when saved chart points must be rebuilt. 2 drops
-  // the saw-tooth points that earlier loads left interleaved in the store.
+  // the saw-tooth points that earlier loads left interleaved in the store; 3
+  // drops points valued with copied fiat rates (see fetchNetWorthHistoryRate).
   return JSON.stringify({
     debtSnapshotModel: 2,
-    chartPointsModel: 2,
+    chartPointsModel: 3,
     accounts: st.accounts || [],
     trades: st.trades || [],
     priceOverrides: st.priceOverrides || {},
@@ -1093,6 +1094,14 @@ function fetchNetWorthHistoryPrice(symbol, day, main, kind) {
   return netWorthHistoryFetches[key];
 }
 
+// Daily fiat rate for chart valuation. Only real ECB fixings are cached or
+// shared: a day without one is fetched (fetchEcbRate already answers a
+// weekend or holiday with the last fixing before it). This used to copy the
+// rate of an earlier day and store it as the day's own rate, so one old
+// fixing spread forward day after day, into this device's rate cache and
+// through Price Data to every device, and the chart jumped between it and
+// the real rates. A borrowed rate now only stands in when the fetch is not
+// possible, and is never stored.
 function fetchNetWorthHistoryRate(day, from, to) {
   var source = String(from || '').toUpperCase();
   var target = String(to || '').toUpperCase();
@@ -1102,27 +1111,12 @@ function fetchNetWorthHistoryRate(day, from, to) {
     return Promise.resolve(cached);
   }
   var shared = netWorthHistorySharedRate(day, source, target);
-  if (shared) {
-    cacheRate(day, source, target, shared.rate, 'Price Data');
-    return Promise.resolve(shared);
-  }
-  for (var lookback = 1; lookback <= FX_MAX_LOOKBACK_DAYS; lookback++) {
-    var previousDay = fxShiftDate(day, -lookback);
-    var previousRate = getCachedRate(previousDay, source, target) ||
-      netWorthHistorySharedRate(previousDay, source, target);
-    if (!previousRate || !isFinite(Number(previousRate.rate)) || Number(previousRate.rate) <= 0) continue;
-    cacheRate(day, source, target, Number(previousRate.rate), previousRate.source);
-    netWorthHistorySaveRate(day, source, target, Number(previousRate.rate));
-    saveFxCache();
-    return Promise.resolve({
-      rate: Number(previousRate.rate),
-      source: previousRate.source,
-      interpolated: true
-    });
-  }
+  if (shared) return Promise.resolve(shared);
   var key = [day, source, target].join('|');
   if (netWorthHistoryRateFetches[key]) return netWorthHistoryRateFetches[key];
-  if (netWorthHistoryFetchBudget.remaining <= 0) return Promise.resolve(null);
+  if (netWorthHistoryFetchBudget.remaining <= 0) {
+    return Promise.resolve(netWorthHistoryBorrowedRate(day, source, target));
+  }
   netWorthHistoryFetchBudget.remaining--;
   netWorthHistoryRateFetches[key] = fetchEcbRate(day, from, to).then(function (rate) {
     delete netWorthHistoryRateFetches[key];
@@ -1132,16 +1126,34 @@ function fetchNetWorthHistoryRate(day, from, to) {
       saveFxCache();
       return rate;
     }
-    return null;
+    return netWorthHistoryBorrowedRate(day, source, target);
   }, function () {
     delete netWorthHistoryRateFetches[key];
-    return null;
+    return netWorthHistoryBorrowedRate(day, source, target);
   });
   return netWorthHistoryRateFetches[key];
 }
 
+// Stand-in when a day's fixing cannot be fetched (offline, budget spent):
+// the nearest stored real fixing up to FX_MAX_LOOKBACK_DAYS earlier, used for
+// this valuation only. Null beyond that, so the point stays a gap.
+function netWorthHistoryBorrowedRate(day, from, to) {
+  for (var lookback = 1; lookback <= FX_MAX_LOOKBACK_DAYS; lookback++) {
+    var previousDay = fxShiftDate(day, -lookback);
+    var previous = getCachedRate(previousDay, from, to) || netWorthHistorySharedRate(previousDay, from, to);
+    if (previous && isFinite(Number(previous.rate)) && Number(previous.rate) > 0) {
+      return { rate: Number(previous.rate), source: previous.source, interpolated: true };
+    }
+  }
+  return null;
+}
+
+// Shared through Price Data. "FXECB-" holds real fixings only; the earlier
+// "FX-" series carried copied rates and is no longer read (see
+// priceDataNormalizeSeries, which drops it).
+var NET_WORTH_RATE_SERIES_PREFIX = 'FXECB-';
 function netWorthHistoryRateSeriesKey(from, to) {
-  return ['FX-' + from + '-' + to, 'commodity', to, '0', '4102444800'].join('|');
+  return [NET_WORTH_RATE_SERIES_PREFIX + from + '-' + to, 'commodity', to, '0', '4102444800'].join('|');
 }
 
 function netWorthHistorySharedRate(day, from, to) {
@@ -1159,7 +1171,7 @@ function netWorthHistorySharedRate(day, from, to) {
     else if (at > dayAt) high = middle - 1;
     else {
       var rate = Number(points[middle].price);
-      return isFinite(rate) && rate > 0 ? { rate: rate, source: 'Price Data' } : null;
+      return isFinite(rate) && rate > 0 ? { rate: rate, source: 'ECB (Price Data)' } : null;
     }
   }
   return null;

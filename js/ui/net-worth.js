@@ -1033,7 +1033,13 @@ function buildNetWorthHistory(st, main, range, onProgress, currentSnapshot, sign
         });
       });
     }
-    return valueNextBatch(0).then(function () {
+    // Every fiat rate the valuation will ask for, fetched up front: a few
+    // range requests instead of one request per day, one after another.
+    var rateCodes = netWorthHistoryRateCodes(st, seriesBySymbol, main);
+    var rateDays = times.map(function (at) { return netWorthHistoryDate(at); });
+    return netWorthHistoryPrefetchRates(rateCodes, main, rateDays, isCurrent).then(function () {
+      return valueNextBatch(0);
+    }).then(function () {
       var completedAt = Date.now();
       if (points.length && currentSnapshot &&
           completedAt >= end && completedAt - end <= 5 * 60 * 1000) {
@@ -1132,6 +1138,124 @@ function fetchNetWorthHistoryRate(day, from, to) {
     return netWorthHistoryBorrowedRate(day, source, target);
   });
   return netWorthHistoryRateFetches[key];
+}
+
+// Fiat codes the chart converts from: quote currencies of the price series,
+// cash accounts, and fiat-denominated debt and pending income.
+function netWorthHistoryRateCodes(st, seriesBySymbol, main) {
+  var codes = {};
+  function note(code) {
+    var c = String(code || '').trim().toUpperCase();
+    if (c && c !== String(main).toUpperCase()) codes[c] = true;
+  }
+  Object.keys(seriesBySymbol || {}).forEach(function (symbol) {
+    var series = seriesBySymbol[symbol];
+    if (!series) return;
+    note(series.currency);
+    (series.points || []).forEach(function (point) { if (point && point.currency) note(point.currency); });
+  });
+  var cashIds = cashAccountIds(st);
+  (st.accounts || []).forEach(function (account) {
+    if (!account) return;
+    if (cashIds[account.id]) note(account.ticker);
+    accountBalancePositions(account).forEach(function (position) {
+      var kind = String(position.assetKind || account.kind || 'crypto').trim().toLowerCase();
+      if (isCashKind(kind)) note(position.assetTicker || account.ticker);
+    });
+  });
+  return Object.keys(codes);
+}
+
+// Fetches, ahead of valuation, the fixings of every day in `days` that this
+// device holds no rate for: one range request per 90 days and fiat, which
+// fills weekends and holidays from the fixing before them. If a range
+// request fails, its days are fetched one by one, six at a time. Rates
+// already held cost nothing, so only the first load of a period downloads.
+var NET_WORTH_RATE_RANGE_DAYS = 90;
+var NET_WORTH_RATE_PARALLEL = 6;
+function netWorthHistoryPrefetchRates(codes, main, days, isCurrent) {
+  var target = String(main || '').toUpperCase();
+  var uniqueDays = {};
+  (days || []).forEach(function (day) { if (isValidDateStr(day) && !isFutureDateStr(day)) uniqueDays[day] = true; });
+  var sortedDays = Object.keys(uniqueDays).sort();
+  function current() { return typeof isCurrent !== 'function' || isCurrent(); }
+  function held(day, code) {
+    return !!(getCachedRate(day, code, target) || netWorthHistorySharedRate(day, code, target));
+  }
+  return Promise.all((codes || []).map(function (code) {
+    var missing = sortedDays.filter(function (day) { return !held(day, code); });
+    if (!missing.length) return Promise.resolve();
+    var chunks = [];
+    var chunk = null;
+    missing.forEach(function (day) {
+      if (chunk && Date.parse(day + 'T00:00:00Z') - Date.parse(chunk.start + 'T00:00:00Z') < NET_WORTH_RATE_RANGE_DAYS * 86400000) {
+        chunk.days.push(day);
+      } else {
+        chunk = { start: day, days: [day] };
+        chunks.push(chunk);
+      }
+    });
+    function storeRange(chunkDays, fixings) {
+      var fixingDays = Object.keys(fixings).sort();
+      var last = fixingDays[fixingDays.length - 1];
+      var stored = false;
+      chunkDays.forEach(function (day) {
+        // Days after the newest returned fixing (today before publication)
+        // are left to fetchEcbRate.
+        if (day > last && !netWorthHistoryWeekendAfter(last, day)) return;
+        var picked = pickRate(fixings, day);
+        if (!picked) return;
+        cacheRate(day, code, target, picked.rate, picked.source);
+        netWorthHistorySaveRate(day, String(code).toUpperCase(), target, picked.rate);
+        stored = true;
+      });
+      if (stored) saveFxCache();
+    }
+    // Gives up on this fiat once a dozen days in a row found no rate (a fiat
+    // the ECB does not publish, or no network): valuation leaves those gaps.
+    var failedInRow = 0;
+    function oneByOne(chunkDays) {
+      var queue = chunkDays.filter(function (day) { return !held(day, code); });
+      function worker() {
+        if (!queue.length || !current() || failedInRow >= 2 * NET_WORTH_RATE_PARALLEL) return Promise.resolve();
+        var day = queue.shift();
+        return fetchNetWorthHistoryRate(day, code, target).then(function (rate) {
+          failedInRow = rate ? 0 : failedInRow + 1;
+          return worker();
+        }, function () {
+          failedInRow++;
+          return worker();
+        });
+      }
+      var workers = [];
+      for (var i = 0; i < NET_WORTH_RATE_PARALLEL; i++) workers.push(worker());
+      return Promise.all(workers);
+    }
+    function nextChunk(index) {
+      if (index >= chunks.length || !current()) return Promise.resolve();
+      var item = chunks[index];
+      var from = fxShiftDate(item.days[0], -FX_MAX_LOOKBACK_DAYS);
+      var to = item.days[item.days.length - 1];
+      return fetchEcbRateRange(from, to, code, target).then(function (fixings) {
+        storeRange(item.days, fixings);
+        return oneByOne(item.days);
+      }, function () {
+        return oneByOne(item.days);
+      }).then(function () { return nextChunk(index + 1); });
+    }
+    return nextChunk(0);
+  })).then(null, function () { /* valuation fetches what is still missing */ });
+}
+
+// True when every day after `fixingDay` up to `day` is a Saturday or Sunday.
+function netWorthHistoryWeekendAfter(fixingDay, day) {
+  var d = fxShiftDate(fixingDay, 1);
+  while (d && d <= day) {
+    var w = new Date(d + 'T00:00:00Z').getUTCDay();
+    if (w !== 0 && w !== 6) return false;
+    d = fxShiftDate(d, 1);
+  }
+  return true;
 }
 
 // Stand-in when a day's fixing cannot be fetched (offline, budget spent):
